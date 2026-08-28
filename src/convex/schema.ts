@@ -120,6 +120,14 @@ const schema = defineSchema(
       .index("by_role", ["role"])
       .index("by_active", ["active"]),
 
+    // ── Passwords (email + password auth) ──
+    passwords: defineTable({
+      userId: v.id("users"),
+      passwordHash: v.string(),
+      salt: v.string(),
+      requiresReset: v.boolean(),
+    }).index("by_user", ["userId"]),
+
     // ── Organizations (hierarchical) ──
     organizations: defineTable({
       name: v.string(),
@@ -206,13 +214,24 @@ const schema = defineSchema(
       requesterId: v.id("users"),
       status: requestStatusValidator,
       approverId: v.optional(v.id("users")),
+      // ── NEW: Destination hierarchy ──
+      secretariaId: v.id("organizations"),
+      departamentoId: v.optional(v.id("organizations")),
+      unidadeId: v.optional(v.id("organizations")),
+      // ── NEW: Reason and O.S. ──
+      reason: v.string(),
+      osNumber: v.optional(v.string()),
+      // ── NEW: Equipment patrimony (optional, prepared for future) ──
+      patrimony: v.optional(v.string()),
+      // ── Existing ──
       observation: v.optional(v.string()),
       createdAt: v.number(),
       updatedAt: v.number(),
     }).index("by_requester", ["requesterId"])
       .index("by_status", ["status"])
       .index("by_approver", ["approverId"])
-      .index("by_created", ["createdAt"]),
+      .index("by_created", ["createdAt"])
+      .index("by_secretaria", ["secretariaId"]),
 
     // ── Request Items ──
     requestItems: defineTable({
