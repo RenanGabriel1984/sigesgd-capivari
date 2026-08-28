@@ -1,0 +1,19 @@
+{
+  "name": "SIGESGD Capivari",
+  "short_name": "SIGESGD",
+  "description": "Sistema Integrado de Gestão da Secretaria de Gestão e Governo Digital — Capivari",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#1e293b",
+  "orientation": "any",
+  "categories": ["business", "government"],
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
