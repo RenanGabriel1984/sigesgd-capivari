@@ -49,8 +49,8 @@ export const listActive = query({
   },
 });
 
-/** Get a single product with details. */
-export const get = query({
+/** Get a single product by ID with full details. */
+export const getById = query({
   args: { id: v.id("products") },
   handler: async (ctx, args) => {
     const product = await ctx.db.get(args.id);
@@ -60,7 +60,23 @@ export const get = query({
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.id))
       .first();
-    return { ...product, category, stock };
+    const movements = await ctx.db
+      .query("stockMovements")
+      .withIndex("by_product", (q) => q.eq("productId", args.id))
+      .order("desc")
+      .take(10);
+    const movementsWithUser = await Promise.all(
+      movements.map(async (m) => {
+        const user = await ctx.db.get(m.userId);
+        return { ...m, user };
+      })
+    );
+    return {
+      ...product,
+      category,
+      stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 },
+      recentMovements: movementsWithUser,
+    };
   },
 });
 

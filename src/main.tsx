@@ -14,6 +14,7 @@ const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const Products = lazy(() => import("./pages/Products.tsx"));
+const ProductDetail = lazy(() => import("./pages/ProductDetail.tsx"));
 const Categories = lazy(() => import("./pages/Categories.tsx"));
 const Stock = lazy(() => import("./pages/Stock.tsx"));
 const Entries = lazy(() => import("./pages/Entries.tsx"));
@@ -29,7 +30,7 @@ const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 function RouteLoading() {
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-pulse text-muted-foreground">Carregando...</div>
+      <div className="animate-pulse text-muted-foreground">Loading...</div>
     </div>
   );
 }
@@ -58,7 +59,7 @@ class RootErrorBoundary extends React.Component<
       return (
         <div className="min-h-screen flex items-center justify-center bg-background text-foreground p-6">
           <div className="max-w-lg text-center">
-            <p className="text-sm font-semibold">Erro de runtime</p>
+            <p className="text-sm font-semibold">Runtime error</p>
             <p className="mt-2 text-xs text-muted-foreground break-words">{this.state.message}</p>
           </div>
         </div>
@@ -105,6 +106,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
               <Route path="/stock" element={<RequireAuth><Stock /></RequireAuth>} />
               <Route path="/products" element={<RequireAuth><Products /></RequireAuth>} />
+              <Route path="/products/:id" element={<RequireAuth><ProductDetail /></RequireAuth>} />
               <Route path="/categories" element={<RequireAuth><Categories /></RequireAuth>} />
               <Route path="/entries" element={<RequireAuth><Entries /></RequireAuth>} />
               <Route path="/requests" element={<RequireAuth><Requests /></RequireAuth>} />

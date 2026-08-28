@@ -13,6 +13,8 @@ import {
   CheckCircle2,
   Smartphone,
   Globe,
+  Boxes,
+  Zap,
 } from "lucide-react";
 
 const fadeIn = {
@@ -28,41 +30,49 @@ const stagger = {
 const features = [
   {
     icon: Package,
-    title: "Controle de Estoque",
-    desc: "Gestão completa de produtos, entradas, saídas e níveis de estoque com rastreabilidade total.",
+    title: "Product Catalog",
+    desc: "Maintain a complete catalog with categories, stock levels, suppliers, and detailed product information — all in one place.",
   },
   {
     icon: ClipboardList,
-    title: "Solicitações",
-    desc: "Fluxo completo de solicitação, aprovação e entrega de materiais entre setores.",
+    title: "Request Management",
+    desc: "Submit, approve, and track material requests through a structured workflow with full visibility at every step.",
   },
   {
     icon: Shield,
-    title: "Auditoria",
-    desc: "Registro completo de todas as ações do sistema para compliance e transparência.",
+    title: "Full Audit Trail",
+    desc: "Every action is logged with timestamps and user attribution for complete accountability and compliance.",
   },
   {
     icon: Building2,
-    title: "Estrutura Organizacional",
-    desc: "Cadastro hierárquico flexível de unidades, departamentos e secretarias.",
+    title: "Organizational Structure",
+    desc: "Model any team hierarchy — departments, units, and teams — without being locked into a rigid template.",
   },
   {
     icon: BarChart3,
-    title: "Dashboard",
-    desc: "Visão geral em tempo real com indicadores-chave e alertas de estoque.",
+    title: "Live Dashboard",
+    desc: "Real-time overview of stock levels, pending requests, and items requiring attention, always up to date.",
   },
   {
     icon: Lock,
-    title: "Segurança",
-    desc: "Controle de acesso baseado em perfis com permissões granulares por função.",
+    title: "Role-Based Access",
+    desc: "Granular permissions ensure each team member sees and does only what their role allows — nothing more.",
   },
 ];
 
 const stats = [
-  { value: "100%", label: "Controle" },
-  { value: "5", label: "Perfis" },
-  { value: "∞", label: "Escalável" },
-  { value: "24/7", label: "Disponível" },
+  { value: "100%", label: "Stock Control" },
+  { value: "5", label: "Access Roles" },
+  { value: "∞", label: "Scalable" },
+  { value: "24/7", label: "Available" },
+];
+
+const roles = [
+  { role: "Administrator", perms: ["Full system access", "Manage users and roles", "System configuration"] },
+  { role: "Stock Manager", perms: ["Register products and categories", "Record entries and exits", "Approve incoming requests"] },
+  { role: "Director", perms: ["View stock levels", "Approve material requests", "Review movement history"] },
+  { role: "Secretary", perms: ["View stock overview", "Authorize material requests", "Access management reports"] },
+  { role: "Technician", perms: ["Browse available materials", "Submit new requests", "Track request status"] },
 ];
 
 export default function Landing() {
@@ -80,12 +90,19 @@ export default function Landing() {
               <p className="text-[10px] text-muted-foreground leading-tight hidden sm:block">Capivari</p>
             </div>
           </Link>
-          <Link to="/auth">
-            <Button className="gap-2">
-              Acessar
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link to="/auth">
+              <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
+                Sign In
+              </Button>
+            </Link>
+            <Link to="/auth">
+              <Button size="sm" className="gap-2">
+                Get Started
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -101,27 +118,26 @@ export default function Landing() {
           >
             <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/50 px-3 py-1 text-xs text-muted-foreground mb-6">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Sistema de Gestão Institucional
+              Inventory Management Platform
             </div>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1]">
               SIGESGD{" "}
               <span className="text-primary/70">Capivari</span>
             </h1>
             <p className="mt-4 text-lg sm:text-xl text-muted-foreground max-w-2xl leading-relaxed">
-              Sistema Integrado de Gestão da Secretaria de Gestão e Governo Digital —
-              Controle inteligente de estoque, materiais e movimentações para a
-              administração pública.
+              A precise, secure inventory management system built for teams that need
+              full visibility over their stock — from procurement to delivery.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row gap-3">
               <Link to="/auth">
                 <Button size="lg" className="gap-2 w-full sm:w-auto">
-                  Começar agora
+                  Start Managing Stock
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
               <Button size="lg" variant="outline" className="gap-2 w-full sm:w-auto" asChild>
                 <a href="#features">
-                  Saiba mais
+                  Learn More
                 </a>
               </Button>
             </div>
@@ -159,11 +175,11 @@ export default function Landing() {
             className="max-w-2xl mb-12"
           >
             <h2 className="text-3xl font-bold tracking-tight">
-              Funcionalidades essenciais
+              Everything your team needs
             </h2>
             <p className="mt-3 text-muted-foreground">
-              Tudo que a Secretaria de Gestão precisa para controlar estoque e materiais
-              de forma organizada e transparente.
+              Core capabilities designed for teams that manage physical inventory
+              and need a reliable, auditable system of record.
             </p>
           </motion.div>
 
@@ -201,21 +217,16 @@ export default function Landing() {
             className="max-w-2xl mb-12"
           >
             <h2 className="text-3xl font-bold tracking-tight">
-              Perfis de acesso
+              Access control by role
             </h2>
             <p className="mt-3 text-muted-foreground">
-              Controle granular de permissões para cada perfil de usuário.
+              Granular permissions ensure every team member has exactly the access they need —
+              no more, no less.
             </p>
           </motion.div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[
-              { role: "Administrador", perms: ["Acesso total ao sistema", "Gerenciar usuários e perfis", "Configurações gerais"] },
-              { role: "Responsável pelo Estoque", perms: ["Cadastrar produtos e categorias", "Registrar entradas e saídas", "Aprovar solicitações"] },
-              { role: "Diretor", perms: ["Consultar estoque", "Aprovar materiais", "Consultar movimentações"] },
-              { role: "Secretário", perms: ["Consultar estoque", "Aprovar fornecimento", "Informações gerenciais"] },
-              { role: "Técnico", perms: ["Consultar materiais disponíveis", "Criar solicitações", "Acompanhar status"] },
-            ].map((item, i) => (
+            {roles.map((item, i) => (
               <motion.div
                 key={item.role}
                 initial={{ opacity: 0, y: 20 }}
@@ -252,11 +263,11 @@ export default function Landing() {
             className="text-center max-w-2xl mx-auto"
           >
             <h2 className="text-3xl font-bold tracking-tight">
-              Acesse de qualquer dispositivo
+              Works everywhere
             </h2>
             <p className="mt-3 text-muted-foreground">
-              Aplicação responsiva que funciona em computadores, tablets e celulares.
-              Instalável como PWA para acesso rápido.
+              Fully responsive and installable as a progressive web app.
+              Works on desktop, tablet, and mobile — no app store required.
             </p>
             <div className="flex justify-center gap-8 mt-8">
               <div className="flex flex-col items-center gap-2">
@@ -285,14 +296,15 @@ export default function Landing() {
             viewport={{ once: true }}
           >
             <h2 className="text-3xl font-bold tracking-tight">
-              Pronto para começar?
+              Ready to take control?
             </h2>
             <p className="mt-3 text-muted-foreground max-w-lg mx-auto">
-              Acesse o sistema e comece a gerenciar o estoque da Secretaria de Gestão e Governo Digital.
+              Create your account and start managing inventory with full visibility,
+              accountability, and control.
             </p>
             <Link to="/auth" className="mt-8 inline-block">
               <Button size="lg" className="gap-2">
-                Acessar o SIGESGD
+                Open SIGESGD
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
@@ -310,7 +322,7 @@ export default function Landing() {
             <span className="text-sm font-medium">SIGESGD Capivari</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            Prefeitura Municipal de Capivari — Secretaria de Gestão e Governo Digital
+            Inventory management platform for teams that demand precision.
           </p>
         </div>
       </footer>

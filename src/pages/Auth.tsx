@@ -52,7 +52,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       setStep({ email: formData.get("email") as string });
       setIsLoading(false);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Falha ao enviar código. Tente novamente.");
+      setError(error instanceof Error ? error.message : "Could not send verification code. Please try again.");
       setIsLoading(false);
     }
   };
@@ -66,7 +66,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       await signIn("email-otp", formData);
       navigate(redirect);
     } catch (error) {
-      setError("Código de verificação incorreto.");
+      setError("The verification code is incorrect. Please try again.");
       setIsLoading(false);
       setOtp("");
     }
@@ -79,7 +79,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       await signIn("anonymous");
       navigate(redirect);
     } catch (error) {
-      setError(`Falha ao acessar como visitante: ${error instanceof Error ? error.message : "Erro desconhecido"}`);
+      setError(`Could not sign in as guest: ${error instanceof Error ? error.message : "Unknown error"}`);
       setIsLoading(false);
     }
   };
@@ -106,9 +106,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             {step === "signIn" ? (
               <>
                 <CardHeader className="text-center">
-                  <CardTitle className="text-xl">Acessar o sistema</CardTitle>
+                  <CardTitle className="text-xl">Welcome back</CardTitle>
                   <CardDescription>
-                    Enter seu e-mail para receber um código de verificação
+                    Enter your email to receive a sign-in code
                   </CardDescription>
                 </CardHeader>
                 <form onSubmit={handleEmailSubmit}>
@@ -118,7 +118,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                         <Input
                           name="email"
-                          placeholder="seu@email.com"
+                          placeholder="you@company.com"
                           type="email"
                           className="pl-9"
                           disabled={isLoading}
@@ -137,7 +137,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                           <span className="w-full border-t" />
                         </div>
                         <div className="relative flex justify-center text-xs uppercase">
-                          <span className="bg-background px-2 text-muted-foreground">Ou</span>
+                          <span className="bg-background px-2 text-muted-foreground">Or</span>
                         </div>
                       </div>
                       <Button
@@ -148,7 +148,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         disabled={isLoading}
                       >
                         <UserX className="mr-2 h-4 w-4" />
-                        Acessar como Visitante
+                        Continue as Guest
                       </Button>
                     </div>
                   </CardContent>
@@ -157,9 +157,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             ) : (
               <>
                 <CardHeader className="text-center">
-                  <CardTitle>Verificar código</CardTitle>
+                  <CardTitle>Check your inbox</CardTitle>
                   <CardDescription>
-                    Enviamos um código para {step.email}
+                    We sent a 6-digit code to {step.email}
                   </CardDescription>
                 </CardHeader>
                 <form onSubmit={handleOtpSubmit}>
@@ -188,22 +188,22 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     </div>
                     {error && <p className="mt-2 text-sm text-destructive text-center">{error}</p>}
                     <p className="text-sm text-muted-foreground text-center mt-4">
-                      Não recebeu?{" "}
+                      Didn't receive a code?{" "}
                       <Button variant="link" className="p-0 h-auto" onClick={() => setStep("signIn")}>
-                        Tentar novamente
+                        Try a different email
                       </Button>
                     </p>
                   </CardContent>
                   <CardFooter className="flex-col gap-2">
                     <Button type="submit" className="w-full" disabled={isLoading || otp.length !== 6}>
                       {isLoading ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verificando...</>
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verifying...</>
                       ) : (
-                        <>Verificar código<ArrowRight className="ml-2 h-4 w-4" /></>
+                        <>Verify Code<ArrowRight className="ml-2 h-4 w-4" /></>
                       )}
                     </Button>
                     <Button type="button" variant="ghost" onClick={() => setStep("signIn")} disabled={isLoading} className="w-full">
-                      Usar outro e-mail
+                      Use a different email
                     </Button>
                   </CardFooter>
                 </form>

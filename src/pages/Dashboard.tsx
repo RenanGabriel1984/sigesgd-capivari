@@ -16,8 +16,6 @@ import {
 } from "lucide-react";
 import { ROLE_LABELS } from "@/types/constants";
 import type { UserRole } from "@/types/constants";
-import { formatDistanceToNow } from "date-fns";
-import { ptBR } from "date-fns/locale";
 
 const fadeIn = {
   initial: { opacity: 0, y: 12 },
@@ -52,10 +50,10 @@ export default function Dashboard() {
         {/* Header */}
         <motion.div {...fadeIn}>
           <h1 className="text-2xl font-bold tracking-tight">
-            Olá{user?.name ? `, ${user.name.split(" ")[0]}` : ""}
+            Welcome{user?.name ? `, ${user.name.split(" ")[0]}` : ""}
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Painel de controle — {ROLE_LABELS[role]}
+            {ROLE_LABELS[role]} — Overview
           </p>
         </motion.div>
 
@@ -70,7 +68,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-2xl font-bold">{totalProducts}</p>
-                    <p className="text-xs text-muted-foreground">Produtos</p>
+                    <p className="text-xs text-muted-foreground">Products</p>
                   </div>
                 </div>
               </CardContent>
@@ -86,7 +84,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-2xl font-bold">{totalStock}</p>
-                    <p className="text-xs text-muted-foreground">Estoque Total</p>
+                    <p className="text-xs text-muted-foreground">Total Stock</p>
                   </div>
                 </div>
               </CardContent>
@@ -102,7 +100,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-2xl font-bold">{pendingCount}</p>
-                    <p className="text-xs text-muted-foreground">Solicitações Pendentes</p>
+                    <p className="text-xs text-muted-foreground">Pending Requests</p>
                   </div>
                 </div>
               </CardContent>
@@ -118,7 +116,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-2xl font-bold">{belowMinCount}</p>
-                    <p className="text-xs text-muted-foreground">Abaixo do Mínimo</p>
+                    <p className="text-xs text-muted-foreground">Below Minimum</p>
                   </div>
                 </div>
               </CardContent>
@@ -133,20 +131,20 @@ export default function Dashboard() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <ArrowUpRight className="h-4 w-4 text-emerald-600" />
-                  Últimas Entradas
+                  Recent Entries
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {recentEntries.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma entrada registrada</p>
+                  <p className="text-sm text-muted-foreground py-4 text-center">No entries recorded yet</p>
                 ) : (
                   <div className="space-y-3">
                     {recentEntries.map((m) => (
                       <div key={m._id} className="flex items-center justify-between text-sm">
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium truncate">{m.product?.name ?? "Produto"}</p>
+                          <p className="font-medium truncate">{m.product?.name ?? "Product"}</p>
                           <p className="text-xs text-muted-foreground">
-                            {m.quantity} un. • {m.user?.name ?? "Usuário"}
+                            {m.quantity} units — {m.user?.name ?? "User"}
                           </p>
                         </div>
                         <Badge variant="outline" className="text-emerald-600 border-emerald-200 shrink-0 ml-2">
@@ -165,20 +163,20 @@ export default function Dashboard() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <ArrowDownRight className="h-4 w-4 text-rose-600" />
-                  Últimas Saídas
+                  Recent Exits
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {recentExits.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma saída registrada</p>
+                  <p className="text-sm text-muted-foreground py-4 text-center">No exits recorded yet</p>
                 ) : (
                   <div className="space-y-3">
                     {recentExits.map((m) => (
                       <div key={m._id} className="flex items-center justify-between text-sm">
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium truncate">{m.product?.name ?? "Produto"}</p>
+                          <p className="font-medium truncate">{m.product?.name ?? "Product"}</p>
                           <p className="text-xs text-muted-foreground">
-                            {m.quantity} un. • {m.user?.name ?? "Usuário"}
+                            {m.quantity} units — {m.user?.name ?? "User"}
                           </p>
                         </div>
                         <Badge variant="outline" className="text-rose-600 border-rose-200 shrink-0 ml-2">
@@ -200,7 +198,7 @@ export default function Dashboard() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2 text-amber-700">
                   <TrendingDown className="h-4 w-4" />
-                  Estoque Abaixo do Mínimo
+                  Stock Below Minimum
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -210,10 +208,10 @@ export default function Dashboard() {
                       <span className="font-medium">{p.name}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-muted-foreground">
-                          Atual: {p.currentStock} / Mín: {p.minimumStock}
+                          Current: {p.currentStock} / Min: {p.minimumStock}
                         </span>
                         <Badge variant="destructive" className="text-[10px]">
-                          Baixo
+                          Low
                         </Badge>
                       </div>
                     </div>
