@@ -1,8 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { query, mutation, QueryCtx, MutationCtx } from "./_generated/server";
+import { query, mutation, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 
-/** Get the current signed in user. */
 export const currentUser = query({
   args: {},
   handler: async (ctx) => {
@@ -12,7 +11,6 @@ export const currentUser = query({
   },
 });
 
-/** Get user by ID (for admin/management views). */
 export const getUserById = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
@@ -20,7 +18,6 @@ export const getUserById = query({
   },
 });
 
-/** List all users (admin only — filtered on frontend). */
 export const listUsers = query({
   args: {},
   handler: async (ctx) => {
@@ -34,7 +31,6 @@ export const listUsers = query({
   },
 });
 
-/** Create a user profile (called during first sign-in or by admin). */
 export const createUser = mutation({
   args: {
     name: v.string(),
@@ -50,33 +46,23 @@ export const createUser = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
-
+    if (!userId) throw new Error("Não autenticado");
     const existing = await ctx.db.get(userId);
     if (existing) {
-      // Update existing user profile
       await ctx.db.patch(userId, {
-        name: args.name,
-        email: args.email,
-        role: args.role,
-        organizationId: args.organizationId,
-        active: true,
+        name: args.name, email: args.email, role: args.role,
+        organizationId: args.organizationId, active: true,
       });
       return userId;
     }
-
     await ctx.db.patch(userId, {
-      name: args.name,
-      email: args.email,
-      role: args.role,
-      organizationId: args.organizationId,
-      active: true,
+      name: args.name, email: args.email, role: args.role,
+      organizationId: args.organizationId, active: true,
     });
     return userId;
   },
 });
 
-/** Update user profile (admin). */
 export const updateUser = mutation({
   args: {
     userId: v.id("users"),
@@ -94,12 +80,9 @@ export const updateUser = mutation({
   },
   handler: async (ctx, args) => {
     const authUserId = await getAuthUserId(ctx);
-    if (!authUserId) throw new Error("Not authenticated");
-
+    if (!authUserId) throw new Error("Não autenticado");
     const { userId, ...updates } = args;
     await ctx.db.patch(userId, updates);
-
-    // Audit log
     await ctx.db.insert("auditLogs", {
       userId: authUserId,
       action: updates.active === false ? "deactivate" : "update",
@@ -108,26 +91,18 @@ export const updateUser = mutation({
       details: JSON.stringify(updates),
       timestamp: Date.now(),
     });
-
     return userId;
   },
 });
 
-/** Record login time */
 export const recordLogin = mutation({
   args: {},
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) return;
-
     await ctx.db.patch(userId, { lastLoginAt: Date.now() });
-
     await ctx.db.insert("auditLogs", {
-      userId,
-      action: "login",
-      entity: "users",
-      entityId: userId,
-      timestamp: Date.now(),
+      userId, action: "login", entity: "users", entityId: userId, timestamp: Date.now(),
     });
   },
 });
@@ -135,11 +110,5 @@ export const recordLogin = mutation({
 export const getCurrentUser = async (ctx: QueryCtx) => {
   const userId = await getAuthUserId(ctx);
   if (userId === null) return null;
-  return await ctx.db.get(userId);
-};
-
-export const getCurrentUserCtx = async (ctx: MutationCtx) => {
-  const userId = await getAuthUserId(ctx);
-  if (userId === null) throw new Error("Not authenticated");
   return await ctx.db.get(userId);
 };

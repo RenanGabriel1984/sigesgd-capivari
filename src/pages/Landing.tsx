@@ -9,12 +9,9 @@ import {
   ClipboardList,
   BarChart3,
   Building2,
-  Lock,
   CheckCircle2,
   Smartphone,
   Globe,
-  Boxes,
-  Zap,
 } from "lucide-react";
 
 const fadeIn = {
@@ -30,49 +27,49 @@ const stagger = {
 const features = [
   {
     icon: Package,
-    title: "Product Catalog",
-    desc: "Maintain a complete catalog with categories, stock levels, suppliers, and detailed product information — all in one place.",
+    title: "Catálogo de Produtos",
+    desc: "Mantenha um catálogo completo com categorias, níveis de estoque, fornecedores e informações detalhadas — tudo em um só lugar.",
   },
   {
     icon: ClipboardList,
-    title: "Request Management",
-    desc: "Submit, approve, and track material requests through a structured workflow with full visibility at every step.",
+    title: "Gestão de Solicitações",
+    desc: "Envie, aprove e acompanhe solicitações de materiais por meio de um fluxo estruturado com visibilidade total em cada etapa.",
   },
   {
     icon: Shield,
-    title: "Full Audit Trail",
-    desc: "Every action is logged with timestamps and user attribution for complete accountability and compliance.",
+    title: "Trilha de Auditoria",
+    desc: "Cada ação é registrada com carimbo de data/hora e atribuição de usuário para total responsabilidade e conformidade.",
   },
   {
-    icon: Building2,
-    title: "Organizational Structure",
-    desc: "Model any team hierarchy — departments, units, and teams — without being locked into a rigid template.",
+  icon: Building2,
+    title: "Estrutura Organizacional",
+    desc: "Modele qualquer hierarquia de equipe — departamentos, unidades e setores — sem ficar preso a um modelo rígido.",
   },
   {
     icon: BarChart3,
-    title: "Live Dashboard",
-    desc: "Real-time overview of stock levels, pending requests, and items requiring attention, always up to date.",
+    title: "Painel em Tempo Real",
+    desc: "Visão geral dos níveis de estoque, solicitações pendentes e itens que necessitam atenção, sempre atualizados.",
   },
   {
-    icon: Lock,
-    title: "Role-Based Access",
-    desc: "Granular permissions ensure each team member sees and does only what their role allows — nothing more.",
+    icon: Shield,
+    title: "Acesso por Perfil",
+    desc: "Permissões granulares garantem que cada membro da equipe veja e faça apenas o que seu perfil permite — nada mais.",
   },
 ];
 
 const stats = [
-  { value: "100%", label: "Stock Control" },
-  { value: "5", label: "Access Roles" },
-  { value: "∞", label: "Scalable" },
-  { value: "24/7", label: "Available" },
+  { value: "100%", label: "Controle de Estoque" },
+  { value: "5", label: "Perfis de Acesso" },
+  { value: "∞", label: "Escalável" },
+  { value: "24/7", label: "Disponível" },
 ];
 
 const roles = [
-  { role: "Administrator", perms: ["Full system access", "Manage users and roles", "System configuration"] },
-  { role: "Stock Manager", perms: ["Register products and categories", "Record entries and exits", "Approve incoming requests"] },
-  { role: "Director", perms: ["View stock levels", "Approve material requests", "Review movement history"] },
-  { role: "Secretary", perms: ["View stock overview", "Authorize material requests", "Access management reports"] },
-  { role: "Technician", perms: ["Browse available materials", "Submit new requests", "Track request status"] },
+  { role: "Administrador", perms: ["Acesso total ao sistema", "Gerenciar usuários e perfis", "Configurações gerais"] },
+  { role: "Responsável pelo Estoque", perms: ["Cadastrar produtos e categorias", "Registrar entradas e saídas", "Aprovar solicitações pendentes"] },
+  { role: "Diretor", perms: ["Consultar níveis de estoque", "Aprovar solicitações de materiais", "Revisar histórico de movimentações"] },
+  { role: "Secretário", perms: ["Consultar visão geral do estoque", "Autorizar fornecimento de materiais", "Acessar relatórios gerenciais"] },
+  { role: "Técnico", perms: ["Consultar materiais disponíveis", "Criar novas solicitações", "Acompanhar status das solicitações"] },
 ];
 
 export default function Landing() {
@@ -93,12 +90,12 @@ export default function Landing() {
           <div className="flex items-center gap-3">
             <Link to="/auth">
               <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
-                Sign In
+                Entrar
               </Button>
             </Link>
             <Link to="/auth">
               <Button size="sm" className="gap-2">
-                Get Started
+                Começar
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
@@ -118,26 +115,27 @@ export default function Landing() {
           >
             <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/50 px-3 py-1 text-xs text-muted-foreground mb-6">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Inventory Management Platform
+              Plataforma de Gestão de Estoque
             </div>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1]">
               SIGESGD{" "}
               <span className="text-primary/70">Capivari</span>
             </h1>
             <p className="mt-4 text-lg sm:text-xl text-muted-foreground max-w-2xl leading-relaxed">
-              A precise, secure inventory management system built for teams that need
-              full visibility over their stock — from procurement to delivery.
+              Sistema Integrado de Gestão da Secretaria de Gestão e Governo Digital —
+              Controle inteligente de estoque, materiais e movimentações para a
+              administração pública.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row gap-3">
               <Link to="/auth">
                 <Button size="lg" className="gap-2 w-full sm:w-auto">
-                  Start Managing Stock
+                  Começar a Gerenciar
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
               <Button size="lg" variant="outline" className="gap-2 w-full sm:w-auto" asChild>
                 <a href="#features">
-                  Learn More
+                  Saiba Mais
                 </a>
               </Button>
             </div>
@@ -175,11 +173,11 @@ export default function Landing() {
             className="max-w-2xl mb-12"
           >
             <h2 className="text-3xl font-bold tracking-tight">
-              Everything your team needs
+              Tudo que sua equipe precisa
             </h2>
             <p className="mt-3 text-muted-foreground">
-              Core capabilities designed for teams that manage physical inventory
-              and need a reliable, auditable system of record.
+              Funcionalidades essenciais projetadas para equipes que gerenciam
+              estoque físico e precisam de um sistema confiável e auditável.
             </p>
           </motion.div>
 
@@ -217,11 +215,11 @@ export default function Landing() {
             className="max-w-2xl mb-12"
           >
             <h2 className="text-3xl font-bold tracking-tight">
-              Access control by role
+              Controle de acesso por perfil
             </h2>
             <p className="mt-3 text-muted-foreground">
-              Granular permissions ensure every team member has exactly the access they need —
-              no more, no less.
+              Permissões granulares garantem que cada membro da equipe tenha exatamente
+              o acesso que precisa — nem mais, nem menos.
             </p>
           </motion.div>
 
@@ -263,11 +261,11 @@ export default function Landing() {
             className="text-center max-w-2xl mx-auto"
           >
             <h2 className="text-3xl font-bold tracking-tight">
-              Works everywhere
+              Funciona em qualquer dispositivo
             </h2>
             <p className="mt-3 text-muted-foreground">
-              Fully responsive and installable as a progressive web app.
-              Works on desktop, tablet, and mobile — no app store required.
+              Totalmente responsivo e instalável como aplicativo web progressivo.
+              Funciona em desktop, tablet e celular — sem necessidade de loja de aplicativos.
             </p>
             <div className="flex justify-center gap-8 mt-8">
               <div className="flex flex-col items-center gap-2">
@@ -280,7 +278,7 @@ export default function Landing() {
                 <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
                   <Smartphone className="h-6 w-6" />
                 </div>
-                <span className="text-sm font-medium">Mobile</span>
+                <span className="text-sm font-medium">Celular</span>
               </div>
             </div>
           </motion.div>
@@ -296,15 +294,15 @@ export default function Landing() {
             viewport={{ once: true }}
           >
             <h2 className="text-3xl font-bold tracking-tight">
-              Ready to take control?
+              Pronto para começar?
             </h2>
             <p className="mt-3 text-muted-foreground max-w-lg mx-auto">
-              Create your account and start managing inventory with full visibility,
-              accountability, and control.
+              Crie sua conta e comece a gerenciar o estoque com visibilidade total,
+              responsabilidade e controle.
             </p>
             <Link to="/auth" className="mt-8 inline-block">
               <Button size="lg" className="gap-2">
-                Open SIGESGD
+                Acessar o SIGESGD
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
@@ -322,7 +320,7 @@ export default function Landing() {
             <span className="text-sm font-medium">SIGESGD Capivari</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            Inventory management platform for teams that demand precision.
+            Plataforma de gestão de estoque para equipes que exigem precisão.
           </p>
         </div>
       </footer>

@@ -23,14 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, ClipboardList, Check, X, Truck } from "lucide-react";
 import { REQUEST_STATUS_LABELS, REQUEST_STATUS_COLORS, getPermissions, ROLE_LABELS, type UserRole } from "@/types/constants";
@@ -73,14 +65,13 @@ export default function Requests() {
 
   const handleCreate = async () => {
     const validItems = items.filter((i) => i.productId && i.quantity > 0);
-    if (validItems.length === 0) { toast.error("Please add at least one item with a valid product and quantity > 0"); return; }
-    // Validate quantity does not exceed available stock
+    if (validItems.length === 0) { toast.error("Adicione pelo menos um item com produto e quantidade válidos"); return; }
     for (const item of validItems) {
       const product = products?.find((p) => p._id === item.productId);
       if (product) {
         const available = (product.stock?.physicalQuantity ?? 0) - (product.stock?.reservedQuantity ?? 0);
         if (item.quantity > available) {
-          toast.error(`Insufficient stock for "${product.name}". Available: ${available}`);
+          toast.error(`Estoque insuficiente para "${product.name}". Disponível: ${available}`);
           return;
         }
       }
@@ -90,13 +81,13 @@ export default function Requests() {
         observation: observation || undefined,
         items: validItems.map((i) => ({ productId: i.productId as any, quantityRequested: i.quantity })),
       });
-      toast.success("Request created");
+      toast.success("Solicitação criada com sucesso");
       setCreateDialog(false);
       setItems([{ productId: "", quantity: 1 }]);
       setObservation("");
     } catch (e: any) {
-      console.error("Create request error:", e);
-      toast.error(e.message ?? "Failed to create request");
+      console.error("Erro ao criar solicitação:", e);
+      toast.error(e.message ?? "Erro ao criar solicitação");
     }
   };
 
@@ -111,42 +102,42 @@ export default function Requests() {
         })),
         observation: approveObservation || undefined,
       });
-      toast.success("Request approved");
+      toast.success("Solicitação aprovada");
       setApproveDialog(null);
       setApproveObservation("");
     } catch (e: any) {
-      console.error("Approve request error:", e);
-      toast.error(e.message ?? "Failed to approve request");
+      console.error("Erro ao aprovar solicitação:", e);
+      toast.error(e.message ?? "Erro ao aprovar solicitação");
     }
   };
 
   const handleReject = async (requestId: string) => {
     try {
       await rejectRequest({ requestId: requestId as any });
-      toast.success("Request rejected");
+      toast.success("Solicitação rejeitada");
     } catch (e: any) {
-      console.error("Reject request error:", e);
-      toast.error(e.message ?? "Failed to reject request");
+      console.error("Erro ao rejeitar solicitação:", e);
+      toast.error(e.message ?? "Erro ao rejeitar solicitação");
     }
   };
 
   const handleDeliver = async (requestId: string) => {
     try {
       await deliverRequest({ requestId: requestId as any });
-      toast.success("Delivery registered");
+      toast.success("Entrega registrada com sucesso");
     } catch (e: any) {
-      console.error("Deliver request error:", e);
-      toast.error(e.message ?? "Failed to register delivery");
+      console.error("Erro ao registrar entrega:", e);
+      toast.error(e.message ?? "Erro ao registrar entrega");
     }
   };
 
   const handleCancel = async (requestId: string) => {
     try {
       await cancelRequest({ requestId: requestId as any });
-      toast.success("Request cancelled");
+      toast.success("Solicitação cancelada");
     } catch (e: any) {
-      console.error("Cancel request error:", e);
-      toast.error(e.message ?? "Failed to cancel request");
+      console.error("Erro ao cancelar solicitação:", e);
+      toast.error(e.message ?? "Erro ao cancelar solicitação");
     }
   };
 
@@ -252,7 +243,6 @@ export default function Requests() {
         </Tabs>
       </div>
 
-      {/* Create Request Dialog */}
       <Dialog open={createDialog} onOpenChange={setCreateDialog}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -264,7 +254,7 @@ export default function Requests() {
                 <div className="flex-1">
                   {i === 0 && <Label className="mb-1.5 block">Produto</Label>}
                   <Select value={item.productId} onValueChange={(v) => updateItem(i, "productId", v)}>
-                    <SelectTrigger><SelectValue placeholder="Produto" /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Selecionar produto" /></SelectTrigger>
                     <SelectContent>
                       {products?.map((p) => (
                         <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>
@@ -298,7 +288,6 @@ export default function Requests() {
         </DialogContent>
       </Dialog>
 
-      {/* Approve Dialog */}
       <Dialog open={!!approveDialog} onOpenChange={() => setApproveDialog(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>

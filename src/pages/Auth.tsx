@@ -52,7 +52,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       setStep({ email: formData.get("email") as string });
       setIsLoading(false);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not send verification code. Please try again.");
+      setError(error instanceof Error ? error.message : "Não foi possível enviar o código. Tente novamente.");
       setIsLoading(false);
     }
   };
@@ -66,7 +66,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       await signIn("email-otp", formData);
       navigate(redirect);
     } catch (error) {
-      setError("The verification code is incorrect. Please try again.");
+      setError("Código de verificação incorreto. Tente novamente.");
       setIsLoading(false);
       setOtp("");
     }
@@ -79,14 +79,13 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       await signIn("anonymous");
       navigate(redirect);
     } catch (error) {
-      setError(`Could not sign in as guest: ${error instanceof Error ? error.message : "Unknown error"}`);
+      setError(`Não foi possível entrar como visitante: ${error instanceof Error ? error.message : "Erro desconhecido"}`);
       setIsLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Top bar */}
       <header className="flex items-center justify-between px-4 sm:px-6 h-16 border-b border-border/60">
         <Link to="/" className="flex items-center gap-2.5">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-xs">
@@ -99,16 +98,15 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
         </Link>
       </header>
 
-      {/* Auth Content */}
       <div className="flex-1 flex items-center justify-center px-4">
         <div className="flex items-center justify-center h-full flex-col">
           <Card className="w-full max-w-[400px] border-border/50 shadow-lg">
             {step === "signIn" ? (
               <>
                 <CardHeader className="text-center">
-                  <CardTitle className="text-xl">Welcome back</CardTitle>
+                  <CardTitle className="text-xl">Bem-vindo</CardTitle>
                   <CardDescription>
-                    Enter your email to receive a sign-in code
+                    Informe seu e-mail para receber um código de acesso
                   </CardDescription>
                 </CardHeader>
                 <form onSubmit={handleEmailSubmit}>
@@ -118,7 +116,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                         <Input
                           name="email"
-                          placeholder="you@company.com"
+                          placeholder="seu@email.com"
                           type="email"
                           className="pl-9"
                           disabled={isLoading}
@@ -137,7 +135,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                           <span className="w-full border-t" />
                         </div>
                         <div className="relative flex justify-center text-xs uppercase">
-                          <span className="bg-background px-2 text-muted-foreground">Or</span>
+                          <span className="bg-background px-2 text-muted-foreground">Ou</span>
                         </div>
                       </div>
                       <Button
@@ -148,7 +146,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         disabled={isLoading}
                       >
                         <UserX className="mr-2 h-4 w-4" />
-                        Continue as Guest
+                        Entrar como Visitante
                       </Button>
                     </div>
                   </CardContent>
@@ -157,9 +155,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             ) : (
               <>
                 <CardHeader className="text-center">
-                  <CardTitle>Check your inbox</CardTitle>
+                  <CardTitle>Verificar código</CardTitle>
                   <CardDescription>
-                    We sent a 6-digit code to {step.email}
+                    Enviamos um código de 6 dígitos para {step.email}
                   </CardDescription>
                 </CardHeader>
                 <form onSubmit={handleOtpSubmit}>
@@ -188,22 +186,22 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     </div>
                     {error && <p className="mt-2 text-sm text-destructive text-center">{error}</p>}
                     <p className="text-sm text-muted-foreground text-center mt-4">
-                      Didn't receive a code?{" "}
+                      Não recebeu o código?{" "}
                       <Button variant="link" className="p-0 h-auto" onClick={() => setStep("signIn")}>
-                        Try a different email
+                        Usar outro e-mail
                       </Button>
                     </p>
                   </CardContent>
                   <CardFooter className="flex-col gap-2">
                     <Button type="submit" className="w-full" disabled={isLoading || otp.length !== 6}>
                       {isLoading ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verifying...</>
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verificando...</>
                       ) : (
-                        <>Verify Code<ArrowRight className="ml-2 h-4 w-4" /></>
+                        <>Verificar Código<ArrowRight className="ml-2 h-4 w-4" /></>
                       )}
                     </Button>
                     <Button type="button" variant="ghost" onClick={() => setStep("signIn")} disabled={isLoading} className="w-full">
-                      Use a different email
+                      Usar outro e-mail
                     </Button>
                   </CardFooter>
                 </form>

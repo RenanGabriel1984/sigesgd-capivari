@@ -47,17 +47,15 @@ export default function Dashboard() {
   return (
     <AppShell>
       <div className="space-y-6 max-w-7xl mx-auto">
-        {/* Header */}
         <motion.div {...fadeIn}>
           <h1 className="text-2xl font-bold tracking-tight">
-            Welcome{user?.name ? `, ${user.name.split(" ")[0]}` : ""}
+            Olá{user?.name ? `, ${user.name.split(" ")[0]}` : ""}
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            {ROLE_LABELS[role]} — Overview
+            {ROLE_LABELS[role]} — Visão Geral
           </p>
         </motion.div>
 
-        {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
           <motion.div {...fadeIn} transition={{ delay: 0.05 }}>
             <Card className="border-border/50 shadow-sm hover:shadow-md transition-shadow">
@@ -68,7 +66,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-2xl font-bold">{totalProducts}</p>
-                    <p className="text-xs text-muted-foreground">Products</p>
+                    <p className="text-xs text-muted-foreground">Produtos</p>
                   </div>
                 </div>
               </CardContent>
@@ -84,7 +82,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-2xl font-bold">{totalStock}</p>
-                    <p className="text-xs text-muted-foreground">Total Stock</p>
+                    <p className="text-xs text-muted-foreground">Estoque Total</p>
                   </div>
                 </div>
               </CardContent>
@@ -100,7 +98,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-2xl font-bold">{pendingCount}</p>
-                    <p className="text-xs text-muted-foreground">Pending Requests</p>
+                    <p className="text-xs text-muted-foreground">Solicitações Pendentes</p>
                   </div>
                 </div>
               </CardContent>
@@ -116,7 +114,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-2xl font-bold">{belowMinCount}</p>
-                    <p className="text-xs text-muted-foreground">Below Minimum</p>
+                    <p className="text-xs text-muted-foreground">Abaixo do Mínimo</p>
                   </div>
                 </div>
               </CardContent>
@@ -124,27 +122,26 @@ export default function Dashboard() {
           </motion.div>
         </div>
 
-        {/* Recent Activity */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <motion.div {...fadeIn} transition={{ delay: 0.25 }}>
             <Card className="border-border/50 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <ArrowUpRight className="h-4 w-4 text-emerald-600" />
-                  Recent Entries
+                  Últimas Entradas
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {recentEntries.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4 text-center">No entries recorded yet</p>
+                  <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma entrada registrada</p>
                 ) : (
                   <div className="space-y-3">
                     {recentEntries.map((m) => (
                       <div key={m._id} className="flex items-center justify-between text-sm">
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium truncate">{m.product?.name ?? "Product"}</p>
+                          <p className="font-medium truncate">{m.product?.name ?? "Produto"}</p>
                           <p className="text-xs text-muted-foreground">
-                            {m.quantity} units — {m.user?.name ?? "User"}
+                            {m.quantity} un. — {m.user?.name ?? "Usuário"}
                           </p>
                         </div>
                         <Badge variant="outline" className="text-emerald-600 border-emerald-200 shrink-0 ml-2">
@@ -163,20 +160,20 @@ export default function Dashboard() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <ArrowDownRight className="h-4 w-4 text-rose-600" />
-                  Recent Exits
+                  Últimas Saídas
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {recentExits.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-4 text-center">No exits recorded yet</p>
+                  <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma saída registrada</p>
                 ) : (
                   <div className="space-y-3">
                     {recentExits.map((m) => (
                       <div key={m._id} className="flex items-center justify-between text-sm">
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium truncate">{m.product?.name ?? "Product"}</p>
+                          <p className="font-medium truncate">{m.product?.name ?? "Produto"}</p>
                           <p className="text-xs text-muted-foreground">
-                            {m.quantity} units — {m.user?.name ?? "User"}
+                            {m.quantity} un. — {m.user?.name ?? "Usuário"}
                           </p>
                         </div>
                         <Badge variant="outline" className="text-rose-600 border-rose-200 shrink-0 ml-2">
@@ -191,14 +188,13 @@ export default function Dashboard() {
           </motion.div>
         </div>
 
-        {/* Below Minimum Stock */}
         {belowMinCount > 0 && (
           <motion.div {...fadeIn} transition={{ delay: 0.35 }}>
             <Card className="border-amber-200 bg-amber-50/50 shadow-sm">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2 text-amber-700">
                   <TrendingDown className="h-4 w-4" />
-                  Stock Below Minimum
+                  Estoque Abaixo do Mínimo
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -208,10 +204,10 @@ export default function Dashboard() {
                       <span className="font-medium">{p.name}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-xs text-muted-foreground">
-                          Current: {p.currentStock} / Min: {p.minimumStock}
+                          Atual: {p.currentStock} / Mín: {p.minimumStock}
                         </span>
                         <Badge variant="destructive" className="text-[10px]">
-                          Low
+                          Baixo
                         </Badge>
                       </div>
                     </div>

@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Pencil, Search, Package, ArrowUpRight, Boxes } from "lucide-react";
+import { Plus, Pencil, Search, Package, ArrowUpRight } from "lucide-react";
 import { UNITS_OF_MEASURE } from "@/types/constants";
 import { toast } from "sonner";
 
@@ -76,26 +76,15 @@ export default function Products() {
     return matchesSearch && matchesCategory;
   });
 
-  const openCreate = () => {
-    setForm(emptyForm);
-    setEditingId(null);
-    setDialogOpen(true);
-  };
-
+  const openCreate = () => { setForm(emptyForm); setEditingId(null); setDialogOpen(true); };
   const openEdit = (e: React.MouseEvent, p: any) => {
     e.preventDefault();
     e.stopPropagation();
     setForm({
-      name: p.name,
-      description: p.description ?? "",
-      categoryId: p.categoryId,
-      unitOfMeasure: p.unitOfMeasure,
-      internalCode: p.internalCode ?? "",
-      manufacturer: p.manufacturer ?? "",
-      model: p.model ?? "",
-      minimumStock: p.minimumStock,
-      idealStock: p.idealStock,
-      maximumStock: p.maximumStock,
+      name: p.name, description: p.description ?? "", categoryId: p.categoryId,
+      unitOfMeasure: p.unitOfMeasure, internalCode: p.internalCode ?? "",
+      manufacturer: p.manufacturer ?? "", model: p.model ?? "",
+      minimumStock: p.minimumStock, idealStock: p.idealStock, maximumStock: p.maximumStock,
       observation: p.observation ?? "",
     });
     setEditingId(p._id);
@@ -103,47 +92,25 @@ export default function Products() {
   };
 
   const handleSave = async () => {
-    if (!form.name || !form.categoryId) {
-      toast.error("Name and category are required");
-      return;
-    }
+    if (!form.name || !form.categoryId) { toast.error("Nome e categoria são obrigatórios"); return; }
     try {
+      const data = {
+        name: form.name, description: form.description || undefined,
+        categoryId: form.categoryId as any, unitOfMeasure: form.unitOfMeasure,
+        internalCode: form.internalCode || undefined, manufacturer: form.manufacturer || undefined,
+        model: form.model || undefined, minimumStock: form.minimumStock,
+        idealStock: form.idealStock, maximumStock: form.maximumStock,
+        observation: form.observation || undefined,
+      };
       if (editingId) {
-        await updateProduct({
-          id: editingId as any,
-          name: form.name,
-          description: form.description || undefined,
-          categoryId: form.categoryId as any,
-          unitOfMeasure: form.unitOfMeasure,
-          internalCode: form.internalCode || undefined,
-          manufacturer: form.manufacturer || undefined,
-          model: form.model || undefined,
-          minimumStock: form.minimumStock,
-          idealStock: form.idealStock,
-          maximumStock: form.maximumStock,
-          observation: form.observation || undefined,
-        });
-        toast.success("Product updated");
+        await updateProduct({ id: editingId as any, ...data });
+        toast.success("Produto atualizado");
       } else {
-        await createProduct({
-          name: form.name,
-          description: form.description || undefined,
-          categoryId: form.categoryId as any,
-          unitOfMeasure: form.unitOfMeasure,
-          internalCode: form.internalCode || undefined,
-          manufacturer: form.manufacturer || undefined,
-          model: form.model || undefined,
-          minimumStock: form.minimumStock,
-          idealStock: form.idealStock,
-          maximumStock: form.maximumStock,
-          observation: form.observation || undefined,
-        });
-        toast.success("Product created");
+        await createProduct(data);
+        toast.success("Produto criado");
       }
       setDialogOpen(false);
-    } catch (e: any) {
-      toast.error(e.message ?? "Failed to save product");
-    }
+    } catch (e: any) { toast.error(e.message ?? "Erro ao salvar produto"); }
   };
 
   return (
@@ -151,53 +118,33 @@ export default function Products() {
       <div className="space-y-6 max-w-7xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Product Catalog</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Catálogo de Produtos</h1>
             <p className="text-sm text-muted-foreground">
-              {filtered?.length ?? 0} product{(filtered?.length ?? 0) !== 1 ? "s" : ""} in catalog
+              {filtered?.length ?? 0} produto{(filtered?.length ?? 0) !== 1 ? "s" : ""} no catálogo
             </p>
           </div>
-          <Button onClick={openCreate} className="gap-2">
-            <Plus className="h-4 w-4" />
-            Add Product
-          </Button>
+          <Button onClick={openCreate} className="gap-2"><Plus className="h-4 w-4" /> Novo Produto</Button>
         </div>
 
-        {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search by name, code, or manufacturer..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
+            <Input placeholder="Buscar por nome, código ou fabricante..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
           </div>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-full sm:w-48">
-              <SelectValue placeholder="All Categories" />
-            </SelectTrigger>
+            <SelectTrigger className="w-full sm:w-48"><SelectValue placeholder="Todas as categorias" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              {categories?.map((c) => (
-                <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
-              ))}
+              <SelectItem value="all">Todas as categorias</SelectItem>
+              {categories?.map((c) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}
             </SelectContent>
           </Select>
         </div>
 
-        {/* Catalog Grid */}
         {filtered?.length === 0 ? (
-          <Card className="border-border/50">
-            <CardContent className="py-16 text-center">
-              <Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-              <p className="text-muted-foreground">
-                {search || categoryFilter !== "all"
-                  ? "No products match your filters"
-                  : "No products in the catalog yet"}
-              </p>
-            </CardContent>
-          </Card>
+          <Card className="border-border/50"><CardContent className="py-16 text-center">
+            <Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+            <p className="text-muted-foreground">{search || categoryFilter !== "all" ? "Nenhum produto corresponde aos filtros" : "Nenhum produto cadastrado"}</p>
+          </CardContent></Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered?.map((p) => {
@@ -206,7 +153,6 @@ export default function Products() {
               const available = stock - reserved;
               const isLow = stock < p.minimumStock;
               const stockPct = p.maximumStock > 0 ? Math.min(100, (stock / p.maximumStock) * 100) : 0;
-
               return (
                 <Link key={p._id} to={`/products/${p._id}`} className="group">
                   <Card className="h-full border-border/50 shadow-sm hover:shadow-md hover:border-primary/20 transition-all duration-200">
@@ -217,49 +163,22 @@ export default function Products() {
                         </div>
                         <div className="flex items-center gap-1.5">
                           <ArrowUpRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            onClick={(e) => openEdit(e, p)}
-                          >
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => openEdit(e, p)}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
                         </div>
                       </div>
-
-                      <h3 className="font-semibold text-sm mb-1 group-hover:text-primary transition-colors">
-                        {p.name}
-                      </h3>
-                      <p className="text-xs text-muted-foreground mb-3 line-clamp-1">
-                        {p.manufacturer} {p.model}
-                      </p>
-
+                      <h3 className="font-semibold text-sm mb-1 group-hover:text-primary transition-colors">{p.name}</h3>
+                      <p className="text-xs text-muted-foreground mb-3 line-clamp-1">{p.manufacturer} {p.model}</p>
                       <div className="flex items-center gap-2 mb-3">
-                        {p.category && (
-                          <Badge variant="secondary" className="text-[10px]">
-                            {p.category.name}
-                          </Badge>
-                        )}
-                        <Badge
-                          variant={isLow ? "destructive" : "outline"}
-                          className="text-[10px]"
-                        >
-                          {stock} {p.unitOfMeasure}
-                        </Badge>
+                        {p.category && <Badge variant="secondary" className="text-[10px]">{p.category.name}</Badge>}
+                        <Badge variant={isLow ? "destructive" : "outline"} className="text-[10px]">{stock} {p.unitOfMeasure}</Badge>
                       </div>
-
-                      {/* Mini stock bar */}
                       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                         <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${
-                              isLow ? "bg-rose-500" : "bg-emerald-500"
-                            }`}
-                            style={{ width: `${stockPct}%` }}
-                          />
+                          <div className={`h-full rounded-full transition-all ${isLow ? "bg-rose-500" : "bg-emerald-500"}`} style={{ width: `${stockPct}%` }} />
                         </div>
-                        <span>{available} avail.</span>
+                        <span>{available} disp.</span>
                       </div>
                     </CardContent>
                   </Card>
@@ -270,85 +189,31 @@ export default function Products() {
         )}
       </div>
 
-      {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingId ? "Edit Product" : "New Product"}</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? "Editar Produto" : "Novo Produto"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
-            <div>
-              <Label>Name *</Label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Product name" />
-            </div>
-            <div>
-              <Label>Description</Label>
-              <Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} />
+            <div><Label>Nome *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nome do produto" /></div>
+            <div><Label>Descrição</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} /></div>
+            <div className="grid grid-cols-2 gap-4">
+              <div><Label>Categoria *</Label><Select value={form.categoryId} onValueChange={(v) => setForm({ ...form, categoryId: v })}><SelectTrigger><SelectValue placeholder="Selecionar" /></SelectTrigger><SelectContent>{categories?.map((c) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}</SelectContent></Select></div>
+              <div><Label>Unidade</Label><Select value={form.unitOfMeasure} onValueChange={(v) => setForm({ ...form, unitOfMeasure: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{UNITS_OF_MEASURE.map((u) => (<SelectItem key={u} value={u}>{u}</SelectItem>))}</SelectContent></Select></div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Category *</Label>
-                <Select value={form.categoryId} onValueChange={(v) => setForm({ ...form, categoryId: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categories?.map((c) => (
-                      <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Unit</Label>
-                <Select value={form.unitOfMeasure} onValueChange={(v) => setForm({ ...form, unitOfMeasure: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {UNITS_OF_MEASURE.map((u) => (
-                      <SelectItem key={u} value={u}>{u}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <div><Label>Código Interno</Label><Input value={form.internalCode} onChange={(e) => setForm({ ...form, internalCode: e.target.value })} /></div>
+              <div><Label>Fabricante</Label><Input value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} /></div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Internal Code</Label>
-                <Input value={form.internalCode} onChange={(e) => setForm({ ...form, internalCode: e.target.value })} />
-              </div>
-              <div>
-                <Label>Manufacturer</Label>
-                <Input value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} />
-              </div>
-            </div>
-            <div>
-              <Label>Model</Label>
-              <Input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
-            </div>
+            <div><Label>Modelo</Label><Input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></div>
             <div className="grid grid-cols-3 gap-4">
-              <div>
-                <Label>Minimum</Label>
-                <Input type="number" min="0" value={form.minimumStock} onChange={(e) => setForm({ ...form, minimumStock: Number(e.target.value) })} />
-              </div>
-              <div>
-                <Label>Ideal</Label>
-                <Input type="number" min="0" value={form.idealStock} onChange={(e) => setForm({ ...form, idealStock: Number(e.target.value) })} />
-              </div>
-              <div>
-                <Label>Maximum</Label>
-                <Input type="number" min="0" value={form.maximumStock} onChange={(e) => setForm({ ...form, maximumStock: Number(e.target.value) })} />
-              </div>
+              <div><Label>Estoque Mínimo</Label><Input type="number" min="0" value={form.minimumStock} onChange={(e) => setForm({ ...form, minimumStock: Number(e.target.value) })} /></div>
+              <div><Label>Estoque Ideal</Label><Input type="number" min="0" value={form.idealStock} onChange={(e) => setForm({ ...form, idealStock: Number(e.target.value) })} /></div>
+              <div><Label>Estoque Máximo</Label><Input type="number" min="0" value={form.maximumStock} onChange={(e) => setForm({ ...form, maximumStock: Number(e.target.value) })} /></div>
             </div>
-            <div>
-              <Label>Notes</Label>
-              <Textarea value={form.observation} onChange={(e) => setForm({ ...form, observation: e.target.value })} rows={2} />
-            </div>
+            <div><Label>Observações</Label><Textarea value={form.observation} onChange={(e) => setForm({ ...form, observation: e.target.value })} rows={2} /></div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleSave}>{editingId ? "Save" : "Create"}</Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSave}>{editingId ? "Salvar" : "Criar"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

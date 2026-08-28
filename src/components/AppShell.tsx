@@ -47,18 +47,18 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permission: "canViewMovements" },
-  { label: "Inventory", href: "/stock", icon: Warehouse, permission: "canManageStock" },
-  { label: "Catalog", href: "/products", icon: Package, permission: "canManageProducts" },
-  { label: "Categories", href: "/categories", icon: Tags, permission: "canManageCategories" },
-  { label: "Entries", href: "/entries", icon: ShoppingCart, permission: "canCreateEntries" },
-  { label: "Requests", href: "/requests", icon: ClipboardList, permission: "canCreateRequests" },
-  { label: "Movements", href: "/movements", icon: ArrowLeftRight, permission: "canViewMovements" },
-  { label: "Organization", href: "/organization", icon: Building2, permission: "canManageOrg" },
-  { label: "Users", href: "/users", icon: Users, permission: "canManageUsers" },
-  { label: "Suppliers", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
-  { label: "Audit Log", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
-  { label: "Settings", href: "/settings", icon: Settings, permission: "canManageSettings" },
+  { label: "Painel", href: "/dashboard", icon: LayoutDashboard, permission: "canViewMovements" },
+  { label: "Estoque", href: "/stock", icon: Warehouse, permission: "canManageStock" },
+  { label: "Catálogo", href: "/products", icon: Package, permission: "canManageProducts" },
+  { label: "Categorias", href: "/categories", icon: Tags, permission: "canManageCategories" },
+  { label: "Entradas", href: "/entries", icon: ShoppingCart, permission: "canCreateEntries" },
+  { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests" },
+  { label: "Movimentações", href: "/movements", icon: ArrowLeftRight, permission: "canViewMovements" },
+  { label: "Organização", href: "/organization", icon: Building2, permission: "canManageOrg" },
+  { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },
+  { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
+  { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
+  { label: "Configurações", href: "/settings", icon: Settings, permission: "canManageSettings" },
 ];
 
 function SidebarLink({
@@ -258,7 +258,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Avatar>
                 <div className="hidden sm:flex flex-col items-start text-left">
                   <span className="text-sm font-medium leading-tight truncate max-w-[120px]">
-                    {user?.name ?? "User"}
+                    {user?.name ?? "Usuário"}
                   </span>
                   <span className="text-[10px] text-muted-foreground leading-tight">
                     {ROLE_LABELS[role]}
@@ -274,7 +274,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleSignOut} className="text-destructive focus:text-destructive">
                 <LogOut className="mr-2 h-4 w-4" />
-                Sign Out
+                Sair
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
