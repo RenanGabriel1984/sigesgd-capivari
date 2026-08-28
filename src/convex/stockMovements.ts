@@ -2,6 +2,15 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
+/** Helper: get authenticated user or throw. */
+async function requireUser(ctx: any) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error("Not authenticated");
+  const user = await ctx.db.get(userId);
+  if (!user) throw new Error("User profile not found. Please sign in again.");
+  return { userId, user };
+}
+
 /** List all stock movements with product info. */
 export const list = query({
   args: {},
@@ -53,8 +62,7 @@ export const createEntry = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const { userId } = await requireUser(ctx);
     if (args.quantity <= 0) throw new Error("Quantity must be positive");
 
     const stock = await ctx.db
@@ -96,7 +104,7 @@ export const createEntry = mutation({
       action: "move_stock",
       entity: "stockMovements",
       entityId: movementId,
-      details: `Entrada de ${args.quantity} unidade(s) no produto`,
+      details: `Entry of ${args.quantity} unit(s)`,
       timestamp: Date.now(),
     });
 
@@ -113,8 +121,7 @@ export const createExit = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const { userId } = await requireUser(ctx);
     if (args.quantity <= 0) throw new Error("Quantity must be positive");
 
     const stock = await ctx.db
@@ -154,7 +161,7 @@ export const createExit = mutation({
       action: "move_stock",
       entity: "stockMovements",
       entityId: movementId,
-      details: `Saída de ${args.quantity} unidade(s) do produto`,
+      details: `Exit of ${args.quantity} unit(s)`,
       timestamp: Date.now(),
     });
 
@@ -170,8 +177,7 @@ export const reserveStock = mutation({
     requestId: v.id("requests"),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const { userId } = await requireUser(ctx);
 
     const stock = await ctx.db
       .query("stock")
@@ -201,8 +207,7 @@ export const createAdjustment = mutation({
     observation: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const { userId } = await requireUser(ctx);
     if (args.newQuantity < 0) throw new Error("Quantity cannot be negative");
 
     const stock = await ctx.db
@@ -235,7 +240,7 @@ export const createAdjustment = mutation({
       action: "move_stock",
       entity: "stockMovements",
       entityId: movementId,
-      details: `Ajuste de estoque: ${prevPhysical} → ${args.newQuantity}`,
+      details: `Adjustment: ${prevPhysical} → ${args.newQuantity}`,
       timestamp: Date.now(),
     });
 

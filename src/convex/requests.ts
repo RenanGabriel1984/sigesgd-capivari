@@ -2,7 +2,16 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
-/** List all requests with requester info. */
+/** Helper: get authenticated user or throw. */
+async function requireUser(ctx: any) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error("Not authenticated");
+  const user = await ctx.db.get(userId);
+  if (!user) throw new Error("User profile not found. Please sign in again.");
+  return { userId, user };
+}
+
+/** List all requests with requester info (limited for performance). */
 export const list = query({
   args: {},
   handler: async (ctx) => {
@@ -10,7 +19,7 @@ export const list = query({
       .query("requests")
       .withIndex("by_created")
       .order("desc")
-      .collect();
+      .take(200);
 
     return Promise.all(
       requests.map(async (r) => {
@@ -42,7 +51,7 @@ export const listByUser = query({
       .query("requests")
       .withIndex("by_requester", (q) => q.eq("requesterId", args.userId))
       .order("desc")
-      .collect();
+      .take(100);
 
     return Promise.all(
       requests.map(async (r) => {
@@ -77,9 +86,15 @@ export const create = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const { userId } = await requireUser(ctx);
     if (args.items.length === 0) throw new Error("Request must have at least one item");
+
+    // Validate that all products exist
+    for (const item of args.items) {
+      const product = await ctx.db.get(item.productId);
+      if (!product) throw new Error(`Product not found: ${item.productId}`);
+      if (item.quantityRequested <= 0) throw new Error("Quantity must be greater than zero");
+    }
 
     const now = Date.now();
     const requestId = await ctx.db.insert("requests", {
@@ -105,7 +120,7 @@ export const create = mutation({
       action: "create",
       entity: "requests",
       entityId: requestId,
-      details: `Solicitação criada com ${args.items.length} item(ns)`,
+      details: `Request created with ${args.items.length} item(s)`,
       timestamp: now,
     });
 
@@ -126,8 +141,7 @@ export const approve = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const { userId } = await requireUser(ctx);
 
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Request not found");
@@ -174,7 +188,7 @@ export const approve = mutation({
       action: "approve",
       entity: "requests",
       entityId: args.requestId,
-      details: `Solicitação aprovada`,
+      details: `Request approved`,
       timestamp: now,
     });
 
@@ -189,8 +203,7 @@ export const reject = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const { userId } = await requireUser(ctx);
 
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Request not found");
@@ -211,7 +224,7 @@ export const reject = mutation({
       action: "reject",
       entity: "requests",
       entityId: args.requestId,
-      details: `Solicitação rejeitada`,
+      details: `Request rejected`,
       timestamp: now,
     });
 
@@ -225,8 +238,7 @@ export const deliver = mutation({
     requestId: v.id("requests"),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const { userId } = await requireUser(ctx);
 
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Request not found");
@@ -247,7 +259,6 @@ export const deliver = mutation({
           .first();
 
         if (stock) {
-          // Reduce physical and reserved
           const newReserved = Math.max(0, stock.reservedQuantity - item.quantityApproved);
           const newPhysical = Math.max(0, stock.physicalQuantity - item.quantityApproved);
 
@@ -256,7 +267,6 @@ export const deliver = mutation({
             reservedQuantity: newReserved,
           });
 
-          // Create exit movement
           await ctx.db.insert("stockMovements", {
             productId: item.productId,
             type: "exit",
@@ -267,7 +277,7 @@ export const deliver = mutation({
             newReserved,
             userId,
             requestId: args.requestId,
-            observation: `Entrega da solicitação`,
+            observation: `Delivery from request`,
             timestamp: now,
           });
         }
@@ -288,7 +298,7 @@ export const deliver = mutation({
       action: "deliver",
       entity: "requests",
       entityId: args.requestId,
-      details: `Solicitação entregue`,
+      details: `Request delivered`,
       timestamp: now,
     });
 
@@ -302,8 +312,7 @@ export const cancel = mutation({
     requestId: v.id("requests"),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    const { userId } = await requireUser(ctx);
 
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Request not found");
@@ -322,7 +331,7 @@ export const cancel = mutation({
       action: "reject",
       entity: "requests",
       entityId: args.requestId,
-      details: `Solicitação cancelada pelo solicitante`,
+      details: `Request cancelled by requester`,
       timestamp: now,
     });
 

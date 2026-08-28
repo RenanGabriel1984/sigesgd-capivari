@@ -73,18 +73,30 @@ export default function Requests() {
 
   const handleCreate = async () => {
     const validItems = items.filter((i) => i.productId && i.quantity > 0);
-    if (validItems.length === 0) { toast.error("Adicione pelo menos um item"); return; }
+    if (validItems.length === 0) { toast.error("Please add at least one item with a valid product and quantity > 0"); return; }
+    // Validate quantity does not exceed available stock
+    for (const item of validItems) {
+      const product = products?.find((p) => p._id === item.productId);
+      if (product) {
+        const available = (product.stock?.physicalQuantity ?? 0) - (product.stock?.reservedQuantity ?? 0);
+        if (item.quantity > available) {
+          toast.error(`Insufficient stock for "${product.name}". Available: ${available}`);
+          return;
+        }
+      }
+    }
     try {
       await createRequest({
         observation: observation || undefined,
         items: validItems.map((i) => ({ productId: i.productId as any, quantityRequested: i.quantity })),
       });
-      toast.success("Solicitação criada");
+      toast.success("Request created");
       setCreateDialog(false);
       setItems([{ productId: "", quantity: 1 }]);
       setObservation("");
     } catch (e: any) {
-      toast.error(e.message ?? "Erro ao criar solicitação");
+      console.error("Create request error:", e);
+      toast.error(e.message ?? "Failed to create request");
     }
   };
 
@@ -99,38 +111,42 @@ export default function Requests() {
         })),
         observation: approveObservation || undefined,
       });
-      toast.success("Solicitação aprovada");
+      toast.success("Request approved");
       setApproveDialog(null);
       setApproveObservation("");
     } catch (e: any) {
-      toast.error(e.message ?? "Erro ao aprovar");
+      console.error("Approve request error:", e);
+      toast.error(e.message ?? "Failed to approve request");
     }
   };
 
   const handleReject = async (requestId: string) => {
     try {
       await rejectRequest({ requestId: requestId as any });
-      toast.success("Solicitação rejeitada");
+      toast.success("Request rejected");
     } catch (e: any) {
-      toast.error(e.message ?? "Erro ao rejeitar");
+      console.error("Reject request error:", e);
+      toast.error(e.message ?? "Failed to reject request");
     }
   };
 
   const handleDeliver = async (requestId: string) => {
     try {
       await deliverRequest({ requestId: requestId as any });
-      toast.success("Entrega registrada");
+      toast.success("Delivery registered");
     } catch (e: any) {
-      toast.error(e.message ?? "Erro ao entregar");
+      console.error("Deliver request error:", e);
+      toast.error(e.message ?? "Failed to register delivery");
     }
   };
 
   const handleCancel = async (requestId: string) => {
     try {
       await cancelRequest({ requestId: requestId as any });
-      toast.success("Solicitação cancelada");
+      toast.success("Request cancelled");
     } catch (e: any) {
-      toast.error(e.message ?? "Erro ao cancelar");
+      console.error("Cancel request error:", e);
+      toast.error(e.message ?? "Failed to cancel request");
     }
   };
 
