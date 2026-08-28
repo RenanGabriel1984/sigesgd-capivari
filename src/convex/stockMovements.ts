@@ -64,6 +64,11 @@ export const createEntry = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireUser(ctx);
     if (args.quantity <= 0) throw new Error("Quantity must be positive");
+    if (!isFinite(args.quantity)) throw new Error("Invalid quantity");
+
+    // Validate product exists
+    const product = await ctx.db.get(args.productId);
+    if (!product) throw new Error("Product not found");
 
     const stock = await ctx.db
       .query("stock")
@@ -112,7 +117,12 @@ export const createEntry = mutation({
   },
 });
 
-/** Create a stock exit (saída). */
+/**
+ * Create a stock exit (saída).
+ *
+ * STRICT validation — NO Math.max(0, ...) masking.
+ * If stock is insufficient, operation is rejected entirely.
+ */
 export const createExit = mutation({
   args: {
     productId: v.id("products"),
@@ -123,6 +133,7 @@ export const createExit = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireUser(ctx);
     if (args.quantity <= 0) throw new Error("Quantity must be positive");
+    if (!isFinite(args.quantity)) throw new Error("Invalid quantity");
 
     const stock = await ctx.db
       .query("stock")
@@ -133,7 +144,9 @@ export const createExit = mutation({
 
     const available = stock.physicalQuantity - stock.reservedQuantity;
     if (available < args.quantity) {
-      throw new Error(`Insufficient stock. Available: ${available}, requested: ${args.quantity}`);
+      throw new Error(
+        `Estoque insuficiente. Disponível: ${available}. Solicitado: ${args.quantity}.`
+      );
     }
 
     const prevPhysical = stock.physicalQuantity;
@@ -188,7 +201,9 @@ export const reserveStock = mutation({
 
     const available = stock.physicalQuantity - stock.reservedQuantity;
     if (available < args.quantity) {
-      throw new Error(`Insufficient stock. Available: ${available}, requested: ${args.quantity}`);
+      throw new Error(
+        `Estoque insuficiente. Disponível: ${available}. Solicitado: ${args.quantity}.`
+      );
     }
 
     await ctx.db.patch(stock._id, {
@@ -209,6 +224,7 @@ export const createAdjustment = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireUser(ctx);
     if (args.newQuantity < 0) throw new Error("Quantity cannot be negative");
+    if (!isFinite(args.newQuantity)) throw new Error("Invalid quantity");
 
     const stock = await ctx.db
       .query("stock")
