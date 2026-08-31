@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, ClipboardList, Check, X, Truck, FileText } from "lucide-react";
+import { Plus, ClipboardList, Check, X, Truck, FileText, Printer, Eraser } from "lucide-react";
 import {
   REQUEST_STATUS_LABELS,
   REQUEST_STATUS_COLORS,
@@ -46,6 +46,122 @@ const REASON_OPTIONS = [
   "Manutenção de infraestrutura",
   "Outro",
 ];
+
+// ─── Native Canvas Signature Component ──────────────────────────────────────
+interface SignatureCanvasProps {
+  onSave: (dataUrl: string) => void;
+  width?: number;
+  height?: number;
+}
+
+function SignatureCanvas({ onSave, width = 350, height = 150 }: SignatureCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawingRef = useRef(false);
+  const hasDrawnRef = useRef(false);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    // White background
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, width, height);
+  }, [width, height]);
+
+  const getPos = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    if ("touches" in e) {
+      const touch = e.touches[0];
+      return { x: (touch.clientX - rect.left) * scaleX, y: (touch.clientY - rect.top) * scaleY };
+    }
+    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
+  }, []);
+
+  const startDraw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    drawingRef.current = true;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const { x, y } = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  }, [getPos]);
+
+  const draw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    if (!drawingRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const { x, y } = getPos(e);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    hasDrawnRef.current = true;
+  }, [getPos]);
+
+  const stopDraw = useCallback(() => {
+    drawingRef.current = false;
+  }, []);
+
+  const clear = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, width, height);
+    hasDrawnRef.current = false;
+  }, [width, height]);
+
+  const handleSave = useCallback(() => {
+    if (!hasDrawnRef.current) {
+      toast.error("Por favor, assine antes de confirmar");
+      return;
+    }
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    onSave(canvas.toDataURL("image/png"));
+  }, [onSave]);
+
+  return (
+    <div className="space-y-2">
+      <canvas
+        ref={canvasRef}
+        width={width}
+        height={height}
+        className="border border-border rounded-md bg-white cursor-crosshair w-full touch-none"
+        style={{ maxWidth: width }}
+        onMouseDown={startDraw}
+        onMouseMove={draw}
+        onMouseUp={stopDraw}
+        onMouseLeave={stopDraw}
+        onTouchStart={startDraw}
+        onTouchMove={draw}
+        onTouchEnd={stopDraw}
+      />
+      <div className="flex gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={clear} className="gap-1 text-muted-foreground">
+          <Eraser className="h-3.5 w-3.5" /> Limpar Assinatura
+        </Button>
+        <Button type="button" size="sm" onClick={handleSave} className="gap-1">
+          <Check className="h-3.5 w-3.5" /> Confirmar Assinatura
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export default function Requests() {
   const { user } = useAuth();
@@ -83,6 +199,8 @@ export default function Requests() {
   const [deliverItems, setDeliverItems] = useState<
     Array<{ itemId: string; quantity: number; maxQuantity: number; serialNumbers: string[] }>
   >([]);
+  const [deliverySignature, setDeliverySignature] = useState<string | null>(null);
+  const [signatureStep, setSignatureStep] = useState<"items" | "signature">("items");
 
   // ─── Delivery term dialog ───
   const [termDialog, setTermDialog] = useState<any>(null);
@@ -224,6 +342,8 @@ export default function Requests() {
     }
     setDeliverItems(dItems);
     setDeliverDialog(r);
+    setDeliverySignature(null);
+    setSignatureStep("items");
   };
 
   const updateDeliverItem = (idx: number, field: string, value: any) => {
@@ -270,10 +390,13 @@ export default function Requests() {
           quantityDelivered: di.quantity,
           serialNumbers: di.serialNumbers.length > 0 ? di.serialNumbers : undefined,
         })),
+        signature: deliverySignature ?? undefined,
       });
       toast.success("Entrega registrada com sucesso");
       setDeliverDialog(null);
       setDeliverItems([]);
+      setDeliverySignature(null);
+      setSignatureStep("items");
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao registrar entrega");
     }
@@ -327,14 +450,26 @@ export default function Requests() {
             ))}
           </div>
         </div>
-        <div className="border-t pt-4 flex justify-between text-xs text-muted-foreground">
-          <div className="text-center w-1/2">
-            <div className="border-t border-foreground/30 mt-12 pt-1">Entregue por</div>
+        {r.deliveredSignature ? (
+          <div className="border-t pt-3 space-y-2">
+            <p className="font-medium text-xs">Assinatura Digital do Recebedor:</p>
+            <div className="border rounded bg-white p-2 inline-block">
+              <img src={r.deliveredSignature} alt="Assinatura digital" className="max-w-[300px] h-auto" />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Documento assinado digitalmente em {r.deliveredAt ? new Date(r.deliveredAt).toLocaleString("pt-BR") : today} por {r.requester?.name ?? "Recebedor"}
+            </p>
           </div>
-          <div className="text-center w-1/2">
-            <div className="border-t border-foreground/30 mt-12 pt-1">Recebido por</div>
+        ) : (
+          <div className="border-t pt-4 flex justify-between text-xs text-muted-foreground">
+            <div className="text-center w-1/2">
+              <div className="border-t border-foreground/30 mt-12 pt-1">Entregue por</div>
+            </div>
+            <div className="text-center w-1/2">
+              <div className="border-t border-foreground/30 mt-12 pt-1">Recebido por</div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   };
@@ -624,65 +759,116 @@ export default function Requests() {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Entregar Material</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
-            <p className="text-sm text-muted-foreground">
-              Informe a quantidade entregue e, quando aplicável, os números de patrimônio/série de cada unidade.
-            </p>
-            {deliverItems.map((di, idx) => {
-              const reqItem = deliverDialog?.items?.find((i: any) => i._id === di.itemId);
-              const product = reqItem?.product;
-              return (
-                <div key={di.itemId} className="border rounded px-3 py-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-sm">{product?.name ?? "Item"}</span>
-                    <span className="text-xs text-muted-foreground">Aprovado: {di.maxQuantity}</span>
-                  </div>
-                  <div>
-                    <Label className="text-xs">Quantidade a entregar</Label>
-                    <Input
-                      type="number" min="1" max={di.maxQuantity}
-                      value={di.quantity}
-                      onChange={(e) => {
-                        const v = parseInt(e.target.value, 10);
-                        if (!isNaN(v) && v >= 1 && v <= di.maxQuantity) updateDeliverItem(idx, "quantity", v);
-                      }}
-                      className="mt-1"
-                    />
-                  </div>
-                  {product?.hasSerial && di.quantity > 0 && (
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Números de Patrimônio/Série ({di.quantity} unidade{di.quantity > 1 ? "s" : ""})</Label>
-                      {Array.from({ length: di.quantity }).map((_, sIdx) => (
+            {signatureStep === "items" ? (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Informe a quantidade entregue e, quando aplicável, os números de patrimônio/série de cada unidade.
+                </p>
+                {deliverItems.map((di, idx) => {
+                  const reqItem = deliverDialog?.items?.find((i: any) => i._id === di.itemId);
+                  const product = reqItem?.product;
+                  return (
+                    <div key={di.itemId} className="border rounded px-3 py-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-sm">{product?.name ?? "Item"}</span>
+                        <span className="text-xs text-muted-foreground">Aprovado: {di.maxQuantity}</span>
+                      </div>
+                      <div>
+                        <Label className="text-xs">Quantidade a entregar</Label>
                         <Input
-                          key={sIdx}
-                          placeholder={`Patrimônio/Série #${sIdx + 1}`}
-                          value={di.serialNumbers[sIdx] ?? ""}
-                          onChange={(e) => updateSerialNumber(idx, sIdx, e.target.value)}
+                          type="number" min="1" max={di.maxQuantity}
+                          value={di.quantity}
+                          onChange={(e) => {
+                            const v = parseInt(e.target.value, 10);
+                            if (!isNaN(v) && v >= 1 && v <= di.maxQuantity) updateDeliverItem(idx, "quantity", v);
+                          }}
                           className="mt-1"
                         />
-                      ))}
+                      </div>
+                      {product?.hasSerial && di.quantity > 0 && (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Números de Patrimônio/Série ({di.quantity} unidade{di.quantity > 1 ? "s" : ""})</Label>
+                          {Array.from({ length: di.quantity }).map((_, sIdx) => (
+                            <Input
+                              key={sIdx}
+                              placeholder={`Patrimônio/Série #${sIdx + 1}`}
+                              value={di.serialNumbers[sIdx] ?? ""}
+                              onChange={(e) => updateSerialNumber(idx, sIdx, e.target.value)}
+                              className="mt-1"
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                  );
+                })}
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  O recebedor deve assinar abaixo para confirmar o recebimento do material.
+                </p>
+                <SignatureCanvas onSave={setDeliverySignature} />
+                {deliverySignature && (
+                  <div className="border rounded bg-emerald-50 border-emerald-200 px-3 py-2">
+                    <p className="text-xs text-emerald-700 font-medium">✓ Assinatura capturada com sucesso</p>
+                  </div>
+                )}
+              </>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeliverDialog(null)}>Cancelar</Button>
-            <Button onClick={handleDeliver}>Confirmar Entrega</Button>
+            {signatureStep === "items" ? (
+              <Button onClick={() => setSignatureStep("signature")}>Próximo: Assinatura</Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setSignatureStep("items")}>Voltar</Button>
+                <Button onClick={handleDeliver} disabled={!deliverySignature}>Confirmar Entrega</Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* ═══ Termo de Entrega ═══ */}
       <Dialog open={!!termDialog} onOpenChange={() => setTermDialog(null)}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Termo de Entrega</DialogTitle></DialogHeader>
-          {renderDeliveryTerm(termDialog)}
-          <DialogFooter>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto print:shadow-none print:border-none print:max-h-none print:w-full">
+          <DialogHeader className="print-hide"><DialogTitle>Termo de Entrega</DialogTitle></DialogHeader>
+          <div id="delivery-term-content">
+            {renderDeliveryTerm(termDialog)}
+          </div>
+          <DialogFooter className="print-hide">
+            <Button variant="outline" onClick={() => window.print()} className="gap-1">
+              <Printer className="h-4 w-4" /> Imprimir Termo
+            </Button>
             <Button variant="outline" onClick={() => setTermDialog(null)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Print styles */}
+      <style>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          #delivery-term-content,
+          #delivery-term-content * {
+            visibility: visible;
+          }
+          #delivery-term-content {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            padding: 20px;
+          }
+          .print-hide {
+            display: none !important;
+          }
+        }
+      `}</style>
     </AppShell>
   );
 }

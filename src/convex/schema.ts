@@ -247,6 +247,9 @@ const schema = defineSchema(
       // Existing
       observation: v.optional(v.string()),
       approvalObservation: v.optional(v.string()),
+      // Digital signature (Base64 image)
+      deliveredSignature: v.optional(v.string()),
+      deliveredAt: v.optional(v.number()),
       createdAt: v.number(),
       updatedAt: v.number(),
     }).index("by_requester", ["requesterId"])

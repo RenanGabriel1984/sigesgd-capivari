@@ -247,6 +247,7 @@ export const deliver = mutation({
       quantityDelivered: v.number(),
       serialNumbers: v.optional(v.array(v.string())),
     }))),
+    signature: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireUser(ctx);
@@ -319,7 +320,7 @@ export const deliver = mutation({
       });
     }
 
-    await ctx.db.patch(args.requestId, { status: "delivered", updatedAt: now });
+    await ctx.db.patch(args.requestId, { status: "delivered", updatedAt: now, deliveredAt: now, deliveredSignature: args.signature || undefined });
     await ctx.db.insert("auditLogs", { userId, action: "deliver", entity: "requests", entityId: args.requestId, details: `Solicitação entregue (${inputItems.length} item(ns))`, timestamp: now });
     return args.requestId;
   },
