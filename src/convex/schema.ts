@@ -246,6 +246,7 @@ const schema = defineSchema(
       patrimony: v.optional(v.string()),
       // Existing
       observation: v.optional(v.string()),
+      approvalObservation: v.optional(v.string()),
       createdAt: v.number(),
       updatedAt: v.number(),
     }).index("by_requester", ["requesterId"])
@@ -261,6 +262,7 @@ const schema = defineSchema(
       quantityRequested: v.number(),
       quantityApproved: v.number(),
       quantityDelivered: v.number(),
+      deliveredSerialNumbers: v.optional(v.array(v.string())),
     }).index("by_request", ["requestId"])
       .index("by_product", ["productId"]),
 

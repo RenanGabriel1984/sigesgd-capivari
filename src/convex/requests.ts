@@ -68,6 +68,15 @@ export const listByUser = query({
   },
 });
 
+export const get = query({
+  args: { requestId: v.id("requests") },
+  handler: async (ctx, args) => {
+    const request = await ctx.db.get(args.requestId);
+    if (!request) return null;
+    return enrichRequest(ctx, request);
+  },
+});
+
 // ─── Mutations ───────────────────────────────────────────────────────────────
 
 export const create = mutation({
@@ -205,7 +214,7 @@ export const approve = mutation({
       const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId)).first();
       if (stock) await ctx.db.patch(stock._id, { reservedQuantity: stock.reservedQuantity + item.quantityApproved });
     }
-    await ctx.db.patch(args.requestId, { status: "approved", approverId: userId, updatedAt: now, observation: args.observation ?? request.observation });
+    await ctx.db.patch(args.requestId, { status: "approved", approverId: userId, updatedAt: now, approvalObservation: args.observation ?? undefined });
     await ctx.db.insert("auditLogs", { userId, action: "approve", entity: "requests", entityId: args.requestId, details: "Solicitação aprovada", timestamp: now });
     return args.requestId;
   },
@@ -221,58 +230,97 @@ export const reject = mutation({
     if (!request) throw new Error("Solicitação não encontrada");
     if (request.requesterId === userId) throw new Error("Não é possível rejeitar sua própria solicitação");
     if (request.status !== "pending") throw new Error("Solicitação não está pendente");
+    const reason = (args.observation ?? "").trim();
+    if (!reason) throw new Error("O motivo da rejeição é obrigatório");
     const now = Date.now();
-    await ctx.db.patch(args.requestId, { status: "rejected", approverId: userId, updatedAt: now, observation: args.observation });
-    await ctx.db.insert("auditLogs", { userId, action: "reject", entity: "requests", entityId: args.requestId, details: "Solicitação rejeitada", timestamp: now });
+    await ctx.db.patch(args.requestId, { status: "rejected", approverId: userId, updatedAt: now, approvalObservation: reason });
+    await ctx.db.insert("auditLogs", { userId, action: "reject", entity: "requests", entityId: args.requestId, details: `Solicitação rejeitada. Motivo: ${reason}`, timestamp: now });
     return args.requestId;
   },
 });
 
 export const deliver = mutation({
-  args: { requestId: v.id("requests") },
+  args: {
+    requestId: v.id("requests"),
+    items: v.optional(v.array(v.object({
+      itemId: v.id("requestItems"),
+      quantityDelivered: v.number(),
+      serialNumbers: v.optional(v.array(v.string())),
+    }))),
+  },
   handler: async (ctx, args) => {
     const { userId } = await requireUser(ctx);
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Solicitação não encontrada");
     if (request.status !== "approved") throw new Error("Solicitação deve estar aprovada");
-    const items = await ctx.db.query("requestItems").withIndex("by_request", (q) => q.eq("requestId", args.requestId)).collect();
-    if (items.length === 0) throw new Error("Solicitação não possui itens");
+    const inputItems = args.items ?? [];
+    if (inputItems.length === 0) throw new Error("Informe ao menos um item para entrega");
 
-    const stockUpdates: Array<{ stockId: string; productId: string; quantity: number }> = [];
-    for (const item of items) {
-      if (item.quantityApproved <= 0) continue;
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", item.productId)).first();
-      if (!stock) throw new Error(`Registro de estoque não encontrado para o produto ${item.productId}`);
-      if (stock.physicalQuantity < item.quantityApproved) {
-        throw new Error(`Estoque insuficiente. Disponível: ${stock.physicalQuantity}. Solicitado: ${item.quantityApproved}.`);
+    // Validate each item
+    for (const input of inputItems) {
+      const requestItem = await ctx.db.get(input.itemId);
+      if (!requestItem) throw new Error(`Item da solicitação não encontrado: ${input.itemId}`);
+      if (requestItem.requestId !== args.requestId) throw new Error("Item não pertence a esta solicitação");
+      if (input.quantityDelivered <= 0) throw new Error("Quantidade entregue deve ser maior que zero");
+      if (input.quantityDelivered > requestItem.quantityApproved) {
+        throw new Error(`Quantidade entregue (${input.quantityDelivered}) excede a aprovada (${requestItem.quantityApproved}) para "${(await ctx.db.get(requestItem.productId))?.name ?? "item"}"`);
       }
-      if (stock.reservedQuantity < item.quantityApproved) {
-        throw new Error(`Estoque reservado insuficiente. Reservado: ${stock.reservedQuantity}. Solicitado: ${item.quantityApproved}.`);
+      // Validate serial numbers for serial-tracked products
+      const product = await ctx.db.get(requestItem.productId);
+      if (product?.hasSerial && input.quantityDelivered > 0) {
+        const serials = input.serialNumbers ?? [];
+        if (serials.length !== input.quantityDelivered) {
+          throw new Error(`Para "${product.name}", é necessário informar ${input.quantityDelivered} número(s) de patrimônio/série`);
+        }
+        // Check for empty serials
+        if (serials.some((s) => !s.trim())) {
+          throw new Error(`Todos os números de patrimônio/série devem ser preenchidos para "${product.name}"`);
+        }
       }
-      stockUpdates.push({ stockId: stock._id, productId: item.productId, quantity: item.quantityApproved });
+    }
+
+    // Check stock availability for all items
+    for (const input of inputItems) {
+      if (input.quantityDelivered <= 0) continue;
+      const requestItem = await ctx.db.get(input.itemId);
+      if (!requestItem) continue;
+      const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", requestItem.productId)).first();
+      if (!stock) throw new Error(`Registro de estoque não encontrado para o produto`);
+      if (stock.physicalQuantity < input.quantityDelivered) {
+        throw new Error(`Estoque insuficiente. Disponível: ${stock.physicalQuantity}. Entrega: ${input.quantityDelivered}.`);
+      }
+      if (stock.reservedQuantity < input.quantityDelivered) {
+        throw new Error(`Estoque reservado insuficiente. Reservado: ${stock.reservedQuantity}. Entrega: ${input.quantityDelivered}.`);
+      }
     }
 
     const now = Date.now();
-    for (const update of stockUpdates) {
-      const freshStock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", update.productId as any)).first();
+    // Process deliveries
+    for (const input of inputItems) {
+      if (input.quantityDelivered <= 0) continue;
+      const requestItem = await ctx.db.get(input.itemId);
+      if (!requestItem) continue;
+      const freshStock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", requestItem.productId)).first();
       if (!freshStock) throw new Error("Registro de estoque desapareceu durante a entrega");
-      if (freshStock.physicalQuantity < update.quantity) throw new Error(`Estoque insuficiente (concorrência). Disponível: ${freshStock.physicalQuantity}. Solicitado: ${update.quantity}.`);
-      if (freshStock.reservedQuantity < update.quantity) throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}. Solicitado: ${update.quantity}.`);
-      const newPhysical = freshStock.physicalQuantity - update.quantity;
-      const newReserved = freshStock.reservedQuantity - update.quantity;
+      if (freshStock.physicalQuantity < input.quantityDelivered) throw new Error(`Estoque insuficiente (concorrência). Disponível: ${freshStock.physicalQuantity}.`);
+      if (freshStock.reservedQuantity < input.quantityDelivered) throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}.`);
+      const newPhysical = freshStock.physicalQuantity - input.quantityDelivered;
+      const newReserved = freshStock.reservedQuantity - input.quantityDelivered;
       await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical, reservedQuantity: newReserved });
       await ctx.db.insert("stockMovements", {
-        productId: update.productId as any, type: "exit", quantity: update.quantity,
+        productId: requestItem.productId, type: "exit", quantity: input.quantityDelivered,
         previousPhysical: freshStock.physicalQuantity, newPhysical,
         previousReserved: freshStock.reservedQuantity, newReserved,
         userId, requestId: args.requestId, observation: "Entrega da solicitação", timestamp: now,
       });
+      await ctx.db.patch(input.itemId, {
+        quantityDelivered: input.quantityDelivered,
+        deliveredSerialNumbers: input.serialNumbers?.length ? input.serialNumbers : undefined,
+      });
     }
-    for (const item of items) {
-      if (item.quantityApproved > 0) await ctx.db.patch(item._id, { quantityDelivered: item.quantityApproved });
-    }
+
     await ctx.db.patch(args.requestId, { status: "delivered", updatedAt: now });
-    await ctx.db.insert("auditLogs", { userId, action: "deliver", entity: "requests", entityId: args.requestId, details: `Solicitação entregue (${stockUpdates.length} item(ns))`, timestamp: now });
+    await ctx.db.insert("auditLogs", { userId, action: "deliver", entity: "requests", entityId: args.requestId, details: `Solicitação entregue (${inputItems.length} item(ns))`, timestamp: now });
     return args.requestId;
   },
 });
