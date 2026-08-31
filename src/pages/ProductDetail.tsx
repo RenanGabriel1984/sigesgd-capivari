@@ -23,8 +23,8 @@ export default function ProductDetail() {
       <AppShell>
         <div className="max-w-5xl mx-auto text-center py-20">
           <Package className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-          <h2 className="text-xl font-semibold mb-2">Produto não encontrado</h2>
-          <p className="text-muted-foreground mb-6">O produto que você procura não existe ou foi removido.</p>
+          <h2 className="text-xl font-semibold mb-2">Item não encontrado</h2>
+          <p className="text-muted-foreground mb-6">O item que você procura não existe ou foi removido.</p>
           <Button asChild><Link to="/products">Voltar ao Catálogo</Link></Button>
         </div>
       </AppShell>

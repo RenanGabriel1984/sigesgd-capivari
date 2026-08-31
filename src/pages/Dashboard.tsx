@@ -66,7 +66,7 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <p className="text-2xl font-bold">{totalProducts}</p>
-                    <p className="text-xs text-muted-foreground">Produtos</p>
+                    <p className="text-xs text-muted-foreground">Itens do Estoque</p>
                   </div>
                 </div>
               </CardContent>

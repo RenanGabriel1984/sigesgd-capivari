@@ -3,6 +3,22 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword, verifyPassword } from "./auth/passwords";
 
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+
+async function requireUser(ctx: any) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error("Não autenticado");
+  const user = await ctx.db.get(userId);
+  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
+  return { userId, user };
+}
+
+async function requireAdmin(ctx: any) {
+  const { userId, user } = await requireUser(ctx);
+  if (user.role !== "admin") throw new Error("Apenas administradores podem executar esta operação");
+  return { userId, user };
+}
+
 /** Create password for a user (admin only). */
 export const createPassword = mutation({
   args: {
@@ -11,8 +27,7 @@ export const createPassword = mutation({
     requiresReset: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const adminId = await getAuthUserId(ctx);
-    if (!adminId) throw new Error("Não autenticado");
+    const { userId: adminId } = await requireAdmin(ctx);
 
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
@@ -38,6 +53,11 @@ export const createPassword = mutation({
       requiresReset: args.requiresReset ?? false,
     });
 
+    // Set requiresPasswordReset flag on user
+    if (args.requiresReset) {
+      await ctx.db.patch(args.userId, { requiresPasswordReset: true });
+    }
+
     await ctx.db.insert("auditLogs", {
       userId: adminId,
       action: "create",
@@ -58,11 +78,14 @@ export const changePassword = mutation({
     newPassword: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Não autenticado");
+    const { userId } = await requireUser(ctx);
 
     if (args.newPassword.length < 6) {
       throw new Error("A nova senha deve ter pelo menos 6 caracteres");
+    }
+
+    if (args.currentPassword === args.newPassword) {
+      throw new Error("A nova senha deve ser diferente da atual");
     }
 
     const passwordRecord = await ctx.db
@@ -88,9 +111,12 @@ export const changePassword = mutation({
       requiresReset: false,
     });
 
+    // Clear requiresPasswordReset flag on user
+    await ctx.db.patch(userId, { requiresPasswordReset: false });
+
     await ctx.db.insert("auditLogs", {
       userId,
-      action: "update",
+      action: "password_change",
       entity: "passwords",
       entityId: passwordRecord._id,
       details: "Senha alterada",
@@ -108,13 +134,7 @@ export const adminResetPassword = mutation({
     newPassword: v.string(),
   },
   handler: async (ctx, args) => {
-    const adminId = await getAuthUserId(ctx);
-    if (!adminId) throw new Error("Não autenticado");
-
-    const admin = await ctx.db.get(adminId);
-    if (!admin || admin.role !== "admin") {
-      throw new Error("Apenas administradores podem redefinir senhas");
-    }
+    const { userId: adminId } = await requireAdmin(ctx);
 
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
@@ -145,9 +165,12 @@ export const adminResetPassword = mutation({
       });
     }
 
+    // Set requiresPasswordReset flag on user
+    await ctx.db.patch(args.userId, { requiresPasswordReset: true });
+
     await ctx.db.insert("auditLogs", {
       userId: adminId,
-      action: "update",
+      action: "password_reset",
       entity: "passwords",
       entityId: args.userId,
       details: `Senha redefinida pelo administrador para ${user.name ?? user.email}`,
@@ -158,7 +181,7 @@ export const adminResetPassword = mutation({
   },
 });
 
-/** Verify email and password (used by HTTP login endpoint). */
+/** Verify email and password (used by auth provider). */
 export const verifyCredentials = query({
   args: {
     email: v.string(),

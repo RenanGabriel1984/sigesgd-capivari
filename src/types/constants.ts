@@ -70,7 +70,7 @@ export const REQUEST_STATUS_COLORS: Record<RequestStatusType, string> = {
 };
 
 // ─── Audit Actions ───────────────────────────────────────────────────────────
-export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "move_stock" | "login" | "logout" | "deliver";
+export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset";
 
 export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   create: "Criação",
@@ -79,16 +79,37 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   deactivate: "Desativação",
   approve: "Aprovação",
   reject: "Rejeição",
+  cancel: "Cancelamento",
   move_stock: "Movimentação",
   login: "Login",
   logout: "Logout",
   deliver: "Entrega",
+  password_change: "Alteração de Senha",
+  password_reset: "Redefinição de Senha",
 };
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
 export const UNITS_OF_MEASURE = [
-  "un", "kg", "m", "m²", "m³", "L", "ml", "cx", "pct", "par", "dz", "rolo",
+  "un", "kit", "metro", "caixa", "pacote", "rolo", "litro", "kg", "m2", "m3",
+  "ml", "par", "dz", "outro",
 ] as const;
+
+export const UNIT_LABELS: Record<string, string> = {
+  un: "Unidade",
+  kit: "Kit",
+  metro: "Metro",
+  caixa: "Caixa",
+  pacote: "Pacote",
+  rolo: "Rolo",
+  litro: "Litro",
+  kg: "Quilograma",
+  m2: "Metro Quadrado",
+  m3: "Metro Cúbico",
+  ml: "Mililitro",
+  par: "Par",
+  dz: "Dúzia",
+  outro: "Outro",
+};
 
 // ─── Permissions by Role ─────────────────────────────────────────────────────
 export const PERMISSIONS = {

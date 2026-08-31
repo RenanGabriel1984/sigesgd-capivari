@@ -80,10 +80,13 @@ export const AUDIT_ACTIONS = {
   DEACTIVATE: "deactivate",
   APPROVE: "approve",
   REJECT: "reject",
+  CANCEL: "cancel",
   MOVE_STOCK: "move_stock",
   LOGIN: "login",
   LOGOUT: "logout",
   DELIVER: "deliver",
+  PASSWORD_CHANGE: "password_change",
+  PASSWORD_RESET: "password_reset",
 } as const;
 
 export const auditActionValidator = v.union(
@@ -93,16 +96,25 @@ export const auditActionValidator = v.union(
   v.literal(AUDIT_ACTIONS.DEACTIVATE),
   v.literal(AUDIT_ACTIONS.APPROVE),
   v.literal(AUDIT_ACTIONS.REJECT),
+  v.literal(AUDIT_ACTIONS.CANCEL),
   v.literal(AUDIT_ACTIONS.MOVE_STOCK),
   v.literal(AUDIT_ACTIONS.LOGIN),
   v.literal(AUDIT_ACTIONS.LOGOUT),
   v.literal(AUDIT_ACTIONS.DELIVER),
+  v.literal(AUDIT_ACTIONS.PASSWORD_CHANGE),
+  v.literal(AUDIT_ACTIONS.PASSWORD_RESET),
 );
+
+// ─── Units of Measure ────────────────────────────────────────────────────────
+export const UNIT_OF_MEASURE_VALUES = [
+  "un", "kit", "metro", "caixa", "pacote", "rolo", "litro", "kg", "m2", "m3",
+  "ml", "par", "dz", "outro",
+] as const;
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
 const schema = defineSchema(
   {
-    // ── Auth tables (do not modify) ──
+    // ── Auth tables (managed by @convex-dev/auth) ──
     ...authTables,
 
     // ── Users ──
@@ -116,11 +128,12 @@ const schema = defineSchema(
       active: v.optional(v.boolean()),
       organizationId: v.optional(v.id("organizations")),
       lastLoginAt: v.optional(v.number()),
+      requiresPasswordReset: v.optional(v.boolean()),
     }).index("email", ["email"])
       .index("by_role", ["role"])
       .index("by_active", ["active"]),
 
-    // ── Passwords (email + password auth) ──
+    // ── Passwords (custom email + password auth) ──
     passwords: defineTable({
       userId: v.id("users"),
       passwordHash: v.string(),
@@ -148,7 +161,7 @@ const schema = defineSchema(
       active: v.boolean(),
     }).index("by_active", ["active"]),
 
-    // ── Products ──
+    // ── Products (Itens do Estoque) ──
     products: defineTable({
       name: v.string(),
       description: v.optional(v.string()),
@@ -157,15 +170,20 @@ const schema = defineSchema(
       internalCode: v.optional(v.string()),
       manufacturer: v.optional(v.string()),
       model: v.optional(v.string()),
+      brand: v.optional(v.string()),
+      specification: v.optional(v.string()),
       active: v.boolean(),
       minimumStock: v.number(),
       idealStock: v.number(),
       maximumStock: v.number(),
       observation: v.optional(v.string()),
       photo: v.optional(v.string()),
+      // Prepared for future lot/serial tracking
+      hasSerial: v.optional(v.boolean()),
     }).index("by_category", ["categoryId"])
       .index("by_active", ["active"])
-      .index("by_code", ["internalCode"]),
+      .index("by_code", ["internalCode"])
+      .index("by_name", ["name"]),
 
     // ── Stock (per product) ──
     stock: defineTable({
@@ -214,16 +232,16 @@ const schema = defineSchema(
       requesterId: v.id("users"),
       status: requestStatusValidator,
       approverId: v.optional(v.id("users")),
-      // ── NEW: Destination hierarchy ──
+      // Destination hierarchy
       secretariaId: v.id("organizations"),
       departamentoId: v.optional(v.id("organizations")),
       unidadeId: v.optional(v.id("organizations")),
-      // ── NEW: Reason and O.S. ──
+      // Reason and O.S.
       reason: v.string(),
       osNumber: v.optional(v.string()),
-      // ── NEW: Equipment patrimony (optional, prepared for future) ──
+      // Equipment patrimony (optional, prepared for future)
       patrimony: v.optional(v.string()),
-      // ── Existing ──
+      // Existing
       observation: v.optional(v.string()),
       createdAt: v.number(),
       updatedAt: v.number(),

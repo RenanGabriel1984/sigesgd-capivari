@@ -287,7 +287,7 @@ export const cancel = mutation({
     if (request.status !== "pending") throw new Error("Só é possível cancelar solicitações pendentes");
     const now = Date.now();
     await ctx.db.patch(args.requestId, { status: "cancelled", updatedAt: now });
-    await ctx.db.insert("auditLogs", { userId, action: "reject", entity: "requests", entityId: args.requestId, details: "Solicitação cancelada pelo solicitante", timestamp: now });
+    await ctx.db.insert("auditLogs", { userId, action: "cancel", entity: "requests", entityId: args.requestId, details: "Solicitação cancelada pelo solicitante", timestamp: now });
     return args.requestId;
   },
 });

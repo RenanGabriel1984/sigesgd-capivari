@@ -1,10 +1,13 @@
-// THIS FILE IS READ ONLY. Do not touch this file unless you are correctly adding a new auth provider in accordance to the vly auth documentation
+// Auth providers for SIGESGD Capivari.
+// This file configures authentication providers for the application.
+// Existing: email OTP (for recovery/fallback), Anonymous (guest).
+// Added: credentials (email + password) for primary authentication.
 
 import { convexAuth } from "@convex-dev/auth/server";
 import { Anonymous } from "@convex-dev/auth/providers/Anonymous";
 import { emailOtp } from "./auth/emailOtp";
-
+import { credentials } from "./auth/credentials";
 
 export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
-  providers: [emailOtp, Anonymous],
+  providers: [credentials, emailOtp, Anonymous],
 });

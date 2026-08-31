@@ -3,28 +3,17 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Link } from "react-router";
 import { AppShell } from "@/components/AppShell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Pencil, Search, Package, ArrowUpRight } from "lucide-react";
-import { UNITS_OF_MEASURE } from "@/types/constants";
+import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
 import { toast } from "sonner";
 
 interface ProductForm {
@@ -35,24 +24,19 @@ interface ProductForm {
   internalCode: string;
   manufacturer: string;
   model: string;
+  brand: string;
+  specification: string;
   minimumStock: number;
   idealStock: number;
   maximumStock: number;
   observation: string;
+  hasSerial: boolean;
 }
 
 const emptyForm: ProductForm = {
-  name: "",
-  description: "",
-  categoryId: "",
-  unitOfMeasure: "un",
-  internalCode: "",
-  manufacturer: "",
-  model: "",
-  minimumStock: 0,
-  idealStock: 0,
-  maximumStock: 0,
-  observation: "",
+  name: "", description: "", categoryId: "", unitOfMeasure: "un",
+  internalCode: "", manufacturer: "", model: "", brand: "", specification: "",
+  minimumStock: 0, idealStock: 0, maximumStock: 0, observation: "", hasSerial: false,
 };
 
 export default function Products() {
@@ -67,28 +51,31 @@ export default function Products() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
 
-  const filtered = products?.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.internalCode?.toLowerCase().includes(search.toLowerCase()) ||
-      p.manufacturer?.toLowerCase().includes(search.toLowerCase());
+  const filtered = products?.filter((p: any) => {
+    const q = search.toLowerCase();
+    const matchesSearch = !q ||
+      p.name.toLowerCase().includes(q) ||
+      p.internalCode?.toLowerCase().includes(q) ||
+      p.manufacturer?.toLowerCase().includes(q) ||
+      p.model?.toLowerCase().includes(q) ||
+      p.brand?.toLowerCase().includes(q) ||
+      p.description?.toLowerCase().includes(q);
     const matchesCategory = categoryFilter === "all" || p.categoryId === categoryFilter;
     return matchesSearch && matchesCategory;
   });
 
   const openCreate = () => { setForm(emptyForm); setEditingId(null); setDialogOpen(true); };
   const openEdit = (e: React.MouseEvent, p: any) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     setForm({
       name: p.name, description: p.description ?? "", categoryId: p.categoryId,
       unitOfMeasure: p.unitOfMeasure, internalCode: p.internalCode ?? "",
       manufacturer: p.manufacturer ?? "", model: p.model ?? "",
+      brand: p.brand ?? "", specification: p.specification ?? "",
       minimumStock: p.minimumStock, idealStock: p.idealStock, maximumStock: p.maximumStock,
-      observation: p.observation ?? "",
+      observation: p.observation ?? "", hasSerial: p.hasSerial ?? false,
     });
-    setEditingId(p._id);
-    setDialogOpen(true);
+    setEditingId(p._id); setDialogOpen(true);
   };
 
   const handleSave = async () => {
@@ -98,19 +85,20 @@ export default function Products() {
         name: form.name, description: form.description || undefined,
         categoryId: form.categoryId as any, unitOfMeasure: form.unitOfMeasure,
         internalCode: form.internalCode || undefined, manufacturer: form.manufacturer || undefined,
-        model: form.model || undefined, minimumStock: form.minimumStock,
-        idealStock: form.idealStock, maximumStock: form.maximumStock,
-        observation: form.observation || undefined,
+        model: form.model || undefined, brand: form.brand || undefined,
+        specification: form.specification || undefined,
+        minimumStock: form.minimumStock, idealStock: form.idealStock, maximumStock: form.maximumStock,
+        observation: form.observation || undefined, hasSerial: form.hasSerial || undefined,
       };
       if (editingId) {
         await updateProduct({ id: editingId as any, ...data });
-        toast.success("Produto atualizado");
+        toast.success("Item atualizado");
       } else {
         await createProduct(data);
-        toast.success("Produto criado");
+        toast.success("Item criado");
       }
       setDialogOpen(false);
-    } catch (e: any) { toast.error(e.message ?? "Erro ao salvar produto"); }
+    } catch (e: any) { toast.error(e.message ?? "Erro ao salvar item"); }
   };
 
   return (
@@ -118,24 +106,24 @@ export default function Products() {
       <div className="space-y-6 max-w-7xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Catálogo de Produtos</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Itens do Estoque</h1>
             <p className="text-sm text-muted-foreground">
-              {filtered?.length ?? 0} produto{(filtered?.length ?? 0) !== 1 ? "s" : ""} no catálogo
+              {filtered?.length ?? 0} item{(filtered?.length ?? 0) !== 1 ? "s" : ""} cadastrado{(filtered?.length ?? 0) !== 1 ? "s" : ""}
             </p>
           </div>
-          <Button onClick={openCreate} className="gap-2"><Plus className="h-4 w-4" /> Novo Produto</Button>
+          <Button onClick={openCreate} className="gap-2"><Plus className="h-4 w-4" /> Novo Item</Button>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Buscar por nome, código ou fabricante..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+            <Input placeholder="Buscar por nome, código, marca ou modelo..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
           </div>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
             <SelectTrigger className="w-full sm:w-48"><SelectValue placeholder="Todas as categorias" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Todas as categorias</SelectItem>
-              {categories?.map((c) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}
+              {categories?.map((c: any) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}
             </SelectContent>
           </Select>
         </div>
@@ -143,11 +131,13 @@ export default function Products() {
         {filtered?.length === 0 ? (
           <Card className="border-border/50"><CardContent className="py-16 text-center">
             <Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-            <p className="text-muted-foreground">{search || categoryFilter !== "all" ? "Nenhum produto corresponde aos filtros" : "Nenhum produto cadastrado"}</p>
+            <p className="text-muted-foreground">
+              {search || categoryFilter !== "all" ? "Nenhum item corresponde aos filtros" : "Nenhum item cadastrado"}
+            </p>
           </CardContent></Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered?.map((p) => {
+            {filtered?.map((p: any) => {
               const stock = p.stock?.physicalQuantity ?? 0;
               const reserved = p.stock?.reservedQuantity ?? 0;
               const available = stock - reserved;
@@ -169,10 +159,19 @@ export default function Products() {
                         </div>
                       </div>
                       <h3 className="font-semibold text-sm mb-1 group-hover:text-primary transition-colors">{p.name}</h3>
-                      <p className="text-xs text-muted-foreground mb-3 line-clamp-1">{p.manufacturer} {p.model}</p>
+                      <p className="text-xs text-muted-foreground mb-1">
+                        {p.brand && <span>{p.brand}</span>}
+                        {p.brand && p.model && <span> — </span>}
+                        {p.model && <span>{p.model}</span>}
+                        {!p.brand && !p.model && (p.manufacturer || p.internalCode) && (
+                          <span>{p.manufacturer}{p.manufacturer && p.internalCode ? ` — ${p.internalCode}` : p.internalCode}</span>
+                        )}
+                      </p>
+                      {p.specification && <p className="text-[10px] text-muted-foreground mb-2 truncate">{p.specification}</p>}
                       <div className="flex items-center gap-2 mb-3">
                         {p.category && <Badge variant="secondary" className="text-[10px]">{p.category.name}</Badge>}
                         <Badge variant={isLow ? "destructive" : "outline"} className="text-[10px]">{stock} {p.unitOfMeasure}</Badge>
+                        {p.hasSerial && <Badge variant="outline" className="text-[10px]">S/N</Badge>}
                       </div>
                       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                         <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
@@ -191,19 +190,29 @@ export default function Products() {
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{editingId ? "Editar Produto" : "Novo Produto"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? "Editar Item" : "Novo Item do Estoque"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
-            <div><Label>Nome *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Nome do produto" /></div>
-            <div><Label>Descrição</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} /></div>
+            <div><Label>Nome *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex: SSD 480 GB SATA" /></div>
+            <div><Label>Descrição</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} placeholder="Descrição detalhada do item" /></div>
             <div className="grid grid-cols-2 gap-4">
-              <div><Label>Categoria *</Label><Select value={form.categoryId} onValueChange={(v) => setForm({ ...form, categoryId: v })}><SelectTrigger><SelectValue placeholder="Selecionar" /></SelectTrigger><SelectContent>{categories?.map((c) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}</SelectContent></Select></div>
-              <div><Label>Unidade</Label><Select value={form.unitOfMeasure} onValueChange={(v) => setForm({ ...form, unitOfMeasure: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{UNITS_OF_MEASURE.map((u) => (<SelectItem key={u} value={u}>{u}</SelectItem>))}</SelectContent></Select></div>
+              <div><Label>Categoria *</Label><Select value={form.categoryId} onValueChange={(v) => setForm({ ...form, categoryId: v })}><SelectTrigger><SelectValue placeholder="Selecionar" /></SelectTrigger><SelectContent>{categories?.map((c: any) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}</SelectContent></Select></div>
+              <div><Label>Unidade de Medida</Label><Select value={form.unitOfMeasure} onValueChange={(v) => setForm({ ...form, unitOfMeasure: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{UNITS_OF_MEASURE.map((u) => (<SelectItem key={u} value={u}>{UNIT_LABELS[u] ?? u}</SelectItem>))}</SelectContent></Select></div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div><Label>Código Interno</Label><Input value={form.internalCode} onChange={(e) => setForm({ ...form, internalCode: e.target.value })} /></div>
-              <div><Label>Fabricante</Label><Input value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} /></div>
+              <div><Label>Marca</Label><Input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="Ex: Kingston, SanDisk" /></div>
+              <div><Label>Modelo</Label><Input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="Ex: A400, SSD Plus" /></div>
             </div>
-            <div><Label>Modelo</Label><Input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></div>
+            <div><Label>Fabricante</Label><Input value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} placeholder="Fabricante (se diferente da marca)" /></div>
+            <div><Label>Especificação</Label><Input value={form.specification} onChange={(e) => setForm({ ...form, specification: e.target.value })} placeholder="Ex: 480 GB, SATA III, Leitura 500MB/s" /></div>
+            <div className="grid grid-cols-2 gap-4">
+              <div><Label>Código Interno</Label><Input value={form.internalCode} onChange={(e) => setForm({ ...form, internalCode: e.target.value })} placeholder="Código de referência" /></div>
+              <div className="flex items-end pb-1">
+                <div className="flex items-center gap-2">
+                  <Checkbox id="hasSerial" checked={form.hasSerial} onCheckedChange={(checked) => setForm({ ...form, hasSerial: checked === true })} />
+                  <Label htmlFor="hasSerial" className="text-sm font-normal">Possui número de série / patrimônio</Label>
+                </div>
+              </div>
+            </div>
             <div className="grid grid-cols-3 gap-4">
               <div><Label>Estoque Mínimo</Label><Input type="number" min="0" value={form.minimumStock} onChange={(e) => setForm({ ...form, minimumStock: Number(e.target.value) })} /></div>
               <div><Label>Estoque Ideal</Label><Input type="number" min="0" value={form.idealStock} onChange={(e) => setForm({ ...form, idealStock: Number(e.target.value) })} /></div>
