@@ -410,7 +410,7 @@ export default function Requests() {
             </Button>
           </div>
         )}
-        {showActions && r.status === "approved" && permissions.canDeliver && (
+        {r.status === "approved" && permissions.canDeliver && (
           <Button size="sm" className="gap-1 mt-3" onClick={() => openDeliverModal(r)}>
             <Truck className="h-3.5 w-3.5" /> Entregar Material
           </Button>
