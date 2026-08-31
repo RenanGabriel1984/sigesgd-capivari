@@ -38,6 +38,7 @@ export default function UsersPage() {
   const [orgId, setOrgId] = useState("");
   const [active, setActive] = useState(true);
   const [password, setPassword] = useState("");
+  const [tempPassword, setTempPassword] = useState("");
 
   const filtered = users?.filter((u: any) =>
     u.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -45,7 +46,7 @@ export default function UsersPage() {
   );
 
   const openCreate = () => {
-    setName(""); setEmail(""); setRole("technician"); setOrgId("");
+    setName(""); setEmail(""); setRole("technician"); setOrgId(""); setTempPassword("");
     setCreateDialog(true);
   };
 
@@ -64,9 +65,13 @@ export default function UsersPage() {
 
   const handleCreate = async () => {
     if (!name.trim() || !email.trim()) { toast.error("Nome e e-mail são obrigatórios"); return; }
+    if (!tempPassword.trim()) { toast.error("A senha temporária é obrigatória"); return; }
+    if (tempPassword.length < 6) { toast.error("A senha temporária deve ter pelo menos 6 caracteres"); return; }
     try {
-      await createUser({ name: name.trim(), email: email.trim(), role, organizationId: (orgId || undefined) as any });
-      toast.success("Usuário criado com sucesso");
+      const newUserId = await createUser({ name: name.trim(), email: email.trim(), role, organizationId: (orgId || undefined) as any });
+      // Auto-create password with requiresReset: true
+      await createPassword({ userId: newUserId as Id<"users">, password: tempPassword, requiresReset: true });
+      toast.success("Usuário criado com sucesso. Obrigará troca de senha no primeiro acesso.");
       setCreateDialog(false);
     } catch (e: any) { toast.error(e.message ?? "Erro ao criar usuário"); }
   };
@@ -82,14 +87,12 @@ export default function UsersPage() {
 
   const handleToggleActive = async (userId: any, currentActive: boolean, userName: string) => {
     if (currentActive) {
-      // Deactivating
       if (!confirm(`Tem certeza que deseja desativar o usuário "${userName}"?`)) return;
       try {
         await deactivateUser({ userId });
         toast.success("Usuário desativado");
       } catch (e: any) { toast.error(e.message ?? "Erro ao desativar"); }
     } else {
-      // Activating
       try {
         await activateUser({ userId });
         toast.success("Usuário ativado");
@@ -109,11 +112,6 @@ export default function UsersPage() {
       toast.success(passwordDialog.isNew ? "Senha definida com sucesso" : "Senha redefinida com sucesso");
       setPasswordDialog(null);
     } catch (e: any) { toast.error(e.message ?? "Erro ao definir senha"); }
-  };
-
-  const hasPassword = (userId: string) => {
-    // We can't easily check this in real-time, so we just show the button
-    return true;
   };
 
   return (
@@ -208,7 +206,11 @@ export default function UsersPage() {
             <div><Label>E-mail *</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@exemplo.com" /></div>
             <div><Label>Perfil *</Label><Select value={role} onValueChange={(v) => setRole(v as UserRole)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(ROLE_LABELS).map(([k, v]) => (<SelectItem key={k} value={k}>{v}</SelectItem>))}</SelectContent></Select></div>
             <div><Label>Unidade Organizacional</Label><Select value={orgId} onValueChange={setOrgId}><SelectTrigger><SelectValue placeholder="Nenhuma" /></SelectTrigger><SelectContent>{orgs?.orgs.map((o: any) => (<SelectItem key={o._id} value={o._id}>{o.name}</SelectItem>))}</SelectContent></Select></div>
-            <p className="text-xs text-muted-foreground">Após a criação, defina uma senha para o usuário poder acessar o sistema.</p>
+            <div>
+              <Label>Senha Temporária *</Label>
+              <Input type="password" value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+              <p className="text-xs text-muted-foreground mt-1">O usuário será obrigado a alterar a senha no primeiro acesso.</p>
+            </div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setCreateDialog(false)}>Cancelar</Button><Button onClick={handleCreate}>Criar Usuário</Button></DialogFooter>
         </DialogContent>

@@ -7,13 +7,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Settings as SettingsIcon, Key, User } from "lucide-react";
+import { Settings as SettingsIcon, Key, User, AlertTriangle } from "lucide-react";
 import { ROLE_LABELS, type UserRole } from "@/types/constants";
 import { toast } from "sonner";
+import { useSearchParams, useNavigate } from "react-router";
 
 export default function Settings() {
   const { user } = useAuth();
   const changePassword = useMutation(api.passwords.changePassword);
+  const forceChangePassword = useMutation(api.passwords.forceChangePassword);
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const isForceChange = searchParams.get("forcePasswordChange") === "true";
+  const returnTo = searchParams.get("returnTo") || "/dashboard";
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -23,8 +29,8 @@ export default function Settings() {
   const role = (user?.role ?? "technician") as UserRole;
 
   const handleChangePassword = async () => {
-    if (!currentPassword || !newPassword) {
-      toast.error("Preencha todos os campos");
+    if (!newPassword) {
+      toast.error(isForceChange ? "Preencha o campo de nova senha" : "Preencha todos os campos");
       return;
     }
     if (newPassword.length < 6) {
@@ -35,17 +41,29 @@ export default function Settings() {
       toast.error("As senhas não conferem");
       return;
     }
-    if (currentPassword === newPassword) {
-      toast.error("A nova senha deve ser diferente da atual");
-      return;
+    if (!isForceChange) {
+      if (!currentPassword) {
+        toast.error("Preencha a senha atual");
+        return;
+      }
+      if (currentPassword === newPassword) {
+        toast.error("A nova senha deve ser diferente da atual");
+        return;
+      }
     }
     setIsChanging(true);
     try {
-      await changePassword({ currentPassword, newPassword });
-      toast.success("Senha alterada com sucesso");
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
+      if (isForceChange) {
+        await forceChangePassword({ newPassword });
+        toast.success("Senha alterada com sucesso! Bem-vindo ao SIGESGD.");
+        navigate(returnTo);
+      } else {
+        await changePassword({ currentPassword, newPassword });
+        toast.success("Senha alterada com sucesso");
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+      }
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao alterar senha");
     } finally {
@@ -56,12 +74,25 @@ export default function Settings() {
   return (
     <AppShell>
       <div className="space-y-6 max-w-5xl mx-auto">
+        {isForceChange && (
+          <Card className="border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30">
+            <CardContent className="py-4 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold text-sm text-amber-800 dark:text-amber-200">Alteração de senha obrigatória</p>
+                <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                  Esta é sua primeira acesso ao sistema. Você deve definir uma nova senha para continuar.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Configurações</h1>
           <p className="text-sm text-muted-foreground">Configurações da sua conta e do sistema</p>
         </div>
 
-        {/* User Info */}
         <Card className="border-border/50">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
@@ -90,19 +121,20 @@ export default function Settings() {
           </CardContent>
         </Card>
 
-        {/* Change Password */}
         <Card className="border-border/50">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <Key className="h-4 w-4" /> Alterar Senha
+              <Key className="h-4 w-4" /> {isForceChange ? "Definir Nova Senha" : "Alterar Senha"}
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="max-w-md space-y-4">
-              <div>
-                <Label>Senha Atual</Label>
-                <Input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Sua senha atual" />
-              </div>
+              {!isForceChange && (
+                <div>
+                  <Label>Senha Atual</Label>
+                  <Input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} placeholder="Sua senha atual" />
+                </div>
+              )}
               <div>
                 <Label>Nova Senha</Label>
                 <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
@@ -111,14 +143,13 @@ export default function Settings() {
                 <Label>Confirmar Nova Senha</Label>
                 <Input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repita a nova senha" />
               </div>
-              <Button onClick={handleChangePassword} disabled={isChanging || !currentPassword || !newPassword || !confirmPassword}>
+              <Button onClick={handleChangePassword} disabled={isChanging || !newPassword || !confirmPassword}>
                 {isChanging ? "Alterando..." : "Alterar Senha"}
               </Button>
             </div>
           </CardContent>
         </Card>
 
-        {/* System Info */}
         <Card className="border-border/50">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">

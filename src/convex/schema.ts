@@ -107,8 +107,7 @@ export const auditActionValidator = v.union(
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
 export const UNIT_OF_MEASURE_VALUES = [
-  "un", "kit", "metro", "caixa", "pacote", "rolo", "litro", "kg", "m2", "m3",
-  "ml", "par", "dz", "outro",
+  "un", "pc", "cx", "m", "rl", "pct", "outro",
 ] as const;
 
 // ─── Schema ──────────────────────────────────────────────────────────────────

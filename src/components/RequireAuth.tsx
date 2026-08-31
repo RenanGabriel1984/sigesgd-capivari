@@ -2,10 +2,20 @@ import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
+import { toast } from "sonner";
+import { useEffect, useRef } from "react";
 
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { isLoading, isAuthenticated } = useAuth();
+  const { isLoading, isAuthenticated, user } = useAuth();
   const location = useLocation();
+  const hasShownToast = useRef(false);
+
+  useEffect(() => {
+    if (user?.requiresPasswordReset && !hasShownToast.current) {
+      hasShownToast.current = true;
+      toast.info("Você deve alterar sua senha antes de continuar.", { duration: 5000 });
+    }
+  }, [user?.requiresPasswordReset]);
 
   if (isLoading) {
     return (
@@ -20,6 +30,16 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     return (
       <Navigate
         to={`/auth?returnTo=${encodeURIComponent(returnTo)}`}
+        replace
+      />
+    );
+  }
+
+  // Force password change on first login
+  if (user?.requiresPasswordReset && location.pathname !== "/settings") {
+    return (
+      <Navigate
+        to={`/settings?forcePasswordChange=true&returnTo=${encodeURIComponent(location.pathname)}`}
         replace
       />
     );

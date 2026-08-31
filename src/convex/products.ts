@@ -21,6 +21,21 @@ async function requireManagerOrAdmin(ctx: any) {
   return { userId, user };
 }
 
+/** Generate sequential internal code: ITEM-0001, ITEM-0002, etc. */
+async function generateInternalCode(ctx: any): Promise<string> {
+  const existing = await ctx.db.query("products").collect();
+  const maxNum = existing.reduce((max: number, p: any) => {
+    const match = p.internalCode?.match(/^ITEM-(\d+)$/);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      return num > max ? num : max;
+    }
+    return max;
+  }, 0);
+  const next = maxNum + 1;
+  return `ITEM-${String(next).padStart(4, "0")}`;
+}
+
 export const list = query({
   args: {},
   handler: async (ctx) => {
@@ -114,7 +129,11 @@ export const create = mutation({
     }
 
     const id = await ctx.db.insert("products", {
-      ...args, name: args.name.trim(), active: true,
+      ...args,
+      name: args.name.trim(),
+      // Auto-generate sequential internal code if not provided
+      internalCode: args.internalCode?.trim() || await generateInternalCode(ctx),
+      active: true,
     });
     await ctx.db.insert("stock", { productId: id, physicalQuantity: 0, reservedQuantity: 0 });
     await ctx.db.insert("auditLogs", {

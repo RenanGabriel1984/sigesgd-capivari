@@ -90,24 +90,16 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
 export const UNITS_OF_MEASURE = [
-  "un", "kit", "metro", "caixa", "pacote", "rolo", "litro", "kg", "m2", "m3",
-  "ml", "par", "dz", "outro",
+  "un", "pc", "cx", "m", "rl", "pct", "outro",
 ] as const;
 
 export const UNIT_LABELS: Record<string, string> = {
-  un: "Unidade",
-  kit: "Kit",
-  metro: "Metro",
-  caixa: "Caixa",
-  pacote: "Pacote",
-  rolo: "Rolo",
-  litro: "Litro",
-  kg: "Quilograma",
-  m2: "Metro Quadrado",
-  m3: "Metro Cúbico",
-  ml: "Mililitro",
-  par: "Par",
-  dz: "Dúzia",
+  un: "Unidade (UN)",
+  pc: "Peça (PC)",
+  cx: "Caixa (CX)",
+  m: "Metro (M)",
+  rl: "Rolo (RL)",
+  pct: "Pacote (PCT)",
   outro: "Outro",
 };
 

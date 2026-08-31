@@ -181,6 +181,49 @@ export const adminResetPassword = mutation({
   },
 });
 
+/** Force change password (first login — requiresPasswordReset). */
+export const forceChangePassword = mutation({
+  args: {
+    newPassword: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireUser(ctx);
+
+    if (args.newPassword.length < 6) {
+      throw new Error("A nova senha deve ter pelo menos 6 caracteres");
+    }
+
+    const passwordRecord = await ctx.db
+      .query("passwords")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .first();
+
+    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+
+    const { hash, salt } = await hashPassword(args.newPassword);
+
+    await ctx.db.patch(passwordRecord._id, {
+      passwordHash: hash,
+      salt,
+      requiresReset: false,
+    });
+
+    // Clear requiresPasswordReset flag on user
+    await ctx.db.patch(userId, { requiresPasswordReset: false });
+
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "password_change",
+      entity: "passwords",
+      entityId: passwordRecord._id,
+      details: "Senha alterada no primeiro acesso",
+      timestamp: Date.now(),
+    });
+
+    return true;
+  },
+});
+
 /** Verify email and password (used by auth provider). */
 export const verifyCredentials = query({
   args: {

@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Pencil, Search, Package, ArrowUpRight } from "lucide-react";
+import { Plus, Pencil, Search, Package, ArrowUpRight, AlertTriangle } from "lucide-react";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
 import { toast } from "sonner";
 
@@ -56,7 +56,6 @@ export default function Products() {
     const matchesSearch = !q ||
       p.name.toLowerCase().includes(q) ||
       p.internalCode?.toLowerCase().includes(q) ||
-      p.manufacturer?.toLowerCase().includes(q) ||
       p.model?.toLowerCase().includes(q) ||
       p.brand?.toLowerCase().includes(q) ||
       p.description?.toLowerCase().includes(q);
@@ -84,7 +83,8 @@ export default function Products() {
       const data = {
         name: form.name, description: form.description || undefined,
         categoryId: form.categoryId as any, unitOfMeasure: form.unitOfMeasure,
-        internalCode: form.internalCode || undefined, manufacturer: form.manufacturer || undefined,
+        internalCode: form.internalCode || undefined,
+        manufacturer: form.manufacturer || undefined,
         model: form.model || undefined, brand: form.brand || undefined,
         specification: form.specification || undefined,
         minimumStock: form.minimumStock, idealStock: form.idealStock, maximumStock: form.maximumStock,
@@ -163,14 +163,14 @@ export default function Products() {
                         {p.brand && <span>{p.brand}</span>}
                         {p.brand && p.model && <span> — </span>}
                         {p.model && <span>{p.model}</span>}
-                        {!p.brand && !p.model && (p.manufacturer || p.internalCode) && (
-                          <span>{p.manufacturer}{p.manufacturer && p.internalCode ? ` — ${p.internalCode}` : p.internalCode}</span>
+                        {!p.brand && !p.model && p.internalCode && (
+                          <span>{p.internalCode}</span>
                         )}
                       </p>
                       {p.specification && <p className="text-[10px] text-muted-foreground mb-2 truncate">{p.specification}</p>}
                       <div className="flex items-center gap-2 mb-3">
                         {p.category && <Badge variant="secondary" className="text-[10px]">{p.category.name}</Badge>}
-                        <Badge variant={isLow ? "destructive" : "outline"} className="text-[10px]">{stock} {p.unitOfMeasure}</Badge>
+                        <Badge variant={isLow ? "destructive" : "outline"} className="text-[10px]">{stock} {UNIT_LABELS[p.unitOfMeasure] ?? p.unitOfMeasure}</Badge>
                         {p.hasSerial && <Badge variant="outline" className="text-[10px]">S/N</Badge>}
                       </div>
                       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
@@ -192,6 +192,21 @@ export default function Products() {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editingId ? "Editar Item" : "Novo Item do Estoque"}</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
+            {/* Category warning when none exist */}
+            {!editingId && categories?.length === 0 && (
+              <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-950/30 dark:border-amber-800">
+                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                <div className="text-sm">
+                  <p className="font-medium text-amber-800 dark:text-amber-200">Nenhuma categoria cadastrada</p>
+                  <p className="text-amber-700 dark:text-amber-300 mt-0.5">
+                    Cadastre uma categoria antes de criar itens.{" "}
+                    <Link to="/categories" onClick={() => setDialogOpen(false)} className="underline font-medium hover:text-amber-900 dark:hover:text-amber-100">
+                      Cadastrar Categoria Primeiro →
+                    </Link>
+                  </p>
+                </div>
+              </div>
+            )}
             <div><Label>Nome *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex: SSD 480 GB SATA" /></div>
             <div><Label>Descrição</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} placeholder="Descrição detalhada do item" /></div>
             <div className="grid grid-cols-2 gap-4">
@@ -202,10 +217,9 @@ export default function Products() {
               <div><Label>Marca</Label><Input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="Ex: Kingston, SanDisk" /></div>
               <div><Label>Modelo</Label><Input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="Ex: A400, SSD Plus" /></div>
             </div>
-            <div><Label>Fabricante</Label><Input value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} placeholder="Fabricante (se diferente da marca)" /></div>
             <div><Label>Especificação</Label><Input value={form.specification} onChange={(e) => setForm({ ...form, specification: e.target.value })} placeholder="Ex: 480 GB, SATA III, Leitura 500MB/s" /></div>
             <div className="grid grid-cols-2 gap-4">
-              <div><Label>Código Interno</Label><Input value={form.internalCode} onChange={(e) => setForm({ ...form, internalCode: e.target.value })} placeholder="Código de referência" /></div>
+              <div><Label>Código Interno</Label><Input value={form.internalCode} onChange={(e) => setForm({ ...form, internalCode: e.target.value })} placeholder="Opcional — gerado automaticamente" /></div>
               <div className="flex items-end pb-1">
                 <div className="flex items-center gap-2">
                   <Checkbox id="hasSerial" checked={form.hasSerial} onCheckedChange={(checked) => setForm({ ...form, hasSerial: checked === true })} />
@@ -214,9 +228,9 @@ export default function Products() {
               </div>
             </div>
             <div className="grid grid-cols-3 gap-4">
-              <div><Label>Estoque Mínimo</Label><Input type="number" min="0" value={form.minimumStock} onChange={(e) => setForm({ ...form, minimumStock: Number(e.target.value) })} /></div>
-              <div><Label>Estoque Ideal</Label><Input type="number" min="0" value={form.idealStock} onChange={(e) => setForm({ ...form, idealStock: Number(e.target.value) })} /></div>
-              <div><Label>Estoque Máximo</Label><Input type="number" min="0" value={form.maximumStock} onChange={(e) => setForm({ ...form, maximumStock: Number(e.target.value) })} /></div>
+              <div><Label>Estoque Mínimo</Label><Input type="number" min="0" value={form.minimumStock || ""} onChange={(e) => setForm({ ...form, minimumStock: e.target.value === "" ? 0 : Number(e.target.value) })} /></div>
+              <div><Label>Estoque Ideal</Label><Input type="number" min="0" value={form.idealStock || ""} onChange={(e) => setForm({ ...form, idealStock: e.target.value === "" ? 0 : Number(e.target.value) })} /></div>
+              <div><Label>Estoque Máximo</Label><Input type="number" min="0" value={form.maximumStock || ""} onChange={(e) => setForm({ ...form, maximumStock: e.target.value === "" ? 0 : Number(e.target.value) })} /></div>
             </div>
             <div><Label>Observações</Label><Textarea value={form.observation} onChange={(e) => setForm({ ...form, observation: e.target.value })} rows={2} /></div>
           </div>
