@@ -186,7 +186,7 @@ export const approve = mutation({
     if (role === "technician") throw new Error("Técnicos não podem aprovar solicitações");
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Solicitação não encontrada");
-    if (request.requesterId === userId) throw new Error("Não é possível aprovar sua própria solicitação");
+    if (request.requesterId === userId && role !== "admin") throw new Error("Não é possível aprovar sua própria solicitação");
     if (request.status !== "pending") throw new Error("Solicitação não está pendente");
 
     for (const item of args.items) {
@@ -228,7 +228,7 @@ export const reject = mutation({
     if (role === "technician") throw new Error("Técnicos não podem rejeitar solicitações");
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Solicitação não encontrada");
-    if (request.requesterId === userId) throw new Error("Não é possível rejeitar sua própria solicitação");
+    if (request.requesterId === userId && role !== "admin") throw new Error("Não é possível rejeitar sua própria solicitação");
     if (request.status !== "pending") throw new Error("Solicitação não está pendente");
     const reason = (args.observation ?? "").trim();
     if (!reason) throw new Error("O motivo da rejeição é obrigatório");

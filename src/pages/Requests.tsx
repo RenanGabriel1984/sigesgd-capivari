@@ -91,8 +91,12 @@ export default function Requests() {
   const permissions = getPermissions(role);
 
   const myRequests = requests?.filter((r) => r.requesterId === user?._id) ?? [];
-  const pendingForApproval =
-    requests?.filter((r) => r.status === "pending" && r.requesterId !== user?._id) ?? [];
+  // Admin/StockManager see ALL pending; others see pending from others only
+  const pendingForApproval = requests?.filter((r) => {
+    if (r.status !== "pending") return false;
+    if (role === "admin" || role === "stock_manager") return true;
+    return r.requesterId !== user?._id;
+  }) ?? [];
 
   // Cascading org selects
   const orgList = organizations?.orgs ?? [];
@@ -454,7 +458,7 @@ export default function Requests() {
                 <ClipboardList className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
                 <p className="text-muted-foreground text-sm">Nenhuma solicitação</p>
               </CardContent></Card>
-            ) : myRequests.map((r) => renderRequest(r))}
+            ) : myRequests.map((r) => renderRequest(r, r.status === "pending" && permissions.canApproveRequests))}
           </TabsContent>
           <TabsContent value="pending" className="space-y-3 mt-4">
             {pendingForApproval.length === 0 ? (
@@ -465,7 +469,7 @@ export default function Requests() {
             ) : pendingForApproval.map((r) => renderRequest(r, true))}
           </TabsContent>
           <TabsContent value="all" className="space-y-3 mt-4">
-            {requests?.map((r) => renderRequest(r, r.status === "pending" && r.requesterId !== user?._id))}
+            {requests?.map((r) => renderRequest(r, r.status === "pending" && permissions.canApproveRequests && (role === "admin" || r.requesterId !== user?._id)))}
           </TabsContent>
         </Tabs>
       </div>
