@@ -129,6 +129,8 @@ const schema = defineSchema(
       organizationId: v.optional(v.id("organizations")),
       lastLoginAt: v.optional(v.number()),
       requiresPasswordReset: v.optional(v.boolean()),
+      createdAt: v.optional(v.number()),
+      updatedAt: v.optional(v.number()),
     }).index("email", ["email"])
       .index("by_role", ["role"])
       .index("by_active", ["active"]),

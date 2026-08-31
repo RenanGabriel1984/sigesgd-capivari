@@ -37,8 +37,10 @@ export const bootstrapAdmin = mutation({
     if (args.password.length < 8) throw new Error("A senha deve ter pelo menos 8 caracteres");
 
     const email = args.email.trim().toLowerCase();
+    const now = Date.now();
     const userId = await ctx.db.insert("users", {
       name: args.name.trim(), email, role: "admin", active: true,
+      createdAt: now, updatedAt: now,
     });
     const { hash, salt } = await hashPassword(args.password);
     await ctx.db.insert("passwords", { userId, passwordHash: hash, salt, requiresReset: false });
@@ -94,9 +96,11 @@ export const createUser = mutation({
     const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", args.email.toLowerCase())).first();
     if (existing) throw new Error("Já existe um usuário com este e-mail");
 
+    const now = Date.now();
     const newUserId = await ctx.db.insert("users", {
       name: args.name, email: args.email.toLowerCase(), role: args.role,
       organizationId: args.organizationId, active: true,
+      createdAt: now, updatedAt: now,
     });
     await ctx.db.insert("auditLogs", {
       userId, action: "create", entity: "users", entityId: newUserId,
@@ -132,7 +136,7 @@ export const updateUser = mutation({
       updates.email = updates.email.toLowerCase();
     }
 
-    await ctx.db.patch(userId, updates);
+    await ctx.db.patch(userId, { ...updates, updatedAt: Date.now() });
     const action = updates.active === false ? "deactivate" : updates.active === true ? "activate" : "update";
     const user = await ctx.db.get(userId);
     await ctx.db.insert("auditLogs", {
@@ -149,7 +153,7 @@ export const activateUser = mutation({
     const { userId: adminId } = await requireAdmin(ctx);
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
-    await ctx.db.patch(args.userId, { active: true });
+    await ctx.db.patch(args.userId, { active: true, updatedAt: Date.now() });
     await ctx.db.insert("auditLogs", {
       userId: adminId, action: "activate", entity: "users", entityId: args.userId,
       details: `Usuário "${user.name}" ativado`, timestamp: Date.now(),
@@ -169,7 +173,7 @@ export const deactivateUser = mutation({
       const admins = await ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect();
       if (admins.length <= 1) throw new Error("Não é possível desativar o único administrador");
     }
-    await ctx.db.patch(args.userId, { active: false });
+    await ctx.db.patch(args.userId, { active: false, updatedAt: Date.now() });
     await ctx.db.insert("auditLogs", {
       userId: adminId, action: "deactivate", entity: "users", entityId: args.userId,
       details: `Usuário "${user.name}" desativado`, timestamp: Date.now(),

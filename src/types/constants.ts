@@ -142,7 +142,7 @@ export const PERMISSIONS = {
     canDeliver: true,
     canViewMovements: true,
     canViewAuditLogs: false,
-    canManageSettings: false,
+    canManageSettings: true,
     canCreateRequests: false,
   },
   director: {
@@ -158,7 +158,7 @@ export const PERMISSIONS = {
     canDeliver: true,
     canViewMovements: true,
     canViewAuditLogs: false,
-    canManageSettings: false,
+    canManageSettings: true,
     canCreateRequests: false,
   },
   secretary: {
@@ -174,7 +174,7 @@ export const PERMISSIONS = {
     canDeliver: false,
     canViewMovements: true,
     canViewAuditLogs: false,
-    canManageSettings: false,
+    canManageSettings: true,
     canCreateRequests: false,
   },
   technician: {
@@ -190,7 +190,7 @@ export const PERMISSIONS = {
     canDeliver: false,
     canViewMovements: false,
     canViewAuditLogs: false,
-    canManageSettings: false,
+    canManageSettings: true,
     canCreateRequests: true,
   },
 } as const;
