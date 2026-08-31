@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
@@ -24,7 +24,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, ClipboardList, Check, X, Truck, FileText, Printer, Eraser } from "lucide-react";
+import {
+  Plus, ClipboardList, Check, X, Truck, FileText, Printer, Search, Archive, Lock,
+} from "lucide-react";
 import {
   REQUEST_STATUS_LABELS,
   REQUEST_STATUS_COLORS,
@@ -46,122 +48,6 @@ const REASON_OPTIONS = [
   "Manutenção de infraestrutura",
   "Outro",
 ];
-
-// ─── Native Canvas Signature Component ──────────────────────────────────────
-interface SignatureCanvasProps {
-  onSave: (dataUrl: string) => void;
-  width?: number;
-  height?: number;
-}
-
-function SignatureCanvas({ onSave, width = 350, height = 150 }: SignatureCanvasProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const drawingRef = useRef(false);
-  const hasDrawnRef = useRef(false);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 2;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    // White background
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, width, height);
-  }, [width, height]);
-
-  const getPos = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    if ("touches" in e) {
-      const touch = e.touches[0];
-      return { x: (touch.clientX - rect.left) * scaleX, y: (touch.clientY - rect.top) * scaleY };
-    }
-    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
-  }, []);
-
-  const startDraw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    drawingRef.current = true;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const { x, y } = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-  }, [getPos]);
-
-  const draw = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    if (!drawingRef.current) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const { x, y } = getPos(e);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    hasDrawnRef.current = true;
-  }, [getPos]);
-
-  const stopDraw = useCallback(() => {
-    drawingRef.current = false;
-  }, []);
-
-  const clear = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, width, height);
-    hasDrawnRef.current = false;
-  }, [width, height]);
-
-  const handleSave = useCallback(() => {
-    if (!hasDrawnRef.current) {
-      toast.error("Por favor, assine antes de confirmar");
-      return;
-    }
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    onSave(canvas.toDataURL("image/png"));
-  }, [onSave]);
-
-  return (
-    <div className="space-y-2">
-      <canvas
-        ref={canvasRef}
-        width={width}
-        height={height}
-        className="border border-border rounded-md bg-white cursor-crosshair w-full touch-none"
-        style={{ maxWidth: width }}
-        onMouseDown={startDraw}
-        onMouseMove={draw}
-        onMouseUp={stopDraw}
-        onMouseLeave={stopDraw}
-        onTouchStart={startDraw}
-        onTouchMove={draw}
-        onTouchEnd={stopDraw}
-      />
-      <div className="flex gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={clear} className="gap-1 text-muted-foreground">
-          <Eraser className="h-3.5 w-3.5" /> Limpar Assinatura
-        </Button>
-        <Button type="button" size="sm" onClick={handleSave} className="gap-1">
-          <Check className="h-3.5 w-3.5" /> Confirmar Assinatura
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 export default function Requests() {
   const { user } = useAuth();
@@ -199,24 +85,43 @@ export default function Requests() {
   const [deliverItems, setDeliverItems] = useState<
     Array<{ itemId: string; quantity: number; maxQuantity: number; serialNumbers: string[] }>
   >([]);
-  const [deliverySignature, setDeliverySignature] = useState<string | null>(null);
+  const [confirmationPassword, setConfirmationPassword] = useState("");
   const [signatureStep, setSignatureStep] = useState<"items" | "signature">("items");
 
   // ─── Delivery term dialog ───
   const [termDialog, setTermDialog] = useState<any>(null);
 
+  // ─── Arquivo Histórico state ───
+  const [histSecretariaId, setHistSecretariaId] = useState("");
+  const [histStartDate, setHistStartDate] = useState("");
+  const [histEndDate, setHistEndDate] = useState("");
+  const [histSerialSearch, setHistSerialSearch] = useState("");
+
+  const hasFilters = !!(histSecretariaId || histStartDate || histEndDate || histSerialSearch);
+  const deliveredRequests = useQuery(
+    api.requests.listDelivered,
+    hasFilters
+      ? {
+          secretariaId: histSecretariaId ? (histSecretariaId as any) : undefined,
+          startDate: histStartDate ? new Date(histStartDate).getTime() : undefined,
+          endDate: histEndDate ? new Date(histEndDate + "T23:59:59").getTime() : undefined,
+          serialSearch: histSerialSearch || undefined,
+        }
+      : "skip"
+  );
+  const allDeliveredRequests = useQuery(api.requests.listDelivered, {});
+
   const role = (user?.role ?? "technician") as UserRole;
   const permissions = getPermissions(role);
 
   const myRequests = requests?.filter((r) => r.requesterId === user?._id) ?? [];
-  // Admin/StockManager see ALL pending; others see pending from others only
   const pendingForApproval = requests?.filter((r) => {
     if (r.status !== "pending") return false;
     if (role === "admin" || role === "stock_manager") return true;
     return r.requesterId !== user?._id;
   }) ?? [];
 
-  // Cascading org selects
+  // ─── Cascading org selects ───
   const orgList = organizations?.orgs ?? [];
   const secretarias = useMemo(
     () => orgList.filter((o) => o.type === "secretaria" && o.active),
@@ -342,7 +247,7 @@ export default function Requests() {
     }
     setDeliverItems(dItems);
     setDeliverDialog(r);
-    setDeliverySignature(null);
+    setConfirmationPassword("");
     setSignatureStep("items");
   };
 
@@ -366,7 +271,10 @@ export default function Requests() {
 
   const handleDeliver = async () => {
     if (!deliverDialog) return;
-    // Validate serial numbers
+    if (!confirmationPassword.trim()) {
+      toast.error("Informe a senha de confirmação para assinar a entrega");
+      return;
+    }
     for (const di of deliverItems) {
       if (di.quantity <= 0) continue;
       const reqItem = deliverDialog.items.find((i: any) => i._id === di.itemId);
@@ -390,12 +298,12 @@ export default function Requests() {
           quantityDelivered: di.quantity,
           serialNumbers: di.serialNumbers.length > 0 ? di.serialNumbers : undefined,
         })),
-        signature: deliverySignature ?? undefined,
+        confirmationPassword: confirmationPassword,
       });
       toast.success("Entrega registrada com sucesso");
       setDeliverDialog(null);
       setDeliverItems([]);
-      setDeliverySignature(null);
+      setConfirmationPassword("");
       setSignatureStep("items");
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao registrar entrega");
@@ -423,7 +331,7 @@ export default function Requests() {
           <p className="text-xs text-muted-foreground">Solicitação #{r._id?.slice(-8).toUpperCase()}</p>
         </div>
         <div className="border-t pt-3 space-y-1">
-          <p><span className="font-medium">Data da Entrega:</span> {today}</p>
+          <p><span className="font-medium">Data da Entrega:</span> {r.deliveredAt ? new Date(r.deliveredAt).toLocaleDateString("pt-BR") : today}</p>
           <p><span className="font-medium">Solicitante:</span> {r.requester?.name ?? "—"}</p>
           <p><span className="font-medium">Secretaria:</span> {r.secretaria?.name ?? "—"}</p>
           {r.departamento && <p><span className="font-medium">Departamento:</span> {r.departamento.name}</p>}
@@ -450,15 +358,15 @@ export default function Requests() {
             ))}
           </div>
         </div>
-        {r.deliveredSignature ? (
+        {r.deliveredBySignature ? (
           <div className="border-t pt-3 space-y-2">
-            <p className="font-medium text-xs">Assinatura Digital do Recebedor:</p>
-            <div className="border rounded bg-white p-2 inline-block">
-              <img src={r.deliveredSignature} alt="Assinatura digital" className="max-w-[300px] h-auto" />
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+              <div className="flex items-center gap-2 mb-1">
+                <Lock className="h-4 w-4 text-blue-600" />
+                <span className="font-medium text-xs text-blue-700">Assinatura Eletrônica Válida</span>
+              </div>
+              <p className="text-xs text-blue-600">{r.deliveredBySignature}</p>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Documento assinado digitalmente em {r.deliveredAt ? new Date(r.deliveredAt).toLocaleString("pt-BR") : today} por {r.requester?.name ?? "Recebedor"}
-            </p>
           </div>
         ) : (
           <div className="border-t pt-4 flex justify-between text-xs text-muted-foreground">
@@ -508,14 +416,12 @@ export default function Requests() {
             </div>
           ))}
         </div>
-        {/* Show rejection reason */}
         {r.status === "rejected" && r.approvalObservation && (
           <div className="mb-2 text-xs bg-red-50 border border-red-200 rounded px-3 py-2">
             <span className="font-medium text-red-700">Motivo da rejeição:</span>{" "}
             <span className="text-red-600">{r.approvalObservation}</span>
           </div>
         )}
-        {/* Show approval observation */}
         {r.status === "approved" && r.approvalObservation && (
           <div className="mb-2 text-xs bg-emerald-50 border border-emerald-200 rounded px-3 py-2">
             <span className="font-medium text-emerald-700">Observação da aprovação:</span>{" "}
@@ -523,7 +429,6 @@ export default function Requests() {
           </div>
         )}
         {r.observation && <p className="text-xs text-muted-foreground italic">"{r.observation}"</p>}
-        {/* Show delivered serial numbers */}
         {r.status === "delivered" && r.items?.some((item: any) => item.deliveredSerialNumbers?.length > 0) && (
           <div className="mb-2 text-xs bg-blue-50 border border-blue-200 rounded px-3 py-2">
             <span className="font-medium text-blue-700">Patrimônio/Série:</span>
@@ -534,7 +439,6 @@ export default function Requests() {
             ))}
           </div>
         )}
-        {/* Action buttons */}
         {showActions && r.status === "pending" && (
           <div className="flex gap-2 mt-3">
             <Button size="sm" className="gap-1" onClick={() => { setApproveDialog(r); setApproveObservation(""); }}>
@@ -586,6 +490,7 @@ export default function Requests() {
               <TabsTrigger value="pending">Pendentes ({pendingForApproval.length})</TabsTrigger>
             )}
             <TabsTrigger value="all">Todas</TabsTrigger>
+            <TabsTrigger value="archive" className="gap-1"><Archive className="h-3.5 w-3.5" /> Arquivo Histórico</TabsTrigger>
           </TabsList>
           <TabsContent value="my" className="space-y-3 mt-4">
             {myRequests.length === 0 ? (
@@ -605,6 +510,78 @@ export default function Requests() {
           </TabsContent>
           <TabsContent value="all" className="space-y-3 mt-4">
             {requests?.map((r) => renderRequest(r, r.status === "pending" && permissions.canApproveRequests && (role === "admin" || r.requesterId !== user?._id)))}
+          </TabsContent>
+
+          {/* ═══ Arquivo Histórico ═══ */}
+          <TabsContent value="archive" className="space-y-4 mt-4">
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Archive className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm font-medium">Arquivo Histórico — Materiais Entregues</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <div>
+                    <Label className="text-xs">Secretaria / Unidade</Label>
+                    <Select value={histSecretariaId} onValueChange={setHistSecretariaId}>
+                      <SelectTrigger className="mt-1"><SelectValue placeholder="Todas" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all">Todas</SelectItem>
+                        {secretarias.map((o) => <SelectItem key={o._id} value={o._id}>{o.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Data Inicial</Label>
+                    <Input type="date" value={histStartDate} onChange={(e) => setHistStartDate(e.target.value)} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Data Final</Label>
+                    <Input type="date" value={histEndDate} onChange={(e) => setHistEndDate(e.target.value)} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Patrimônio / Série</Label>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        value={histSerialSearch}
+                        onChange={(e) => setHistSerialSearch(e.target.value)}
+                        placeholder="Buscar patrimônio..."
+                        className="mt-1 pl-8"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  variant="outline" size="sm" className="mt-3"
+                  onClick={() => { setHistSecretariaId(""); setHistStartDate(""); setHistEndDate(""); setHistSerialSearch(""); }}
+                >
+                  Limpar Filtros
+                </Button>
+              </CardContent>
+            </Card>
+            {(() => {
+              const list = hasFilters ? deliveredRequests : allDeliveredRequests;
+              if (list === undefined) {
+                return <Card className="border-border/50"><CardContent className="py-8 text-center"><p className="text-muted-foreground text-sm">Carregando...</p></CardContent></Card>;
+              }
+              if (list.length === 0) {
+                return (
+                  <Card className="border-border/50"><CardContent className="py-12 text-center">
+                    <Archive className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                    <p className="text-muted-foreground text-sm">
+                      {hasFilters ? "Nenhum resultado encontrado para os filtros selecionados" : "Nenhuma entrega registrada ainda"}
+                    </p>
+                  </CardContent></Card>
+                );
+              }
+              return (
+                <div className="space-y-3">
+                  <p className="text-xs text-muted-foreground">{list.length} entrega(s) encontrada(s)</p>
+                  {list.map((r) => renderRequest(r))}
+                </div>
+              );
+            })()}
           </TabsContent>
         </Tabs>
       </div>
@@ -805,13 +782,31 @@ export default function Requests() {
               </>
             ) : (
               <>
-                <p className="text-sm text-muted-foreground">
-                  O recebedor deve assinar abaixo para confirmar o recebimento do material.
-                </p>
-                <SignatureCanvas onSave={setDeliverySignature} />
-                {deliverySignature && (
-                  <div className="border rounded bg-emerald-50 border-emerald-200 px-3 py-2">
-                    <p className="text-xs text-emerald-700 font-medium">✓ Assinatura capturada com sucesso</p>
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Lock className="h-4 w-4 text-amber-600" />
+                    <p className="text-sm font-medium text-amber-800">Assinatura Eletrônica por Senha</p>
+                  </div>
+                  <p className="text-xs text-amber-700">
+                    Para confirmar a entrega, informe sua senha de acesso ao sistema. Esta ação constitui assinatura eletrônica com valor legal.
+                  </p>
+                </div>
+                <div>
+                  <Label>Senha de Confirmação do Servidor/Recebedor <span className="text-destructive">*</span></Label>
+                  <Input
+                    type="password"
+                    value={confirmationPassword}
+                    onChange={(e) => setConfirmationPassword(e.target.value)}
+                    placeholder="Informe sua senha para assinar"
+                    className="mt-1"
+                    onKeyDown={(e) => { if (e.key === "Enter" && confirmationPassword.trim()) handleDeliver(); }}
+                  />
+                </div>
+                {confirmationPassword && (
+                  <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2">
+                    <p className="text-xs text-blue-600">
+                      Ao confirmar, será registrado: "Assinado eletronicamente por {user?.name ?? "Servidor"} via autenticação por senha"
+                    </p>
                   </div>
                 )}
               </>
@@ -820,11 +815,11 @@ export default function Requests() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeliverDialog(null)}>Cancelar</Button>
             {signatureStep === "items" ? (
-              <Button onClick={() => setSignatureStep("signature")}>Próximo: Assinatura</Button>
+              <Button onClick={() => setSignatureStep("signature")}>Próximo: Assinar</Button>
             ) : (
               <>
                 <Button variant="outline" onClick={() => setSignatureStep("items")}>Voltar</Button>
-                <Button onClick={handleDeliver} disabled={!deliverySignature}>Confirmar Entrega</Button>
+                <Button onClick={handleDeliver} disabled={!confirmationPassword.trim()}>Confirmar e Assinar Entrega</Button>
               </>
             )}
           </DialogFooter>
@@ -850,23 +845,11 @@ export default function Requests() {
       {/* Print styles */}
       <style>{`
         @media print {
-          body * {
-            visibility: hidden;
-          }
+          body * { visibility: hidden; }
           #delivery-term-content,
-          #delivery-term-content * {
-            visibility: visible;
-          }
-          #delivery-term-content {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            padding: 20px;
-          }
-          .print-hide {
-            display: none !important;
-          }
+          #delivery-term-content * { visibility: visible; }
+          #delivery-term-content { position: absolute; left: 0; top: 0; width: 100%; padding: 20px; }
+          .print-hide { display: none !important; }
         }
       `}</style>
     </AppShell>

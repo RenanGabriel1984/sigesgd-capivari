@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { verifyPassword } from "./auth/passwords";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -247,10 +248,20 @@ export const deliver = mutation({
       quantityDelivered: v.number(),
       serialNumbers: v.optional(v.array(v.string())),
     }))),
-    signature: v.optional(v.string()),
+    confirmationPassword: v.string(),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireUser(ctx);
+    const { userId, user } = await requireUser(ctx);
+
+    // Verify password for electronic signature
+    const passwordRecord = await ctx.db
+      .query("passwords")
+      .withIndex("by_user", (q: any) => q.eq("userId", userId))
+      .first();
+    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+    const passwordValid = await verifyPassword(args.confirmationPassword, passwordRecord.passwordHash, passwordRecord.salt);
+    if (!passwordValid) throw new Error("Senha de confirmação incorreta");
+
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Solicitação não encontrada");
     if (request.status !== "approved") throw new Error("Solicitação deve estar aprovada");
@@ -320,7 +331,10 @@ export const deliver = mutation({
       });
     }
 
-    await ctx.db.patch(args.requestId, { status: "delivered", updatedAt: now, deliveredAt: now, deliveredSignature: args.signature || undefined });
+    const sigName = user.name ?? user.email ?? "Servidor";
+    const sigDate = new Date(now).toLocaleString("pt-BR");
+    const deliveredBySignature = `Assinado eletronicamente por ${sigName} via autenticação por senha em ${sigDate}`;
+    await ctx.db.patch(args.requestId, { status: "delivered", updatedAt: now, deliveredAt: now, deliveredBySignature });
     await ctx.db.insert("auditLogs", { userId, action: "deliver", entity: "requests", entityId: args.requestId, details: `Solicitação entregue (${inputItems.length} item(ns))`, timestamp: now });
     return args.requestId;
   },
@@ -352,5 +366,67 @@ export const pendingCount = query({
     }
     const pending = await ctx.db.query("requests").withIndex("by_requester", (q) => q.eq("requesterId", user._id)).collect();
     return pending.filter((r) => r.status === "pending").length;
+  },
+});
+
+// ─── Arquivo Histórico: delivered/cancelled requests with filters ─────────────
+export const listDelivered = query({
+  args: {
+    secretariaId: v.optional(v.id("organizations")),
+    startDate: v.optional(v.number()),
+    endDate: v.optional(v.number()),
+    serialSearch: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    let requests = await ctx.db
+      .query("requests")
+      .withIndex("by_status", (q: any) => q.eq("status", "delivered"))
+      .order("desc")
+      .take(500);
+
+    if (args.secretariaId) {
+      requests = requests.filter((r) => r.secretariaId === args.secretariaId);
+    }
+    if (args.startDate) {
+      requests = requests.filter((r) => r.deliveredAt != null && r.deliveredAt >= args.startDate!);
+    }
+    if (args.endDate) {
+      requests = requests.filter((r) => r.deliveredAt != null && r.deliveredAt <= args.endDate!);
+    }
+
+    let results = await Promise.all(requests.map(async (r) => enrichRequest(ctx, r)));
+
+    // Filter by serial number in delivered items
+    if (args.serialSearch?.trim()) {
+      const term = args.serialSearch.trim().toLowerCase();
+      results = results.filter((r) =>
+        r.items?.some((item: any) =>
+          item.deliveredSerialNumbers?.some((sn: string) => sn.toLowerCase().includes(term))
+        )
+      );
+    }
+
+    return results;
+  },
+});
+
+// ─── Historico de Consumo por organizacao ───────────────────────────────────
+export const listByOrganization = query({
+  args: { organizationId: v.id("organizations") },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    // Get all delivered requests that reference this org (as secretaria, departamento, or unidade)
+    const allDelivered = await ctx.db
+      .query("requests")
+      .withIndex("by_status", (q: any) => q.eq("status", "delivered"))
+      .order("desc")
+      .take(500);
+
+    const filtered = allDelivered.filter(
+      (r) => r.secretariaId === args.organizationId || r.departamentoId === args.organizationId || r.unidadeId === args.organizationId
+    );
+
+    return Promise.all(filtered.map(async (r) => enrichRequest(ctx, r)));
   },
 });
