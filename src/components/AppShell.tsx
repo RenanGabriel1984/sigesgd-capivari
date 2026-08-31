@@ -49,7 +49,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: "Painel", href: "/dashboard", icon: LayoutDashboard, permission: "canViewMovements" },
   { label: "Estoque", href: "/stock", icon: Warehouse, permission: "canManageStock" },
-  { label: "Catálogo", href: "/products", icon: Package, permission: "canManageProducts" },
+  { label: "Itens de Estoque", href: "/products", icon: Package, permission: "canManageProducts" },
   { label: "Categorias", href: "/categories", icon: Tags, permission: "canManageCategories" },
   { label: "Entradas", href: "/entries", icon: ShoppingCart, permission: "canCreateEntries" },
   { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests" },
