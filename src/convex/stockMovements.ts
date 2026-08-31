@@ -124,6 +124,73 @@ export const reserveStock = mutation({
   },
 });
 
+export const editEntry = mutation({
+  args: {
+    movementId: v.id("stockMovements"),
+    quantity: v.number(),
+    documentNumber: v.optional(v.string()),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    if (args.quantity <= 0) throw new Error("A quantidade deve ser maior que zero");
+    if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
+    const movement = await ctx.db.get(args.movementId);
+    if (!movement) throw new Error("Movimentação não encontrada");
+    if (movement.type !== "entry") throw new Error("Apenas entradas podem ser editadas");
+    if (movement.canceled) throw new Error("Entrada cancelada não pode ser editada");
+    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", movement.productId)).first();
+    if (!stock) throw new Error("Registro de estoque não encontrado");
+    const diff = args.quantity - movement.quantity;
+    if (diff < 0 && stock.physicalQuantity + diff < 0) {
+      throw new Error(`A redução deixaria o saldo negativo. Saldo atual: ${stock.physicalQuantity}. Redução: ${Math.abs(diff)}.`);
+    }
+    const newPhysical = stock.physicalQuantity + diff;
+    await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+    await ctx.db.patch(args.movementId, {
+      quantity: args.quantity,
+      newPhysical: newPhysical,
+      documentNumber: args.documentNumber,
+      observation: args.observation,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId, action: "update", entity: "stockMovements", entityId: args.movementId,
+      details: `Edição de entrada: quantidade ${movement.quantity} → ${args.quantity}. ${args.observation ? `Motivo: ${args.observation}` : ""}`,
+      timestamp: Date.now(),
+    });
+    return args.movementId;
+  },
+});
+
+export const reverseEntry = mutation({
+  args: {
+    movementId: v.id("stockMovements"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    if (!args.reason.trim()) throw new Error("O motivo do estorno é obrigatório");
+    const movement = await ctx.db.get(args.movementId);
+    if (!movement) throw new Error("Movimentação não encontrada");
+    if (movement.type !== "entry") throw new Error("Apenas entradas podem ser estornadas");
+    if (movement.canceled) throw new Error("Esta entrada já foi estornada");
+    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", movement.productId)).first();
+    if (!stock) throw new Error("Registro de estoque não encontrado");
+    if (stock.physicalQuantity < movement.quantity) {
+      throw new Error(`Estoque insuficiente para estorno. Saldo atual: ${stock.physicalQuantity}. Quantidade da entrada: ${movement.quantity}.`);
+    }
+    const newPhysical = stock.physicalQuantity - movement.quantity;
+    await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+    await ctx.db.patch(args.movementId, { canceled: true, canceledAt: Date.now() });
+    await ctx.db.insert("auditLogs", {
+      userId, action: "cancel", entity: "stockMovements", entityId: args.movementId,
+      details: `Estorno de entrada: ${movement.quantity} unidade(s). Motivo: ${args.reason.trim()}`,
+      timestamp: Date.now(),
+    });
+    return args.movementId;
+  },
+});
+
 export const createAdjustment = mutation({
   args: { productId: v.id("products"), newQuantity: v.number(), observation: v.string() },
   handler: async (ctx, args) => {

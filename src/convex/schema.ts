@@ -222,6 +222,8 @@ const schema = defineSchema(
       documentNumber: v.optional(v.string()),
       observation: v.optional(v.string()),
       timestamp: v.number(),
+      canceled: v.optional(v.boolean()),
+      canceledAt: v.optional(v.number()),
     }).index("by_product", ["productId"])
       .index("by_type", ["type"])
       .index("by_user", ["userId"])
