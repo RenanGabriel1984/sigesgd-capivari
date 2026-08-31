@@ -2,11 +2,22 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+
 async function requireUser(ctx: any) {
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error("Não autenticado");
   const user = await ctx.db.get(userId);
   if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
+  return { userId, user };
+}
+
+async function requireStockManagerOrAdmin(ctx: any) {
+  const { userId, user } = await requireUser(ctx);
+  const role = (user.role ?? "technician") as UserRole;
+  if (role !== "admin" && role !== "stock_manager") {
+    throw new Error("Apenas administradores e responsáveis pelo estoque podem movimentar estoque");
+  }
   return { userId, user };
 }
 
@@ -42,7 +53,7 @@ export const createEntry = mutation({
     documentNumber: v.optional(v.string()), observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireUser(ctx);
+    const { userId } = await requireStockManagerOrAdmin(ctx);
     if (args.quantity <= 0) throw new Error("A quantidade deve ser positiva");
     if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
     const product = await ctx.db.get(args.productId);
@@ -72,7 +83,7 @@ export const createExit = mutation({
     requestId: v.optional(v.id("requests")), observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireUser(ctx);
+    const { userId } = await requireStockManagerOrAdmin(ctx);
     if (args.quantity <= 0) throw new Error("A quantidade deve ser positiva");
     if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
     const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
@@ -116,7 +127,7 @@ export const reserveStock = mutation({
 export const createAdjustment = mutation({
   args: { productId: v.id("products"), newQuantity: v.number(), observation: v.string() },
   handler: async (ctx, args) => {
-    const { userId } = await requireUser(ctx);
+    const { userId } = await requireStockManagerOrAdmin(ctx);
     if (args.newQuantity < 0) throw new Error("A quantidade não pode ser negativa");
     if (!isFinite(args.newQuantity)) throw new Error("Quantidade inválida");
     const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();

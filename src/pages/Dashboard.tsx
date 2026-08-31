@@ -1,5 +1,5 @@
 import { useAuth } from "@/hooks/use-auth";
-import { useQuery } from "convex/react";
+import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { ROLE_LABELS } from "@/types/constants";
 import type { UserRole } from "@/types/constants";
-
+import { useEffect } from "react";
 const fadeIn = {
   initial: { opacity: 0, y: 12 },
   animate: { opacity: 1, y: 0 },
@@ -25,12 +25,18 @@ const fadeIn = {
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const recordLogin = useMutation(api.users.recordLogin);
   const products = useQuery(api.products.list);
   const movements = useQuery(api.stockMovements.list);
   const pendingRequests = useQuery(api.requests.pendingCount);
   const belowMin = useQuery(api.products.belowMinimum);
 
   const role = (user?.role ?? "technician") as UserRole;
+
+  // Record login timestamp on mount
+  useEffect(() => {
+    if (user?._id) recordLogin();
+  }, [user?._id]);
 
   const totalProducts = products?.length ?? 0;
   const totalStock = products?.reduce((sum, p) => sum + (p.stock?.physicalQuantity ?? 0), 0) ?? 0;
