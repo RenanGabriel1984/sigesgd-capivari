@@ -24,7 +24,7 @@ export default function Entries() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [productId, setProductId] = useState("");
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState<string>("1");
   const [supplierId, setSupplierId] = useState("");
   const [documentNumber, setDocumentNumber] = useState("");
   const [observation, setObservation] = useState("");
@@ -52,11 +52,12 @@ export default function Entries() {
   const recentEntries = movements?.filter((m) => m.type === "entry").slice(0, 50) ?? [];
 
   const handleSave = async () => {
-    if (!productId || quantity <= 0) { toast.error("Selecione um item e informe uma quantidade válida"); return; }
+    const qty = Number(quantity);
+    if (!productId || isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) { toast.error("Selecione um item e informe uma quantidade válida (número inteiro maior que zero)"); return; }
     try {
-      await createEntry({ productId: productId as any, quantity, supplierId: supplierId ? (supplierId as any) : undefined, documentNumber: documentNumber || undefined, observation: observation || undefined });
+      await createEntry({ productId: productId as any, quantity: qty, supplierId: supplierId ? (supplierId as any) : undefined, documentNumber: documentNumber || undefined, observation: observation || undefined });
       toast.success("Entrada registrada com sucesso");
-      setDialogOpen(false); setProductId(""); setQuantity(1); setSupplierId(""); setDocumentNumber(""); setObservation("");
+      setDialogOpen(false); setProductId(""); setQuantity("1"); setSupplierId(""); setDocumentNumber(""); setObservation("");
     } catch (e: any) { toast.error(e.message ?? "Erro ao registrar entrada"); }
   };
 
@@ -145,7 +146,7 @@ export default function Entries() {
               </Select>
             </div>
 
-            <div><Label>Quantidade *</Label><Input type="number" min="1" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} /></div>
+            <div><Label>Quantidade *</Label><Input type="number" inputMode="numeric" min="1" step="1" placeholder="0" value={quantity} onChange={(e) => { const v = e.target.value.replace(/^0+(?=\d)/, ""); setQuantity(v); }} onBlur={(e) => { const n = parseInt(e.target.value, 10); if (isNaN(n) || n < 1) setQuantity("1"); else setQuantity(String(n)); }} /></div>
 
             {/* Supplier selector with quick-create */}
             <div>
