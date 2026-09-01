@@ -138,6 +138,21 @@ export const listCompatibility = query({
   },
 });
 
+/** Returns all compatibility records grouped by productId — used by Requests to validate toner→printer compatibility. */
+export const listAllCompatibility = query({
+  args: {},
+  handler: async (ctx) => {
+    const all = await ctx.db.query("printerCompatibility").collect();
+    const grouped: Record<string, string[]> = {};
+    for (const c of all) {
+      const pid = c.productId as string;
+      if (!grouped[pid]) grouped[pid] = [];
+      grouped[pid].push(c.printerModel);
+    }
+    return grouped;
+  },
+});
+
 export const upsertCompatibility = mutation({
   args: {
     productId: v.id("products"),

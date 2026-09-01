@@ -75,6 +75,9 @@ export default function Requests() {
   const [osNumber, setOsNumber] = useState("");
   const [patrimony, setPatrimony] = useState("");
 
+  // ─── Toner compat data (for validation) ───
+  const allCompat = useQuery(api.printers.listAllCompatibility);
+
   // ─── Approve dialog ───
   const [approveDialog, setApproveDialog] = useState<any>(null);
   const [approveObservation, setApproveObservation] = useState("");
@@ -179,6 +182,20 @@ export default function Requests() {
         if (!item.targetPrinterId) {
           toast.error(`"${product.name}" requer seleção da impressora de destino`);
           return;
+        }
+        // Validate compatibility: check if selected printer model matches toner compat entries
+        if (allCompat) {
+          const compatModels = allCompat[item.productId];
+          if (compatModels && compatModels.length > 0) {
+            const printer = allPrinters?.find((p: any) => p._id === item.targetPrinterId);
+            if (printer) {
+              const isCompatible = compatModels.some((cm: string) => cm === printer.model || cm === `${printer.brand} ${printer.model}`);
+              if (!isCompatible) {
+                toast.error(`O toner "${product.name}" não é compatível com a impressora "${printer.name}" (${printer.brand} ${printer.model}). Modelos compatíveis: ${compatModels.join(", ")}`);
+                return;
+              }
+            }
+          }
         }
       }
     }
@@ -688,27 +705,42 @@ export default function Requests() {
                       <div className="w-20">
                         <Input type="number" min="1" value={item.quantity} onChange={(e) => updateItem(i, "quantity", Number(e.target.value))} />
                       </div>
-                      {/* Printer selector for toner items */}
-                      {allPrinters?.length ? (
-                        <div className="flex-1">
-                          <Select
-                            value={item.targetPrinterId || ""}
-                            onValueChange={(v) => updateItem(i, "targetPrinterId", v)}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Impressora (se toner)" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none">Não aplicável</SelectItem>
-                              {allPrinters.map((p: any) => (
-                                <SelectItem key={p._id} value={p._id}>
-                                  {p.name} — {p.brand} {p.model}{p.patrimony ? ` [${p.patrimony}]` : ""}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      ) : null}
+                      {/* Printer selector — only for toner/compat items */}
+                      {(() => {
+                        const product = availableProducts.find((p) => p._id === item.productId);
+                        const isToner = !!(product as any)?.hasCompat;
+                        if (!isToner || !allPrinters?.length) return null;
+                        const compatModels = allCompat?.[item.productId] ?? [];
+                        return (
+                          <div className="flex-1 space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <Printer className="h-3 w-3 text-blue-600" />
+                              <span className="text-xs text-blue-600 font-medium">Impressora de Destino *</span>
+                            </div>
+                            <Select
+                              value={item.targetPrinterId || ""}
+                              onValueChange={(v) => updateItem(i, "targetPrinterId", v)}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione a impressora" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none">Selecione...</SelectItem>
+                                {allPrinters.map((p: any) => (
+                                  <SelectItem key={p._id} value={p._id}>
+                                    {p.name} — {p.brand} {p.model}{p.patrimony ? ` [${p.patrimony}]` : ""}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {compatModels.length > 0 && (
+                              <p className="text-[10px] text-muted-foreground">
+                                Modelos compatíveis: {compatModels.join(", ")}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
                       {items.length > 1 && (
                         <Button variant="ghost" size="icon" onClick={() => removeItem(i)} className="shrink-0 mb-0.5"><X className="h-4 w-4" /></Button>
                       )}
