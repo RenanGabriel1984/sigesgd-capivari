@@ -31,7 +31,7 @@ import {
   ArrowLeftRight,
   Building2,
   Search,
-  Printer,
+  AlertTriangle,
 } from "lucide-react";
 import { UNIT_LABELS } from "@/types/constants";
 import { toast } from "sonner";

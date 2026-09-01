@@ -40,10 +40,13 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     const products = await ctx.db.query("products").collect();
+    // Pre-fetch all compatibility records to flag toner products
+    const allCompat = await ctx.db.query("printerCompatibility").collect();
+    const compatProductIds = new Set(allCompat.map((c: any) => c.productId));
     return Promise.all(products.map(async (p: any) => {
       const category = await ctx.db.get(p.categoryId);
       const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).first();
-      return { ...p, category, stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 } };
+      return { ...p, category, stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 }, hasCompat: compatProductIds.has(p._id) };
     }));
   },
 });
@@ -52,10 +55,13 @@ export const listActive = query({
   args: {},
   handler: async (ctx) => {
     const products = await ctx.db.query("products").withIndex("by_active", (q) => q.eq("active", true)).collect();
+    // Pre-fetch all compatibility records to flag toner products
+    const allCompat = await ctx.db.query("printerCompatibility").collect();
+    const compatProductIds = new Set(allCompat.map((c: any) => c.productId));
     return Promise.all(products.map(async (p: any) => {
       const category = await ctx.db.get(p.categoryId);
       const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).first();
-      return { ...p, category, stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 } };
+      return { ...p, category, stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 }, hasCompat: compatProductIds.has(p._id) };
     }));
   },
 });

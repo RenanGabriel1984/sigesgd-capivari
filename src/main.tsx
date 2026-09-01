@@ -23,6 +23,7 @@ const Movements = lazy(() => import("./pages/Movements.tsx"));
 const Organization = lazy(() => import("./pages/Organization.tsx"));
 const UsersPage = lazy(() => import("./pages/Users.tsx"));
 const Suppliers = lazy(() => import("./pages/Suppliers.tsx"));
+const PrintersPage = lazy(() => import("./pages/Printers.tsx"));
 const Reports = lazy(() => import("./pages/Reports.tsx"));
 const Audit = lazy(() => import("./pages/Audit.tsx"));
 const Settings = lazy(() => import("./pages/Settings.tsx"));
@@ -115,6 +116,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/organization" element={<RequireAuth><Organization /></RequireAuth>} />
               <Route path="/users" element={<RequireAuth><UsersPage /></RequireAuth>} />
               <Route path="/suppliers" element={<RequireAuth><Suppliers /></RequireAuth>} />
+              <Route path="/printers" element={<RequireAuth><PrintersPage /></RequireAuth>} />
               <Route path="/reports" element={<RequireAuth><Reports /></RequireAuth>} />
               <Route path="/audit" element={<RequireAuth><Audit /></RequireAuth>} />
               <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />

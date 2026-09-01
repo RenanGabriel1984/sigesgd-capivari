@@ -22,6 +22,7 @@ import {
   FileText,
   BarChart3,
   Download,
+  Printer,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -59,6 +60,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Organização", href: "/organization", icon: Building2, permission: "canManageOrg" },
   { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },
   { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
+  { label: "Impressoras", href: "/printers", icon: Printer, permission: "canManageProducts" },
   { label: "Relatórios", href: "/reports", icon: BarChart3, permission: "canViewMovements" },
   { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
   { label: "Configurações", href: "/settings", icon: Settings, permission: "canManageSettings" },
