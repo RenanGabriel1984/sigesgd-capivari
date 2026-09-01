@@ -40,6 +40,11 @@ const ALL_ACTIONS = [
   "password_reset",
   "reserve",
   "toner_update",
+  "confirm_entry",
+  "reverse_entry",
+  "open_inventory",
+  "count_inventory",
+  "close_inventory",
 ] as const;
 
 const ENTITY_OPTIONS = [
@@ -51,6 +56,10 @@ const ENTITY_OPTIONS = [
   { value: "organizations", label: "Organizações" },
   { value: "categories", label: "Categorias" },
   { value: "suppliers", label: "Fornecedores" },
+  { value: "entries", label: "Entradas" },
+  { value: "lots", label: "Lotes" },
+  { value: "inventories", label: "Inventários" },
+  { value: "storageLocations", label: "Locais de Armazenamento" },
 ];
 
 export default function Audit() {

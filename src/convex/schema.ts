@@ -89,6 +89,11 @@ export const AUDIT_ACTIONS = {
   PASSWORD_RESET: "password_reset",
   RESERVE: "reserve",
   TONER_UPDATE: "toner_update",
+  CONFIRM_ENTRY: "confirm_entry",
+  REVERSE_ENTRY: "reverse_entry",
+  OPEN_INVENTORY: "open_inventory",
+  COUNT_INVENTORY: "count_inventory",
+  CLOSE_INVENTORY: "close_inventory",
 } as const;
 
 export const auditActionValidator = v.union(
@@ -107,6 +112,11 @@ export const auditActionValidator = v.union(
   v.literal(AUDIT_ACTIONS.PASSWORD_RESET),
   v.literal(AUDIT_ACTIONS.RESERVE),
   v.literal(AUDIT_ACTIONS.TONER_UPDATE),
+  v.literal(AUDIT_ACTIONS.CONFIRM_ENTRY),
+  v.literal(AUDIT_ACTIONS.REVERSE_ENTRY),
+  v.literal(AUDIT_ACTIONS.OPEN_INVENTORY),
+  v.literal(AUDIT_ACTIONS.COUNT_INVENTORY),
+  v.literal(AUDIT_ACTIONS.CLOSE_INVENTORY),
 );
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
@@ -223,6 +233,8 @@ const schema = defineSchema(
       userId: v.id("users"),
       supplierId: v.optional(v.id("suppliers")),
       requestId: v.optional(v.id("requests")),
+      entryId: v.optional(v.id("entries")),
+      lotId: v.optional(v.string()),
       documentNumber: v.optional(v.string()),
       observation: v.optional(v.string()),
       timestamp: v.number(),
@@ -293,6 +305,109 @@ const schema = defineSchema(
       deliveredSerialNumbers: v.optional(v.array(v.string())),
       targetPrinterId: v.optional(v.id("printers")),
     }).index("by_request", ["requestId"])
+      .index("by_product", ["productId"]),
+
+    // ── Entries (Entradas de Estoque) ──
+    entries: defineTable({
+      entryNumber: v.string(),
+      receivedAt: v.number(),
+      originType: v.union(
+        v.literal("purchase"), v.literal("donation"), v.literal("transfer"),
+        v.literal("return"), v.literal("initial_inventory"), v.literal("other")
+      ),
+      supplierId: v.optional(v.id("suppliers")),
+      invoiceNumber: v.optional(v.string()),
+      invoiceDate: v.optional(v.string()),
+      purchaseAuthorizationNumber: v.optional(v.string()),
+      processNumber: v.optional(v.string()),
+      contractNumber: v.optional(v.string()),
+      responsibleUserId: v.id("users"),
+      observation: v.optional(v.string()),
+      documentStorageId: v.optional(v.string()),
+      status: v.union(
+        v.literal("draft"), v.literal("confirmed"), v.literal("reversed")
+      ),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_status", ["status"])
+      .index("by_number", ["entryNumber"])
+      .index("by_date", ["receivedAt"]),
+
+    // ── Entry Items (Itens da Entrada) ──
+    entryItems: defineTable({
+      entryId: v.id("entries"),
+      productId: v.id("products"),
+      quantity: v.number(),
+      unitOfMeasure: v.string(),
+      unitCost: v.optional(v.number()),
+      totalCost: v.optional(v.number()),
+      brand: v.optional(v.string()),
+      model: v.optional(v.string()),
+      specification: v.optional(v.string()),
+      lotId: v.optional(v.string()),
+      locationId: v.optional(v.id("storageLocations")),
+      photoStorageId: v.optional(v.string()),
+      observation: v.optional(v.string()),
+    }).index("by_entry", ["entryId"])
+      .index("by_product", ["productId"]),
+
+    // ── Lots (Lotes de Entrada) ──
+    lots: defineTable({
+      lotNumber: v.string(),
+      productId: v.id("products"),
+      entryId: v.id("entries"),
+      brand: v.optional(v.string()),
+      model: v.optional(v.string()),
+      specification: v.optional(v.string()),
+      quantityReceived: v.number(),
+      quantityAvailable: v.number(),
+      unitCost: v.optional(v.number()),
+      receivedAt: v.number(),
+      supplierId: v.optional(v.id("suppliers")),
+      invoiceNumber: v.optional(v.string()),
+      purchaseAuthorizationNumber: v.optional(v.string()),
+      photoStorageId: v.optional(v.string()),
+      active: v.boolean(),
+      observation: v.optional(v.string()),
+    }).index("by_product", ["productId"])
+      .index("by_entry", ["entryId"])
+      .index("by_number", ["lotNumber"])
+      .index("by_active", ["active"]),
+
+    // ── Storage Locations (Locais de Armazenamento) ──
+    storageLocations: defineTable({
+      name: v.string(),
+      description: v.optional(v.string()),
+      active: v.boolean(),
+    }).index("by_active", ["active"]),
+
+    // ── Inventories (Inventários) ──
+    inventories: defineTable({
+      inventoryNumber: v.string(),
+      date: v.number(),
+      responsibleUserId: v.id("users"),
+      status: v.union(
+        v.literal("draft"), v.literal("counting"), v.literal("review"),
+        v.literal("closed"), v.literal("cancelled")
+      ),
+      observation: v.optional(v.string()),
+      closedAt: v.optional(v.number()),
+      closedByUserId: v.optional(v.id("users")),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_status", ["status"])
+      .index("by_date", ["date"]),
+
+    // ── Inventory Counts (Contagens do Inventário) ──
+    inventoryCounts: defineTable({
+      inventoryId: v.id("inventories"),
+      productId: v.id("products"),
+      lotId: v.optional(v.string()),
+      systemQuantity: v.number(),
+      countedQuantity: v.optional(v.number()),
+      difference: v.optional(v.number()),
+      observation: v.optional(v.string()),
+    }).index("by_inventory", ["inventoryId"])
       .index("by_product", ["productId"]),
 
     // ── Audit Log ──

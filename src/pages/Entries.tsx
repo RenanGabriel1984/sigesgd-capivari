@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -7,321 +7,601 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Plus, ShoppingCart, ExternalLink, MoreHorizontal, Edit2, RotateCcw, XCircle } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Plus, ShoppingCart, CheckCircle, RotateCcw, XCircle, Eye, Camera, Trash2, ExternalLink, MoreHorizontal } from "lucide-react";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
 import { toast } from "sonner";
 
+const ORIGIN_LABELS: Record<string, string> = {
+  purchase: "Compra",
+  donation: "Doação",
+  transfer: "Transferência",
+  return: "Devolução",
+  initial_inventory: "Inventário Inicial",
+  other: "Outro",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  draft: "Rascunho",
+  confirmed: "Confirmada",
+  reversed: "Estornada",
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  draft: "text-amber-600 bg-amber-50",
+  confirmed: "text-emerald-600 bg-emerald-50",
+  reversed: "text-red-600 bg-red-50",
+};
+
+type EntryItem = {
+  productId: string;
+  quantity: string;
+  unitOfMeasure: string;
+  unitCost: string;
+  brand: string;
+  model: string;
+  specification: string;
+  locationId: string;
+  observation: string;
+};
+
+const EMPTY_ITEM: EntryItem = {
+  productId: "",
+  quantity: "1",
+  unitOfMeasure: "un",
+  unitCost: "",
+  brand: "",
+  model: "",
+  specification: "",
+  locationId: "",
+  observation: "",
+};
+
 export default function Entries() {
+  const entries = useQuery(api.entries.list);
   const products = useQuery(api.products.listActive);
   const suppliers = useQuery(api.suppliers.listActive);
+  const locations = useQuery(api.storageLocations.listActive);
   const categories = useQuery(api.categories.listActive);
-  const movements = useQuery(api.stockMovements.list);
-  const createEntry = useMutation(api.stockMovements.createEntry);
-  const editEntry = useMutation(api.stockMovements.editEntry);
-  const reverseEntry = useMutation(api.stockMovements.reverseEntry);
-  const createProduct = useMutation(api.products.create);
-  const createSupplier = useMutation(api.suppliers.create);
+  const createEntry = useMutation(api.entries.create);
+  const confirmEntry = useMutation(api.entries.confirm);
+  const reverseEntry = useMutation(api.entries.reverse);
 
-  // ─── New Entry dialog ───
+  const [tab, setTab] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [productId, setProductId] = useState("");
-  const [quantity, setQuantity] = useState<string>("1");
-  const [supplierId, setSupplierId] = useState("");
-  const [documentNumber, setDocumentNumber] = useState("");
-  const [observation, setObservation] = useState("");
+  const [viewId, setViewId] = useState<string | null>(null);
+  const [reverseModalOpen, setReverseModalOpen] = useState(false);
+  const [reverseId, setReverseId] = useState<string | null>(null);
+  const [reverseReason, setReverseReason] = useState("");
 
-  // ─── Quick-create product modal ───
+  // New entry form state
+  const [receivedAt, setReceivedAt] = useState(() => new Date().toISOString().slice(0, 10));
+  const [originType, setOriginType] = useState("purchase");
+  const [supplierId, setSupplierId] = useState("");
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState("");
+  const [purchaseAuthNumber, setPurchaseAuthNumber] = useState("");
+  const [processNumber, setProcessNumber] = useState("");
+  const [contractNumber, setContractNumber] = useState("");
+  const [entryObservation, setEntryObservation] = useState("");
+  const [items, setItems] = useState<EntryItem[]>([{ ...EMPTY_ITEM }]);
+  const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+
+  // Quick-create product
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [newProductName, setNewProductName] = useState("");
   const [newProductCategoryId, setNewProductCategoryId] = useState("");
   const [newProductUnit, setNewProductUnit] = useState("un");
-  const [newProductDescription, setNewProductDescription] = useState("");
   const [newProductBrand, setNewProductBrand] = useState("");
   const [newProductModel, setNewProductModel] = useState("");
-  const [newProductSpec, setNewProductSpec] = useState("");
-  const [savingProduct, setSavingProduct] = useState(false);
+  const createProduct = useMutation(api.products.create);
 
-  // ─── Quick-create supplier modal ───
-  const [supplierModalOpen, setSupplierModalOpen] = useState(false);
-  const [newSupplierName, setNewSupplierName] = useState("");
-  const [newSupplierTrade, setNewSupplierTrade] = useState("");
-  const [newSupplierCnpj, setNewSupplierCnpj] = useState("");
-  const [newSupplierPhone, setNewSupplierPhone] = useState("");
-  const [newSupplierEmail, setNewSupplierEmail] = useState("");
-  const [savingSupplier, setSavingSupplier] = useState(false);
+  const viewEntry = entries?.find((e) => e._id === viewId);
 
-  // ─── Edit entry modal ───
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [editMovementId, setEditMovementId] = useState<string | null>(null);
-  const [editQuantity, setEditQuantity] = useState<string>("");
-  const [editDocumentNumber, setEditDocumentNumber] = useState("");
-  const [editObservation, setEditObservation] = useState("");
-  const [savingEdit, setSavingEdit] = useState(false);
+  const filteredEntries = entries?.filter((e) => {
+    if (tab === "all") return true;
+    if (tab === "draft") return e.status === "draft";
+    if (tab === "confirmed") return e.status === "confirmed";
+    if (tab === "reversed") return e.status === "reversed";
+    return true;
+  });
 
-  // ─── Reverse entry modal ───
-  const [reverseModalOpen, setReverseModalOpen] = useState(false);
-  const [reverseMovementId, setReverseMovementId] = useState<string | null>(null);
-  const [reverseReason, setReverseReason] = useState("");
-  const [savingReverse, setSavingReverse] = useState(false);
+  // ─── Item management ───
+  const addItem = () => setItems([...items, { ...EMPTY_ITEM }]);
+  const removeItem = (idx: number) => setItems(items.filter((_, i) => i !== idx));
+  const updateItem = (idx: number, field: keyof EntryItem, value: string) => {
+    const newItems = [...items];
+    (newItems[idx] as any)[field] = value;
+    // Auto-fill unit of measure from product
+    if (field === "productId" && value) {
+      const product = products?.find((p) => p._id === value);
+      if (product) {
+        newItems[idx].unitOfMeasure = product.unitOfMeasure;
+        newItems[idx].brand = product.brand ?? "";
+        newItems[idx].model = product.model ?? "";
+      }
+    }
+    setItems(newItems);
+  };
 
-  const recentEntries = movements?.filter((m) => m.type === "entry").slice(0, 50) ?? [];
+  const resetForm = () => {
+    setReceivedAt(new Date().toISOString().slice(0, 10));
+    setOriginType("purchase");
+    setSupplierId("");
+    setInvoiceNumber("");
+    setInvoiceDate("");
+    setPurchaseAuthNumber("");
+    setProcessNumber("");
+    setContractNumber("");
+    setEntryObservation("");
+    setItems([{ ...EMPTY_ITEM }]);
+  };
 
-  // ─── Handlers ───
-
-  const handleSave = async () => {
-    const qty = Number(quantity);
-    if (!productId || isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) {
-      toast.error("Selecione um item e informe uma quantidade válida (número inteiro maior que zero)");
+  // ─── Create draft entry ───
+  const handleCreate = async () => {
+    const validItems = items.filter((i) => i.productId && Number(i.quantity) > 0);
+    if (validItems.length === 0) {
+      toast.error("Adicione pelo menos um item válido");
       return;
     }
+
+    setSaving(true);
     try {
+      const receivedAtMs = new Date(receivedAt + "T12:00:00").getTime();
       await createEntry({
-        productId: productId as any,
-        quantity: qty,
+        receivedAt: receivedAtMs,
+        originType: originType as any,
         supplierId: supplierId ? (supplierId as any) : undefined,
-        documentNumber: documentNumber || undefined,
-        observation: observation || undefined,
+        invoiceNumber: invoiceNumber || undefined,
+        invoiceDate: invoiceDate || undefined,
+        purchaseAuthorizationNumber: purchaseAuthNumber || undefined,
+        processNumber: processNumber || undefined,
+        contractNumber: contractNumber || undefined,
+        observation: entryObservation || undefined,
+        items: validItems.map((i) => ({
+          productId: i.productId as any,
+          quantity: Number(i.quantity),
+          unitOfMeasure: i.unitOfMeasure,
+          unitCost: i.unitCost ? Number(i.unitCost) : undefined,
+          brand: i.brand || undefined,
+          model: i.model || undefined,
+          specification: i.specification || undefined,
+          locationId: i.locationId ? (i.locationId as any) : undefined,
+          observation: i.observation || undefined,
+        })),
       });
-      toast.success("Entrada registrada com sucesso");
+      toast.success("Entrada criada como rascunho");
       setDialogOpen(false);
-      setProductId(""); setQuantity("1"); setSupplierId(""); setDocumentNumber(""); setObservation("");
-    } catch (e: any) { toast.error(e.message ?? "Erro ao registrar entrada"); }
+      resetForm();
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao criar entrada");
+    }
+    setSaving(false);
   };
 
-  const openEditModal = (m: any) => {
-    setEditMovementId(m._id);
-    setEditQuantity(String(m.quantity));
-    setEditDocumentNumber(m.documentNumber ?? "");
-    setEditObservation(m.observation ?? "");
-    setEditModalOpen(true);
+  // ─── Confirm entry ───
+  const handleConfirm = async (entryId: string) => {
+    setConfirming(true);
+    try {
+      await confirmEntry({ entryId: entryId as any });
+      toast.success("Entrada confirmada — estoque atualizado");
+      setViewId(null);
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao confirmar entrada");
+    }
+    setConfirming(false);
   };
 
-  const handleEditSave = async () => {
-    if (!editMovementId) return;
-    const qty = Number(editQuantity);
-    if (isNaN(qty) || qty <= 0 || !Number.isInteger(qty)) {
-      toast.error("A quantidade deve ser um número inteiro maior que zero");
+  // ─── Reverse entry ───
+  const handleReverse = async () => {
+    if (!reverseId || !reverseReason.trim()) {
+      toast.error("Motivo do estorno é obrigatório");
       return;
     }
-    setSavingEdit(true);
     try {
-      await editEntry({
-        movementId: editMovementId as any,
-        quantity: qty,
-        documentNumber: editDocumentNumber || undefined,
-        observation: editObservation || undefined,
-      });
-      toast.success("Entrada atualizada com sucesso");
-      setEditModalOpen(false);
-      setEditMovementId(null);
-    } catch (e: any) { toast.error(e.message ?? "Erro ao editar entrada"); }
-    setSavingEdit(false);
-  };
-
-  const openReverseModal = (m: any) => {
-    setReverseMovementId(m._id);
-    setReverseReason("");
-    setReverseModalOpen(true);
-  };
-
-  const handleReverseSave = async () => {
-    if (!reverseMovementId) return;
-    if (!reverseReason.trim()) {
-      toast.error("O motivo do estorno é obrigatório");
-      return;
-    }
-    setSavingReverse(true);
-    try {
-      await reverseEntry({
-        movementId: reverseMovementId as any,
-        reason: reverseReason.trim(),
-      });
+      await reverseEntry({ entryId: reverseId as any, reason: reverseReason.trim() });
       toast.success("Entrada estornada com sucesso");
       setReverseModalOpen(false);
-      setReverseMovementId(null);
+      setReverseId(null);
       setReverseReason("");
-    } catch (e: any) { toast.error(e.message ?? "Erro ao estornar entrada"); }
-    setSavingReverse(false);
+      setViewId(null);
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao estornar entrada");
+    }
   };
 
+  // ─── Quick create product ───
   const handleQuickCreateProduct = async () => {
-    if (!newProductName.trim()) { toast.error("Nome do item é obrigatório"); return; }
+    if (!newProductName.trim()) { toast.error("Nome é obrigatório"); return; }
     if (!newProductCategoryId) { toast.error("Selecione uma categoria"); return; }
-    setSavingProduct(true);
     try {
       const newId = await createProduct({
         name: newProductName.trim(),
         categoryId: newProductCategoryId as any,
         unitOfMeasure: newProductUnit,
-        description: newProductDescription || undefined,
         brand: newProductBrand || undefined,
         model: newProductModel || undefined,
-        specification: newProductSpec || undefined,
         minimumStock: 0, idealStock: 0, maximumStock: 0,
       });
-      setProductId(newId as string);
+      const newItems = [...items];
+      newItems[items.length - 1].productId = newId as string;
+      setItems(newItems);
       setProductModalOpen(false);
       setNewProductName(""); setNewProductCategoryId(""); setNewProductUnit("un");
-      setNewProductDescription(""); setNewProductBrand(""); setNewProductModel(""); setNewProductSpec("");
+      setNewProductBrand(""); setNewProductModel("");
       toast.success("Item criado e selecionado");
-    } catch (e: any) { toast.error(e.message ?? "Erro ao criar item"); }
-    setSavingProduct(false);
-  };
-
-  const handleQuickCreateSupplier = async () => {
-    if (!newSupplierName.trim()) { toast.error("Razão social é obrigatória"); return; }
-    setSavingSupplier(true);
-    try {
-      const newId = await createSupplier({
-        legalName: newSupplierName.trim(),
-        tradeName: newSupplierTrade || undefined,
-        cnpj: newSupplierCnpj || undefined,
-        phone: newSupplierPhone || undefined,
-        email: newSupplierEmail || undefined,
-      });
-      setSupplierId(newId as string);
-      setSupplierModalOpen(false);
-      setNewSupplierName(""); setNewSupplierTrade(""); setNewSupplierCnpj(""); setNewSupplierPhone(""); setNewSupplierEmail("");
-      toast.success("Fornecedor criado e selecionado");
-    } catch (e: any) { toast.error(e.message ?? "Erro ao criar fornecedor"); }
-    setSavingSupplier(false);
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao criar item");
+    }
   };
 
   return (
     <AppShell>
       <div className="space-y-6 max-w-7xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div><h1 className="text-2xl font-bold tracking-tight">Entradas</h1><p className="text-sm text-muted-foreground">Registrar entradas de estoque</p></div>
-          <Button onClick={() => setDialogOpen(true)} className="gap-2"><Plus className="h-4 w-4" /> Nova Entrada</Button>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Entradas</h1>
+            <p className="text-sm text-muted-foreground">
+              Entradas de estoque com rastreabilidade por lote — {entries?.length ?? 0} entrada(s)
+            </p>
+          </div>
+          <Button onClick={() => { resetForm(); setDialogOpen(true); }} className="gap-2">
+            <Plus className="h-4 w-4" /> Nova Entrada
+          </Button>
         </div>
 
-        <Card className="border-border/50">
-          <CardHeader className="pb-3"><CardTitle className="text-base">Últimas Entradas</CardTitle></CardHeader>
-          <CardContent>
-            {recentEntries.length === 0 ? (
-              <div className="text-center py-8"><ShoppingCart className="h-8 w-8 mx-auto text-muted-foreground mb-2" /><p className="text-muted-foreground text-sm">Nenhuma entrada registrada</p></div>
-            ) : (
-              <div className="space-y-3">
-                {recentEntries.map((m) => (
-                  <div key={m._id} className={`flex items-center justify-between py-2 border-b border-border/30 last:border-0 ${m.canceled ? "opacity-50" : ""}`}>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-sm truncate">{m.product?.name ?? "Item"}</p>
-                        {m.canceled && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-600 shrink-0">
-                            <XCircle className="h-3 w-3" /> Estornada
-                          </span>
-                        )}
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList>
+            <TabsTrigger value="all">Todas</TabsTrigger>
+            <TabsTrigger value="draft">Rascunho</TabsTrigger>
+            <TabsTrigger value="confirmed">Confirmadas</TabsTrigger>
+            <TabsTrigger value="reversed">Estornadas</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {filteredEntries?.length === 0 ? (
+          <Card className="border-border/50">
+            <CardContent className="py-16 text-center">
+              <ShoppingCart className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+              <p className="text-muted-foreground">
+                {tab === "all" ? "Nenhuma entrada registrada" : "Nenhuma entrada neste status"}
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {filteredEntries?.map((entry) => (
+              <Card key={entry._id} className="border-border/50">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-sm">{entry.entryNumber}</h3>
+                          <Badge className={`text-[10px] ${STATUS_COLORS[entry.status]}`}>
+                            {STATUS_LABELS[entry.status]}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {entry.responsible?.name ?? "—"} • {new Date(entry.receivedAt).toLocaleDateString("pt-BR")} • {ORIGIN_LABELS[entry.originType]}
+                        </p>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {m.user?.name ?? "Usuário"}{m.supplier ? ` • ${m.supplier.legalName}` : ""}{m.documentNumber ? ` • Doc: ${m.documentNumber}` : ""}
-                      </p>
-                      {m.observation && <p className="text-[10px] text-muted-foreground italic mt-0.5">"{m.observation}"</p>}
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div className="text-right">
-                        <p className={`font-mono font-semibold ${m.canceled ? "text-muted-foreground line-through" : "text-emerald-600"}`}>{m.canceled ? "+" : "+"}{m.quantity}</p>
-                        <p className="text-[10px] text-muted-foreground">{new Date(m.timestamp).toLocaleDateString("pt-BR")}</p>
-                      </div>
-                      {!m.canceled && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => openEditModal(m)}>
-                              <Edit2 className="mr-2 h-4 w-4" /> Editar Entrada
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => openReverseModal(m)} className="text-destructive focus:text-destructive">
-                              <RotateCcw className="mr-2 h-4 w-4" /> Estornar Entrada
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => setViewId(entry._id)}>
+                        <Eye className="h-3.5 w-3.5" /> Detalhes
+                      </Button>
+                      {entry.status === "draft" && (
+                        <Button size="sm" className="gap-1" onClick={() => handleConfirm(entry._id)} disabled={confirming}>
+                          <CheckCircle className="h-3.5 w-3.5" /> {confirming ? "Confirmando..." : "Confirmar"}
+                        </Button>
+                      )}
+                      {entry.status === "confirmed" && (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="gap-1"
+                          onClick={() => { setReverseId(entry._id); setReverseReason(""); setReverseModalOpen(true); }}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" /> Estornar
+                        </Button>
                       )}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+
+                  {/* Summary of items */}
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {entry.items?.slice(0, 5).map((item: any) => (
+                      <Badge key={item._id} variant="secondary" className="text-[10px]">
+                        {item.product?.name ?? "Item"}: +{item.quantity}
+                      </Badge>
+                    ))}
+                    {(entry.items?.length ?? 0) > 5 && (
+                      <Badge variant="secondary" className="text-[10px]">+{(entry.items?.length ?? 0) - 5} mais</Badge>
+                    )}
+                  </div>
+
+                  <div className="flex gap-4 text-[10px] text-muted-foreground">
+                    {entry.supplier && <span>Fornecedor: {entry.supplier.legalName}</span>}
+                    {entry.invoiceNumber && <span>NF: {entry.invoiceNumber}</span>}
+                    {entry.purchaseAuthorizationNumber && <span>AF: {entry.purchaseAuthorizationNumber}</span>}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* ═══ Nova Entrada Dialog ═══ */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Nova Entrada</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <Label>Item do Estoque *</Label>
-                <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs gap-1 text-primary" onClick={() => setProductModalOpen(true)}>
-                  <Plus className="h-3 w-3" /> Criar Novo Item
-                </Button>
+      {/* ═══ Detail Dialog ═══ */}
+      <Dialog open={!!viewId} onOpenChange={() => setViewId(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{viewEntry?.entryNumber ?? "Entrada"}</DialogTitle>
+          </DialogHeader>
+          {viewEntry && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div><span className="text-muted-foreground">Status:</span> <Badge className={`text-[10px] ${STATUS_COLORS[viewEntry.status]}`}>{STATUS_LABELS[viewEntry.status]}</Badge></div>
+                <div><span className="text-muted-foreground">Origem:</span> {ORIGIN_LABELS[viewEntry.originType]}</div>
+                <div><span className="text-muted-foreground">Recebido:</span> {new Date(viewEntry.receivedAt).toLocaleDateString("pt-BR")}</div>
+                <div><span className="text-muted-foreground">Responsável:</span> {viewEntry.responsible?.name ?? "—"}</div>
+                {viewEntry.supplier && <div><span className="text-muted-foreground">Fornecedor:</span> {viewEntry.supplier.legalName}</div>}
+                {viewEntry.invoiceNumber && <div><span className="text-muted-foreground">NF:</span> {viewEntry.invoiceNumber}</div>}
+                {viewEntry.invoiceDate && <div><span className="text-muted-foreground">Data NF:</span> {viewEntry.invoiceDate}</div>}
+                {viewEntry.purchaseAuthorizationNumber && <div><span className="text-muted-foreground">AF:</span> {viewEntry.purchaseAuthorizationNumber}</div>}
+                {viewEntry.processNumber && <div><span className="text-muted-foreground">Processo:</span> {viewEntry.processNumber}</div>}
+                {viewEntry.contractNumber && <div><span className="text-muted-foreground">Contrato:</span> {viewEntry.contractNumber}</div>}
               </div>
-              <Select value={productId} onValueChange={setProductId}>
-                <SelectTrigger><SelectValue placeholder="Selecionar item" /></SelectTrigger>
-                <SelectContent>{products?.map((p) => (<SelectItem key={p._id} value={p._id}>{p.name}{p.brand ? ` — ${p.brand}` : ""}{p.internalCode ? ` (${p.internalCode})` : ""}</SelectItem>))}</SelectContent>
-              </Select>
+
+              {viewEntry.observation && (
+                <div className="text-sm"><span className="text-muted-foreground">Observação:</span> {viewEntry.observation}</div>
+              )}
+
+              <div>
+                <h4 className="font-medium text-sm mb-2">Itens da Entrada</h4>
+                <div className="border rounded-lg overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="text-xs">Produto</TableHead>
+                        <TableHead className="text-xs text-center">Qtd</TableHead>
+                        <TableHead className="text-xs">UM</TableHead>
+                        <TableHead className="text-xs">Marca/Modelo</TableHead>
+                        <TableHead className="text-xs">Custo Unit.</TableHead>
+                        <TableHead className="text-xs">Local</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {viewEntry.items?.map((item: any) => (
+                        <TableRow key={item._id}>
+                          <TableCell className="text-sm font-medium">{item.product?.name ?? "—"}</TableCell>
+                          <TableCell className="text-center font-mono">{item.quantity}</TableCell>
+                          <TableCell className="text-xs">{item.unitOfMeasure}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{item.brand ?? "—"} {item.model ? `/ ${item.model}` : ""}</TableCell>
+                          <TableCell className="text-xs">{item.unitCost != null ? `R$ ${item.unitCost.toFixed(2)}` : "—"}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{item.location?.name ?? "—"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+
+              {viewEntry.lots && viewEntry.lots.length > 0 && (
+                <div>
+                  <h4 className="font-medium text-sm mb-2">Lotes Gerados</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {viewEntry.lots?.map((lot: any) => (
+                      <Badge key={lot._id} variant={lot.active ? "default" : "secondary"} className="text-[10px] font-mono">
+                        {lot.lotNumber} — {lot.quantityAvailable}/{lot.quantityReceived} disp.
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ New Entry Dialog ═══ */}
+      <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Nova Entrada de Estoque</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Data de Recebimento *</Label>
+                <Input type="date" value={receivedAt} onChange={(e) => setReceivedAt(e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label>Origem *</Label>
+                <Select value={originType} onValueChange={setOriginType}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(ORIGIN_LABELS).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            <div><Label>Quantidade *</Label><Input type="number" inputMode="numeric" min="1" step="1" placeholder="0" value={quantity} onChange={(e) => { const v = e.target.value.replace(/^0+(?=\d)/, ""); setQuantity(v); }} onBlur={(e) => { const n = parseInt(e.target.value, 10); if (isNaN(n) || n < 1) setQuantity("1"); else setQuantity(String(n)); }} /></div>
-
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
                 <Label>Fornecedor</Label>
-                <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs gap-1 text-primary" onClick={() => setSupplierModalOpen(true)}>
-                  <Plus className="h-3 w-3" /> Criar Novo Fornecedor
-                </Button>
+                <Select value={supplierId} onValueChange={setSupplierId}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Opcional" /></SelectTrigger>
+                  <SelectContent>
+                    {suppliers?.map((s) => (
+                      <SelectItem key={s._id} value={s._id}>{s.legalName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <Select value={supplierId} onValueChange={setSupplierId}>
-                <SelectTrigger><SelectValue placeholder="Nenhum (doação, transferência interna, etc.)" /></SelectTrigger>
-                <SelectContent>{suppliers?.map((s) => (<SelectItem key={s._id} value={s._id}>{s.legalName}</SelectItem>))}</SelectContent>
-              </Select>
-              <p className="text-[10px] text-muted-foreground mt-1">Opcional — utilize para doações, transferências internas ou itens sem nota fiscal.</p>
+              <div>
+                <Label>Nº Nota Fiscal</Label>
+                <Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="Opcional" className="mt-1" />
+              </div>
             </div>
 
-            <div><Label>Número do Documento</Label><Input value={documentNumber} onChange={(e) => setDocumentNumber(e.target.value)} placeholder="NF, OS, etc." /></div>
-            <div><Label>Observação</Label><Textarea value={observation} onChange={(e) => setObservation(e.target.value)} rows={2} /></div>
-          </div>
-          <DialogFooter><Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button><Button onClick={handleSave}>Registrar Entrada</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <Label>Data NF</Label>
+                <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label>Nº Autorização de Fornecimento</Label>
+                <Input value={purchaseAuthNumber} onChange={(e) => setPurchaseAuthNumber(e.target.value)} placeholder="Opcional" className="mt-1" />
+              </div>
+              <div>
+                <Label>Nº Processo</Label>
+                <Input value={processNumber} onChange={(e) => setProcessNumber(e.target.value)} placeholder="Opcional" className="mt-1" />
+              </div>
+            </div>
 
-      {/* ═══ Edit Entry Modal ═══ */}
-      <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Editar Entrada</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div><Label>Quantidade *</Label><Input type="number" inputMode="numeric" min="1" step="1" placeholder="0" value={editQuantity} onChange={(e) => { const v = e.target.value.replace(/^0+(?=\d)/, ""); setEditQuantity(v); }} onBlur={(e) => { const n = parseInt(e.target.value, 10); if (isNaN(n) || n < 1) setEditQuantity("1"); else setEditQuantity(String(n)); }} /></div>
-            <div><Label>Número do Documento</Label><Input value={editDocumentNumber} onChange={(e) => setEditDocumentNumber(e.target.value)} placeholder="NF, OS, etc." /></div>
-            <div><Label>Observação</Label><Textarea value={editObservation} onChange={(e) => setEditObservation(e.target.value)} rows={2} placeholder="Motivo da alteração (recomendado)" /></div>
-          </div>
-          <DialogFooter><Button variant="outline" onClick={() => setEditModalOpen(false)}>Cancelar</Button><Button onClick={handleEditSave} disabled={savingEdit}>{savingEdit ? "Salvando..." : "Salvar Alterações"}</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <div>
+              <Label>Nº Contrato</Label>
+              <Input value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} placeholder="Opcional" className="mt-1" />
+            </div>
 
-      {/* ═══ Reverse Entry Modal ═══ */}
-      <Dialog open={reverseModalOpen} onOpenChange={setReverseModalOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Estornar Entrada</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <p className="text-sm text-muted-foreground">O estorno irá deduzir a quantidade integral desta entrada do saldo atual do produto. Esta ação não pode ser desfeita.</p>
-            <div><Label>Motivo do Estorno *</Label><Textarea value={reverseReason} onChange={(e) => setReverseReason(e.target.value)} rows={3} placeholder="Informe o motivo do cancelamento desta entrada..." /></div>
+            <div>
+              <Label>Observação</Label>
+              <Textarea value={entryObservation} onChange={(e) => setEntryObservation(e.target.value)} rows={2} placeholder="Opcional" className="mt-1" />
+            </div>
+
+            {/* Items */}
+            <div className="border-t pt-4">
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-sm font-medium">Itens da Entrada *</Label>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs gap-1 text-primary" onClick={() => setProductModalOpen(true)}>
+                    <ExternalLink className="h-3 w-3" /> Novo Item
+                  </Button>
+                </div>
+              </div>
+
+              {items.map((item, idx) => (
+                <div key={idx} className="border rounded-lg p-3 mb-2 space-y-2 bg-muted/30">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted-foreground">Item {idx + 1}</span>
+                    {items.length > 1 && (
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeItem(idx)}>
+                        <Trash2 className="h-3 w-3 text-destructive" />
+                      </Button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    <div className="col-span-2">
+                      <Label className="text-xs">Produto *</Label>
+                      <Select value={item.productId} onValueChange={(v) => updateItem(idx, "productId", v)}>
+                        <SelectTrigger className="mt-1 h-8"><SelectValue placeholder="Selecionar" /></SelectTrigger>
+                        <SelectContent>
+                          {products?.map((p) => (
+                            <SelectItem key={p._id} value={p._id}>{p.name} {p.brand ? `(${p.brand})` : ""}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Quantidade *</Label>
+                      <Input type="number" min="1" value={item.quantity} onChange={(e) => updateItem(idx, "quantity", e.target.value)} className="mt-1 h-8" />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Unidade</Label>
+                      <Select value={item.unitOfMeasure} onValueChange={(v) => updateItem(idx, "unitOfMeasure", v)}>
+                        <SelectTrigger className="mt-1 h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {UNITS_OF_MEASURE.map((u) => (
+                            <SelectItem key={u} value={u}>{UNIT_LABELS[u] ?? u}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    <div>
+                      <Label className="text-xs">Marca</Label>
+                      <Input value={item.brand} onChange={(e) => updateItem(idx, "brand", e.target.value)} className="mt-1 h-8" />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Modelo</Label>
+                      <Input value={item.model} onChange={(e) => updateItem(idx, "model", e.target.value)} className="mt-1 h-8" />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Custo Unitário</Label>
+                      <Input type="number" step="0.01" min="0" value={item.unitCost} onChange={(e) => updateItem(idx, "unitCost", e.target.value)} placeholder="R$" className="mt-1 h-8" />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Local</Label>
+                      <Select value={item.locationId} onValueChange={(v) => updateItem(idx, "locationId", v)}>
+                        <SelectTrigger className="mt-1 h-8"><SelectValue placeholder="Opcional" /></SelectTrigger>
+                        <SelectContent>
+                          {locations?.map((l) => (
+                            <SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              <Button variant="outline" size="sm" className="gap-1 mt-2" onClick={addItem}>
+                <Plus className="h-3 w-3" /> Adicionar Item
+              </Button>
+            </div>
           </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setReverseModalOpen(false)}>Cancelar</Button>
-            <Button variant="destructive" onClick={handleReverseSave} disabled={savingReverse}>{savingReverse ? "Estornando..." : "Confirmar Estorno"}</Button>
+            <Button variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>Cancelar</Button>
+            <Button onClick={handleCreate} disabled={saving}>
+              {saving ? "Criando..." : "Criar Entrada (Rascunho)"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ═══ Quick-Create Product Modal ═══ */}
+      {/* ═══ Reverse Modal ═══ */}
+      <Dialog open={reverseModalOpen} onOpenChange={setReverseModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Estornar Entrada</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              O estorno irá deduzir a quantidade desta entrada do saldo atual do produto.
+              Esta ação não pode ser desfeita.
+            </p>
+            <div>
+              <Label>Motivo do Estorno *</Label>
+              <Textarea
+                value={reverseReason}
+                onChange={(e) => setReverseReason(e.target.value)}
+                rows={3}
+                placeholder="Informe o motivo do estorno..."
+                className="mt-1"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReverseModalOpen(false)}>Cancelar</Button>
+            <Button variant="destructive" onClick={handleReverse}>
+              Confirmar Estorno
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ Quick Create Product ═══ */}
       <Dialog open={productModalOpen} onOpenChange={setProductModalOpen}>
         <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -334,9 +614,8 @@ export default function Entries() {
             <div><Label>Categoria *</Label>
               <Select value={newProductCategoryId} onValueChange={setNewProductCategoryId}>
                 <SelectTrigger><SelectValue placeholder="Selecionar" /></SelectTrigger>
-                <SelectContent>{categories?.map((c: any) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}</SelectContent>
+                <SelectContent>{categories?.map((c) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}</SelectContent>
               </Select>
-              {categories?.length === 0 && <p className="text-xs text-amber-600 mt-1">Nenhuma categoria cadastrada. Cadastre em Categorias primeiro.</p>}
             </div>
             <div><Label>Unidade de Medida</Label>
               <Select value={newProductUnit} onValueChange={setNewProductUnit}>
@@ -348,38 +627,10 @@ export default function Entries() {
               <div><Label>Marca</Label><Input value={newProductBrand} onChange={(e) => setNewProductBrand(e.target.value)} placeholder="Opcional" /></div>
               <div><Label>Modelo</Label><Input value={newProductModel} onChange={(e) => setNewProductModel(e.target.value)} placeholder="Opcional" /></div>
             </div>
-            <div><Label>Especificação</Label><Input value={newProductSpec} onChange={(e) => setNewProductSpec(e.target.value)} placeholder="Opcional" /></div>
-            <div><Label>Descrição</Label><Textarea value={newProductDescription} onChange={(e) => setNewProductDescription(e.target.value)} rows={2} placeholder="Opcional" /></div>
-            <p className="text-[10px] text-muted-foreground">O código interno será gerado automaticamente. Estoque mínimo, ideal e máximo ficam zerados — ajuste depois no cadastro do item.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setProductModalOpen(false)}>Cancelar</Button>
-            <Button onClick={handleQuickCreateProduct} disabled={savingProduct}>{savingProduct ? "Criando..." : "Criar e Selecionar"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ═══ Quick-Create Supplier Modal ═══ */}
-      <Dialog open={supplierModalOpen} onOpenChange={setSupplierModalOpen}>
-        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ExternalLink className="h-4 w-4" /> Criar Fornecedor Rápido
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div><Label>Razão Social *</Label><Input value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)} placeholder="Nome completo do fornecedor" /></div>
-            <div><Label>Nome Fantasia</Label><Input value={newSupplierTrade} onChange={(e) => setNewSupplierTrade(e.target.value)} placeholder="Opcional" /></div>
-            <div><Label>CNPJ</Label><Input value={newSupplierCnpj} onChange={(e) => setNewSupplierCnpj(e.target.value)} placeholder="00.000.000/0000-00" /></div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Telefone</Label><Input value={newSupplierPhone} onChange={(e) => setNewSupplierPhone(e.target.value)} placeholder="(00) 0000-0000" /></div>
-              <div><Label>E-mail</Label><Input value={newSupplierEmail} onChange={(e) => setNewSupplierEmail(e.target.value)} placeholder="contato@empresa.com" /></div>
-            </div>
-            <p className="text-[10px] text-muted-foreground">Apenas a razão social é obrigatória. Demais campos podem ser preenchidos depois.</p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSupplierModalOpen(false)}>Cancelar</Button>
-            <Button onClick={handleQuickCreateSupplier} disabled={savingSupplier}>{savingSupplier ? "Criando..." : "Criar e Selecionar"}</Button>
+            <Button onClick={handleQuickCreateProduct}>Criar e Selecionar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

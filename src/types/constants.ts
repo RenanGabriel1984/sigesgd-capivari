@@ -70,7 +70,7 @@ export const REQUEST_STATUS_COLORS: Record<RequestStatusType, string> = {
 };
 
 // ─── Audit Actions ───────────────────────────────────────────────────────────
-export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update";
+export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update" | "confirm_entry" | "reverse_entry" | "open_inventory" | "count_inventory" | "close_inventory";
 
 export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   create: "Criação",
@@ -88,6 +88,11 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   password_reset: "Redefinição de Senha",
   reserve: "Reserva",
   toner_update: "Atualização Toner",
+  confirm_entry: "Confirmação de Entrada",
+  reverse_entry: "Estorno de Entrada",
+  open_inventory: "Abertura de Inventário",
+  count_inventory: "Contagem de Inventário",
+  close_inventory: "Fechamento de Inventário",
 };
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
@@ -122,6 +127,8 @@ export const PERMISSIONS = {
     canViewAuditLogs: true,
     canManageSettings: true,
     canCreateRequests: true,
+    canManageInventory: true,
+    canManageStorageLocations: true,
   },
   stock_manager: {
     canManageUsers: false,
@@ -138,6 +145,8 @@ export const PERMISSIONS = {
     canViewAuditLogs: false,
     canManageSettings: true,
     canCreateRequests: false,
+    canManageInventory: true,
+    canManageStorageLocations: true,
   },
   director: {
     canManageUsers: false,
@@ -154,6 +163,8 @@ export const PERMISSIONS = {
     canViewAuditLogs: false,
     canManageSettings: true,
     canCreateRequests: false,
+    canManageInventory: false,
+    canManageStorageLocations: false,
   },
   secretary: {
     canManageUsers: false,
@@ -170,6 +181,8 @@ export const PERMISSIONS = {
     canViewAuditLogs: false,
     canManageSettings: true,
     canCreateRequests: false,
+    canManageInventory: false,
+    canManageStorageLocations: false,
   },
   technician: {
     canManageUsers: false,
@@ -186,6 +199,8 @@ export const PERMISSIONS = {
     canViewAuditLogs: false,
     canManageSettings: true,
     canCreateRequests: true,
+    canManageInventory: false,
+    canManageStorageLocations: false,
   },
 } as const;
 

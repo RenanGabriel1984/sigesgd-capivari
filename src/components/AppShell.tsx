@@ -23,6 +23,9 @@ import {
   BarChart3,
   Download,
   Printer,
+  Boxes,
+  MapPin,
+  ClipboardCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -55,6 +58,9 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Itens de Estoque", href: "/products", icon: Package, permission: "canManageProducts" },
   { label: "Categorias", href: "/categories", icon: Tags, permission: "canManageCategories" },
   { label: "Entradas", href: "/entries", icon: ShoppingCart, permission: "canCreateEntries" },
+  { label: "Lotes", href: "/lots", icon: Boxes, permission: "canCreateEntries" },
+  { label: "Locais de Armazenamento", href: "/storage-locations", icon: MapPin, permission: "canManageStorageLocations" },
+  { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
   { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests" },
   { label: "Movimentações", href: "/movements", icon: ArrowLeftRight, permission: "canViewMovements" },
   { label: "Organização", href: "/organization", icon: Building2, permission: "canManageOrg" },
