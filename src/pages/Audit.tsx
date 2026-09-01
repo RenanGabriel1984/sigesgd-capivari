@@ -38,6 +38,8 @@ const ALL_ACTIONS = [
   "deliver",
   "password_change",
   "password_reset",
+  "reserve",
+  "toner_update",
 ] as const;
 
 const ENTITY_OPTIONS = [
@@ -209,7 +211,7 @@ export default function Audit() {
                               : ""
                           }`}
                         >
-                          {AUDIT_ACTION_LABELS[log.action as AuditAction]}
+                          {AUDIT_ACTION_LABELS[log.action as AuditAction] ?? log.action}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{log.entity}</TableCell>

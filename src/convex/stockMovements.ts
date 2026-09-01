@@ -119,7 +119,14 @@ export const reserveStock = mutation({
     if (available < args.quantity) {
       throw new Error(`Estoque insuficiente. Disponível: ${available}. Solicitado: ${args.quantity}.`);
     }
-    await ctx.db.patch(stock._id, { reservedQuantity: stock.reservedQuantity + args.quantity });
+    const newReserved = stock.reservedQuantity + args.quantity;
+    await ctx.db.patch(stock._id, { reservedQuantity: newReserved });
+    const product = await ctx.db.get(args.productId);
+    await ctx.db.insert("auditLogs", {
+      userId, action: "reserve", entity: "stock", entityId: stock._id,
+      details: `Reserva: ${product?.name ?? "item"} — ${args.quantity} unidade(s). Reservado: ${stock.reservedQuantity} → ${newReserved}`,
+      timestamp: Date.now(),
+    });
     return stock._id;
   },
 });
@@ -143,7 +150,17 @@ export const editEntry = mutation({
     if (!stock) throw new Error("Registro de estoque não encontrado");
     const diff = args.quantity - movement.quantity;
     if (diff < 0 && stock.physicalQuantity + diff < 0) {
-      throw new Error(`A redução deixaria o saldo negativo. Saldo atual: ${stock.physicalQuantity}. Redução: ${Math.abs(diff)}.`);
+      throw new Error(
+        `A redução deixaria o saldo negativo. Saldo atual: ${stock.physicalQuantity}. ` +
+        `Redução pretendida: ${Math.abs(diff)}.`
+      );
+    }
+    // Also check if reduction would violate active reservations
+    if (diff < 0 && stock.physicalQuantity + diff < stock.reservedQuantity) {
+      throw new Error(
+        `A redução violaria o estoque reservado. ` +
+        `Saldo pós-edição: ${stock.physicalQuantity + diff}. Reserva atual: ${stock.reservedQuantity}.`
+      );
     }
     const newPhysical = stock.physicalQuantity + diff;
     await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
@@ -155,7 +172,7 @@ export const editEntry = mutation({
     });
     await ctx.db.insert("auditLogs", {
       userId, action: "update", entity: "stockMovements", entityId: args.movementId,
-      details: `Edição de entrada: quantidade ${movement.quantity} → ${args.quantity}. ${args.observation ? `Motivo: ${args.observation}` : ""}`,
+      details: `Edição de entrada: quantidade ${movement.quantity} → ${args.quantity} (Δ${diff >= 0 ? "+" : ""}${diff}). Saldo: ${stock.physicalQuantity} → ${newPhysical}.${args.observation ? ` Motivo: ${args.observation}` : ""}`,
       timestamp: Date.now(),
     });
     return args.movementId;
@@ -174,17 +191,33 @@ export const reverseEntry = mutation({
     if (!movement) throw new Error("Movimentação não encontrada");
     if (movement.type !== "entry") throw new Error("Apenas entradas podem ser estornadas");
     if (movement.canceled) throw new Error("Esta entrada já foi estornada");
+
     const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", movement.productId)).first();
     if (!stock) throw new Error("Registro de estoque não encontrado");
+
+    // Check if reversal would produce negative stock
     if (stock.physicalQuantity < movement.quantity) {
-      throw new Error(`Estoque insuficiente para estorno. Saldo atual: ${stock.physicalQuantity}. Quantidade da entrada: ${movement.quantity}.`);
+      throw new Error(
+        `Não é possível estornar esta entrada integralmente porque parte do saldo já foi consumida. ` +
+        `Saldo atual: ${stock.physicalQuantity}. Quantidade da entrada: ${movement.quantity}. ` +
+        `Diferença consumida: ${movement.quantity - stock.physicalQuantity}.`
+      );
     }
+
+    // Also check if there are active reservations that depend on this stock
+    if (stock.reservedQuantity > 0 && stock.physicalQuantity - movement.quantity < stock.reservedQuantity) {
+      throw new Error(
+        `Não é possível estornar: a reserva atual (${stock.reservedQuantity}) consumiria mais que o saldo restante. ` +
+        `Saldo pós-estorno: ${stock.physicalQuantity - movement.quantity}. Reserva: ${stock.reservedQuantity}.`
+      );
+    }
+
     const newPhysical = stock.physicalQuantity - movement.quantity;
     await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
     await ctx.db.patch(args.movementId, { canceled: true, canceledAt: Date.now() });
     await ctx.db.insert("auditLogs", {
       userId, action: "cancel", entity: "stockMovements", entityId: args.movementId,
-      details: `Estorno de entrada: ${movement.quantity} unidade(s). Motivo: ${args.reason.trim()}`,
+      details: `Estorno de entrada: ${movement.quantity} unidade(s). Saldo: ${stock.physicalQuantity} → ${newPhysical}. Motivo: ${args.reason.trim()}`,
       timestamp: Date.now(),
     });
     return args.movementId;

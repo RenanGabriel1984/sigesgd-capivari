@@ -205,38 +205,101 @@ export const approve = mutation({
     const { userId, user } = await requireUser(ctx);
     const role = (user.role ?? "technician") as UserRole;
     if (role === "technician") throw new Error("Técnicos não podem aprovar solicitações");
+
+    // Read request — must still be pending (prevents double-approval)
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Solicitação não encontrada");
     if (request.requesterId === userId && role !== "admin") throw new Error("Não é possível aprovar sua própria solicitação");
-    if (request.status !== "pending") throw new Error("Solicitação não está pendente");
+    if (request.status !== "pending") throw new Error("Solicitação não está pendente. Verifique se já foi aprovada, rejeitada ou cancelada.");
+
+    // ─── PHASE 1: Validate ALL items and calculate total reservation per product ───
+    // Group by productId to handle multiple request items for the same product
+    const stockNeeded: Record<string, { requestItemId: string; quantity: number; productName: string }> = {};
+    let totalItemsToApprove = 0;
 
     for (const item of args.items) {
-      if (item.quantityApproved <= 0) continue;
       const requestItem = await ctx.db.get(item.itemId);
       if (!requestItem) throw new Error(`Item da solicitação não encontrado: ${item.itemId}`);
       if (requestItem.requestId !== args.requestId) throw new Error("O item não pertence a esta solicitação");
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId)).first();
-      if (stock) {
-        const available = stock.physicalQuantity - stock.reservedQuantity;
-        if (available < item.quantityApproved) {
-          throw new Error(`Estoque insuficiente para aprovação. Disponível: ${available}. Aprovado: ${item.quantityApproved}.`);
-        }
-      } else {
-        throw new Error("Registro de estoque não encontrado para este produto");
+      if (item.quantityApproved <= 0) continue;
+
+      const product = await ctx.db.get(requestItem.productId);
+      const productName = product?.name ?? "item";
+
+      // Accumulate per product
+      const key = requestItem.productId as string;
+      if (!stockNeeded[key]) stockNeeded[key] = { requestItemId: item.itemId, quantity: 0, productName };
+      stockNeeded[key].quantity += item.quantityApproved;
+      totalItemsToApprove++;
+    }
+
+    if (totalItemsToApprove === 0) throw new Error("Nenhum item com quantidade aprovada maior que zero.");
+
+    // Validate stock for each product (fresh read)
+    const stockMap: Record<string, any> = {};
+    for (const [productId, needed] of Object.entries(stockNeeded)) {
+      const stock = await ctx.db
+        .query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", productId as any))
+        .first();
+
+      if (!stock) throw new Error(`Registro de estoque não encontrado para "${needed.productName}"`);
+
+      const available = stock.physicalQuantity - stock.reservedQuantity;
+      if (available < needed.quantity) {
+        throw new Error(
+          `Estoque insuficiente para concluir a aprovação. ` +
+          `"${needed.productName}": disponível ${available}, necessário ${needed.quantity}. ` +
+          `Nenhum item foi reservado — operação abortada.`
+        );
+      }
+      stockMap[productId] = stock;
+    }
+
+    // ─── PHASE 2: Apply ALL reservations atomically (no partial approval) ───
+    const now = Date.now();
+
+    for (const item of args.items) {
+      const requestItem = await ctx.db.get(item.itemId);
+      if (!requestItem) continue;
+
+      if (item.quantityApproved <= 0) {
+        await ctx.db.patch(item.itemId, { quantityApproved: 0 });
+        continue;
+      }
+
+      // Update request item
+      await ctx.db.patch(item.itemId, { quantityApproved: item.quantityApproved });
+
+      // Reserve stock (re-read for safety)
+      const freshStock = await ctx.db
+        .query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
+        .first();
+
+      if (freshStock) {
+        const newReserved = freshStock.reservedQuantity + item.quantityApproved;
+        await ctx.db.patch(freshStock._id, { reservedQuantity: newReserved });
       }
     }
 
-    const now = Date.now();
-    for (const item of args.items) {
-      if (item.quantityApproved <= 0) { await ctx.db.patch(item.itemId, { quantityApproved: 0 }); continue; }
-      const requestItem = await ctx.db.get(item.itemId);
-      if (!requestItem) continue;
-      await ctx.db.patch(item.itemId, { quantityApproved: item.quantityApproved });
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId)).first();
-      if (stock) await ctx.db.patch(stock._id, { reservedQuantity: stock.reservedQuantity + item.quantityApproved });
-    }
-    await ctx.db.patch(args.requestId, { status: "approved", approverId: userId, updatedAt: now, approvalObservation: args.observation ?? undefined });
-    await ctx.db.insert("auditLogs", { userId, action: "approve", entity: "requests", entityId: args.requestId, details: "Solicitação aprovada", timestamp: now });
+    // Update request status
+    await ctx.db.patch(args.requestId, {
+      status: "approved",
+      approverId: userId,
+      updatedAt: now,
+      approvalObservation: args.observation ?? undefined,
+    });
+
+    // Build audit details
+    const approvedSummary = Object.values(stockNeeded)
+      .map((s) => `${s.productName}: ${s.quantity}`)
+      .join(", ");
+    await ctx.db.insert("auditLogs", {
+      userId, action: "approve", entity: "requests", entityId: args.requestId,
+      details: `Solicitação aprovada. Itens: ${approvedSummary}`,
+      timestamp: now,
+    });
     return args.requestId;
   },
 });
@@ -374,10 +437,74 @@ export const cancel = mutation({
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Solicitação não encontrada");
     if (request.requesterId !== userId) throw new Error("Só é possível cancelar suas próprias solicitações");
-    if (request.status !== "pending") throw new Error("Só é possível cancelar solicitações pendentes");
+    // PENDING → CANCELLED: allowed
+    // APPROVED → CANCELLED: allowed (must release reservation)
+    // DELIVERED → CANCELLED: NOT allowed
+    // REJECTED / CANCELLED: NOT allowed
+    if (request.status === "delivered") throw new Error("Não é possível cancelar uma solicitação já entregue. Utilize a operação de devolução quando disponível.");
+    if (request.status === "rejected" || request.status === "cancelled") throw new Error("Solicitação já foi rejeitada ou cancelada.");
+    if (request.status !== "pending" && request.status !== "approved") throw new Error("Status inválido para cancelamento.");
+
     const now = Date.now();
+
+    // If APPROVED, release reserved stock for each item
+    if (request.status === "approved") {
+      const items = await ctx.db
+        .query("requestItems")
+        .withIndex("by_request", (q: any) => q.eq("requestId", args.requestId))
+        .collect();
+
+      const releaseDetails: string[] = [];
+
+      for (const item of items) {
+        if (item.quantityApproved <= 0) continue;
+
+        // Re-read stock for consistency
+        const stock = await ctx.db
+          .query("stock")
+          .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+          .first();
+
+        if (!stock) {
+          throw new Error(`Registro de estoque não encontrado para o produto. Não é possível liberar reserva.`);
+        }
+
+        // Safety: never allow reservedQuantity to go below 0
+        if (stock.reservedQuantity < item.quantityApproved) {
+          throw new Error(
+            `Inconsistência de estoque: reservado (${stock.reservedQuantity}) < quantidade a liberar (${item.quantityApproved}) para produto. ` +
+            `Liberação abortada para manter integridade.`
+          );
+        }
+
+        const newReserved = stock.reservedQuantity - item.quantityApproved;
+        await ctx.db.patch(stock._id, { reservedQuantity: newReserved });
+
+        const product = await ctx.db.get(item.productId);
+        releaseDetails.push(`${product?.name ?? "item"}: -${item.quantityApproved}`);
+      }
+
+      await ctx.db.insert("auditLogs", {
+        userId,
+        action: "cancel",
+        entity: "requests",
+        entityId: args.requestId,
+        details: `Solicitação aprovada cancelada. Reserva liberada: ${releaseDetails.join(", ")}`,
+        timestamp: now,
+      });
+    } else {
+      // PENDING → CANCELLED: no stock to release
+      await ctx.db.insert("auditLogs", {
+        userId,
+        action: "cancel",
+        entity: "requests",
+        entityId: args.requestId,
+        details: "Solicitação pendente cancelada pelo solicitante",
+        timestamp: now,
+      });
+    }
+
     await ctx.db.patch(args.requestId, { status: "cancelled", updatedAt: now });
-    await ctx.db.insert("auditLogs", { userId, action: "cancel", entity: "requests", entityId: args.requestId, details: "Solicitação cancelada pelo solicitante", timestamp: now });
     return args.requestId;
   },
 });

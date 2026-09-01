@@ -172,6 +172,11 @@ export const upsertCompatibility = mutation({
     const found = existing.find((c) => c.printerModel === args.printerModel.trim());
     if (found) {
       await ctx.db.patch(found._id, { estimatedYield: args.estimatedYield });
+      await ctx.db.insert("auditLogs", {
+        userId, action: "toner_update", entity: "printerCompatibility", entityId: found._id,
+        details: `Compatibilidade atualizada: modelo "${args.printerModel.trim()}" rendimento ${args.estimatedYield} pág.`,
+        timestamp: Date.now(),
+      });
       return found._id;
     }
 
@@ -179,6 +184,11 @@ export const upsertCompatibility = mutation({
       productId: args.productId,
       printerModel: args.printerModel.trim(),
       estimatedYield: args.estimatedYield,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId, action: "toner_update", entity: "printerCompatibility", entityId: id,
+      details: `Compatibilidade adicionada: modelo "${args.printerModel.trim()}" rendimento ${args.estimatedYield} pág.`,
+      timestamp: Date.now(),
     });
     return id;
   },
@@ -192,8 +202,8 @@ export const removeCompatibility = mutation({
     if (!record) throw new Error("Registro de compatibilidade não encontrado");
     await ctx.db.delete(args.id);
     await ctx.db.insert("auditLogs", {
-      userId, action: "update", entity: "printerCompatibility", entityId: args.id,
-      details: `Compatibilidade removida: ${record.printerModel}`,
+      userId, action: "toner_update", entity: "printerCompatibility", entityId: args.id,
+      details: `Compatibilidade removida: modelo "${record.printerModel}"`,
       timestamp: Date.now(),
     });
     return args.id;

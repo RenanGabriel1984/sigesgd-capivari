@@ -70,7 +70,7 @@ export const REQUEST_STATUS_COLORS: Record<RequestStatusType, string> = {
 };
 
 // ─── Audit Actions ───────────────────────────────────────────────────────────
-export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset";
+export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update";
 
 export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   create: "Criação",
@@ -86,6 +86,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   deliver: "Entrega",
   password_change: "Alteração de Senha",
   password_reset: "Redefinição de Senha",
+  reserve: "Reserva",
+  toner_update: "Atualização Toner",
 };
 
 // ─── Units of Measure ────────────────────────────────────────────────────────

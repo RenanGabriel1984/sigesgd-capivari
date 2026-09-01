@@ -87,6 +87,8 @@ export const AUDIT_ACTIONS = {
   DELIVER: "deliver",
   PASSWORD_CHANGE: "password_change",
   PASSWORD_RESET: "password_reset",
+  RESERVE: "reserve",
+  TONER_UPDATE: "toner_update",
 } as const;
 
 export const auditActionValidator = v.union(
@@ -103,6 +105,8 @@ export const auditActionValidator = v.union(
   v.literal(AUDIT_ACTIONS.DELIVER),
   v.literal(AUDIT_ACTIONS.PASSWORD_CHANGE),
   v.literal(AUDIT_ACTIONS.PASSWORD_RESET),
+  v.literal(AUDIT_ACTIONS.RESERVE),
+  v.literal(AUDIT_ACTIONS.TONER_UPDATE),
 );
 
 // ─── Units of Measure ────────────────────────────────────────────────────────

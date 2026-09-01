@@ -347,10 +347,15 @@ export default function Requests() {
     }
   };
 
-  const handleCancel = async (requestId: string) => {
+  const handleCancel = async (requestId: string, isApproved: boolean) => {
+    if (isApproved) {
+      if (!confirm("Tem certeza? Esta ação irá cancelar a solicitação APROVADA e liberar todo o estoque reservado.")) {
+        return;
+      }
+    }
     try {
       await cancelRequest({ requestId: requestId as any });
-      toast.success("Solicitação cancelada");
+      toast.success(isApproved ? "Solicitação cancelada e reserva liberada" : "Solicitação cancelada");
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao cancelar");
     }
@@ -509,9 +514,9 @@ export default function Requests() {
             <Truck className="h-3.5 w-3.5" /> Entregar Material
           </Button>
         )}
-        {!showActions && r.status === "pending" && r.requesterId === user?._id && (
-          <Button size="sm" variant="outline" className="gap-1 mt-3" onClick={() => handleCancel(r._id)}>
-            Cancelar
+        {!showActions && (r.status === "pending" || r.status === "approved") && r.requesterId === user?._id && (
+          <Button size="sm" variant="outline" className="gap-1 mt-3" onClick={() => handleCancel(r._id, r.status === "approved")}>
+            {r.status === "approved" ? "Cancelar e Liberar Reserva" : "Cancelar"}
           </Button>
         )}
         {r.status === "delivered" && (
