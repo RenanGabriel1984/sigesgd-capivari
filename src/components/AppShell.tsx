@@ -21,6 +21,7 @@ import {
   Shield,
   FileText,
   BarChart3,
+  Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -109,6 +110,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+
+  // ─── PWA Install Prompt ───
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+
+  useEffect(() => {
+    // Don't show if already running in standalone mode
+    if (window.matchMedia("(display-mode: standalone)").matches) return;
+    // Don't show if user previously dismissed
+    if (localStorage.getItem("sigesgd-pwa-dismissed") === "1") return;
+
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBanner(true);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === "accepted") {
+      setShowInstallBanner(false);
+    }
+    setDeferredPrompt(null);
+  };
+
+  const handleDismissInstall = () => {
+    setShowInstallBanner(false);
+    localStorage.setItem("sigesgd-pwa-dismissed", "1");
+  };
 
   const pendingCount = useQuery(api.requests.pendingCount);
   const belowMinItems = useQuery(api.products.belowMinimum);
@@ -248,6 +283,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Main content */}
       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+        {/* PWA Install Banner */}
+        {showInstallBanner && (
+          <div className="flex items-center gap-3 bg-primary/5 border-b border-primary/20 px-4 py-2.5 shrink-0">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-[10px] shrink-0">
+              SG
+            </div>
+            <p className="text-sm text-foreground flex-1 min-w-0">
+              <span className="font-medium">Instalar o SIGESGD</span> na Tela Inicial para acesso rápido.
+            </p>
+            <Button size="sm" onClick={handleInstall} className="gap-1.5 shrink-0">
+              <Download className="h-3.5 w-3.5" /> Instalar PWA
+            </Button>
+            <Button size="sm" variant="ghost" onClick={handleDismissInstall} className="shrink-0">
+              Fechar
+            </Button>
+          </div>
+        )}
+
         {/* Top bar */}
         <header className="flex h-16 items-center gap-4 border-b border-border/60 bg-card/80 backdrop-blur-sm px-4 lg:px-6 shrink-0">
           <Button

@@ -1,19 +1,28 @@
 {
-  "name": "SIGESGD Capivari",
+  "name": "SIGESGD — Gestão de Estoque de TI",
   "short_name": "SIGESGD",
-  "description": "Inventory management platform for teams that demand precision.",
+  "description": "Sistema de Gestão de Estoque e Ativos de TI de Capivari",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f8fafc",
-  "theme_color": "#1e293b",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
   "orientation": "any",
   "categories": ["business", "productivity"],
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "scope": "/",
   "icons": [
     {
       "src": "/logo.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
     }
   ]
 }
