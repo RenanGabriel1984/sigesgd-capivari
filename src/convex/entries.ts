@@ -289,6 +289,150 @@ export const confirm = mutation({
   },
 });
 
+// ─── Draft Item Management ──────────────────────────────────────────────────
+
+/** Add an item to a draft entry. Does NOT modify stock. */
+export const addItem = mutation({
+  args: {
+    entryId: v.id("entries"),
+    productId: v.id("products"),
+    quantity: v.number(),
+    unitOfMeasure: v.string(),
+    unitCost: v.optional(v.number()),
+    totalCost: v.optional(v.number()),
+    brand: v.optional(v.string()),
+    model: v.optional(v.string()),
+    specification: v.optional(v.string()),
+    locationId: v.optional(v.id("storageLocations")),
+    photoStorageId: v.optional(v.string()),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    const entry = await ctx.db.get(args.entryId);
+    if (!entry) throw new Error("Entrada não encontrada");
+    if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ter itens adicionados");
+    if (args.quantity <= 0) throw new Error("A quantidade deve ser maior que zero");
+    if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
+
+    const product = await ctx.db.get(args.productId);
+    if (!product) throw new Error("Produto não encontrado");
+    if (!product.active) throw new Error(`O produto "${product.name}" está inativo`);
+
+    const itemId = await ctx.db.insert("entryItems", {
+      entryId: args.entryId,
+      productId: args.productId,
+      quantity: args.quantity,
+      unitOfMeasure: args.unitOfMeasure,
+      unitCost: args.unitCost,
+      totalCost: args.totalCost,
+      brand: args.brand,
+      model: args.model,
+      specification: args.specification,
+      locationId: args.locationId,
+      photoStorageId: args.photoStorageId,
+      observation: args.observation,
+    });
+
+    await ctx.db.patch(args.entryId, { updatedAt: Date.now() });
+    await ctx.db.insert("auditLogs", {
+      userId, action: "update", entity: "entryItems", entityId: itemId,
+      details: `Item adicionado à entrada ${entry.entryNumber}: ${product.name} x${args.quantity}`,
+      timestamp: Date.now(),
+    });
+    return itemId;
+  },
+});
+
+/** Update an item in a draft entry. Does NOT modify stock. */
+export const updateItem = mutation({
+  args: {
+    itemId: v.id("entryItems"),
+    productId: v.optional(v.id("products")),
+    quantity: v.optional(v.number()),
+    unitOfMeasure: v.optional(v.string()),
+    unitCost: v.optional(v.number()),
+    totalCost: v.optional(v.number()),
+    brand: v.optional(v.string()),
+    model: v.optional(v.string()),
+    specification: v.optional(v.string()),
+    locationId: v.optional(v.id("storageLocations")),
+    photoStorageId: v.optional(v.string()),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    const item = await ctx.db.get(args.itemId);
+    if (!item) throw new Error("Item não encontrado");
+
+    const entry = await ctx.db.get(item.entryId);
+    if (!entry) throw new Error("Entrada não encontrada");
+    if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ter itens alterados");
+
+    if (args.quantity !== undefined) {
+      if (args.quantity <= 0) throw new Error("A quantidade deve ser maior que zero");
+      if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
+    }
+
+    if (args.productId) {
+      const product = await ctx.db.get(args.productId);
+      if (!product) throw new Error("Produto não encontrado");
+      if (!product.active) throw new Error(`O produto "${product.name}" está inativo`);
+    }
+
+    const updates: Record<string, any> = {};
+    if (args.productId !== undefined) updates.productId = args.productId;
+    if (args.quantity !== undefined) updates.quantity = args.quantity;
+    if (args.unitOfMeasure !== undefined) updates.unitOfMeasure = args.unitOfMeasure;
+    if (args.unitCost !== undefined) updates.unitCost = args.unitCost;
+    if (args.totalCost !== undefined) updates.totalCost = args.totalCost;
+    if (args.brand !== undefined) updates.brand = args.brand;
+    if (args.model !== undefined) updates.model = args.model;
+    if (args.specification !== undefined) updates.specification = args.specification;
+    if (args.locationId !== undefined) updates.locationId = args.locationId;
+    if (args.photoStorageId !== undefined) updates.photoStorageId = args.photoStorageId;
+    if (args.observation !== undefined) updates.observation = args.observation;
+
+    await ctx.db.patch(args.itemId, updates);
+    await ctx.db.patch(item.entryId, { updatedAt: Date.now() });
+
+    const product = args.productId ? await ctx.db.get(args.productId) : await ctx.db.get(item.productId);
+    await ctx.db.insert("auditLogs", {
+      userId, action: "update", entity: "entryItems", entityId: args.itemId,
+      details: `Item atualizado na entrada ${entry.entryNumber}: ${product?.name ?? "—"} ${JSON.stringify(updates)}`,
+      timestamp: Date.now(),
+    });
+  },
+});
+
+/** Remove an item from a draft entry. Does NOT modify stock. */
+export const removeItem = mutation({
+  args: { itemId: v.id("entryItems") },
+  handler: async (ctx, args) => {
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    const item = await ctx.db.get(args.itemId);
+    if (!item) throw new Error("Item não encontrado");
+
+    const entry = await ctx.db.get(item.entryId);
+    if (!entry) throw new Error("Entrada não encontrada");
+    if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ter itens removidos");
+
+    // Prevent removing last item
+    const allItems = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", item.entryId)).collect();
+    if (allItems.length <= 1) throw new Error("A entrada deve ter pelo menos um item");
+
+    const product = await ctx.db.get(item.productId);
+    await ctx.db.delete(args.itemId);
+    await ctx.db.patch(item.entryId, { updatedAt: Date.now() });
+
+    await ctx.db.insert("auditLogs", {
+      userId, action: "update", entity: "entryItems", entityId: args.itemId,
+      details: `Item removido da entrada ${entry.entryNumber}: ${product?.name ?? "—"} x${item.quantity}`,
+      timestamp: Date.now(),
+    });
+  },
+});
+
 /** Edit a draft entry (only draft entries can be edited). */
 export const editDraft = mutation({
   args: {

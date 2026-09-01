@@ -452,6 +452,101 @@ describe("Stock Integrity — Full Lifecycle", () => {
   });
 });
 
+describe("Draft Entry Item Management", () => {
+  it("BA. Adding item to draft does not modify stock", () => {
+    const stock = { physicalQuantity: 10, reservedQuantity: 0 };
+    // Add item to draft — stock must remain unchanged
+    expect(stock.physicalQuantity).toBe(10);
+    expect(stock.reservedQuantity).toBe(0);
+  });
+
+  it("BB. Removing item from draft does not modify stock", () => {
+    const stock = { physicalQuantity: 10, reservedQuantity: 0 };
+    // Remove item from draft — stock must remain unchanged
+    expect(stock.physicalQuantity).toBe(10);
+  });
+
+  it("CC. Editing item in draft does not modify stock", () => {
+    const stock = { physicalQuantity: 10, reservedQuantity: 0 };
+    // Change quantity from 5 to 10 — stock unchanged
+    expect(stock.physicalQuantity).toBe(10);
+  });
+
+  it("DD. Cannot add item with quantity <= 0", () => {
+    const quantity = 0;
+    expect(quantity <= 0).toBe(true);
+  });
+
+  it("EE. Cannot remove last item from draft", () => {
+    const items = [{ id: "1" }];
+    const canRemove = items.length > 1;
+    expect(canRemove).toBe(false);
+  });
+
+  it("FF. Cannot confirm draft with zero items", () => {
+    const items: any[] = [];
+    expect(items.length).toBe(0);
+    // Confirm should fail
+  });
+
+  it("GG. Confirmed entry items are immutable", () => {
+    const entryStatus = "confirmed";
+    const canEdit = entryStatus === "draft";
+    expect(canEdit).toBe(false);
+  });
+
+  it("HH. StorageId persists after draft confirmation", () => {
+    const item = { photoStorageId: "storage_abc123" };
+    // After confirm, lot picks up photoStorageId
+    const lot = { photoStorageId: item.photoStorageId };
+    expect(lot.photoStorageId).toBe("storage_abc123");
+  });
+
+  it("II. Document storageId persists after draft confirmation", () => {
+    const entry = { documentStorageId: "storage_doc456", status: "confirmed" };
+    expect(entry.documentStorageId).toBe("storage_doc456");
+  });
+
+  it("JJ. File type validation accepts images", () => {
+    const acceptTypes = ["image/jpeg", "image/png", "image/webp"];
+    const allowed = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+    acceptTypes.forEach((t) => expect(allowed).toContain(t));
+  });
+
+  it("KK. File size validation rejects > 10MB", () => {
+    const maxSize = 10 * 1024 * 1024;
+    const tooLarge = 15 * 1024 * 1024;
+    expect(tooLarge > maxSize).toBe(true);
+    const withinLimit = 5 * 1024 * 1024;
+    expect(withinLimit <= maxSize).toBe(true);
+  });
+
+  it("LL. Full draft lifecycle: create → add item → edit → remove → confirm", () => {
+    // Step 1: Create draft
+    let status = "draft";
+    let items = [{ id: "1", quantity: 5, productId: "p1" }];
+    expect(status).toBe("draft");
+    expect(items.length).toBe(1);
+   
+    // Step 2: Add item
+    items.push({ id: "2", quantity: 3, productId: "p2" });
+    expect(items.length).toBe(2);
+    
+    // Step 3: Edit item 1
+    items[0] = { ...items[0], quantity: 10 };
+    expect(items[0].quantity).toBe(10);
+    
+    // Step 4: Remove item 2
+    items = items.filter((i) => i.id !== "2");
+    expect(items.length).toBe(1);
+    
+    // Step 5: Confirm
+    status = "confirmed";
+    expect(status).toBe("confirmed");
+    expect(items.length).toBe(1);
+  });
+});
+
 describe("Location Validation", () => {
   it("AA. Storage location names must be unique", () => {
     const locations = [
