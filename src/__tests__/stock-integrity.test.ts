@@ -490,7 +490,7 @@ describe("Draft Entry Item Management", () => {
   });
 
   it("GG. Confirmed entry items are immutable", () => {
-    const entryStatus = "confirmed";
+    const entryStatus: string = "confirmed";
     const canEdit = entryStatus === "draft";
     expect(canEdit).toBe(false);
   });
