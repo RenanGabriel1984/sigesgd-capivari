@@ -47,6 +47,7 @@ export default function Products() {
 
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [onlyBelowMin, setOnlyBelowMin] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
@@ -60,8 +61,12 @@ export default function Products() {
       p.brand?.toLowerCase().includes(q) ||
       p.description?.toLowerCase().includes(q);
     const matchesCategory = categoryFilter === "all" || p.categoryId === categoryFilter;
-    return matchesSearch && matchesCategory;
+    const stock = p.stock?.physicalQuantity ?? 0;
+    const matchesBelowMin = !onlyBelowMin || stock <= p.minimumStock;
+    return matchesSearch && matchesCategory && matchesBelowMin;
   });
+
+  const belowMinCount = products?.filter((p: any) => (p.stock?.physicalQuantity ?? 0) <= p.minimumStock).length ?? 0;
 
   const openCreate = () => { setForm(emptyForm); setEditingId(null); setDialogOpen(true); };
   const openEdit = (e: React.MouseEvent, p: any) => {
@@ -126,13 +131,26 @@ export default function Products() {
               {categories?.map((c: any) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}
             </SelectContent>
           </Select>
+          <Button
+            variant={onlyBelowMin ? "destructive" : "outline"}
+            className="gap-1.5"
+            onClick={() => setOnlyBelowMin(!onlyBelowMin)}
+          >
+            <AlertTriangle className="h-4 w-4" />
+            Abaixo do Mínimo
+            {belowMinCount > 0 && (
+              <Badge variant={onlyBelowMin ? "secondary" : "destructive"} className="ml-1 text-[10px] h-5 min-w-5 px-1.5">
+                {belowMinCount}
+              </Badge>
+            )}
+          </Button>
         </div>
 
         {filtered?.length === 0 ? (
           <Card className="border-border/50"><CardContent className="py-16 text-center">
             <Package className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
             <p className="text-muted-foreground">
-              {search || categoryFilter !== "all" ? "Nenhum item corresponde aos filtros" : "Nenhum item cadastrado"}
+              {search || categoryFilter !== "all" || onlyBelowMin ? "Nenhum item corresponde aos filtros" : "Nenhum item cadastrado"}
             </p>
           </CardContent></Card>
         ) : (

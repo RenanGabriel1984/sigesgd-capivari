@@ -20,6 +20,7 @@ import {
   Warehouse,
   Shield,
   FileText,
+  BarChart3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -57,6 +58,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Organização", href: "/organization", icon: Building2, permission: "canManageOrg" },
   { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },
   { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
+  { label: "Relatórios", href: "/reports", icon: BarChart3, permission: "canViewMovements" },
   { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
   { label: "Configurações", href: "/settings", icon: Settings, permission: "canManageSettings" },
 ];
@@ -66,11 +68,13 @@ function SidebarLink({
   isActive,
   onClick,
   pendingCount,
+  alertCount,
 }: {
   item: NavItem;
   isActive: boolean;
   onClick?: () => void;
   pendingCount?: number;
+  alertCount?: number;
 }) {
   return (
     <Link
@@ -90,6 +94,11 @@ function SidebarLink({
           {pendingCount}
         </Badge>
       )}
+      {item.href === "/products" && alertCount !== undefined && alertCount > 0 && (
+        <Badge variant="destructive" className="h-5 min-w-5 text-[10px] px-1.5">
+          {alertCount}
+        </Badge>
+      )}
     </Link>
   );
 }
@@ -102,8 +111,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
 
   const pendingCount = useQuery(api.requests.pendingCount);
+  const belowMinItems = useQuery(api.products.belowMinimum);
   const role = (user?.role ?? "technician") as UserRole;
   const permissions = getPermissions(role);
+  const alertCount = belowMinItems?.length ?? 0;
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -165,6 +176,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 item={item}
                 isActive={location.pathname === item.href}
                 pendingCount={pendingCount}
+                alertCount={alertCount}
               />
             ))}
           </nav>
@@ -224,6 +236,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       isActive={location.pathname === item.href}
                       onClick={() => setSidebarOpen(false)}
                       pendingCount={pendingCount}
+                      alertCount={alertCount}
                     />
                   ))}
                 </nav>
