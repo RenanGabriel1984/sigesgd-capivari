@@ -31,6 +31,7 @@ import {
   ArrowLeftRight,
   Building2,
   Search,
+  Printer,
 } from "lucide-react";
 import { UNIT_LABELS } from "@/types/constants";
 import { toast } from "sonner";
@@ -100,6 +101,7 @@ function exportConsumptionCSV(data: any[]) {
 export default function Reports() {
   // ─── Stock Position ───
   const stockPosition = useQuery(api.dashboard.stockPosition);
+  const tonerMetrics = useQuery(api.printers.tonerMetrics);
 
   // ─── Movement Report ───
   const [movStartDate, setMovStartDate] = useState("");
@@ -158,6 +160,9 @@ export default function Reports() {
             </TabsTrigger>
             <TabsTrigger value="consumption" className="gap-1">
               <Building2 className="h-3.5 w-3.5" /> Consumo por Secretaria
+            </TabsTrigger>
+            <TabsTrigger value="toners" className="gap-1">
+              <Printer className="h-3.5 w-3.5" /> Métricas de Toners
             </TabsTrigger>
           </TabsList>
 
@@ -506,6 +511,91 @@ export default function Reports() {
                             </div>
                           ))}
                         </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </>
+            )}
+          </TabsContent>
+
+          {/* ═══ RELATÓRIO 4: MÉTRICAS DE TONERS ═══ */}
+          <TabsContent value="toners" className="space-y-4 mt-4">
+            {tonerMetrics === undefined ? (
+              <Card className="border-border/50"><CardContent className="py-8 text-center"><p className="text-muted-foreground text-sm">Carregando…</p></CardContent></Card>
+            ) : tonerMetrics.printerMetrics.length === 0 ? (
+              <Card className="border-border/50"><CardContent className="py-12 text-center">
+                <Printer className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
+                <p className="text-muted-foreground text-sm">Nenhuma impressora cadastrada ou nenhuma troca de toner registrada</p>
+              </CardContent></Card>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  <Badge variant="outline" className="text-xs">
+                    {tonerMetrics.printerMetrics.length} impressora(s)
+                  </Badge>
+                  {tonerMetrics.unassignedCount > 0 && (
+                    <Badge variant="secondary" className="text-xs">
+                      {tonerMetrics.unassignedCount} toner(es) sem impressora vinculada
+                    </Badge>
+                  )}
+                </div>
+                <div className="space-y-4">
+                  {tonerMetrics.printerMetrics.map((pm: any) => (
+                    <Card key={pm.printer._id} className="border-border/50">
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className="font-medium text-sm">{pm.printer.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {pm.printer.brand} {pm.printer.model}
+                              {pm.printer.patrimony ? ` [${pm.printer.patrimony}]` : ""}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {pm.excessive && (
+                              <Badge variant="destructive" className="text-[10px] gap-1">
+                                <AlertTriangle className="h-3 w-3" /> Consumo Excessivo
+                              </Badge>
+                            )}
+                            {pm.totalTonerChanges > 0 && (
+                              <Badge variant="outline" className="text-[10px]">
+                                {pm.totalTonerChanges} troca(s)
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3">
+                          <div className="bg-muted/50 rounded px-3 py-2">
+                            <p className="text-[10px] text-muted-foreground">Total de Trocas</p>
+                            <p className="text-sm font-bold">{pm.totalTonerChanges}</p>
+                          </div>
+                          <div className="bg-muted/50 rounded px-3 py-2">
+                            <p className="text-[10px] text-muted-foreground">Intervalo Médio</p>
+                            <p className="text-sm font-bold">
+                              {pm.avgDaysBetweenChanges > 0 ? `${pm.avgDaysBetweenChanges} dias` : "—"}
+                            </p>
+                          </div>
+                          <div className="bg-muted/50 rounded px-3 py-2">
+                            <p className="text-[10px] text-muted-foreground">Última Troca</p>
+                            <p className="text-sm font-bold">
+                              {pm.lastChangeDate ? new Date(pm.lastChangeDate).toLocaleDateString("pt-BR") : "—"}
+                            </p>
+                          </div>
+                        </div>
+                        {pm.items.length > 0 && (
+                          <div className="mt-3 space-y-1">
+                            <p className="text-xs font-medium text-muted-foreground">Histórico recente:</p>
+                            {pm.items.map((item: any, idx: number) => (
+                              <div key={idx} className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1">
+                                <span>{item.productName}</span>
+                                <span className="text-muted-foreground">
+                                  {item.quantity} un. — {new Date(item.deliveredAt).toLocaleDateString("pt-BR")}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   ))}

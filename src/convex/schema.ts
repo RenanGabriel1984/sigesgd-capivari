@@ -250,6 +250,7 @@ const schema = defineSchema(
       // Electronic signature (text stamp)
       deliveredBySignature: v.optional(v.string()),
       deliveredAt: v.optional(v.number()),
+      reverseLogisticsConfirmed: v.optional(v.boolean()),
       createdAt: v.number(),
       updatedAt: v.number(),
     }).index("by_requester", ["requesterId"])
@@ -257,6 +258,26 @@ const schema = defineSchema(
       .index("by_approver", ["approverId"])
       .index("by_created", ["createdAt"])
       .index("by_secretaria", ["secretariaId"]),
+
+    // ── Printers (Impressoras) ──
+    printers: defineTable({
+      name: v.string(),
+      brand: v.string(),
+      model: v.string(),
+      organizationId: v.optional(v.id("organizations")),
+      patrimony: v.optional(v.string()),
+      observation: v.optional(v.string()),
+      active: v.boolean(),
+    }).index("by_organization", ["organizationId"])
+      .index("by_active", ["active"]),
+
+    // ── Printer Compatibility (Matriz de Compatibilidade Toners ↔ Impressoras) ──
+    printerCompatibility: defineTable({
+      productId: v.id("products"),
+      printerModel: v.string(),
+      estimatedYield: v.number(),
+    }).index("by_product", ["productId"])
+      .index("by_printer_model", ["printerModel"]),
 
     // ── Request Items ──
     requestItems: defineTable({
@@ -266,6 +287,7 @@ const schema = defineSchema(
       quantityApproved: v.number(),
       quantityDelivered: v.number(),
       deliveredSerialNumbers: v.optional(v.array(v.string())),
+      targetPrinterId: v.optional(v.id("printers")),
     }).index("by_request", ["requestId"])
       .index("by_product", ["productId"]),
 

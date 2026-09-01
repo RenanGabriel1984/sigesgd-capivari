@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Plus, ClipboardList, Check, X, Truck, FileText, Printer, Search, Archive, Lock,
 } from "lucide-react";
@@ -38,6 +39,7 @@ import { toast } from "sonner";
 interface RequestItemForm {
   productId: string;
   quantity: number;
+  targetPrinterId: string;
 }
 
 const REASON_OPTIONS = [
@@ -55,6 +57,7 @@ export default function Requests() {
   const products = useQuery(api.products.listActive);
   const organizations = useQuery(api.organizations.list);
   const createRequest = useMutation(api.requests.create);
+  const allPrinters = useQuery(api.printers.listActive);
   const approveRequest = useMutation(api.requests.approve);
   const rejectRequest = useMutation(api.requests.reject);
   const deliverRequest = useMutation(api.requests.deliver);
@@ -62,7 +65,7 @@ export default function Requests() {
 
   // ─── Create dialog state ───
   const [createDialog, setCreateDialog] = useState(false);
-  const [items, setItems] = useState<RequestItemForm[]>([{ productId: "", quantity: 1 }]);
+  const [items, setItems] = useState<RequestItemForm[]>([{ productId: "", quantity: 1, targetPrinterId: "" }]);
   const [observation, setObservation] = useState("");
   const [secretariaId, setSecretariaId] = useState("");
   const [departamentoId, setDepartamentoId] = useState("");
@@ -87,6 +90,7 @@ export default function Requests() {
   >([]);
   const [confirmationPassword, setConfirmationPassword] = useState("");
   const [signatureStep, setSignatureStep] = useState<"items" | "signature">("items");
+  const [reverseLogistics, setReverseLogistics] = useState(false);
 
   // ─── Delivery term dialog ───
   const [termDialog, setTermDialog] = useState<any>(null);
@@ -140,7 +144,7 @@ export default function Requests() {
 
   const availableProducts = useMemo(() => products?.filter((p) => p.active) ?? [], [products]);
 
-  const addItem = () => setItems([...items, { productId: "", quantity: 1 }]);
+  const addItem = () => setItems([...items, { productId: "", quantity: 1, targetPrinterId: "" }]);
   const removeItem = (i: number) => setItems(items.filter((_, idx) => idx !== i));
   const updateItem = (i: number, field: keyof RequestItemForm, value: any) => {
     const newItems = [...items];
@@ -149,7 +153,7 @@ export default function Requests() {
   };
 
   const resetForm = () => {
-    setItems([{ productId: "", quantity: 1 }]);
+    setItems([{ productId: "", quantity: 1, targetPrinterId: "" }]);
     setObservation("");
     setSecretariaId("");
     setDepartamentoId("");
@@ -168,6 +172,16 @@ export default function Requests() {
     if (!reason.trim()) { toast.error("O motivo da solicitação é obrigatório"); return; }
     const validItems = items.filter((i) => i.productId && i.quantity > 0);
     if (validItems.length === 0) { toast.error("Adicione pelo menos um item do estoque válido"); return; }
+    // Frontend toner check: for items with compatibility entries, targetPrinterId is required
+    for (const item of validItems) {
+      const product = availableProducts.find((p) => p._id === item.productId);
+      if (product && (product as any).hasCompat) {
+        if (!item.targetPrinterId) {
+          toast.error(`"${product.name}" requer seleção da impressora de destino`);
+          return;
+        }
+      }
+    }
     for (const item of validItems) {
       const product = availableProducts.find((p) => p._id === item.productId);
       if (!product) { toast.error("Item do estoque não encontrado"); return; }
@@ -187,7 +201,11 @@ export default function Requests() {
         osNumber: osNumber.trim() || undefined,
         patrimony: patrimony.trim() || undefined,
         observation: observation.trim() || undefined,
-        items: validItems.map((i) => ({ productId: i.productId as any, quantityRequested: i.quantity })),
+        items: validItems.map((i) => ({
+          productId: i.productId as any,
+          quantityRequested: i.quantity,
+          targetPrinterId: i.targetPrinterId ? (i.targetPrinterId as any) : undefined,
+        })),
       });
       toast.success("Solicitação criada com sucesso");
       setCreateDialog(false);
@@ -299,12 +317,14 @@ export default function Requests() {
           serialNumbers: di.serialNumbers.length > 0 ? di.serialNumbers : undefined,
         })),
         confirmationPassword: confirmationPassword,
+        reverseLogisticsConfirmed: reverseLogistics || undefined,
       });
       toast.success("Entrega registrada com sucesso");
       setDeliverDialog(null);
       setDeliverItems([]);
       setConfirmationPassword("");
       setSignatureStep("items");
+      setReverseLogistics(false);
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao registrar entrega");
     }
@@ -354,6 +374,11 @@ export default function Requests() {
                     {item.deliveredSerialNumbers.join(", ")}
                   </div>
                 )}
+                {item.printer && (
+                  <div className="mt-1 text-xs text-blue-600">
+                    <span className="font-medium">Impressora destino:</span> {item.printer.name} ({item.printer.brand} {item.printer.model}){item.printer.patrimony ? ` [${item.printer.patrimony}]` : ""}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -367,6 +392,13 @@ export default function Requests() {
               </div>
               <p className="text-xs text-blue-600">{r.deliveredBySignature}</p>
             </div>
+            {r.reverseLogisticsConfirmed && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 mt-2">
+                <p className="text-xs text-emerald-700 font-medium">
+                  ✓ Carcaça antiga recolhida para descarte sustentável
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="border-t pt-4 flex justify-between text-xs text-muted-foreground">
@@ -429,6 +461,12 @@ export default function Requests() {
           </div>
         )}
         {r.observation && <p className="text-xs text-muted-foreground italic">"{r.observation}"</p>}
+        {r.status === "delivered" && r.reverseLogisticsConfirmed && (
+          <div className="mb-2 text-xs bg-emerald-50 border border-emerald-200 rounded px-3 py-2">
+            <span className="font-medium text-emerald-700">Logística reversa:</span>{" "}
+            <span className="text-emerald-600">Carcaça antiga recolhida para descarte sustentável</span>
+          </div>
+        )}
         {r.status === "delivered" && r.items?.some((item: any) => item.deliveredSerialNumbers?.length > 0) && (
           <div className="mb-2 text-xs bg-blue-50 border border-blue-200 rounded px-3 py-2">
             <span className="font-medium text-blue-700">Patrimônio/Série:</span>
@@ -650,6 +688,27 @@ export default function Requests() {
                       <div className="w-20">
                         <Input type="number" min="1" value={item.quantity} onChange={(e) => updateItem(i, "quantity", Number(e.target.value))} />
                       </div>
+                      {/* Printer selector for toner items */}
+                      {allPrinters?.length ? (
+                        <div className="flex-1">
+                          <Select
+                            value={item.targetPrinterId || ""}
+                            onValueChange={(v) => updateItem(i, "targetPrinterId", v)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Impressora (se toner)" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none">Não aplicável</SelectItem>
+                              {allPrinters.map((p: any) => (
+                                <SelectItem key={p._id} value={p._id}>
+                                  {p.name} — {p.brand} {p.model}{p.patrimony ? ` [${p.patrimony}]` : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : null}
                       {items.length > 1 && (
                         <Button variant="ghost" size="icon" onClick={() => removeItem(i)} className="shrink-0 mb-0.5"><X className="h-4 w-4" /></Button>
                       )}
@@ -809,6 +868,19 @@ export default function Requests() {
                     </p>
                   </div>
                 )}
+                <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                  <Checkbox
+                    id="reverseLogistics"
+                    checked={reverseLogistics}
+                    onCheckedChange={(c) => setReverseLogistics(c === true)}
+                  />
+                  <Label htmlFor="reverseLogistics" className="text-xs font-medium text-amber-800 cursor-pointer">
+                    Toner vazio recolhido / Logística reversa confirmada
+                    <p className="text-amber-600 font-normal mt-0.5">
+                      Ao marcar, será registrado no Termo de Entrega: "Carcaça antiga recolhida para descarte sustentável"
+                    </p>
+                  </Label>
+                </div>
               </>
             )}
           </div>

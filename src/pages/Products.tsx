@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Link } from "react-router";
@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Pencil, Search, Package, ArrowUpRight, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Search, Package, ArrowUpRight, AlertTriangle, Printer, X } from "lucide-react";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
 import { toast } from "sonner";
 
@@ -52,6 +52,22 @@ export default function Products() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ProductForm>(emptyForm);
 
+  // ─── Printer Compatibility ───
+  const [compatEntries, setCompatEntries] = useState<any[]>([]);
+  const [newCompatModel, setNewCompatModel] = useState("");
+  const [newCompatYield, setNewCompatYield] = useState("");
+  const printers = useQuery(api.printers.listActive);
+  const addCompat = useMutation(api.printers.upsertCompatibility);
+  const removeCompat = useMutation(api.printers.removeCompatibility);
+  const [compatLoading, setCompatLoading] = useState(false);
+
+  // Get unique printer models for the compatibility dropdown
+  const printerModels = useMemo(() => {
+    if (!printers) return [];
+    const models = [...new Set(printers.map((p: any) => `${p.brand} ${p.model}`))];
+    return models.sort();
+  }, [printers]);
+
   const filtered = products?.filter((p: any) => {
     const q = search.toLowerCase();
     const matchesSearch = !q ||
@@ -68,7 +84,12 @@ export default function Products() {
 
   const belowMinCount = products?.filter((p: any) => (p.stock?.physicalQuantity ?? 0) <= p.minimumStock).length ?? 0;
 
-  const openCreate = () => { setForm(emptyForm); setEditingId(null); setDialogOpen(true); };
+  const openCreate = () => { setForm(emptyForm); setEditingId(null); setCompatEntries([]); setDialogOpen(true); };
+  const compatEntriesList = useQuery(
+    api.printers.listCompatibility,
+    editingId ? { productId: editingId as any } : "skip"
+  );
+
   const openEdit = (e: React.MouseEvent, p: any) => {
     e.preventDefault(); e.stopPropagation();
     setForm({
@@ -79,7 +100,43 @@ export default function Products() {
       minimumStock: p.minimumStock, idealStock: p.idealStock, maximumStock: p.maximumStock,
       observation: p.observation ?? "", hasSerial: p.hasSerial ?? false,
     });
-    setEditingId(p._id); setDialogOpen(true);
+    setEditingId(p._id);
+    setDialogOpen(true);
+  };
+
+  // Sync compatEntries from query
+  useMemo(() => {
+    if (compatEntriesList !== undefined) setCompatEntries(compatEntriesList);
+  }, [compatEntriesList]);
+
+  const handleAddCompat = async () => {
+    if (!editingId || !newCompatModel.trim() || !newCompatYield) return;
+    setCompatLoading(true);
+    try {
+      const id = await addCompat({
+        productId: editingId as any,
+        printerModel: newCompatModel.trim(),
+        estimatedYield: Number(newCompatYield),
+      });
+      setCompatEntries((prev) => [...prev, {
+        _id: id, productId: editingId, printerModel: newCompatModel.trim(),
+        estimatedYield: Number(newCompatYield),
+      }]);
+      setNewCompatModel("");
+      setNewCompatYield("");
+      toast.success("Compatibilidade adicionada");
+    } catch (err: any) { toast.error(err.message ?? "Erro ao adicionar"); }
+    setCompatLoading(false);
+  };
+
+  const handleRemoveCompat = async (compatId: string) => {
+    setCompatLoading(true);
+    try {
+      await removeCompat({ id: compatId as any });
+      setCompatEntries((prev) => prev.filter((c) => c._id !== compatId));
+      toast.success("Compatibilidade removida");
+    } catch (err: any) { toast.error(err.message ?? "Erro ao remover"); }
+    setCompatLoading(false);
   };
 
   const handleSave = async () => {
@@ -251,6 +308,75 @@ export default function Products() {
               <div><Label>Estoque Máximo</Label><Input type="number" min="0" value={form.maximumStock || ""} onChange={(e) => setForm({ ...form, maximumStock: e.target.value === "" ? 0 : Number(e.target.value) })} /></div>
             </div>
             <div><Label>Observações</Label><Textarea value={form.observation} onChange={(e) => setForm({ ...form, observation: e.target.value })} rows={2} /></div>
+
+            {/* ═══ Printer Compatibility ═══ */}
+            {editingId && (
+              <div className="border-t pt-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Printer className="h-4 w-4 text-primary" />
+                  <Label className="text-sm font-medium">Impressoras Compatíveis (Toner/Insumo)</Label>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Vincule impressoras compatíveis com este toner/insumo. A compatibilidade será verificada automaticamente nas solicitações.
+                </p>
+                {compatEntries.length > 0 && (
+                  <div className="space-y-2 mb-3">
+                    {compatEntries.map((c: any) => (
+                      <div key={c._id} className="flex items-center justify-between bg-muted/50 rounded px-3 py-2 text-sm">
+                        <div>
+                          <span className="font-medium">{c.printerModel}</span>
+                          <span className="text-xs text-muted-foreground ml-2">≈ {c.estimatedYield.toLocaleString("pt-BR")} páginas</span>
+                        </div>
+                        <Button
+                          variant="ghost" size="icon" className="h-6 w-6"
+                          onClick={() => handleRemoveCompat(c._id)}
+                          disabled={compatLoading}
+                        >
+                          <X className="h-3.5 w-3.5 text-destructive" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {compatEntries.length === 0 && (
+                  <p className="text-xs text-muted-foreground italic mb-3">Nenhuma compatibilidade registrada</p>
+                )}
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <Label className="text-xs">Modelo da Impressora</Label>
+                    <Input
+                      value={newCompatModel}
+                      onChange={(e) => setNewCompatModel(e.target.value)}
+                      placeholder="Ex: HP LaserJet Pro M404dn"
+                      className="mt-1"
+                      list="printer-models-list"
+                    />
+                    <datalist id="printer-models-list">
+                      {printerModels.map((m: string) => (
+                        <option key={m} value={m} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div className="w-32">
+                    <Label className="text-xs">Rendimento (pág.)</Label>
+                    <Input
+                      type="number" min="1"
+                      value={newCompatYield}
+                      onChange={(e) => setNewCompatYield(e.target.value)}
+                      placeholder="Ex: 12000"
+                      className="mt-1"
+                    />
+                  </div>
+                  <Button
+                    size="sm" className="gap-1 shrink-0 mb-0.5"
+                    onClick={handleAddCompat}
+                    disabled={compatLoading || !newCompatModel.trim() || !newCompatYield}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Adicionar
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>

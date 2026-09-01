@@ -35,7 +35,8 @@ async function enrichRequest(ctx: any, r: any) {
   const itemsWithProduct = await Promise.all(
     items.map(async (item: any) => {
       const product = await ctx.db.get(item.productId);
-      return { ...item, product };
+      const printer = item.targetPrinterId ? await ctx.db.get(item.targetPrinterId) : null;
+      return { ...item, product, printer };
     })
   );
   return { ...r, requester, approver, secretaria, departamento, unidade, items: itemsWithProduct };
@@ -92,6 +93,7 @@ export const create = mutation({
     items: v.array(v.object({
       productId: v.id("products"),
       quantityRequested: v.number(),
+      targetPrinterId: v.optional(v.id("printers")),
     })),
   },
   handler: async (ctx, args) => {
@@ -140,6 +142,23 @@ export const create = mutation({
       if (product.unitOfMeasure === "un" && !Number.isInteger(item.quantityRequested)) {
         throw new Error("A quantidade deve ser um número inteiro para esta unidade");
       }
+      // Validate toner compatibility: if this product has compatibility entries, targetPrinterId is required
+      const compatEntries = await ctx.db
+        .query("printerCompatibility")
+        .withIndex("by_product", (q) => q.eq("productId", item.productId))
+        .collect();
+      if (compatEntries.length > 0) {
+        // This is a toner product — targetPrinterId is required
+        if (!item.targetPrinterId) throw new Error(`"${product.name}" é um toner/insumo. Selecione a impressora de destino.`);
+        const printer = await ctx.db.get(item.targetPrinterId);
+        if (!printer) throw new Error("Impressora de destino não encontrada");
+        // Check compatibility
+        const isCompatible = compatEntries.some((c) => c.printerModel === printer.model);
+        if (!isCompatible) {
+          const compatModels = compatEntries.map((c) => c.printerModel).join(", ");
+          throw new Error(`O toner "${product.name}" não é compatível com a impressora "${printer.model}". Modelos compatíveis: ${compatModels}`);
+        }
+      }
     }
 
     const now = Date.now();
@@ -164,6 +183,7 @@ export const create = mutation({
         quantityRequested: item.quantityRequested,
         quantityApproved: 0,
         quantityDelivered: 0,
+        targetPrinterId: item.targetPrinterId,
       });
     }
 
@@ -249,6 +269,7 @@ export const deliver = mutation({
       serialNumbers: v.optional(v.array(v.string())),
     }))),
     confirmationPassword: v.string(),
+    reverseLogisticsConfirmed: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { userId, user } = await requireUser(ctx);
@@ -334,7 +355,13 @@ export const deliver = mutation({
     const sigName = user.name ?? user.email ?? "Servidor";
     const sigDate = new Date(now).toLocaleString("pt-BR");
     const deliveredBySignature = `Assinado eletronicamente por ${sigName} via autenticação por senha em ${sigDate}`;
-    await ctx.db.patch(args.requestId, { status: "delivered", updatedAt: now, deliveredAt: now, deliveredBySignature });
+    await ctx.db.patch(args.requestId, {
+      status: "delivered",
+      updatedAt: now,
+      deliveredAt: now,
+      deliveredBySignature,
+      reverseLogisticsConfirmed: args.reverseLogisticsConfirmed ?? undefined,
+    });
     await ctx.db.insert("auditLogs", { userId, action: "deliver", entity: "requests", entityId: args.requestId, details: `Solicitação entregue (${inputItems.length} item(ns))`, timestamp: now });
     return args.requestId;
   },
