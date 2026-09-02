@@ -26,6 +26,8 @@ import {
   Boxes,
   MapPin,
   ClipboardCheck,
+  RotateCcw,
+  ArrowRightLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -62,6 +64,8 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Locais de Armazenamento", href: "/storage-locations", icon: MapPin, permission: "canManageStorageLocations" },
   { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
   { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests" },
+  { label: "Devoluções", href: "/returns", icon: RotateCcw, permission: "canReturnStock" },
+  { label: "Transferências", href: "/transfers", icon: ArrowRightLeft, permission: "canTransferStock" },
   { label: "Movimentações", href: "/movements", icon: ArrowLeftRight, permission: "canViewMovements" },
   { label: "Organização", href: "/organization", icon: Building2, permission: "canManageOrg" },
   { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },

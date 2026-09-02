@@ -94,6 +94,8 @@ export default function Requests() {
   const [confirmationPassword, setConfirmationPassword] = useState("");
   const [signatureStep, setSignatureStep] = useState<"items" | "signature">("items");
   const [reverseLogistics, setReverseLogistics] = useState(false);
+  const [receivedByUserId, setReceivedByUserId] = useState("");
+  const allUsers = useQuery(api.users.listUsers);
 
   // ─── Delivery term dialog ───
   const [termDialog, setTermDialog] = useState<any>(null);
@@ -333,6 +335,7 @@ export default function Requests() {
           quantityDelivered: di.quantity,
           serialNumbers: di.serialNumbers.length > 0 ? di.serialNumbers : undefined,
         })),
+        receivedByUserId: (receivedByUserId || undefined) as any,
         confirmationPassword: confirmationPassword,
         reverseLogisticsConfirmed: reverseLogistics || undefined,
       });
@@ -342,6 +345,7 @@ export default function Requests() {
       setConfirmationPassword("");
       setSignatureStep("items");
       setReverseLogistics(false);
+      setReceivedByUserId("");
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao registrar entrega");
     }
@@ -886,6 +890,19 @@ export default function Requests() {
                   <p className="text-xs text-amber-700">
                     Para confirmar a entrega, informe sua senha de acesso ao sistema. Esta ação constitui assinatura eletrônica com valor legal.
                   </p>
+                </div>
+                <div>
+                  <Label>Recebedor</Label>
+                  <select
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={receivedByUserId}
+                    onChange={(e) => setReceivedByUserId(e.target.value)}
+                  >
+                    <option value="">Selecione quem recebeu...</option>
+                    {(allUsers ?? []).filter((u: any) => u.active !== false && u.role).map((u: any) => (
+                      <option key={u._id} value={u._id}>{u.name ?? u.email ?? "Usuário"}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <Label>Senha de Confirmação do Servidor/Recebedor <span className="text-destructive">*</span></Label>

@@ -45,6 +45,9 @@ const ALL_ACTIONS = [
   "open_inventory",
   "count_inventory",
   "close_inventory",
+  "return_stock",
+  "reverse_exit",
+  "transfer_stock",
 ] as const;
 
 const ENTITY_OPTIONS = [
@@ -57,6 +60,8 @@ const ENTITY_OPTIONS = [
   { value: "categories", label: "Categorias" },
   { value: "suppliers", label: "Fornecedores" },
   { value: "entries", label: "Entradas" },
+  { value: "returns", label: "Devoluções" },
+  { value: "stockTransfers", label: "Transferências" },
   { value: "lots", label: "Lotes" },
   { value: "inventories", label: "Inventários" },
   { value: "storageLocations", label: "Locais de Armazenamento" },

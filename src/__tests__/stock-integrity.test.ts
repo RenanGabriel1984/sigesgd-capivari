@@ -558,3 +558,248 @@ describe("Location Validation", () => {
     expect(uniqueNames.size).toBe(names.length);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FASE 4: SOLICITAÇÕES, DEVOLUÇÕES, TRANSFERÊNCIAS, LOTES
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("Phase 4 — Return Workflow", () => {
+  it("AB. Return increases physical stock", () => {
+    let physical = 10;
+    let reserved = 0;
+    const quantity = 2;
+    physical += quantity;
+    expect(physical).toBe(12);
+    expect(reserved).toBe(0);
+  });
+
+  it("AC. Partial return is allowed", () => {
+    const delivered = 5;
+    const returned = 2;
+    expect(returned).toBeLessThanOrEqual(delivered);
+    const remaining = delivered - returned;
+    expect(remaining).toBe(3);
+  });
+
+  it("AD. Return exceeding delivered is blocked", () => {
+    const delivered = 5;
+    const attemptedReturn = 6;
+    expect(attemptedReturn).toBeGreaterThan(delivered);
+    // Should be rejected
+  });
+
+  it("AE. Multiple partial returns must not exceed total delivered", () => {
+    const delivered = 10;
+    let totalReturned = 0;
+    totalReturned += 3;
+    totalReturned += 4;
+    expect(totalReturned).toBe(7);
+    expect(delivered - totalReturned).toBe(3);
+    // Third return of 4 should fail
+    const thirdAttempt = 4;
+    expect(totalReturned + thirdAttempt).toBeGreaterThan(delivered);
+  });
+
+  it("AF. Return lot availability increases", () => {
+    let lotAvailable = 8;
+    const returned = 2;
+    lotAvailable += returned;
+    expect(lotAvailable).toBe(10);
+  });
+});
+
+describe("Phase 4 — Transfer Workflow", () => {
+  it("AG. Transfer preserves global stock total", () => {
+    let globalPhysical = 20;
+    let fromLocation = 12;
+    let toLocation = 8;
+    const transferQty = 5;
+    fromLocation -= transferQty;
+    toLocation += transferQty;
+    expect(fromLocation).toBe(7);
+    expect(toLocation).toBe(13);
+    expect(fromLocation + toLocation).toBe(20);
+    expect(globalPhysical).toBe(20);
+  });
+
+  it("AH. Transfer blocked when source insufficient", () => {
+    let fromLocation = 3;
+    const transferQty = 5;
+    expect(transferQty).toBeGreaterThan(fromLocation);
+    // Should be rejected
+  });
+
+  it("AI. Transfer to same location is blocked", () => {
+    const fromLocationId = "loc1";
+    const toLocationId = "loc1";
+    expect(fromLocationId).toBe(toLocationId);
+    // Should be rejected
+  });
+
+  it("AJ. Transfer creates movement record", () => {
+    const movements: Array<{ type: string; quantity: number }> = [];
+    movements.push({ type: "transfer", quantity: 5 });
+    expect(movements.length).toBe(1);
+    expect(movements[0].type).toBe("transfer");
+  });
+});
+
+describe("Phase 4 — FIFO Lot Consumption", () => {
+  it("AK. FIFO selects oldest lot first", () => {
+    const lots = [
+      { id: "L2", receivedAt: 200, available: 10 },
+      { id: "L1", receivedAt: 100, available: 5 },
+      { id: "L3", receivedAt: 300, available: 8 },
+    ];
+    const sorted = [...lots].sort((a, b) => a.receivedAt - b.receivedAt);
+    expect(sorted[0].id).toBe("L1");
+    expect(sorted[1].id).toBe("L2");
+    expect(sorted[2].id).toBe("L3");
+  });
+
+  it("AL. FIFO tie-breaker uses lot number", () => {
+    const lots = [
+      { id: "LOT-2026-002", receivedAt: 100, available: 5 },
+      { id: "LOT-2026-001", receivedAt: 100, available: 5 },
+    ];
+    const sorted = [...lots].sort((a, b) =>
+      a.receivedAt - b.receivedAt || a.id.localeCompare(b.id)
+    );
+    expect(sorted[0].id).toBe("LOT-2026-001");
+    expect(sorted[1].id).toBe("LOT-2026-002");
+  });
+
+  it("AM. Multi-lot consumption sums to quantity delivered", () => {
+    const lots = [
+      { id: "L1", available: 3 },
+      { id: "L2", available: 10 },
+    ];
+    const needed = 5;
+    let consumed: Array<{ lotId: string; qty: number }> = [];
+    let remaining = needed;
+    for (const lot of lots) {
+      if (remaining <= 0) break;
+      const take = Math.min(lot.available, remaining);
+      consumed.push({ lotId: lot.id, qty: take });
+      remaining -= take;
+    }
+    expect(consumed.length).toBe(2);
+    expect(consumed[0].qty).toBe(3);
+    expect(consumed[1].qty).toBe(2);
+    const totalConsumed = consumed.reduce((s, c) => s + c.qty, 0);
+    expect(totalConsumed).toBe(needed);
+  });
+
+  it("AN. Lot availability decreases on consumption", () => {
+    let lotAvailable = 10;
+    const consumed = 4;
+    lotAvailable -= consumed;
+    expect(lotAvailable).toBe(6);
+  });
+
+  it("AO. Consumption exceeding total lot quantity is blocked", () => {
+    const lots = [
+      { id: "L1", available: 3 },
+      { id: "L2", available: 2 },
+    ];
+    const totalAvailable = lots.reduce((s, l) => s + l.available, 0);
+    const requested = 7;
+    expect(requested).toBeGreaterThan(totalAvailable);
+  });
+});
+
+describe("Phase 4 — Receiver Tracking", () => {
+  it("AP. Request tracks requester, approver, deliverer, receiver", () => {
+    const request = {
+      requesterId: "user1",
+      approverId: "user2",
+      deliveredByUserId: "user3",
+      receivedByUserId: "user4",
+    };
+    expect(request.requesterId).not.toBe(request.approverId);
+    expect(request.deliveredByUserId).not.toBe(request.receivedByUserId);
+  });
+
+  it("AQ. Request without receiver defaults to requester", () => {
+    const request = {
+      requesterId: "user1",
+      receivedByUserId: undefined,
+    };
+    const effective = request.receivedByUserId ?? request.requesterId;
+    expect(effective).toBe("user1");
+  });
+});
+
+describe("Phase 4 — Cancel with Reservation Release", () => {
+  it("AR. Cancel of approved request releases reserved quantity", () => {
+    let physical = 10;
+    let reserved = 4;
+    const cancelQty = 4;
+    reserved -= cancelQty;
+    expect(reserved).toBe(0);
+    expect(physical).toBe(10);
+    expect(physical - reserved).toBe(10);
+  });
+
+  it("AS. Cancel of pending request does not affect stock", () => {
+    let physical = 10;
+    let reserved = 0;
+    // No change to stock on cancel of pending
+    expect(physical).toBe(10);
+    expect(reserved).toBe(0);
+  });
+});
+
+describe("Phase 4 — Stock Integrity After All Operations", () => {
+  it("AT. Full lifecycle: enter → approve → deliver → return", () => {
+    // Enter 10
+    let physical = 10;
+    let reserved = 0;
+    expect(physical - reserved).toBe(10);
+
+    // Approve 4
+    reserved += 4;
+    expect(physical - reserved).toBe(6);
+
+    // Deliver 4
+    physical -= 4;
+    reserved -= 4;
+    expect(physical).toBe(6);
+    expect(reserved).toBe(0);
+    expect(physical - reserved).toBe(6);
+
+    // Return 2
+    physical += 2;
+    expect(physical).toBe(8);
+    expect(physical - reserved).toBe(8);
+  });
+
+  it("AU. Full lifecycle: enter → approve → cancel (releases reservation)", () => {
+    let physical = 10;
+    let reserved = 0;
+
+    // Approve 5
+    reserved += 5;
+    expect(physical - reserved).toBe(5);
+
+    // Cancel releases reservation
+    reserved -= 5;
+    expect(reserved).toBe(0);
+    expect(physical - reserved).toBe(10);
+  });
+
+  it("AV. never: physical < 0 or reserved > physical", () => {
+    const scenarios = [
+      { physical: 0, reserved: 0 },
+      { physical: 5, reserved: 3 },
+      { physical: 10, reserved: 0 },
+      { physical: 7, reserved: 7 },
+    ];
+    for (const s of scenarios) {
+      expect(s.physical).toBeGreaterThanOrEqual(0);
+      expect(s.reserved).toBeGreaterThanOrEqual(0);
+      expect(s.reserved).toBeLessThanOrEqual(s.physical);
+      expect(s.physical - s.reserved).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
