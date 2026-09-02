@@ -331,6 +331,7 @@ export const deliver = mutation({
       quantityDelivered: v.number(),
       serialNumbers: v.optional(v.array(v.string())),
     }))),
+    receivedByUserId: v.optional(v.id("users")),
     confirmationPassword: v.string(),
     reverseLogisticsConfirmed: v.optional(v.boolean()),
   },
@@ -352,6 +353,12 @@ export const deliver = mutation({
     const inputItems = args.items ?? [];
     if (inputItems.length === 0) throw new Error("Informe ao menos um item para entrega");
 
+    // Validate receiver
+    if (args.receivedByUserId) {
+      const receiver = await ctx.db.get(args.receivedByUserId);
+      if (!receiver) throw new Error("Usuário recebedor não encontrado");
+    }
+
     // Validate each item
     for (const input of inputItems) {
       const requestItem = await ctx.db.get(input.itemId);
@@ -368,7 +375,6 @@ export const deliver = mutation({
         if (serials.length !== input.quantityDelivered) {
           throw new Error(`Para "${product.name}", é necessário informar ${input.quantityDelivered} número(s) de patrimônio/série`);
         }
-        // Check for empty serials
         if (serials.some((s) => !s.trim())) {
           throw new Error(`Todos os números de patrimônio/série devem ser preenchidos para "${product.name}"`);
         }
@@ -413,6 +419,42 @@ export const deliver = mutation({
         quantityDelivered: input.quantityDelivered,
         deliveredSerialNumbers: input.serialNumbers?.length ? input.serialNumbers : undefined,
       });
+
+      // FIFO Lot Consumption: find lots for this product, ordered by receivedAt ascending
+      let remainingToConsume = input.quantityDelivered;
+      const lots = await ctx.db
+        .query("lots")
+        .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
+        .collect();
+      // Sort by receivedAt ascending (FIFO), then by lotNumber
+      const sortedLots = lots
+        .filter((l) => l.quantityAvailable > 0)
+        .sort((a, b) => a.receivedAt - b.receivedAt || a.lotNumber.localeCompare(b.lotNumber));
+
+      for (const lot of sortedLots) {
+        if (remainingToConsume <= 0) break;
+        const consumeFromLot = Math.min(lot.quantityAvailable, remainingToConsume);
+        if (consumeFromLot <= 0) continue;
+
+        // Reduce lot available
+        await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consumeFromLot });
+
+        // Record which lot was consumed
+        await ctx.db.insert("requestItemLots", {
+          requestItemId: input.itemId,
+          lotId: lot._id,
+          quantity: consumeFromLot,
+        });
+
+        remainingToConsume -= consumeFromLot;
+      }
+
+      if (remainingToConsume > 0) {
+        throw new Error(
+          `Lotes insuficientes para "${(await ctx.db.get(requestItem.productId))?.name ?? "item"}". ` +
+          `Faltam ${remainingToConsume} unidades sem lote disponível.`
+        );
+      }
     }
 
     const sigName = user.name ?? user.email ?? "Servidor";
@@ -423,6 +465,7 @@ export const deliver = mutation({
       updatedAt: now,
       deliveredAt: now,
       deliveredBySignature,
+      receivedByUserId: args.receivedByUserId ?? request.requesterId,
       reverseLogisticsConfirmed: args.reverseLogisticsConfirmed ?? undefined,
     });
     await ctx.db.insert("auditLogs", { userId, action: "deliver", entity: "requests", entityId: args.requestId, details: `Solicitação entregue (${inputItems.length} item(ns))`, timestamp: now });

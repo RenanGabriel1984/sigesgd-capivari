@@ -70,7 +70,7 @@ export const REQUEST_STATUS_COLORS: Record<RequestStatusType, string> = {
 };
 
 // ─── Audit Actions ───────────────────────────────────────────────────────────
-export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update" | "confirm_entry" | "reverse_entry" | "open_inventory" | "count_inventory" | "close_inventory";
+export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update" | "confirm_entry" | "reverse_entry" | "open_inventory" | "count_inventory" | "close_inventory" | "return_stock" | "reverse_exit" | "transfer_stock";
 
 export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   create: "Criação",
@@ -93,6 +93,9 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   open_inventory: "Abertura de Inventário",
   count_inventory: "Contagem de Inventário",
   close_inventory: "Fechamento de Inventário",
+  return_stock: "Devolução de Estoque",
+  reverse_exit: "Estorno de Saída",
+  transfer_stock: "Transferência de Estoque",
 };
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
@@ -129,6 +132,8 @@ export const PERMISSIONS = {
     canCreateRequests: true,
     canManageInventory: true,
     canManageStorageLocations: true,
+    canTransferStock: true,
+    canReturnStock: true,
   },
   stock_manager: {
     canManageUsers: false,
@@ -147,6 +152,8 @@ export const PERMISSIONS = {
     canCreateRequests: false,
     canManageInventory: true,
     canManageStorageLocations: true,
+    canTransferStock: true,
+    canReturnStock: true,
   },
   director: {
     canManageUsers: false,
@@ -165,6 +172,8 @@ export const PERMISSIONS = {
     canCreateRequests: false,
     canManageInventory: false,
     canManageStorageLocations: false,
+    canTransferStock: false,
+    canReturnStock: false,
   },
   secretary: {
     canManageUsers: false,
@@ -183,6 +192,8 @@ export const PERMISSIONS = {
     canCreateRequests: false,
     canManageInventory: false,
     canManageStorageLocations: false,
+    canTransferStock: false,
+    canReturnStock: false,
   },
   technician: {
     canManageUsers: false,
@@ -201,6 +212,8 @@ export const PERMISSIONS = {
     canCreateRequests: true,
     canManageInventory: false,
     canManageStorageLocations: false,
+    canTransferStock: false,
+    canReturnStock: false,
   },
 } as const;
 

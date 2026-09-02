@@ -94,6 +94,9 @@ export const AUDIT_ACTIONS = {
   OPEN_INVENTORY: "open_inventory",
   COUNT_INVENTORY: "count_inventory",
   CLOSE_INVENTORY: "close_inventory",
+  RETURN_STOCK: "return_stock",
+  REVERSE_EXIT: "reverse_exit",
+  TRANSFER_STOCK: "transfer_stock",
 } as const;
 
 export const auditActionValidator = v.union(
@@ -117,6 +120,9 @@ export const auditActionValidator = v.union(
   v.literal(AUDIT_ACTIONS.OPEN_INVENTORY),
   v.literal(AUDIT_ACTIONS.COUNT_INVENTORY),
   v.literal(AUDIT_ACTIONS.CLOSE_INVENTORY),
+  v.literal(AUDIT_ACTIONS.RETURN_STOCK),
+  v.literal(AUDIT_ACTIONS.REVERSE_EXIT),
+  v.literal(AUDIT_ACTIONS.TRANSFER_STOCK),
 );
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
@@ -266,6 +272,7 @@ const schema = defineSchema(
       // Electronic signature (text stamp)
       deliveredBySignature: v.optional(v.string()),
       deliveredAt: v.optional(v.number()),
+      receivedByUserId: v.optional(v.id("users")),
       reverseLogisticsConfirmed: v.optional(v.boolean()),
       createdAt: v.number(),
       updatedAt: v.number(),
@@ -409,6 +416,51 @@ const schema = defineSchema(
       observation: v.optional(v.string()),
     }).index("by_inventory", ["inventoryId"])
       .index("by_product", ["productId"]),
+
+    // ── Request Item Lots (Rastreabilidade de Lotes por Item de Solicitação) ──
+    requestItemLots: defineTable({
+      requestItemId: v.id("requestItems"),
+      lotId: v.id("lots"),
+      quantity: v.number(),
+    }).index("by_requestItem", ["requestItemId"])
+      .index("by_lot", ["lotId"]),
+
+    // ── Returns (Devoluções) ──
+    returns: defineTable({
+      requestId: v.id("requests"),
+      requestItemId: v.id("requestItems"),
+      productId: v.id("products"),
+      lotId: v.optional(v.id("lots")),
+      quantity: v.number(),
+      reason: v.string(),
+      returnedByUserId: v.id("users"),
+      receivedByUserId: v.id("users"),
+      observation: v.optional(v.string()),
+      createdAt: v.number(),
+    }).index("by_request", ["requestId"])
+      .index("by_product", ["productId"]),
+
+    // ── Stock by Location (Estoque por Local de Armazenamento) ──
+    stockByLocation: defineTable({
+      productId: v.id("products"),
+      locationId: v.id("storageLocations"),
+      quantity: v.number(),
+    }).index("by_product", ["productId"])
+      .index("by_location", ["locationId"]),
+
+    // ── Stock Transfers (Transferências entre Locais) ──
+    stockTransfers: defineTable({
+      productId: v.id("products"),
+      lotId: v.optional(v.id("lots")),
+      fromLocationId: v.id("storageLocations"),
+      toLocationId: v.id("storageLocations"),
+      quantity: v.number(),
+      responsibleUserId: v.id("users"),
+      observation: v.optional(v.string()),
+      createdAt: v.number(),
+    }).index("by_product", ["productId"])
+      .index("by_from", ["fromLocationId"])
+      .index("by_to", ["toLocationId"]),
 
     // ── Audit Log ──
     auditLogs: defineTable({
