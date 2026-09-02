@@ -97,6 +97,9 @@ export const AUDIT_ACTIONS = {
   RETURN_STOCK: "return_stock",
   REVERSE_EXIT: "reverse_exit",
   TRANSFER_STOCK: "transfer_stock",
+  GOMAQ_EXCHANGE: "gomaq_exchange",
+  GOMAQ_COLLECTION: "gomaq_collection",
+  GOMAQ_ORDER: "gomaq_order",
 } as const;
 
 export const auditActionValidator = v.union(
@@ -123,6 +126,9 @@ export const auditActionValidator = v.union(
   v.literal(AUDIT_ACTIONS.RETURN_STOCK),
   v.literal(AUDIT_ACTIONS.REVERSE_EXIT),
   v.literal(AUDIT_ACTIONS.TRANSFER_STOCK),
+  v.literal(AUDIT_ACTIONS.GOMAQ_EXCHANGE),
+  v.literal(AUDIT_ACTIONS.GOMAQ_COLLECTION),
+  v.literal(AUDIT_ACTIONS.GOMAQ_ORDER),
 );
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
@@ -201,6 +207,7 @@ const schema = defineSchema(
       photo: v.optional(v.string()),
       // Prepared for future lot/serial tracking
       hasSerial: v.optional(v.boolean()),
+      standardOrderQuantity: v.optional(v.number()),
     }).index("by_category", ["categoryId"])
       .index("by_active", ["active"])
       .index("by_code", ["internalCode"])
@@ -289,6 +296,9 @@ const schema = defineSchema(
       model: v.string(),
       organizationId: v.optional(v.id("organizations")),
       patrimony: v.optional(v.string()),
+      serialNumber: v.optional(v.string()),
+      ipAddress: v.optional(v.string()),
+      macAddress: v.optional(v.string()),
       observation: v.optional(v.string()),
       active: v.boolean(),
     }).index("by_organization", ["organizationId"])
@@ -461,6 +471,54 @@ const schema = defineSchema(
     }).index("by_product", ["productId"])
       .index("by_from", ["fromLocationId"])
       .index("by_to", ["toLocationId"]),
+
+    // ── GOMAQ Exchanges (Trocas de Suprimento) ──
+    gomaQExchanges: defineTable({
+      exchangeNumber: v.string(),
+      productId: v.id("products"),
+      lotId: v.optional(v.id("lots")),
+      printerId: v.id("printers"),
+      quantityDelivered: v.number(),
+      quantityEmptyReceived: v.number(),
+      deliveredByUserId: v.id("users"),
+      receivedByUserId: v.id("users"),
+      requestId: v.optional(v.id("requests")),
+      organizationId: v.optional(v.id("organizations")),
+      exchangedAt: v.number(),
+      observation: v.optional(v.string()),
+    }).index("by_product", ["productId"])
+      .index("by_printer", ["printerId"])
+      .index("by_date", ["exchangedAt"])
+      .index("by_number", ["exchangeNumber"]),
+
+    // ── GOMAQ Empty Cartridges (Carcaças Vazias) ──
+    gomaQEmptyCartridges: defineTable({
+      productId: v.id("products"),
+      printerId: v.optional(v.id("printers")),
+      quantity: v.number(),
+      generatedAt: v.number(),
+      sourceExchangeId: v.id("gomaQExchanges"),
+      storageLocationId: v.optional(v.id("storageLocations")),
+      status: v.union(
+        v.literal("awaiting_collection"), v.literal("collected")
+      ),
+      collectedAt: v.optional(v.number()),
+      collectionId: v.optional(v.id("gomaQCollections")),
+      createdByUserId: v.id("users"),
+      observation: v.optional(v.string()),
+    }).index("by_status", ["status"])
+      .index("by_product", ["productId"])
+      .index("by_printer", ["printerId"]),
+
+    // ── GOMAQ Collections (Coletas) ──
+    gomaQCollections: defineTable({
+      collectionNumber: v.string(),
+      collectedAt: v.number(),
+      responsibleUserId: v.id("users"),
+      observation: v.optional(v.string()),
+      documentStorageId: v.optional(v.string()),
+      totalCartridges: v.number(),
+    }).index("by_date", ["collectedAt"]),
 
     // ── Audit Log ──
     auditLogs: defineTable({
