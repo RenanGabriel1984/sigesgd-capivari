@@ -1071,7 +1071,7 @@ describe("Phase 6: Asset Management", () => {
   });
 
   it("BY. Assign asset to user and organization", () => {
-    const asset = { responsibleUserId: undefined, organizationId: undefined };
+    const asset: { responsibleUserId: string | undefined; organizationId: string | undefined } = { responsibleUserId: undefined, organizationId: undefined };
     asset.responsibleUserId = "user_123";
     asset.organizationId = "org_456";
     expect(asset.responsibleUserId).toBe("user_123");
@@ -1119,7 +1119,7 @@ describe("Phase 6: Asset Management", () => {
   });
 
   it("CD. Remove part preserves history (does not delete)", () => {
-    const part = { removedAt: undefined };
+    const part: { removedAt: number | undefined } = { removedAt: undefined };
     part.removedAt = Date.now();
     expect(part.removedAt).toBeDefined();
   });
@@ -1183,13 +1183,13 @@ describe("Phase 6: Licenses", () => {
   });
 
   it("CL. Remove license assignment preserves record", () => {
-    const assignment = { removedAt: undefined };
+    const assignment: { removedAt: number | undefined } = { removedAt: undefined };
     assignment.removedAt = Date.now();
     expect(assignment.removedAt).toBeDefined();
   });
 
   it("CM. License key not exposed to non-admin users", () => {
-    const role = "technician";
+    const role: string = "technician";
     const key = "XXXX-XXXX-XXXX-1234";
     const maskedKey = role === "admin" ? key : "*".repeat(key.length - 4) + key.slice(-4);
     expect(maskedKey).not.toBe(key);
