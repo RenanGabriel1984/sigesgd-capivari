@@ -12,7 +12,6 @@ import {
   TrendingDown,
   ClipboardList,
   ArrowUpRight,
-  ArrowDownRight,
   AlertTriangle,
   ShoppingCart,
   BarChart3,
@@ -25,17 +24,7 @@ import {
 } from "lucide-react";
 import { ROLE_LABELS } from "@/types/constants";
 import type { UserRole } from "@/types/constants";
-import { useEffect } from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-} from "recharts";
+import { useEffect, lazy, Suspense } from "react";
 
 const fadeIn = {
   initial: { opacity: 0, y: 12 },
@@ -44,6 +33,41 @@ const fadeIn = {
 };
 
 const CHART_COLORS = ["#1a5632", "#5b9bd5", "#d97706", "#dc2626", "#7c3aed"];
+
+/**
+ * Lazy-load recharts to avoid "Failed to fetch dynamically imported module"
+ * in Vite dev mode (recharts ships CommonJS and needs pre-bundling via
+ * optimizeDeps, which is not always available in dev server chunks).
+ */
+const LazyBarChart = lazy(() =>
+  import("recharts").then((m) => ({
+    default: ({ data, colors }: { data: any[]; colors: string[] }) => (
+      <m.ResponsiveContainer width="100%" height={220}>
+        <m.BarChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+          <m.CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
+          <m.XAxis
+            dataKey="name"
+            tick={{ fontSize: 10 }}
+            interval={0}
+            angle={-20}
+            textAnchor="end"
+            height={60}
+          />
+          <m.YAxis tick={{ fontSize: 11 }} />
+          <m.Tooltip
+            formatter={(value: number, name: string) => [value, name === "items" ? "Itens Recebidos" : "Pedidos"]}
+            labelStyle={{ fontSize: 12 }}
+          />
+          <m.Bar dataKey="items" radius={[4, 4, 0, 0]} name="items">
+            {data.map((_: any, idx: number) => (
+              <m.Cell key={idx} fill={colors[idx % colors.length]} />
+            ))}
+          </m.Bar>
+        </m.BarChart>
+      </m.ResponsiveContainer>
+    ),
+  }))
+);
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -228,29 +252,9 @@ export default function Dashboard() {
                 ) : s!.topSecretarias.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-8 text-center">Nenhuma entrega registrada</p>
                 ) : (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={s!.topSecretarias} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
-                      <XAxis
-                        dataKey="name"
-                        tick={{ fontSize: 10 }}
-                        interval={0}
-                        angle={-20}
-                        textAnchor="end"
-                        height={60}
-                      />
-                      <YAxis tick={{ fontSize: 11 }} />
-                      <Tooltip
-                        formatter={(value: number, name: string) => [value, name === "items" ? "Itens Recebidos" : "Pedidos"]}
-                        labelStyle={{ fontSize: 12 }}
-                      />
-                      <Bar dataKey="items" radius={[4, 4, 0, 0]} name="items">
-                        {s!.topSecretarias.map((_: any, idx: number) => (
-                          <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <Suspense fallback={<p className="text-sm text-muted-foreground py-8 text-center">Carregando gráfico…</p>}>
+                    <LazyBarChart data={s!.topSecretarias} colors={CHART_COLORS} />
+                  </Suspense>
                 )}
               </CardContent>
             </Card>
