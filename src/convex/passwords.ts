@@ -453,3 +453,39 @@ export const bootstrapSetPassword = mutation({
     return { message: `Senha definida para ${user.name ?? email}. Faça login.` };
   },
 });
+
+/**
+ * Diagnostic: list all users and whether they have a password.
+ * Useful for figuring out login issues.
+ */
+export const diagnosticListUsers = query({
+  args: {},
+  handler: async (ctx) => {
+    const users = await ctx.db.query("users").collect();
+    const results: Array<{
+      userId: string;
+      name: string | undefined;
+      email: string | undefined;
+      role: string | undefined;
+      active: boolean | undefined;
+      hasPassword: boolean;
+    }> = [];
+
+    for (const u of users) {
+      const pw = await ctx.db
+        .query("passwords")
+        .withIndex("by_user", (q) => q.eq("userId", u._id))
+        .first();
+      results.push({
+        userId: u._id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        active: u.active,
+        hasPassword: !!pw,
+      });
+    }
+
+    return results;
+  },
+});
