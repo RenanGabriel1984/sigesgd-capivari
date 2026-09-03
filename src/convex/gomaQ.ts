@@ -215,14 +215,15 @@ export const createExchange = mutation({
     const printer = await ctx.db.get(args.printerId);
     if (!printer) throw new Error("Impressora não encontrada");
 
-    // Validate stock
+    // Validate stock (check available = physical - reserved)
     const stock = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .first();
     if (!stock) throw new Error("Registro de estoque não encontrado");
-    if (stock.physicalQuantity < args.quantityDelivered) {
-      throw new Error(`Estoque insuficiente. Disponível: ${stock.physicalQuantity}. Necessário: ${args.quantityDelivered}`);
+    const availableStock = stock.physicalQuantity - stock.reservedQuantity;
+    if (availableStock < args.quantityDelivered) {
+      throw new Error(`Estoque insuficiente. Disponível: ${availableStock} (físico: ${stock.physicalQuantity}, reservado: ${stock.reservedQuantity}). Necessário: ${args.quantityDelivered}`);
     }
 
     // Validate receiver
@@ -232,12 +233,7 @@ export const createExchange = mutation({
     const now = Date.now();
     const exchangeNumber = generateExchangeNumber();
 
-    // Reduce global stock
-    const newPhysical = stock.physicalQuantity - args.quantityDelivered;
-    const newReserved = stock.reservedQuantity;
-    await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
-
-    // FIFO Lot Consumption
+    // FIFO Lot Consumption (before stock reduction — mirrors requests.deliver pattern)
     let remainingToConsume = args.quantityDelivered;
     let consumedLotId: string | undefined;
     const lots = await ctx.db
@@ -261,14 +257,32 @@ export const createExchange = mutation({
       throw new Error(`Lotes insuficientes. Faltam ${remainingToConsume} unidades sem lote disponível.`);
     }
 
+    // Re-read stock for concurrency safety (double-check pattern)
+    const freshStock = await ctx.db
+      .query("stock")
+      .withIndex("by_product", (q) => q.eq("productId", args.productId))
+      .first();
+    if (!freshStock) throw new Error("Registro de estoque desapareceu durante a troca");
+    if (freshStock.physicalQuantity < args.quantityDelivered) {
+      throw new Error(`Estoque insuficiente (concorrência). Físico: ${freshStock.physicalQuantity}. Necessário: ${args.quantityDelivered}.`);
+    }
+    if (freshStock.reservedQuantity > freshStock.physicalQuantity - args.quantityDelivered) {
+      throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}. Disponível: ${freshStock.physicalQuantity}.`);
+    }
+
+    // Reduce global stock
+    const newPhysical = freshStock.physicalQuantity - args.quantityDelivered;
+    const newReserved = freshStock.reservedQuantity;
+    await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical });
+
     // Create stock movement
     await ctx.db.insert("stockMovements", {
       productId: args.productId,
       type: "exit",
       quantity: args.quantityDelivered,
-      previousPhysical: stock.physicalQuantity,
+      previousPhysical: freshStock.physicalQuantity,
       newPhysical,
-      previousReserved: stock.reservedQuantity,
+      previousReserved: freshStock.reservedQuantity,
       newReserved,
       userId,
       observation: `Troca Gomaq — ${printer.name} (${printer.model})`,

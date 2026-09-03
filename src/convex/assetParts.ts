@@ -63,7 +63,7 @@ export const installPart = mutation({
     const product = await ctx.db.get(args.productId);
     if (!product) throw new Error("Produto não encontrado");
 
-    // Validate stock
+    // Validate stock (check available = physical - reserved)
     const stock = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
@@ -75,11 +75,7 @@ export const installPart = mutation({
 
     const now = Date.now();
 
-    // Reduce global stock
-    const newPhysical = stock.physicalQuantity - args.quantity;
-    await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
-
-    // FIFO Lot Consumption
+    // FIFO Lot Consumption (before stock reduction)
     let remainingToConsume = args.quantity;
     let consumedLotId: string | undefined;
     const lots = await ctx.db
@@ -103,15 +99,29 @@ export const installPart = mutation({
       throw new Error(`Lotes insuficientes. Faltam ${remainingToConsume} unidades sem lote disponível.`);
     }
 
+    // Re-read stock for concurrency safety (double-check pattern)
+    const freshStock = await ctx.db
+      .query("stock")
+      .withIndex("by_product", (q) => q.eq("productId", args.productId))
+      .first();
+    if (!freshStock) throw new Error("Registro de estoque desapareceu durante a instalação");
+    if (freshStock.physicalQuantity - freshStock.reservedQuantity < args.quantity) {
+      throw new Error(`Estoque insuficiente (concorrência). Disponível: ${freshStock.physicalQuantity - freshStock.reservedQuantity}. Necessário: ${args.quantity}.`);
+    }
+
+    // Reduce global stock
+    const newPhysical = freshStock.physicalQuantity - args.quantity;
+    await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical });
+
     // Create stock movement
     await ctx.db.insert("stockMovements", {
       productId: args.productId,
       type: "exit",
       quantity: args.quantity,
-      previousPhysical: stock.physicalQuantity,
+      previousPhysical: freshStock.physicalQuantity,
       newPhysical,
-      previousReserved: stock.reservedQuantity,
-      newReserved: stock.reservedQuantity,
+      previousReserved: freshStock.reservedQuantity,
+      newReserved: freshStock.reservedQuantity,
       userId,
       observation: `Instalação em equipamento: ${asset.patrimonyNumber ?? asset.serialNumber ?? args.assetId}`,
       timestamp: now,

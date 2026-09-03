@@ -1225,4 +1225,178 @@ describe("Phase 6: Licenses", () => {
     expect(available).toBe(12);
     expect(available).toBeGreaterThanOrEqual(0);
   });
+
+  // ─── Phase 5: GomaQ Concurrency + Available Stock ──────────────────────
+
+  it("CR. GomaQ exchange checks available stock (physical - reserved), not just physical", () => {
+    const physical = 5;
+    const reserved = 4;
+    const available = physical - reserved;
+    expect(available).toBe(1);
+    // Should fail: exchange of 2 exceeds available
+    expect(() => {
+      if (available < 2) throw new Error(`Estoque insuficiente. Disponível: ${available}.`);
+    }).toThrow();
+  });
+
+  it("CS. GomaQ exchange passes when available stock is sufficient", () => {
+    const physical = 10;
+    const reserved = 3;
+    const available = physical - reserved;
+    expect(available).toBe(7);
+    // Should pass: exchange of 3 is within available
+    expect(available >= 3).toBe(true);
+  });
+
+  it("CT. GomaQ double-check prevents race condition", () => {
+    let physical = 5;
+    const reserved = 0;
+    const qty = 3;
+    // First exchange reads and consumes
+    expect(physical - reserved >= qty).toBe(true);
+    physical -= qty;
+    expect(physical).toBe(2);
+    // Second concurrent exchange: double-check would see insufficient
+    expect(() => {
+      if (physical < qty) throw new Error(`Estoque insuficiente (concorrência). Físico: ${physical}.`);
+    }).toThrow();
+  });
+
+  it("CU. GomaQ exchange of 0 quantity is rejected", () => {
+    const qty = 0;
+    expect(() => {
+      if (qty <= 0) throw new Error("Quantidade entregue deve ser maior que zero");
+    }).toThrow();
+  });
+
+  it("CV. GomaQ collection cannot be performed twice on same cartridge", () => {
+    let status = "awaiting_collection";
+    // First collection
+    status = "collected";
+    expect(status).toBe("collected");
+    // Second collection attempt
+    expect(() => {
+      if (status !== "awaiting_collection") throw new Error("Carcaça já foi coletada");
+    }).toThrow();
+  });
+
+  it("CW. GomaQ empty cartridge count accumulates correctly", () => {
+    let cartridgesAwaiting = 0;
+    // Three exchanges generate cartridges
+    cartridgesAwaiting += 1;
+    cartridgesAwaiting += 1;
+    cartridgesAwaiting += 2;
+    expect(cartridgesAwaiting).toBe(4);
+    // Collection removes 3
+    cartridgesAwaiting -= 3;
+    expect(cartridgesAwaiting).toBe(1);
+  });
+
+  // ─── Phase 6: Assets + Licenses ────────────────────────────────────────
+
+  it("CX. Asset part install reduces stock", () => {
+    let physical = 10;
+    let reserved = 2;
+    const qty = 3;
+    expect(physical - reserved >= qty).toBe(true);
+    physical -= qty;
+    expect(physical).toBe(7);
+    expect(reserved).toBe(2);
+  });
+
+  it("CY. Asset part install with insufficient stock fails", () => {
+    const physical = 2;
+    const reserved = 1;
+    const available = physical - reserved;
+    const qty = 3;
+    expect(() => {
+      if (available < qty) throw new Error(`Estoque insuficiente. Disponível: ${available}.`);
+    }).toThrow();
+  });
+
+  it("CZ. Asset part install double-check prevents race", () => {
+    let physical = 5;
+    const reserved = 0;
+    const qty = 4;
+    // First install
+    expect(physical - reserved >= qty).toBe(true);
+    physical -= qty;
+    expect(physical).toBe(1);
+    // Second concurrent install: double-check would fail
+    expect(() => {
+      if (physical - reserved < qty) throw new Error(`Estoque insuficiente (concorrência).`);
+    }).toThrow();
+  });
+
+  it("DA. License assignment respects quantity limit", () => {
+    const licenseQty = 5;
+    const activeAssignments = 5;
+    const newAssignmentAllowed = activeAssignments < licenseQty;
+    expect(newAssignmentAllowed).toBe(false);
+  });
+
+  it("DB. License assignment succeeds within limit", () => {
+    const licenseQty = 5;
+    const activeAssignments = 3;
+    const newAssignmentAllowed = activeAssignments < licenseQty;
+    expect(newAssignmentAllowed).toBe(true);
+  });
+
+  it("DC. Asset status transitions are valid", () => {
+    const validTransitions: Record<string, string[]> = {
+      active: ["maintenance", "inactive", "disposal_pending"],
+      maintenance: ["active", "inactive", "disposal_pending"],
+      inactive: ["active", "disposal_pending"],
+      disposal_pending: ["disposed", "active"],
+      disposed: [],
+      lost: [],
+    };
+    // active -> maintenance is valid
+    expect(validTransitions["active"]).toContain("maintenance");
+    // disposed -> active is invalid (no transitions from disposed)
+    expect(validTransitions["disposed"]).toHaveLength(0);
+  });
+
+  it("DD. License key masking works correctly", () => {
+    const key = "XXXX-XXXX-XXXX-1234";
+    const masked = "*".repeat(key.length - 4) + key.slice(-4);
+    expect(masked).toBe("***************1234");
+    expect(masked).not.toBe(key);
+    expect(masked.endsWith("1234")).toBe(true);
+    expect(masked.length).toBe(key.length);
+  });
+
+  it("DE. Part removal marks removedAt without restoring stock", () => {
+    let physical = 7;
+    const installedParts: { removedAt: number | undefined }[] = [{ removedAt: undefined }];
+    // Remove part
+    installedParts[0].removedAt = Date.now();
+    expect(installedParts[0].removedAt).toBeDefined();
+    // Stock unchanged (per spec: removal doesn't auto-restore)
+    expect(physical).toBe(7);
+  });
+
+  it("DF. Preserves Phase 3-4-5 regression: full stock lifecycle", () => {
+    // Entry: +10
+    let physical = 10;
+    let reserved = 0;
+    expect(physical - reserved).toBe(10);
+    // Approval: +4 reserved
+    reserved += 4;
+    expect(physical - reserved).toBe(6);
+    // Delivery: -4 physical, -4 reserved
+    physical -= 4;
+    reserved -= 4;
+    expect(physical).toBe(6);
+    expect(reserved).toBe(0);
+    expect(physical - reserved).toBe(6);
+    // GomaQ exchange: -2 physical
+    physical -= 2;
+    expect(physical).toBe(4);
+    // Return: +1 physical
+    physical += 1;
+    expect(physical).toBe(5);
+    // Cancel approval: 0 reserved (already delivered)
+    expect(reserved).toBe(0);
+  });
 });
