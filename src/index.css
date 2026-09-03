@@ -126,12 +126,6 @@
   .badge-neutral { @apply bg-gray-50 text-gray-600 border border-gray-200; }
   .badge-primary { @apply bg-primary/10 text-primary border border-primary/20; }
 
-  /* Skeleton — inline bg, no @apply of custom class */
-  .skeleton-text { @apply animate-pulse rounded-md bg-muted h-4 w-full; }
-  .skeleton-text-sm { @apply animate-pulse rounded-md bg-muted h-3 w-3/4; }
-  .skeleton-circle { @apply animate-pulse rounded-full bg-muted h-10 w-10; }
-  .skeleton-card { @apply animate-pulse rounded-lg bg-muted h-24 w-full; }
-
   /* Focus ring */
   .focus-ring {
     @apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring;
