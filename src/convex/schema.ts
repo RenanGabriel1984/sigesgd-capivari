@@ -100,6 +100,16 @@ export const AUDIT_ACTIONS = {
   GOMAQ_EXCHANGE: "gomaq_exchange",
   GOMAQ_COLLECTION: "gomaq_collection",
   GOMAQ_ORDER: "gomaq_order",
+  ASSET_CREATE: "asset_create",
+  ASSET_UPDATE: "asset_update",
+  ASSET_ASSIGN: "asset_assign",
+  ASSET_TRANSFER: "asset_transfer",
+  ASSET_MAINTENANCE: "asset_maintenance",
+  ASSET_DISPOSAL: "asset_disposal",
+  ASSET_PART_INSTALL: "asset_part_install",
+  ASSET_PART_REMOVE: "asset_part_remove",
+  LICENSE_CREATE: "license_create",
+  LICENSE_ASSIGN: "license_assign",
 } as const;
 
 export const auditActionValidator = v.union(
@@ -129,6 +139,16 @@ export const auditActionValidator = v.union(
   v.literal(AUDIT_ACTIONS.GOMAQ_EXCHANGE),
   v.literal(AUDIT_ACTIONS.GOMAQ_COLLECTION),
   v.literal(AUDIT_ACTIONS.GOMAQ_ORDER),
+  v.literal(AUDIT_ACTIONS.ASSET_CREATE),
+  v.literal(AUDIT_ACTIONS.ASSET_UPDATE),
+  v.literal(AUDIT_ACTIONS.ASSET_ASSIGN),
+  v.literal(AUDIT_ACTIONS.ASSET_TRANSFER),
+  v.literal(AUDIT_ACTIONS.ASSET_MAINTENANCE),
+  v.literal(AUDIT_ACTIONS.ASSET_DISPOSAL),
+  v.literal(AUDIT_ACTIONS.ASSET_PART_INSTALL),
+  v.literal(AUDIT_ACTIONS.ASSET_PART_REMOVE),
+  v.literal(AUDIT_ACTIONS.LICENSE_CREATE),
+  v.literal(AUDIT_ACTIONS.LICENSE_ASSIGN),
 );
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
@@ -519,6 +539,118 @@ const schema = defineSchema(
       documentStorageId: v.optional(v.string()),
       totalCartridges: v.number(),
     }).index("by_date", ["collectedAt"]),
+
+    // ── Assets (Equipamentos Patrimoniais) ──
+    assets: defineTable({
+      patrimonyNumber: v.optional(v.string()),
+      serialNumber: v.optional(v.string()),
+      assetType: v.union(
+        v.literal("desktop"), v.literal("notebook"), v.literal("monitor"),
+        v.literal("server"), v.literal("printer"), v.literal("switch"),
+        v.literal("router"), v.literal("access_point"), v.literal("ups"),
+        v.literal("storage"), v.literal("other")
+      ),
+      manufacturer: v.optional(v.string()),
+      model: v.optional(v.string()),
+      hostname: v.optional(v.string()),
+      macAddress: v.optional(v.string()),
+      organizationId: v.optional(v.id("organizations")),
+      responsibleUserId: v.optional(v.id("users")),
+      storageLocationId: v.optional(v.id("storageLocations")),
+      status: v.union(
+        v.literal("active"), v.literal("maintenance"), v.literal("inactive"),
+        v.literal("disposal_pending"), v.literal("disposed"), v.literal("lost")
+      ),
+      acquisitionDate: v.optional(v.string()),
+      observation: v.optional(v.string()),
+      active: v.boolean(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_status", ["status"])
+      .index("by_type", ["assetType"])
+      .index("by_organization", ["organizationId"])
+      .index("by_responsible", ["responsibleUserId"])
+      .index("by_patrimony", ["patrimonyNumber"]),
+
+    // ── Asset History (Histórico de Equipamentos) ──
+    assetHistory: defineTable({
+      assetId: v.id("assets"),
+      eventType: v.union(
+        v.literal("created"), v.literal("assigned"), v.literal("relocated"),
+        v.literal("maintenance"), v.literal("returned"), v.literal("status_changed"),
+        v.literal("part_installed"), v.literal("part_removed"), v.literal("disposed")
+      ),
+      userId: v.id("users"),
+      previousOrganizationId: v.optional(v.id("organizations")),
+      newOrganizationId: v.optional(v.id("organizations")),
+      previousResponsibleUserId: v.optional(v.id("users")),
+      newResponsibleUserId: v.optional(v.id("users")),
+      previousStatus: v.optional(v.string()),
+      newStatus: v.optional(v.string()),
+      observation: v.optional(v.string()),
+      timestamp: v.number(),
+    }).index("by_asset", ["assetId"])
+      .index("by_timestamp", ["timestamp"]),
+
+    // ── Asset Parts (Peças instaladas em equipamentos) ──
+    assetParts: defineTable({
+      assetId: v.id("assets"),
+      productId: v.id("products"),
+      lotId: v.optional(v.string()),
+      quantity: v.number(),
+      installedAt: v.number(),
+      removedAt: v.optional(v.number()),
+      installedByUserId: v.id("users"),
+      observation: v.optional(v.string()),
+    }).index("by_asset", ["assetId"])
+      .index("by_product", ["productId"]),
+
+    // ── Asset Maintenances (Manutenções) ──
+    assetMaintenances: defineTable({
+      assetId: v.id("assets"),
+      date: v.number(),
+      technicianUserId: v.id("users"),
+      reason: v.string(),
+      serviceDescription: v.string(),
+      osNumber: v.optional(v.string()),
+      status: v.union(
+        v.literal("scheduled"), v.literal("in_progress"), v.literal("completed"), v.literal("cancelled")
+      ),
+      observation: v.optional(v.string()),
+      partsUsed: v.optional(v.string()),
+      createdAt: v.number(),
+    }).index("by_asset", ["assetId"])
+      .index("by_date", ["date"]),
+
+    // ── Licenses (Licenças de Software) ──
+    licenses: defineTable({
+      productName: v.string(),
+      edition: v.optional(v.string()),
+      licenseType: v.union(
+        v.literal("oem"), v.literal("volume"), v.literal("retail"),
+        v.literal("subscription"), v.literal("trial"), v.literal("other")
+      ),
+      key: v.optional(v.string()),
+      quantity: v.number(),
+      expirationDate: v.optional(v.string()),
+      supplier: v.optional(v.string()),
+      invoiceNumber: v.optional(v.string()),
+      observation: v.optional(v.string()),
+      active: v.boolean(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_product", ["productName"])
+      .index("by_active", ["active"]),
+
+    // ── License Assignments (Vinculação licença ↔ equipamento) ──
+    licenseAssignments: defineTable({
+      licenseId: v.id("licenses"),
+      assetId: v.id("assets"),
+      assignedAt: v.number(),
+      removedAt: v.optional(v.number()),
+      assignedByUserId: v.id("users"),
+    }).index("by_license", ["licenseId"])
+      .index("by_asset", ["assetId"]),
 
     // ── Audit Log ──
     auditLogs: defineTable({

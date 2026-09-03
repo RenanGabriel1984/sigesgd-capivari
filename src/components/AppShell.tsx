@@ -26,6 +26,8 @@ import {
   Boxes,
   MapPin,
   ClipboardCheck,
+  Monitor,
+  Key,
   RotateCcw,
   ArrowRightLeft,
 } from "lucide-react";
@@ -72,6 +74,8 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
   { label: "Impressoras", href: "/printers", icon: Printer, permission: "canManageProducts" },
   { label: "GomaQ", href: "/gomaq", icon: ArrowRightLeft, permission: "canManageGomaQ" },
+  { label: "Equipamentos", href: "/assets", icon: Monitor, permission: "canManageAssets" },
+  { label: "Licenças", href: "/licenses", icon: Key, permission: "canManageLicenses" },
   { label: "Relatórios", href: "/reports", icon: BarChart3, permission: "canViewMovements" },
   { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
   { label: "Configurações", href: "/settings", icon: Settings, permission: "canManageSettings" },

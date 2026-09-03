@@ -51,6 +51,16 @@ const ALL_ACTIONS = [
   "gomaq_exchange",
   "gomaq_collection",
   "gomaq_order",
+  "asset_create",
+  "asset_update",
+  "asset_assign",
+  "asset_transfer",
+  "asset_maintenance",
+  "asset_disposal",
+  "asset_part_install",
+  "asset_part_remove",
+  "license_create",
+  "license_assign",
 ] as const;
 
 const ENTITY_OPTIONS = [
@@ -68,6 +78,11 @@ const ENTITY_OPTIONS = [
   { value: "lots", label: "Lotes" },
   { value: "inventories", label: "Inventários" },
   { value: "storageLocations", label: "Locais de Armazenamento" },
+  { value: "assets", label: "Equipamentos" },
+  { value: "assetParts", label: "Peças de Equipamentos" },
+  { value: "assetMaintenances", label: "Manutenções" },
+  { value: "licenses", label: "Licenças" },
+  { value: "licenseAssignments", label: "Vinculações de Licença" },
 ];
 
 export default function Audit() {

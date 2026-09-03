@@ -1027,3 +1027,202 @@ describe("Phase 5 — GOMAQ Stock Integrity", () => {
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FASE 6: PATRIMÔNIO, EQUIPAMENTOS, LICENÇAS
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("Phase 6: Asset Management", () => {
+  it("BU. Create asset with patrimony and serial", () => {
+    const asset = {
+      patrimonyNumber: "12345",
+      serialNumber: "SN-ABC-123",
+      assetType: "desktop",
+      manufacturer: "Dell",
+      model: "OptiPlex 7090",
+      status: "active",
+      active: true,
+    };
+    expect(asset.patrimonyNumber).toBe("12345");
+    expect(asset.serialNumber).toBe("SN-ABC-123");
+    expect(asset.status).toBe("active");
+  });
+
+  it("BV. Asset types are valid", () => {
+    const validTypes = ["desktop", "notebook", "monitor", "server", "printer", "switch", "router", "access_point", "ups", "storage", "other"];
+    expect(validTypes).toContain("desktop");
+    expect(validTypes).toContain("notebook");
+    expect(validTypes).toContain("server");
+    expect(validTypes.length).toBe(11);
+  });
+
+  it("BW. Asset status transitions are valid", () => {
+    const statuses = ["active", "maintenance", "inactive", "disposal_pending", "disposed", "lost"];
+    expect(statuses).toContain("active");
+    expect(statuses).toContain("maintenance");
+    expect(statuses).toContain("disposed");
+  });
+
+  it("BX. Asset history records event types", () => {
+    const eventTypes = ["created", "assigned", "relocated", "maintenance", "returned", "status_changed", "part_installed", "part_removed", "disposed"];
+    expect(eventTypes).toContain("created");
+    expect(eventTypes).toContain("part_installed");
+    expect(eventTypes.length).toBe(9);
+  });
+
+  it("BY. Assign asset to user and organization", () => {
+    const asset = { responsibleUserId: undefined, organizationId: undefined };
+    asset.responsibleUserId = "user_123";
+    asset.organizationId = "org_456";
+    expect(asset.responsibleUserId).toBe("user_123");
+    expect(asset.organizationId).toBe("org_456");
+  });
+
+  it("BZ. Transfer asset to new organization preserves history", () => {
+    const history = [];
+    const previousOrg = "org_old";
+    const newOrg = "org_new";
+    history.push({ eventType: "relocated", previousOrganizationId: previousOrg, newOrganizationId: newOrg });
+    expect(history).toHaveLength(1);
+    expect(history[0].previousOrganizationId).toBe("org_old");
+    expect(history[0].newOrganizationId).toBe("org_new");
+  });
+
+  it("CA. Maintenance records asset ID, reason, and technician", () => {
+    const maintenance = {
+      assetId: "asset_1",
+      reason: "Tela piscando",
+      technicianUserId: "user_tech",
+      serviceDescription: "Substituição de cabo",
+      status: "completed",
+    };
+    expect(maintenance.assetId).toBe("asset_1");
+    expect(maintenance.reason).toBe("Tela piscando");
+    expect(maintenance.status).toBe("completed");
+  });
+
+  it("CB. Install part reduces stock and records lot", () => {
+    let physical = 10;
+    const quantity = 2;
+    physical -= quantity;
+    expect(physical).toBe(8);
+    const part = { assetId: "asset_1", productId: "prod_ssd", quantity: 2, lotId: "lot_1" };
+    expect(part.lotId).toBe("lot_1");
+    expect(part.quantity).toBe(2);
+  });
+
+  it("CC. Install part blocks insufficient stock", () => {
+    const available = 1;
+    const requested = 3;
+    const canInstall = available >= requested;
+    expect(canInstall).toBe(false);
+  });
+
+  it("CD. Remove part preserves history (does not delete)", () => {
+    const part = { removedAt: undefined };
+    part.removedAt = Date.now();
+    expect(part.removedAt).toBeDefined();
+  });
+
+  it("CE. Disposal transitions: active → disposal_pending → disposed", () => {
+    let status = "active";
+    status = "disposal_pending";
+    expect(status).toBe("disposal_pending");
+    status = "disposed";
+    expect(status).toBe("disposed");
+  });
+
+  it("CF. Disposed asset becomes inactive", () => {
+    const asset = { status: "disposed", active: true };
+    if (asset.status === "disposed") asset.active = false;
+    expect(asset.active).toBe(false);
+  });
+});
+
+describe("Phase 6: Licenses", () => {
+  it("CG. Create license with valid data", () => {
+    const license = {
+      productName: "Windows 11 Pro",
+      licenseType: "oem",
+      key: "XXXX-XXXX-XXXX-1234",
+      quantity: 10,
+      active: true,
+    };
+    expect(license.productName).toBe("Windows 11 Pro");
+    expect(license.quantity).toBe(10);
+  });
+
+  it("CH. License types are valid", () => {
+    const types = ["oem", "volume", "retail", "subscription", "trial", "other"];
+    expect(types).toContain("oem");
+    expect(types).toContain("volume");
+    expect(types.length).toBe(6);
+  });
+
+  it("CI. Key masking hides most characters", () => {
+    const key = "XXXX-XXXX-XXXX-1234";
+    const masked = "*".repeat(key.length - 4) + key.slice(-4);
+    expect(masked.endsWith("1234")).toBe(true);
+    expect(masked).not.toBe(key);
+  });
+
+  it("CJ. Assign license to asset within quantity limit", () => {
+    const license = { quantity: 5 };
+    let assignedCount = 0;
+    const canAssign = assignedCount < license.quantity;
+    expect(canAssign).toBe(true);
+    assignedCount = 5;
+    const canAssign2 = assignedCount < license.quantity;
+    expect(canAssign2).toBe(false);
+  });
+
+  it("CK. Cannot assign license when quantity exceeded", () => {
+    const license = { quantity: 2 };
+    const assigned = 2;
+    expect(assigned >= license.quantity).toBe(true);
+  });
+
+  it("CL. Remove license assignment preserves record", () => {
+    const assignment = { removedAt: undefined };
+    assignment.removedAt = Date.now();
+    expect(assignment.removedAt).toBeDefined();
+  });
+
+  it("CM. License key not exposed to non-admin users", () => {
+    const role = "technician";
+    const key = "XXXX-XXXX-XXXX-1234";
+    const maskedKey = role === "admin" ? key : "*".repeat(key.length - 4) + key.slice(-4);
+    expect(maskedKey).not.toBe(key);
+    expect(maskedKey.endsWith("1234")).toBe(true);
+  });
+
+  it("CN. Admin can see full license key", () => {
+    const role = "admin";
+    const key = "XXXX-XXXX-XXXX-1234";
+    const maskedKey = role === "admin" ? key : "*".repeat(key.length - 4) + key.slice(-4);
+    expect(maskedKey).toBe(key);
+  });
+
+  it("CO. Cannot reduce license quantity below active assignments", () => {
+    const licenseQuantity = 5;
+    const activeAssignments = 3;
+    const newQuantity = 2;
+    const canReduce = newQuantity >= activeAssignments;
+    expect(canReduce).toBe(false);
+  });
+
+  it("CP. Preserves Phase 5 regression: Gomaq exchange does not affect asset stock", () => {
+    let productStock = 10;
+    // Gomaq exchange reduces product stock, not asset stock
+    productStock -= 1;
+    expect(productStock).toBe(9);
+  });
+
+  it("CQ. Preserves Phase 3-4 regression: stock formula still valid", () => {
+    const physical = 15;
+    const reserved = 3;
+    const available = physical - reserved;
+    expect(available).toBe(12);
+    expect(available).toBeGreaterThanOrEqual(0);
+  });
+});

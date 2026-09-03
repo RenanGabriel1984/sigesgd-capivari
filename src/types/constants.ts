@@ -70,7 +70,17 @@ export const REQUEST_STATUS_COLORS: Record<RequestStatusType, string> = {
 };
 
 // ─── Audit Actions ───────────────────────────────────────────────────────────
-export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update" | "confirm_entry" | "reverse_entry" | "open_inventory" | "count_inventory" | "close_inventory" | "return_stock" | "reverse_exit" | "transfer_stock" | "gomaq_exchange" | "gomaq_collection" | "gomaq_order";
+export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update" | "confirm_entry" | "reverse_entry" | "open_inventory" | "count_inventory" | "close_inventory" | "return_stock" | "reverse_exit" | "transfer_stock" | "gomaq_exchange" | "gomaq_collection"  | "gomaq_order"
+  | "asset_create"
+  | "asset_update"
+  | "asset_assign"
+  | "asset_transfer"
+  | "asset_maintenance"
+  | "asset_disposal"
+  | "asset_part_install"
+  | "asset_part_remove"
+  | "license_create"
+  | "license_assign";
 
 export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   create: "Criação",
@@ -99,6 +109,16 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   gomaq_exchange: "Troca de Suprimento",
   gomaq_collection: "Coleta Gomaq",
   gomaq_order: "Pedido Mensal Gomaq",
+  asset_create: "Criação de Equipamento",
+  asset_update: "Atualização de Equipamento",
+  asset_assign: "Atribuição de Equipamento",
+  asset_transfer: "Transferência de Equipamento",
+  asset_maintenance: "Manutenção de Equipamento",
+  asset_disposal: "Descarte de Equipamento",
+  asset_part_install: "Instalação de Peça",
+  asset_part_remove: "Remoção de Peça",
+  license_create: "Criação de Licença",
+  license_assign: "Vinculação de Licença",
 };
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
@@ -138,6 +158,8 @@ export const PERMISSIONS = {
     canTransferStock: true,
     canReturnStock: true,
     canManageGomaQ: true,
+    canManageAssets: true,
+    canManageLicenses: true,
   },
   stock_manager: {
     canManageUsers: false,
@@ -159,6 +181,8 @@ export const PERMISSIONS = {
     canTransferStock: true,
     canReturnStock: true,
     canManageGomaQ: true,
+    canManageAssets: true,
+    canManageLicenses: true,
   },
   director: {
     canManageUsers: false,
@@ -180,6 +204,8 @@ export const PERMISSIONS = {
     canTransferStock: false,
     canReturnStock: false,
     canManageGomaQ: false,
+    canManageAssets: true,
+    canManageLicenses: false,
   },
   secretary: {
     canManageUsers: false,
@@ -201,6 +227,8 @@ export const PERMISSIONS = {
     canTransferStock: false,
     canReturnStock: false,
     canManageGomaQ: false,
+    canManageAssets: false,
+    canManageLicenses: false,
   },
   technician: {
     canManageUsers: false,
@@ -222,6 +250,8 @@ export const PERMISSIONS = {
     canTransferStock: false,
     canReturnStock: false,
     canManageGomaQ: false,
+    canManageAssets: false,
+    canManageLicenses: false,
   },
 } as const;
 
