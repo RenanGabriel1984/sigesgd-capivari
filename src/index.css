@@ -113,22 +113,24 @@
   }
   html {
     scroll-behavior: smooth;
+    font-feature-settings: "ss01", "ss02", "cv01";
   }
-}
-
-/* ─── Design System Utility Classes ─── */
+}/* ─── Design System Utility Classes ─── */
 @layer utilities {
-  /* Status badges */
-  .badge-success { @apply bg-emerald-50 text-emerald-700 border-emerald-200; }
-  .badge-warning { @apply bg-amber-50 text-amber-700 border-amber-200; }
-  .badge-danger { @apply bg-rose-50 text-rose-700 border-rose-200; }
-  .badge-info { @apply bg-sky-50 text-sky-700 border-sky-200; }
-  .badge-neutral { @apply bg-gray-50 text-gray-600 border-gray-200; }
 
-  /* Skeleton animation */
-  .skeleton {
-    @apply animate-pulse rounded-md bg-muted;
-  }
+  /* Status badges */
+  .badge-success { @apply bg-emerald-50 text-emerald-700 border border-emerald-200; }
+  .badge-warning { @apply bg-amber-50 text-amber-700 border border-amber-200; }
+  .badge-danger { @apply bg-rose-50 text-rose-700 border border-rose-200; }
+  .badge-info { @apply bg-sky-50 text-sky-700 border border-sky-200; }
+  .badge-neutral { @apply bg-gray-50 text-gray-600 border border-gray-200; }
+  .badge-primary { @apply bg-primary/10 text-primary border border-primary/20; }
+
+  /* Skeleton — inline bg, no @apply of custom class */
+  .skeleton-text { @apply animate-pulse rounded-md bg-muted h-4 w-full; }
+  .skeleton-text-sm { @apply animate-pulse rounded-md bg-muted h-3 w-3/4; }
+  .skeleton-circle { @apply animate-pulse rounded-full bg-muted h-10 w-10; }
+  .skeleton-card { @apply animate-pulse rounded-lg bg-muted h-24 w-full; }
 
   /* Focus ring */
   .focus-ring {
@@ -149,4 +151,45 @@
   .status-dot-danger { @apply bg-rose-500; }
   .status-dot-info { @apply bg-sky-500; }
   .status-dot-neutral { @apply bg-gray-400; }
+
+  /* Operational status indicators */
+  .status-critical { @apply bg-rose-50 text-rose-700 border border-rose-200; }
+  .status-low { @apply bg-amber-50 text-amber-700 border border-amber-200; }
+  .status-normal { @apply bg-emerald-50 text-emerald-700 border border-emerald-200; }
+
+  /* Step indicator */
+  .step-active { @apply bg-primary text-primary-foreground; }
+  .step-complete { @apply bg-emerald-500 text-white; }
+  .step-pending { @apply bg-muted text-muted-foreground; }
+
+  /* Empty state */
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-12 text-center;
+  }
+  .empty-state-icon {
+    @apply h-12 w-12 text-muted-foreground/40 mb-3;
+  }
+  .empty-state-title {
+    @apply text-lg font-medium text-foreground mb-1;
+  }
+  .empty-state-desc {
+    @apply text-sm text-muted-foreground max-w-sm;
+  }
+
+  /* Mobile card layout for tables */
+  @media (max-width: 640px) {
+    .mobile-card-row {
+      @apply flex flex-col gap-2 p-3 border-b border-border/50 last:border-b-0;
+    }
+  }
+
+  /* Responsive table wrapper */
+  .table-responsive {
+    @apply overflow-x-auto -mx-6 px-6;
+  }
+  @media (max-width: 640px) {
+    .table-responsive {
+      @apply mx-0 px-0;
+    }
+  }
 }

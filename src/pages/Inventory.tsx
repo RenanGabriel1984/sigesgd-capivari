@@ -11,7 +11,9 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, ClipboardCheck, Play, Eye, CheckCircle, XCircle } from "lucide-react";
+import { Plus, ClipboardCheck, Play, Eye, CheckCircle, XCircle, Package } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -47,6 +49,22 @@ export default function Inventory() {
 
   // Count editing state
   const [countEdits, setCountEdits] = useState<Record<string, string>>({});
+
+  if (inventories === undefined) {
+    return (
+      <AppShell>
+        <div className="space-y-6 max-w-7xl mx-auto">
+          <div>
+            <Skeleton className="h-8 w-24 mb-2" />
+            <Skeleton className="h-4 w-48" />
+          </div>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-20 w-full rounded-lg" />
+          ))}
+        </div>
+      </AppShell>
+    );
+  }
 
   const filtered = inventories?.filter((i) => {
     if (filter === "active") return i.status !== "closed" && i.status !== "cancelled";
@@ -156,11 +174,16 @@ export default function Inventory() {
 
         {filtered?.length === 0 ? (
           <Card className="border-border/50">
-            <CardContent className="py-16 text-center">
-              <ClipboardCheck className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-              <p className="text-muted-foreground">
-                {filter === "active" ? "Nenhum inventário ativo" : "Nenhum inventário encontrado"}
-              </p>
+            <CardContent className="py-16">
+              <div className="empty-state">
+                <ClipboardCheck className="empty-state-icon" />
+                <p className="empty-state-title">
+                  {filter === "active" ? "Nenhum inventário ativo" : "Nenhum inventário encontrado"}
+                </p>
+                <p className="empty-state-desc">
+                  {filter === "active" ? "Crie um inventário para iniciar a contagem física" : "Nenhum inventário encontrado com este filtro"}
+                </p>
+              </div>
             </CardContent>
           </Card>
         ) : (
@@ -206,7 +229,7 @@ export default function Inventory() {
                         </Button>
                       </div>
                     </div>
-                    <div className="flex gap-4 text-xs text-muted-foreground mt-1">
+                    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground mt-1">
                       <span>Criado: {new Date(inv.createdAt).toLocaleDateString("pt-BR")}</span>
                       <span>Responsável: {inv.responsible?.name ?? "—"}</span>
                       <span>{inv.counts.length} itens</span>
@@ -217,6 +240,23 @@ export default function Inventory() {
                         <Badge variant="secondary" className="text-[10px]">{diffs.length} diferença(s)</Badge>
                       )}
                     </div>
+                    {/* Progress indicator for counting/review */}
+                    {(inv.status === "counting" || inv.status === "review") && inv.counts.length > 0 && (
+                      <div className="mt-3 space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">
+                            {inv.counts.length - uncounted.length} de {inv.counts.length} produtos conferidos
+                          </span>
+                          <span className="font-medium">
+                            {Math.round(((inv.counts.length - uncounted.length) / inv.counts.length) * 100)}%
+                          </span>
+                        </div>
+                        <Progress
+                          value={((inv.counts.length - uncounted.length) / inv.counts.length) * 100}
+                          className="h-2"
+                        />
+                      </div>
+                    )}
                   </CardHeader>
 
                   {isActive && (

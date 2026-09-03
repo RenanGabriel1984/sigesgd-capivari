@@ -24,15 +24,48 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AlertTriangle, ArrowRightLeft, Package, Truck, FileSpreadsheet } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Package, Truck, FileSpreadsheet, ShoppingCart } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
-export default function GomaQPage() {
-  const [tab, setTab] = useState("dashboard");
-
+function GomaQSkeleton() {
   return (
     <AppShell>
       <div className="space-y-6">
+        <div>
+          <Skeleton className="h-8 w-56 mb-2" />
+          <Skeleton className="h-4 w-72" />
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-lg" />
+          ))}
+        </div>
+        <Skeleton className="h-10 w-80" />
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-16 w-full rounded-lg" />
+        ))}
+      </div>
+    </AppShell>
+  );
+}
+
+export default function GomaQPage() {
+  const [tab, setTab] = useState("dashboard");
+  const stats = useQuery(api.gomaQ.awaitingCollectionCount);
+  const lastCol = useQuery(api.gomaQ.lastCollection);
+  const exchanges = useQuery(api.gomaQ.listExchanges, {});
+  const monthlyOrder = useQuery(api.gomaQ.monthlyOrder);
+
+  if (stats === undefined || lastCol === undefined) return <GomaQSkeleton />;
+
+  const thisMonthExchanges = exchanges?.filter(
+    (e) => e.exchangedAt >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime()
+  ).length ?? 0;
+
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
         <div>
           <h1 className="text-2xl tracking-tight font-bold">GomaQ — Gestão de Suprimentos</h1>
           <p className="text-sm text-muted-foreground">
@@ -40,6 +73,67 @@ export default function GomaQPage() {
           </p>
         </div>
 
+        {/* Quick Stats — Operational First */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Card className="border-border/50 card-hover">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+                  <Truck className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{stats ?? 0}</p>
+                  <p className="text-xs text-muted-foreground">Carcaças p/ Coleta</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-border/50 card-hover">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <ArrowRightLeft className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{thisMonthExchanges}</p>
+                  <p className="text-xs text-muted-foreground">Trocas no Mês</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-border/50 card-hover">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                  <ShoppingCart className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{monthlyOrder?.length ?? 0}</p>
+                  <p className="text-xs text-muted-foreground">Itens no Pedido</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-border/50 card-hover">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
+                  <Package className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">
+                    {lastCol
+                      ? new Date(lastCol.collectedAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })
+                      : "—"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Última Coleta</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Tabs */}
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>
             <TabsTrigger value="dashboard">Painel</TabsTrigger>
@@ -58,98 +152,51 @@ export default function GomaQPage() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // DASHBOARD TAB
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ═══════════════════════════════════════════════════════════════════════════════
 function DashboardTab() {
-  const awaitingCount = useQuery(api.gomaQ.awaitingCollectionCount);
+  const stats = useQuery(api.gomaQ.awaitingCollectionCount);
   const lastCol = useQuery(api.gomaQ.lastCollection);
-  const exchanges = useQuery(api.gomaQ.listExchanges, {});
-  const monthlyItems = useQuery(api.gomaQ.monthlyOrder);
+  const cartridges = useQuery(api.gomaQ.listEmptyCartridges, { status: "awaiting_collection" });
 
-  const thisMonthExchanges = useMemo(() => {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    return (exchanges ?? []).filter((e: any) => e.exchangedAt >= startOfMonth);
-  }, [exchanges]);
-
-  const belowIdeal = (monthlyItems ?? []).filter(
-    (i: any) => i.physicalQuantity < i.minimumStock
-  );
+  if (stats === undefined) {
+    return (
+      <div className="space-y-3 mt-4">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-16 w-full rounded-lg" />
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
-              <p className="text-sm text-muted-foreground">Abaixo do Mínimo</p>
+    <div className="space-y-4 mt-4">
+      {stats === 0 ? (
+        <Card className="border-border/50">
+          <CardContent className="py-12">
+            <div className="empty-state">
+              <Truck className="empty-state-icon" />
+              <p className="empty-state-title">Nenhuma carcaça aguardando coleta</p>
+              <p className="empty-state-desc">Todas as carcaças foram coletadas ou nenhuma troca foi realizada ainda</p>
             </div>
-            <p className="text-3xl font-bold mt-1">{belowIdeal.length}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2">
-              <Package className="h-5 w-5 text-blue-500" />
-              <p className="text-sm text-muted-foreground">Carcaças p/ Coleta</p>
+      ) : (
+        <Card className="border-border/50 border-orange-200 bg-orange-50/30">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-orange-500" />
+              <div>
+                <p className="font-medium">{stats} carcaça(s) aguardando coleta</p>
+                <p className="text-xs text-muted-foreground">
+                  Última coleta: {lastCol
+                    ? new Date(lastCol.collectedAt).toLocaleDateString("pt-BR")
+                    : "Nenhuma coleta registrada"}
+                </p>
+              </div>
             </div>
-            <p className="text-3xl font-bold mt-1">{awaitingCount ?? 0}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2">
-              <Truck className="h-5 w-5 text-emerald-500" />
-              <p className="text-sm text-muted-foreground">Trocas no Mês</p>
-            </div>
-            <p className="text-3xl font-bold mt-1">{thisMonthExchanges.length}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2">
-              <ArrowRightLeft className="h-5 w-5 text-violet-500" />
-              <p className="text-sm text-muted-foreground">Última Coleta</p>
-            </div>
-            <p className="text-lg font-bold mt-1">
-              {lastCol ? new Date(lastCol.collectedAt).toLocaleDateString("pt-BR") : "Nenhuma"}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {belowIdeal.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
-              Suprimentos Abaixo do Mínimo
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Produto</TableHead>
-                  <TableHead>Atual</TableHead>
-                  <TableHead>Mínimo</TableHead>
-                  <TableHead>Ideal</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {belowIdeal.map((i: any) => (
-                  <TableRow key={i.productId}>
-                    <TableCell className="text-sm font-medium">{i.productName}</TableCell>
-                    <TableCell><Badge variant="destructive">{i.physicalQuantity}</Badge></TableCell>
-                    <TableCell>{i.minimumStock}</TableCell>
-                    <TableCell>{i.idealStock}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
           </CardContent>
         </Card>
       )}
@@ -157,318 +204,150 @@ function DashboardTab() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// EXCHANGES TAB
-// ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// EXCHANGES TAB
+// ═══════════════════════════════════════════════════════════════════════════════
 function ExchangesTab() {
   const exchanges = useQuery(api.gomaQ.listExchanges, {});
   const products = useQuery(api.products.listActive);
-  const printers = useQuery(api.printers.list);
+  const printers = useQuery(api.printers.listActive);
+  const users = useQuery(api.users.listUsers);
   const createExchange = useMutation(api.gomaQ.createExchange);
 
   const [showNew, setShowNew] = useState(false);
-  const [productId, setProductId] = useState("");
-  const [printerId, setPrinterId] = useState("");
-  const [quantityDelivered, setQuantityDelivered] = useState(1);
-  const [quantityEmptyReceived, setQuantityEmptyReceived] = useState(1);
-  const [receivedByUserId, setReceivedByUserId] = useState("");
-  const [observation, setObservation] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({
+    productId: "", printerId: "", quantityDelivered: "1", quantityEmptyReceived: "1",
+    receivedByUserId: "", observation: "",
+  });
 
-  const allUsers = useQuery(api.users.listUsers);
+  if (exchanges === undefined) {
+    return (
+      <div className="space-y-3 mt-4">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-12 w-full rounded-lg" />
+        ))}
+      </div>
+    );
+  }
 
-  const handleSubmit = async () => {
-    if (!productId || !printerId) {
-      toast.error("Selecione o produto e a impressora");
-      return;
-    }
-    if (quantityDelivered <= 0) {
-      toast.error("Quantidade entregue deve ser maior que zero");
-      return;
-    }
-    if (quantityEmptyReceived < 0) {
-      toast.error("Quantidade de carcaças não pode ser negativa");
-      return;
-    }
-    if (!receivedByUserId) {
-      toast.error("Selecione quem recebeu");
-      return;
-    }
-
-    setSubmitting(true);
+  const handleCreate = async () => {
     try {
       await createExchange({
-        productId: productId as any,
-        printerId: printerId as any,
-        quantityDelivered,
-        quantityEmptyReceived,
-        receivedByUserId: receivedByUserId as any,
-        observation: observation || undefined,
+        productId: form.productId as any,
+        printerId: form.printerId as any,
+        quantityDelivered: Number(form.quantityDelivered),
+        quantityEmptyReceived: Number(form.quantityEmptyReceived),
+        receivedByUserId: form.receivedByUserId as any,
+        observation: form.observation || undefined,
       });
       toast.success("Troca registrada com sucesso");
       setShowNew(false);
-      resetForm();
+      setForm({ productId: "", printerId: "", quantityDelivered: "1", quantityEmptyReceived: "1", receivedByUserId: "", observation: "" });
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao registrar troca");
-    } finally {
-      setSubmitting(false);
     }
   };
 
-  const resetForm = () => {
-    setProductId("");
-    setPrinterId("");
-    setQuantityDelivered(1);
-    setQuantityEmptyReceived(1);
-    setReceivedByUserId("");
-    setObservation("");
-  };
-
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Histórico de Trocas</h2>
+    <div className="space-y-4 mt-4">
+      <div className="flex justify-end">
         <Button onClick={() => setShowNew(true)} className="gap-2">
           <ArrowRightLeft className="h-4 w-4" /> Nova Troca
         </Button>
       </div>
 
-      <Card>
-        <CardContent className="pt-6">
-          {!exchanges ? (
-            <p className="text-muted-foreground">Carregando...</p>
-          ) : exchanges.length === 0 ? (
-            <p className="text-muted-foreground">Nenhuma troca registrada</p>
-          ) : (
+      {exchanges.length === 0 ? (
+        <Card className="border-border/50">
+          <CardContent className="py-12">
+            <div className="empty-state">
+              <ArrowRightLeft className="empty-state-icon" />
+              <p className="empty-state-title">Nenhuma troca registrada</p>
+              <p className="empty-state-desc">Registre uma troca de suprimento para iniciar o controle</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-border/50">
+          <CardContent className="p-0">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Data</TableHead>
-                    <TableHead>Nº</TableHead>
-                    <TableHead>Produto</TableHead>
-                    <TableHead>Qtd</TableHead>
-                    <TableHead>Impressora</TableHead>
-                    <TableHead>Carcaças</TableHead>
+                    <TableHead className="text-xs">Número</TableHead>
+                    <TableHead className="text-xs">Produto</TableHead>
+                    <TableHead className="text-xs">Impressora</TableHead>
+                    <TableHead className="text-xs text-center">Qtd</TableHead>
+                    <TableHead className="text-xs text-center">Vazias</TableHead>
+                    <TableHead className="text-xs">Data</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {exchanges.map((e: any) => (
+                  {exchanges.slice(0, 100).map((e) => (
                     <TableRow key={e._id}>
-                      <TableCell className="text-sm">{new Date(e.exchangedAt).toLocaleDateString("pt-BR")}</TableCell>
-                      <TableCell className="text-xs font-mono">{e.exchangeNumber}</TableCell>
-                      <TableCell className="text-sm font-medium">{e.product?.name ?? "\u2014"}</TableCell>
-                      <TableCell><Badge>{e.quantityDelivered}</Badge></TableCell>
-                      <TableCell className="text-sm">{e.printer?.name ?? "\u2014"}</TableCell>
-                      <TableCell><Badge variant="outline">{e.quantityEmptyReceived}</Badge></TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Dialog open={showNew} onOpenChange={setShowNew}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ArrowRightLeft className="h-5 w-5" /> Nova Troca de Suprimento
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>Produto (Suprimento)</Label>
-              <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={productId} onChange={(e) => setProductId(e.target.value)}>
-                <option value="">Selecione...</option>
-                {(products ?? []).map((p: any) => <option key={p._id} value={p._id}>{p.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <Label>Impressora</Label>
-              <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={printerId} onChange={(e) => setPrinterId(e.target.value)}>
-                <option value="">Selecione...</option>
-                {(printers ?? []).map((p: any) => <option key={p._id} value={p._id}>{p.name} ({p.model})</option>)}
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>Qtd Entregue (novo)</Label>
-                <Input type="number" min={1} value={quantityDelivered} onChange={(e) => setQuantityDelivered(Number(e.target.value))} className="mt-1" />
-              </div>
-              <div>
-                <Label>Carcaças Recebidas</Label>
-                <Input type="number" min={0} value={quantityEmptyReceived} onChange={(e) => setQuantityEmptyReceived(Number(e.target.value))} className="mt-1" />
-              </div>
-            </div>
-            <div>
-              <Label>Recebido por</Label>
-              <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={receivedByUserId} onChange={(e) => setReceivedByUserId(e.target.value)}>
-                <option value="">Selecione...</option>
-                {(allUsers ?? []).filter((u: any) => u.active !== false && u.role).map((u: any) => <option key={u._id} value={u._id}>{u.name ?? u.email ?? "Usuário"}</option>)}
-              </select>
-            </div>
-            <div>
-              <Label>Observação</Label>
-              <Textarea value={observation} onChange={(e) => setObservation(e.target.value)} placeholder="Observações..." className="mt-1" />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowNew(false)}>Cancelar</Button>
-            <Button onClick={handleSubmit} disabled={submitting}>{submitting ? "Registrando..." : "Registrar Troca"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// CARTRIDGES TAB
-// ═══════════════════════════════════════════════════════════════════════════
-
-function CartridgesTab() {
-  const cartridges = useQuery(api.gomaQ.listEmptyCartridges, {});
-  const collections = useQuery(api.gomaQ.listCollections);
-  const lastCol = useQuery(api.gomaQ.lastCollection);
-  const createCollection = useMutation(api.gomaQ.createCollection);
-
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [showCollect, setShowCollect] = useState(false);
-  const [observation, setObservation] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  const awaiting = (cartridges ?? []).filter((c: any) => c.status === "awaiting_collection");
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
-  };
-
-  const handleCollect = async () => {
-    if (selectedIds.length === 0) {
-      toast.error("Selecione ao menos uma carcaça");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await createCollection({
-        cartridgeIds: selectedIds as any,
-        observation: observation || undefined,
-      });
-      toast.success("Coleta registrada com sucesso");
-      setShowCollect(false);
-      setSelectedIds([]);
-      setObservation("");
-    } catch (e: any) {
-      toast.error(e.message ?? "Erro ao registrar coleta");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Carcaças Vazias</h2>
-        {awaiting.length > 0 && (
-          <Button onClick={() => setShowCollect(true)} className="gap-2">
-            <Truck className="h-4 w-4" /> Registrar Coleta ({selectedIds.length})
-          </Button>
-        )}
-      </div>
-
-      {lastCol && (
-        <p className="text-sm text-muted-foreground">
-          Última coleta: {new Date(lastCol.collectedAt).toLocaleDateString("pt-BR")} — {lastCol.totalCartridges} carcaça(s)
-        </p>
-      )}
-
-      <Card>
-        <CardContent className="pt-6">
-          {!cartridges ? (
-            <p className="text-muted-foreground">Carregando...</p>
-          ) : awaiting.length === 0 ? (
-            <p className="text-muted-foreground">Nenhuma carcaça aguardando coleta</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10"></TableHead>
-                    <TableHead>Produto</TableHead>
-                    <TableHead>Qtd</TableHead>
-                    <TableHead>Impressora</TableHead>
-                    <TableHead>Gerada em</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {awaiting.map((c: any) => (
-                    <TableRow key={c._id}>
-                      <TableCell>
-                        <input type="checkbox" checked={selectedIds.includes(c._id)} onChange={() => toggleSelect(c._id)} className="cursor-pointer" />
+                      <TableCell className="font-mono text-xs">{e.exchangeNumber}</TableCell>
+                      <TableCell className="text-sm">{e.product?.name ?? "—"}</TableCell>
+                      <TableCell className="text-sm">{e.printer?.name ?? "—"}</TableCell>
+                      <TableCell className="text-center font-mono text-sm">{e.quantityDelivered}</TableCell>
+                      <TableCell className="text-center font-mono text-sm">{e.quantityEmptyReceived}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {new Date(e.exchangedAt).toLocaleDateString("pt-BR")}
                       </TableCell>
-                      <TableCell className="text-sm font-medium">{c.product?.name ?? "\u2014"}</TableCell>
-                      <TableCell><Badge variant="outline">{c.quantity}</Badge></TableCell>
-                      <TableCell className="text-sm">{c.printer?.name ?? "\u2014"}</TableCell>
-                      <TableCell className="text-sm">{new Date(c.generatedAt).toLocaleDateString("pt-BR")}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {collections && collections.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle className="text-lg">Histórico de Coletas</CardTitle></CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Data</TableHead>
-                  <TableHead>Nº</TableHead>
-                  <TableHead>Carcaças</TableHead>
-                  <TableHead>Responsável</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {collections.map((c: any) => (
-                  <TableRow key={c._id}>
-                    <TableCell className="text-sm">{new Date(c.collectedAt).toLocaleDateString("pt-BR")}</TableCell>
-                    <TableCell className="text-xs font-mono">{c.collectionNumber}</TableCell>
-                    <TableCell><Badge>{c.totalCartridges}</Badge></TableCell>
-                    <TableCell className="text-sm">{c.responsible?.name ?? "\u2014"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
           </CardContent>
         </Card>
       )}
 
-      <Dialog open={showCollect} onOpenChange={setShowCollect}>
+      {/* New Exchange Dialog */}
+      <Dialog open={showNew} onOpenChange={setShowNew}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Truck className="h-5 w-5" /> Registrar Coleta Gomaq
-            </DialogTitle>
+            <DialogTitle>Registrar Troca de Suprimento</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <p className="text-sm">Serão coletadas {selectedIds.length} carcaça(s).</p>
+            <div>
+              <Label>Produto</Label>
+              <select className="w-full border rounded-md p-2 text-sm" value={form.productId} onChange={(e) => setForm({ ...form, productId: e.target.value })}>
+                <option value="">Selecione...</option>
+                {products?.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>Impressora</Label>
+              <select className="w-full border rounded-md p-2 text-sm" value={form.printerId} onChange={(e) => setForm({ ...form, printerId: e.target.value })}>
+                <option value="">Selecione...</option>
+                {printers?.map((p) => <option key={p._id} value={p._id}>{p.name} — {p.model}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Qtd Entregue</Label>
+                <Input type="number" min="1" value={form.quantityDelivered} onChange={(e) => setForm({ ...form, quantityDelivered: e.target.value })} />
+              </div>
+              <div>
+                <Label>Qtd Carcaças Vazias</Label>
+                <Input type="number" min="0" value={form.quantityEmptyReceived} onChange={(e) => setForm({ ...form, quantityEmptyReceived: e.target.value })} />
+              </div>
+            </div>
+            <div>
+              <Label>Recebedor</Label>
+              <select className="w-full border rounded-md p-2 text-sm" value={form.receivedByUserId} onChange={(e) => setForm({ ...form, receivedByUserId: e.target.value })}>
+                <option value="">Selecione...</option>
+                {users?.map((u) => <option key={u._id} value={u._id}>{u.name ?? u.email}</option>)}
+              </select>
+            </div>
             <div>
               <Label>Observação</Label>
-              <Textarea value={observation} onChange={(e) => setObservation(e.target.value)} placeholder="Observações da coleta..." className="mt-1" />
+              <Textarea value={form.observation} onChange={(e) => setForm({ ...form, observation: e.target.value })} rows={2} />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCollect(false)}>Cancelar</Button>
-            <Button onClick={handleCollect} disabled={submitting}>{submitting ? "Registrando..." : "Confirmar Coleta"}</Button>
+            <Button variant="outline" onClick={() => setShowNew(false)}>Cancelar</Button>
+            <Button onClick={handleCreate} disabled={!form.productId || !form.printerId || !form.receivedByUserId}>Registrar Troca</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -476,119 +355,234 @@ function CartridgesTab() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MONTHLY ORDER TAB
-// ═══════════════════════════════════════════════════════════════════════════
 
-function OrderTab() {
-  const monthlyItems = useQuery(api.gomaQ.monthlyOrder);
-  const exportOrder = useMutation(api.gomaQ.exportMonthlyOrder);
+// ═══════════════════════════════════════════════════════════════════════════════
+// CARTRIDGES TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function CartridgesTab() {
+  const cartridges = useQuery(api.gomaQ.listEmptyCartridges, {});
+  const collections = useQuery(api.gomaQ.listCollections);
+  const createCollection = useMutation(api.gomaQ.createCollection);
 
-  const [edits, setEdits] = useState<Record<string, number>>({});
-  const [observations, setObservations] = useState<Record<string, string>>({});
+  const [selected, setSelected] = useState<Set<string>>(new Set<string>());
 
-  const getFinalQty = (item: any) => edits[item.productId] ?? item.suggestedQuantity;
+  if (cartridges === undefined) {
+    return (
+      <div className="space-y-3 mt-4">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-16 w-full rounded-lg" />
+        ))}
+      </div>
+    );
+  }
 
-  const handleExport = async () => {
-    if (!monthlyItems) return;
-    const items = monthlyItems.map((item: any) => ({
-      productId: item.productId as any,
-      finalQuantity: getFinalQty(item),
-      observation: observations[item.productId] || undefined,
-    }));
+  const awaiting = cartridges.filter((c) => c.status === "awaiting_collection");
+  const collected = cartridges.filter((c) => c.status === "collected");
+
+  const handleCollect = async () => {
+    if (selected.size === 0) { toast.error("Selecione ao menos uma carcaça"); return; }
     try {
-      await exportOrder({ items });
-      toast.success("Pedido mensal registrado com sucesso");
-
-      // Generate CSV
-      const headers = ["Produto", "Marca", "Modelo", "Compatibilidade", "Estoque Atual", "Estoque Ideal", "Qtd Solicitada", "Observação"];
-      const rows = monthlyItems
-        .filter((item: any) => getFinalQty(item) > 0)
-        .map((item: any) => [
-          item.productName,
-          item.brand ?? "",
-          item.model ?? "",
-          item.compatibleModels.join(", "),
-          item.physicalQuantity,
-          item.idealStock,
-          getFinalQty(item),
-          observations[item.productId] ?? "",
-        ]);
-      const csv = [headers, ...rows].map((r) => r.join(";")).join("\n");
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `pedido-gomaq-${new Date().toISOString().slice(0, 7)}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await createCollection({ cartridgeIds: Array.from(selected) as any });
+      toast.success(`${selected.size} carcaça(s) coletada(s)`);
+      setSelected(new Set());
     } catch (e: any) {
-      toast.error(e.message ?? "Erro ao registrar pedido");
+      toast.error(e.message ?? "Erro ao registrar coleta");
     }
   };
 
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold">Pedido Mensal Gomaq</h2>
-        <Button onClick={handleExport} className="gap-2">
-          <FileSpreadsheet className="h-4 w-4" /> Gerar Planilha CSV
+    <div className="space-y-4 mt-4">
+      {awaiting.length === 0 ? (
+        <Card className="border-border/50">
+          <CardContent className="py-12">
+            <div className="empty-state">
+              <Package className="empty-state-icon" />
+              <p className="empty-state-title">Nenhuma carcaça aguardando coleta</p>
+              <p className="empty-state-desc">Todas as carcaças foram coletadas</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">{awaiting.length} carcaça(s) aguardando coleta</p>
+            {selected.size > 0 && (
+              <Button onClick={handleCollect} className="gap-2" size="sm">
+                <Truck className="h-4 w-4" /> Registrar Coleta ({selected.size})
+              </Button>
+            )}
+          </div>
+          {awaiting.map((c) => (
+            <Card key={c._id} className="border-border/50 card-hover cursor-pointer" onClick={() => toggle(c._id)}>
+              <CardContent className="p-3 flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={selected.has(c._id)}
+                  onChange={() => toggle(c._id)}
+                  className="h-4 w-4 rounded"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{c.product?.name ?? "—"}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {c.printer?.name ?? "—"} • Qtd: {c.quantity}
+                  </p>
+                </div>
+                <Badge variant="secondary" className="text-[10px]">Pendente</Badge>
+              </CardContent>
+            </Card>
+          ))}
+        </>
+      )}
+
+      {/* Collection History */}
+      {collected.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-sm font-medium mb-3">Coletas Anteriores</h3>
+          <div className="space-y-2">
+            {collected.slice(0, 20).map((c) => (
+              <div key={c._id} className="flex items-center justify-between text-xs text-muted-foreground p-2 rounded-lg bg-muted/30">
+                <span>{c.product?.name ?? "—"}</span>
+                <span>Coletado em {new Date(c.collectedAt ?? 0).toLocaleDateString("pt-BR")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MONTHLY ORDER TAB
+// ═══════════════════════════════════════════════════════════════════════════════
+function OrderTab() {
+  const order = useQuery(api.gomaQ.monthlyOrder);
+
+  if (order === undefined) {
+    return (
+      <div className="space-y-3 mt-4">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-16 w-full rounded-lg" />
+        ))}
+      </div>
+    );
+  }
+
+  if (order.length === 0) {
+    return (
+      <Card className="border-border/50 mt-4">
+        <CardContent className="py-12">
+          <div className="empty-state">
+            <ShoppingCart className="empty-state-icon" />
+            <p className="empty-state-title">Nenhum item para pedido</p>
+            <p className="empty-state-desc">Cadastre produtos com compatibilidade de impressora para gerar o pedido mensal</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const validOrder = order.filter((o): o is NonNullable<typeof o> => o !== null && o !== undefined);
+  const toExport = validOrder.map((o) => ({
+    Produto: o.productName,
+    Marca: o.brand ?? "",
+    Modelo: o.model ?? "",
+    Compatibilidade: o.compatibleModels.join(", "),
+    "Em Estoque": o.physicalQuantity,
+    Ideal: o.idealStock,
+    "Sugerido": o.suggestedQuantity,
+  }));
+
+  const exportCSV = () => {
+    const headers = Object.keys(toExport[0]);
+    const csv = [headers.join(","), ...toExport.map((r) => headers.map((h) => `"${String(r[h as keyof typeof r]).replace(/"/g, '""')}"`).join(","))].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pedido-gomaq-${new Date().toISOString().slice(0, 7)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="space-y-4 mt-4">
+      <div className="flex justify-end">
+        <Button variant="outline" size="sm" onClick={exportCSV} className="gap-2">
+          <FileSpreadsheet className="h-4 w-4" /> Exportar CSV
         </Button>
       </div>
 
-      <Card>
-        <CardContent className="pt-6">
-          {!monthlyItems ? (
-            <p className="text-muted-foreground">Carregando...</p>
-          ) : monthlyItems.length === 0 ? (
-            <p className="text-muted-foreground">Nenhum suprimento Gomaq cadastrado</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Produto</TableHead>
-                    <TableHead>Compatibilidade</TableHead>
-                    <TableHead>Atual</TableHead>
-                    <TableHead>Ideal</TableHead>
-                    <TableHead>Sugerido</TableHead>
-                    <TableHead>Quantidade</TableHead>
-                    <TableHead>Observação</TableHead>
+      {/* Desktop Table */}
+      <Card className="border-border/50 hidden sm:block">
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">Produto</TableHead>
+                  <TableHead className="text-xs">Compatibilidade</TableHead>
+                  <TableHead className="text-xs text-center">Estoque</TableHead>
+                  <TableHead className="text-xs text-center">Ideal</TableHead>
+                  <TableHead className="text-xs text-center">Sugerido</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>                  {validOrder.map((o, i) => (
+                    <TableRow key={i}>
+                    <TableCell>
+                      <p className="font-medium text-sm">{o.productName}</p>
+                      <p className="text-[10px] text-muted-foreground">{o.brand} {o.model}</p>
+                    </TableCell>
+                    <TableCell className="text-xs">{o.compatibleModels.join(", ")}</TableCell>
+                    <TableCell className="text-center font-mono text-sm">{o.physicalQuantity}</TableCell>
+                    <TableCell className="text-center font-mono text-sm">{o.idealStock}</TableCell>
+                    <TableCell className="text-center">
+                      <span className={`font-mono text-sm font-semibold ${o.suggestedQuantity > 0 ? "text-primary" : "text-muted-foreground"}`}>
+                        {o.suggestedQuantity}
+                      </span>
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {monthlyItems.map((item: any) => (
-                    <TableRow key={item.productId}>
-                      <TableCell className="text-sm font-medium">{item.productName}</TableCell>
-                      <TableCell className="text-xs">{item.compatibleModels.join(", ")}</TableCell>
-                      <TableCell>{item.physicalQuantity}</TableCell>
-                      <TableCell>{item.idealStock}</TableCell>
-                      <TableCell>{item.suggestedQuantity}</TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={getFinalQty(item)}
-                          onChange={(e) => setEdits({ ...edits, [item.productId]: Number(e.target.value) })}
-                          className="w-20"
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={observations[item.productId] ?? ""}
-                          onChange={(e) => setObservations({ ...observations, [item.productId]: e.target.value })}
-                          placeholder="Obs..."
-                          className="w-32"
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
+
+      {/* Mobile Cards */}
+      <div className="sm:hidden space-y-3">
+        {validOrder.map((o, i) => (
+          <Card key={i} className="border-border/50">
+            <CardContent className="p-3">
+              <p className="font-medium text-sm mb-1">{o.productName}</p>
+              <p className="text-xs text-muted-foreground mb-2">{o.compatibleModels.join(", ")}</p>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <p className="text-lg font-bold font-mono">{o.physicalQuantity}</p>
+                  <p className="text-[10px] text-muted-foreground">Estoque</p>
+                </div>
+                <div>
+                  <p className="text-lg font-bold font-mono">{o.idealStock}</p>
+                  <p className="text-[10px] text-muted-foreground">Ideal</p>
+                </div>
+                <div>
+                  <p className={`text-lg font-bold font-mono ${o.suggestedQuantity > 0 ? "text-primary" : "text-muted-foreground"}`}>{o.suggestedQuantity}</p>
+                  <p className="text-[10px] text-muted-foreground">Sugerido</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
