@@ -32,6 +32,9 @@ import {
   Building2,
   Search,
   AlertTriangle,
+  Monitor,
+  ClipboardList,
+  Truck,
 } from "lucide-react";
 import { UNIT_LABELS } from "@/types/constants";
 import { toast } from "sonner";
@@ -98,10 +101,71 @@ function exportConsumptionCSV(data: any[]) {
   downloadCSV("consumo_por_secretaria.csv", [header, ...rows].join("\n"));
 }
 
+function exportRequestsCSV(data: any[]) {
+  const header = "Nº;Data;Solicitante;Secretaria;Status;Itens;Qtd Total";
+  const rows = data.map((r) =>
+    [
+      r._id.slice(-6),
+      new Date(r.createdAt).toLocaleString("pt-BR"),
+      r.requesterName,
+      r.secretariaName,
+      r.status,
+      r.itemCount,
+      r.totalItems,
+    ].join(";")
+  );
+  downloadCSV("solicitacoes.csv", [header, ...rows].join("\n"));
+}
+
+function exportAssetsCSV(data: any[]) {
+  const header = "Patrimônio;Série;Tipo;Fabricante;Modelo;Usuário;Secretaria;Status";
+  const rows = data.map((a) =>
+    [
+      a.patrimonyNumber ?? "",
+      a.serialNumber ?? "",
+      a.assetType,
+      a.manufacturer ?? "",
+      a.model ?? "",
+      a.responsible?.name ?? "",
+      a.organization?.name ?? "",
+      a.status,
+    ].join(";")
+  );
+  downloadCSV("equipamentos.csv", [header, ...rows].join("\n"));
+}
+
+function exportGomaqCSV(exchanges: any[]) {
+  const header = "Data;Nº;Produto;Qtd Entregue;Carcaças;Impressora";
+  const rows = exchanges.map((e) =>
+    [
+      new Date(e.exchangedAt).toLocaleDateString("pt-BR"),
+      e.exchangeNumber,
+      e.product?.name ?? "",
+      e.quantityDelivered,
+      e.quantityEmptyReceived,
+      e.printer?.name ?? "",
+    ].join(";")
+  );
+  downloadCSV("trocas_gomaq.csv", [header, ...rows].join("\n"));
+}
+
 export default function Reports() {
   // ─── Stock Position ───
   const stockPosition = useQuery(api.dashboard.stockPosition);
   const tonerMetrics = useQuery(api.printers.tonerMetrics);
+
+  // ─── Requests Report ───
+  const [reqStartDate, setReqStartDate] = useState("");
+  const [reqEndDate, setReqEndDate] = useState("");
+  const allRequests = useQuery(api.requests.list, {});
+
+  // ─── Assets Report ───
+  const allAssets = useQuery(api.assets.list, {});
+
+  // ─── GomaQ Report ───
+  const gomaqExchanges = useQuery(api.gomaQ.listExchanges, {});
+  const gomaqCartridges = useQuery(api.gomaQ.listEmptyCartridges, {});
+  const gomaqCollections = useQuery(api.gomaQ.listCollections);
 
   // ─── Movement Report ───
   const [movStartDate, setMovStartDate] = useState("");
@@ -163,6 +227,15 @@ export default function Reports() {
             </TabsTrigger>
             <TabsTrigger value="toners" className="gap-1">
               <Printer className="h-3.5 w-3.5" /> Métricas de Toners
+            </TabsTrigger>
+            <TabsTrigger value="requests" className="gap-1">
+              <ClipboardList className="h-3.5 w-3.5" /> Solicitações
+            </TabsTrigger>
+            <TabsTrigger value="assets" className="gap-1">
+              <Monitor className="h-3.5 w-3.5" /> Equipamentos
+            </TabsTrigger>
+            <TabsTrigger value="gomaq" className="gap-1">
+              <Truck className="h-3.5 w-3.5" /> GomaQ
             </TabsTrigger>
           </TabsList>
 
@@ -601,6 +674,126 @@ export default function Reports() {
                   ))}
                 </div>
               </>
+            )}
+          </TabsContent>
+
+          {/* ═══ RELATÓRIO 5: SOLICITAÇÕES ═══ */}
+          <TabsContent value="requests" className="space-y-4 mt-4">
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <Label className="text-xs">Data Inicial</Label>
+                    <Input type="date" value={reqStartDate} onChange={(e) => setReqStartDate(e.target.value)} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Data Final</Label>
+                    <Input type="date" value={reqEndDate} onChange={(e) => setReqEndDate(e.target.value)} className="mt-1" />
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <Button variant="outline" size="sm" onClick={() => { setReqStartDate(""); setReqEndDate(""); }}>Limpar</Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            {!allRequests ? <p className="text-muted-foreground text-sm">Carregando...</p> : (
+              <>
+                <div className="flex gap-2 mb-3">
+                  <Badge variant="outline" className="text-xs">{allRequests.length} solicitação(ões)</Badge>
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => {
+                    const filtered = allRequests.filter((r: any) => {
+                      if (reqStartDate && r.createdAt < new Date(reqStartDate).getTime()) return false;
+                      if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59").getTime()) return false;
+                      return true;
+                    });
+                    exportRequestsCSV(filtered.map((r: any) => ({ ...r, requesterName: r.requester?.name ?? "—", secretariaName: r.secretaria?.name ?? "—", itemCount: r.items?.length ?? 0, totalItems: (r.items ?? []).reduce((s: number, i: any) => s + (i.quantityDelivered ?? 0), 0) })));
+                    toast.success("CSV exportado");
+                  }}><Download className="h-3.5 w-3.5" /> CSV</Button>
+                </div>
+                <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table>
+                  <TableHeader><TableRow>
+                    <TableHead className="text-xs">Data</TableHead><TableHead className="text-xs">Solicitante</TableHead><TableHead className="text-xs">Secretaria</TableHead><TableHead className="text-xs">Motivo</TableHead><TableHead className="text-xs">Status</TableHead><TableHead className="text-xs text-right">Itens</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {allRequests.filter((r: any) => {
+                      if (reqStartDate && r.createdAt < new Date(reqStartDate).getTime()) return false;
+                      if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59").getTime()) return false;
+                      return true;
+                    }).map((r: any) => (
+                      <TableRow key={r._id}>
+                        <TableCell className="text-xs">{new Date(r.createdAt).toLocaleDateString("pt-BR")}</TableCell>
+                        <TableCell className="text-sm">{r.requester?.name ?? "—"}</TableCell>
+                        <TableCell className="text-sm">{r.secretaria?.name ?? "—"}</TableCell>
+                        <TableCell className="text-xs truncate max-w-[200px]">{r.reason}</TableCell>
+                        <TableCell><Badge variant="outline" className="text-[10px]">{r.status}</Badge></TableCell>
+                        <TableCell className="text-sm text-right">{r.items?.length ?? 0}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table></div></CardContent></Card>
+              </>
+            )}
+          </TabsContent>
+
+          {/* ═══ RELATÓRIO 6: EQUIPAMENTOS ═══ */}
+          <TabsContent value="assets" className="space-y-4 mt-4">
+            {!allAssets ? <p className="text-muted-foreground text-sm">Carregando...</p> : (
+              <>
+                <div className="flex gap-2 mb-3">
+                  <Badge variant="outline" className="text-xs">{allAssets.length} equipamento(s)</Badge>
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { exportAssetsCSV(allAssets); toast.success("CSV exportado"); }}><Download className="h-3.5 w-3.5" /> CSV</Button>
+                </div>
+                <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table>
+                  <TableHeader><TableRow>
+                    <TableHead className="text-xs">Patrimônio</TableHead><TableHead className="text-xs">Série</TableHead><TableHead className="text-xs">Tipo</TableHead><TableHead className="text-xs">Fabricante / Modelo</TableHead><TableHead className="text-xs">Usuário</TableHead><TableHead className="text-xs">Secretaria</TableHead><TableHead className="text-xs">Status</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {allAssets.map((a: any) => (
+                      <TableRow key={a._id}>
+                        <TableCell className="text-xs font-mono">{a.patrimonyNumber ?? "—"}</TableCell>
+                        <TableCell className="text-xs">{a.serialNumber ?? "—"}</TableCell>
+                        <TableCell className="text-sm">{a.assetType}</TableCell>
+                        <TableCell className="text-sm">{[a.manufacturer, a.model].filter(Boolean).join(" ") || "—"}</TableCell>
+                        <TableCell className="text-sm">{a.responsible?.name ?? "—"}</TableCell>
+                        <TableCell className="text-sm">{a.organization?.name ?? "—"}</TableCell>
+                        <TableCell><Badge variant="outline" className="text-[10px]">{a.status}</Badge></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table></div></CardContent></Card>
+              </>
+            )}
+          </TabsContent>
+
+          {/* ═══ RELATÓRIO 7: GOMAQ ═══ */}
+          <TabsContent value="gomaq" className="space-y-4 mt-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total de Trocas</p><p className="text-2xl font-bold">{gomaqExchanges?.length ?? 0}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Carcaças Aguardando</p><p className="text-2xl font-bold text-orange-600">{gomaqCartridges?.filter((c: any) => c.status === "awaiting_collection").length ?? 0}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Coletas Realizadas</p><p className="text-2xl font-bold">{gomaqCollections?.length ?? 0}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Coletado</p><p className="text-2xl font-bold">{gomaqCollections?.reduce((s: number, c: any) => s + c.totalCartridges, 0) ?? 0}</p></CardContent></Card>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { if (gomaqExchanges) { exportGomaqCSV(gomaqExchanges); toast.success("CSV exportado"); } }}><Download className="h-3.5 w-3.5" /> CSV Trocas</Button>
+            </div>
+            {gomaqExchanges && gomaqExchanges.length > 0 && (
+              <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table>
+                <TableHeader><TableRow>
+                  <TableHead className="text-xs">Data</TableHead><TableHead className="text-xs">Nº</TableHead><TableHead className="text-xs">Produto</TableHead><TableHead className="text-xs text-right">Qtd</TableHead><TableHead className="text-xs">Impressora</TableHead><TableHead className="text-xs text-right">Carcaças</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {gomaqExchanges.slice(0, 100).map((e: any) => (
+                    <TableRow key={e._id}>
+                      <TableCell className="text-xs">{new Date(e.exchangedAt).toLocaleDateString("pt-BR")}</TableCell>
+                      <TableCell className="text-xs font-mono">{e.exchangeNumber}</TableCell>
+                      <TableCell className="text-sm">{e.product?.name ?? "—"}</TableCell>
+                      <TableCell className="text-sm text-right">{e.quantityDelivered}</TableCell>
+                      <TableCell className="text-sm">{e.printer?.name ?? "—"}</TableCell>
+                      <TableCell className="text-sm text-right">{e.quantityEmptyReceived}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table></div></CardContent></Card>
             )}
           </TabsContent>
         </Tabs>

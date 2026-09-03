@@ -1,7 +1,7 @@
 {
-  "name": "SIGESGD — Gestão de Estoque de TI",
+  "name": "SIGESGD Capivari",
   "short_name": "SIGESGD",
-  "description": "Sistema de Gestão de Estoque e Ativos de TI de Capivari",
+  "description": "Sistema Integrado de Gestão da Secretaria de Gestão e Governo Digital — Capivari",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

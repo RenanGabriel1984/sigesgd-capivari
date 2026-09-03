@@ -19,6 +19,9 @@ import {
   ShoppingCart as OrderIcon,
   Plus,
   FileBarChart,
+  Truck,
+  Wrench,
+  Key,
 } from "lucide-react";
 import { ROLE_LABELS } from "@/types/constants";
 import type { UserRole } from "@/types/constants";
@@ -133,6 +136,73 @@ export default function Dashboard() {
                       <span className="text-sm font-bold text-rose-600">-{loading ? "—" : s!.exitsThisMonth}</span>
                     </div>
                     <p className="text-xs text-muted-foreground">Entradas / Saídas (Mês)</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+
+        {/* ─── GOMAQ + Assets + Licenses Cards ─── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+          <motion.div {...fadeIn} transition={{ delay: 0.25 }}>
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
+                    <Truck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{loading ? "—" : s!.cartridgesAwaitingCount}</p>
+                    <p className="text-xs text-muted-foreground">Carcaças p/ Coleta</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          <motion.div {...fadeIn} transition={{ delay: 0.27 }}>
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+                    <Wrench className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{loading ? "—" : s!.maintenanceAssetsCount}</p>
+                    <p className="text-xs text-muted-foreground">Em Manutenção</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          <motion.div {...fadeIn} transition={{ delay: 0.29 }}>
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pink-50 text-pink-600">
+                    <Key className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{loading ? "—" : s!.expiringLicensesCount}</p>
+                    <p className="text-xs text-muted-foreground">Licenças p/ Vencer</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          <motion.div {...fadeIn} transition={{ delay: 0.31 }}>
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-50 text-cyan-600">
+                    <Truck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold">{loading ? "—" : s!.gomaqExchangesThisMonth}</p>
+                    <p className="text-xs text-muted-foreground">Trocas Gomaq (Mês)</p>
                   </div>
                 </div>
               </CardContent>

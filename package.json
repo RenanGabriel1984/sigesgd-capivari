@@ -1,7 +1,7 @@
 {
-  "name": "vite-template",
+  "name": "sigesgd-capivari",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
