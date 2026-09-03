@@ -110,32 +110,45 @@ export const stats = query({
     }
     urgentAlerts.sort((a, b) => a.currentStock - b.minimumStock);
 
-    // GOMAQ: cartridges awaiting collection
-    const awaitingCartridges = await ctx.db
-      .query("gomaQEmptyCartridges")
-      .withIndex("by_status", (q) => q.eq("status", "awaiting_collection"))
-      .collect();
-    const cartridgesAwaitingCount = awaitingCartridges.reduce((sum, c) => sum + c.quantity, 0);
+    // GOMAQ: cartridges awaiting collection (use index for efficiency)
+    let cartridgesAwaitingCount = 0;
+    try {
+      const awaitingCartridges = await ctx.db
+        .query("gomaQEmptyCartridges")
+        .withIndex("by_status", (q) => q.eq("status", "awaiting_collection"))
+        .collect();
+      cartridgesAwaitingCount = awaitingCartridges.reduce((sum: number, c: any) => sum + c.quantity, 0);
+    } catch { /* table may not exist yet */ }
 
     // GOMAQ: exchanges this month
-    const gomaqExchanges = await ctx.db.query("gomaQExchanges").order("desc").take(500);
-    const gomaqExchangesThisMonth = gomaqExchanges.filter((e) => e.exchangedAt >= monthStartMs).length;
+    let gomaqExchangesThisMonth = 0;
+    try {
+      const gomaqExchanges = await ctx.db.query("gomaQExchanges").order("desc").take(500);
+      gomaqExchangesThisMonth = gomaqExchanges.filter((e: any) => e.exchangedAt >= monthStartMs).length;
+    } catch { /* table may not exist yet */ }
 
     // Assets in maintenance
-    const maintenanceAssets = await ctx.db
-      .query("assets")
-      .withIndex("by_status", (q) => q.eq("status", "maintenance"))
-      .collect();
+    let maintenanceAssetsCount = 0;
+    try {
+      const maintenanceAssets = await ctx.db
+        .query("assets")
+        .withIndex("by_status", (q) => q.eq("status", "maintenance"))
+        .collect();
+      maintenanceAssetsCount = maintenanceAssets.length;
+    } catch { /* table may not exist yet */ }
 
     // Licenses expiring within 30 days
-    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-    const nowMs = Date.now();
-    const allLicenses = await ctx.db.query("licenses").collect();
-    const expiringLicenses = allLicenses.filter((l) => {
-      if (!l.expirationDate || !l.active) return false;
-      const expMs = new Date(l.expirationDate).getTime();
-      return expMs >= nowMs && expMs <= nowMs + thirtyDaysMs;
-    });
+    let expiringLicensesCount = 0;
+    try {
+      const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+      const nowMs = Date.now();
+      const allLicenses = await ctx.db.query("licenses").collect();
+      expiringLicensesCount = allLicenses.filter((l: any) => {
+        if (!l.expirationDate || !l.active) return false;
+        const expMs = new Date(l.expirationDate).getTime();
+        return expMs >= nowMs && expMs <= nowMs + thirtyDaysMs;
+      }).length;
+    } catch { /* table may not exist yet */ }
 
     return {
       totalProducts: products.length,
@@ -147,8 +160,8 @@ export const stats = query({
       urgentAlerts,
       cartridgesAwaitingCount,
       gomaqExchangesThisMonth,
-      maintenanceAssetsCount: maintenanceAssets.length,
-      expiringLicensesCount: expiringLicenses.length,
+      maintenanceAssetsCount,
+      expiringLicensesCount,
     };
   },
 });
