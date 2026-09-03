@@ -489,3 +489,69 @@ export const diagnosticListUsers = query({
     return results;
   },
 });
+
+/**
+ * Bootstrap: reset password for an existing user (no login required).
+ *
+ * Safety:
+ *  - Only targets users with role admin or stock_manager
+ *  - Records the reset in auditLogs
+ */
+export const bootstrapResetPassword = mutation({
+  args: {
+    email: v.string(),
+    newPassword: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const email = args.email.trim().toLowerCase();
+    if (!email) throw new Error("E-mail é obrigatório");
+    if (args.newPassword.length < 6) {
+      throw new Error("A senha deve ter pelo menos 6 caracteres");
+    }
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .first();
+
+    if (!user) throw new Error(`Usuário não encontrado: ${email}`);
+
+    // Safety: only allow reset for admin/stock_manager
+    if (user.role !== "admin" && user.role !== "stock_manager") {
+      throw new Error("Bootstrap só é permitido para administradores e gerentes de estoque");
+    }
+
+    const { hash, salt } = await hashPassword(args.newPassword);
+
+    // Check if password record exists
+    const existingPw = await ctx.db
+      .query("passwords")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .first();
+
+    if (existingPw) {
+      await ctx.db.patch(existingPw._id, {
+        passwordHash: hash,
+        salt,
+        requiresReset: false,
+      });
+    } else {
+      await ctx.db.insert("passwords", {
+        userId: user._id,
+        passwordHash: hash,
+        salt,
+        requiresReset: false,
+      });
+    }
+
+    await ctx.db.insert("auditLogs", {
+      action: "password_reset",
+      entity: "passwords",
+      entityId: user._id,
+      details: `Bootstrap: senha redefinida para ${user.name ?? email}`,
+      timestamp: Date.now(),
+    });
+
+    return { message: `Senha redefinida para ${user.name ?? email}. Faça login.` };
+  },
+});
