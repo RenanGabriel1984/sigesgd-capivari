@@ -1,9 +1,9 @@
-/* DO NOT CHANGE */
+/* SIGESGD Capivari — Design System */
 @import "tailwindcss";
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));
 
-/* DO NOT CHANGE */
+/* ─── Tailwind Theme Tokens ─── */
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -42,76 +42,64 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* MODERN INSTITUTIONAL THEME — SIGESGD Capivari */
+/* ═══════════════════════════════════════════════════════════════════════════
+   CAPIVARI MUNICIPAL IDENTITY
+   Verde escuro (bandeira) + Branco + Azul-celeste (bandeira)
+   ═══════════════════════════════════════════════════════════════════════════ */
 :root {
   --radius: 0.5rem;
+
+  /* Core palette — Capivari municipal */
+  --capivari-green: #1a5632;
+  --capivari-green-light: #2d7a4a;
+  --capivari-blue: #5b9bd5;
+  --capivari-blue-light: #7fb8e8;
+  --capivari-sky: #a8d4f0;
+
+  /* Semantic tokens */
   --background: oklch(0.985 0.002 240);
   --foreground: oklch(0.18 0.02 260);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.18 0.02 260);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.18 0.02 260);
-  --primary: oklch(0.28 0.06 250);
+
+  /* Primary: Capivari dark green */
+  --primary: oklch(0.32 0.08 155);
   --primary-foreground: oklch(0.985 0.005 240);
-  --secondary: oklch(0.96 0.005 240);
+
+  /* Secondary: light sky blue tint */
+  --secondary: oklch(0.96 0.015 240);
   --secondary-foreground: oklch(0.28 0.04 250);
+
   --muted: oklch(0.96 0.005 240);
-  --muted-foreground: oklch(0.52 0.02 250);
-  --accent: oklch(0.96 0.005 240);
+  --muted-foreground: oklch(0.50 0.02 250);
+  --accent: oklch(0.94 0.02 240);
   --accent-foreground: oklch(0.28 0.04 250);
   --destructive: oklch(0.58 0.22 27);
   --border: oklch(0.91 0.008 240);
   --input: oklch(0.91 0.008 240);
-  --ring: oklch(0.35 0.08 250);
-  --chart-1: oklch(0.55 0.15 250);
-  --chart-2: oklch(0.60 0.12 180);
-  --chart-3: oklch(0.45 0.08 220);
-  --chart-4: oklch(0.75 0.15 85);
-  --chart-5: oklch(0.70 0.18 50);
-  --sidebar: oklch(1 0 0);
-  --sidebar-foreground: oklch(0.18 0.02 260);
-  --sidebar-primary: oklch(0.28 0.06 250);
-  --sidebar-primary-foreground: oklch(0.985 0.005 240);
-  --sidebar-accent: oklch(0.96 0.005 240);
-  --sidebar-accent-foreground: oklch(0.28 0.04 250);
-  --sidebar-border: oklch(0.91 0.008 240);
-  --sidebar-ring: oklch(0.35 0.08 250);
-}
+  --ring: oklch(0.35 0.10 155);
 
-.dark {
-  --background: oklch(0.15 0.02 260);
-  --foreground: oklch(0.96 0.005 240);
-  --card: oklch(0.20 0.025 260);
-  --card-foreground: oklch(0.96 0.005 240);
-  --popover: oklch(0.20 0.025 260);
-  --popover-foreground: oklch(0.96 0.005 240);
-  --primary: oklch(0.80 0.06 250);
-  --primary-foreground: oklch(0.18 0.04 260);
-  --secondary: oklch(0.24 0.03 260);
-  --secondary-foreground: oklch(0.96 0.005 240);
-  --muted: oklch(0.24 0.03 260);
-  --muted-foreground: oklch(0.65 0.02 250);
-  --accent: oklch(0.24 0.03 260);
-  --accent-foreground: oklch(0.96 0.005 240);
-  --destructive: oklch(0.68 0.20 22);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.60 0.06 250);
-  --chart-1: oklch(0.65 0.15 250);
-  --chart-2: oklch(0.60 0.12 180);
-  --chart-3: oklch(0.70 0.15 50);
-  --chart-4: oklch(0.60 0.20 300);
-  --chart-5: oklch(0.55 0.20 15);
-  --sidebar: oklch(0.18 0.025 260);
+  /* Charts */
+  --chart-1: oklch(0.35 0.10 155);
+  --chart-2: oklch(0.55 0.12 210);
+  --chart-3: oklch(0.65 0.14 85);
+  --chart-4: oklch(0.55 0.18 27);
+  --chart-5: oklch(0.45 0.08 260);
+
+  /* Sidebar */
+  --sidebar: oklch(0.20 0.04 155);
   --sidebar-foreground: oklch(0.96 0.005 240);
-  --sidebar-primary: oklch(0.65 0.12 250);
-  --sidebar-primary-foreground: oklch(0.96 0.005 240);
-  --sidebar-accent: oklch(0.24 0.03 260);
+  --sidebar-primary: oklch(0.80 0.08 85);
+  --sidebar-primary-foreground: oklch(0.15 0.04 155);
+  --sidebar-accent: oklch(0.25 0.05 155);
   --sidebar-accent-foreground: oklch(0.96 0.005 240);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.60 0.06 250);
+  --sidebar-border: oklch(0.28 0.04 155);
+  --sidebar-ring: oklch(0.55 0.12 210);
 }
 
+/* ─── Base Layer ─── */
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -123,8 +111,42 @@
   [role="button"]:not([disabled]) {
     cursor: pointer;
   }
-  /* Smooth scrolling for anchor links */
   html {
     scroll-behavior: smooth;
   }
+}
+
+/* ─── Design System Utility Classes ─── */
+@layer utilities {
+  /* Status badges */
+  .badge-success { @apply bg-emerald-50 text-emerald-700 border-emerald-200; }
+  .badge-warning { @apply bg-amber-50 text-amber-700 border-amber-200; }
+  .badge-danger { @apply bg-rose-50 text-rose-700 border-rose-200; }
+  .badge-info { @apply bg-sky-50 text-sky-700 border-sky-200; }
+  .badge-neutral { @apply bg-gray-50 text-gray-600 border-gray-200; }
+
+  /* Skeleton animation */
+  .skeleton {
+    @apply animate-pulse rounded-md bg-muted;
+  }
+
+  /* Focus ring */
+  .focus-ring {
+    @apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring;
+  }
+
+  /* Card hover */
+  .card-hover {
+    @apply transition-all duration-200 hover:shadow-md hover:border-border/80;
+  }
+
+  /* Status dot */
+  .status-dot {
+    @apply inline-block h-2 w-2 rounded-full;
+  }
+  .status-dot-success { @apply bg-emerald-500; }
+  .status-dot-warning { @apply bg-amber-500; }
+  .status-dot-danger { @apply bg-rose-500; }
+  .status-dot-info { @apply bg-sky-500; }
+  .status-dot-neutral { @apply bg-gray-400; }
 }

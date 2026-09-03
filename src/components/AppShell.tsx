@@ -56,29 +56,48 @@ interface NavItem {
   badge?: number;
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { label: "Painel", href: "/dashboard", icon: LayoutDashboard, permission: "canViewMovements" },
-  { label: "Estoque", href: "/stock", icon: Warehouse, permission: "canManageStock" },
-  { label: "Itens de Estoque", href: "/products", icon: Package, permission: "canManageProducts" },
-  { label: "Categorias", href: "/categories", icon: Tags, permission: "canManageCategories" },
-  { label: "Entradas", href: "/entries", icon: ShoppingCart, permission: "canCreateEntries" },
-  { label: "Lotes", href: "/lots", icon: Boxes, permission: "canCreateEntries" },
-  { label: "Locais de Armazenamento", href: "/storage-locations", icon: MapPin, permission: "canManageStorageLocations" },
-  { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
-  { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests" },
-  { label: "Devoluções", href: "/returns", icon: RotateCcw, permission: "canReturnStock" },
-  { label: "Transferências", href: "/transfers", icon: ArrowRightLeft, permission: "canTransferStock" },
-  { label: "Movimentações", href: "/movements", icon: ArrowLeftRight, permission: "canViewMovements" },
-  { label: "Organização", href: "/organization", icon: Building2, permission: "canManageOrg" },
-  { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },
-  { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
-  { label: "Impressoras", href: "/printers", icon: Printer, permission: "canManageProducts" },
-  { label: "GomaQ", href: "/gomaq", icon: ArrowRightLeft, permission: "canManageGomaQ" },
-  { label: "Equipamentos", href: "/assets", icon: Monitor, permission: "canManageAssets" },
-  { label: "Licenças", href: "/licenses", icon: Key, permission: "canManageLicenses" },
-  { label: "Relatórios", href: "/reports", icon: BarChart3, permission: "canViewMovements" },
-  { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
-  { label: "Configurações", href: "/settings", icon: Settings, permission: "canManageSettings" },
+interface NavSection {
+  title?: string;
+  items: NavItem[];
+}
+
+const NAV_SECTIONS: NavSection[] = [
+  { items: [
+    { label: "Painel", href: "/dashboard", icon: LayoutDashboard, permission: "canViewMovements" },
+  ]},
+  { title: "Estoque", items: [
+    { label: "Estoque", href: "/stock", icon: Warehouse, permission: "canManageStock" },
+    { label: "Entradas", href: "/entries", icon: ShoppingCart, permission: "canCreateEntries" },
+    { label: "Lotes", href: "/lots", icon: Boxes, permission: "canCreateEntries" },
+    { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
+    { label: "Locais", href: "/storage-locations", icon: MapPin, permission: "canManageStorageLocations" },
+  ]},
+  { title: "Movimentações", items: [
+    { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests" },
+    { label: "Devoluções", href: "/returns", icon: RotateCcw, permission: "canReturnStock" },
+    { label: "Transferências", href: "/transfers", icon: ArrowRightLeft, permission: "canTransferStock" },
+  ]},
+  { title: "GomaQ", items: [
+    { label: "GomaQ", href: "/gomaq", icon: ArrowRightLeft, permission: "canManageGomaQ" },
+  ]},
+  { title: "Ativos", items: [
+    { label: "Equipamentos", href: "/assets", icon: Monitor, permission: "canManageAssets" },
+    { label: "Licenças", href: "/licenses", icon: Key, permission: "canManageLicenses" },
+    { label: "Impressoras", href: "/printers", icon: Printer, permission: "canManageProducts" },
+  ]},
+  { title: "Análises", items: [
+    { label: "Relatórios", href: "/reports", icon: BarChart3, permission: "canViewMovements" },
+    { label: "Movimentações", href: "/movements", icon: ArrowLeftRight, permission: "canViewMovements" },
+    { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
+  ]},
+  { title: "Administração", items: [
+    { label: "Produtos", href: "/products", icon: Package, permission: "canManageProducts" },
+    { label: "Categorias", href: "/categories", icon: Tags, permission: "canManageCategories" },
+    { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
+    { label: "Organizações", href: "/organization", icon: Building2, permission: "canManageOrg" },
+    { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },
+    { label: "Configurações", href: "/settings", icon: Settings, permission: "canManageSettings" },
+  ]},
 ];
 
 function SidebarLink({
@@ -172,7 +191,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setSidebarOpen(false);
   }, [location.pathname]);
 
-  const filteredNav = NAV_ITEMS.filter((item) => permissions[item.permission]);
+  const filteredSections = NAV_SECTIONS.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => permissions[item.permission]),
+  })).filter((section) => section.items.length > 0);
 
   const handleSignOut = async () => {
     await signOut();
@@ -221,15 +243,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Nav */}
         <ScrollArea className="flex-1 px-3 py-3">
-          <nav className="flex flex-col gap-0.5">
-            {filteredNav.map((item) => (
-              <SidebarLink
-                key={item.href}
-                item={item}
-                isActive={location.pathname === item.href}
-                pendingCount={pendingCount}
-                alertCount={alertCount}
-              />
+          <nav className="flex flex-col gap-1">
+            {filteredSections.map((section, sIdx) => (
+              <div key={sIdx}>
+                {section.title && !collapsed && (
+                  <p className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                    {section.title}
+                  </p>
+                )}
+                {section.items.map((item) => (
+                  <SidebarLink
+                    key={item.href}
+                    item={item}
+                    isActive={location.pathname === item.href || (item.href !== "/dashboard" && location.pathname.startsWith(item.href))}
+                    pendingCount={pendingCount}
+                    alertCount={alertCount}
+                  />
+                ))}
+              </div>
             ))}
           </nav>
         </ScrollArea>
@@ -280,16 +311,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Button>
               </div>
               <ScrollArea className="flex-1 px-3 py-3">
-                <nav className="flex flex-col gap-0.5">
-                  {filteredNav.map((item) => (
-                    <SidebarLink
-                      key={item.href}
-                      item={item}
-                      isActive={location.pathname === item.href}
-                      onClick={() => setSidebarOpen(false)}
-                      pendingCount={pendingCount}
-                      alertCount={alertCount}
-                    />
+                <nav className="flex flex-col gap-1">
+                  {filteredSections.map((section, sIdx) => (
+                    <div key={sIdx}>
+                      {section.title && (
+                        <p className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                          {section.title}
+                        </p>
+                      )}
+                      {section.items.map((item) => (
+                        <SidebarLink
+                          key={item.href}
+                          item={item}
+                          isActive={location.pathname === item.href || (item.href !== "/dashboard" && location.pathname.startsWith(item.href))}
+                          onClick={() => setSidebarOpen(false)}
+                          pendingCount={pendingCount}
+                          alertCount={alertCount}
+                        />
+                      ))}
+                    </div>
                   ))}
                 </nav>
               </ScrollArea>

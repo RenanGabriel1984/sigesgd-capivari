@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import {
   Package,
   TrendingDown,
@@ -43,12 +43,13 @@ const fadeIn = {
   transition: { duration: 0.3 },
 };
 
-const CHART_COLORS = ["#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed"];
+const CHART_COLORS = ["#1a5632", "#5b9bd5", "#d97706", "#dc2626", "#7c3aed"];
 
 export default function Dashboard() {
   const { user } = useAuth();
   const recordLogin = useMutation(api.users.recordLogin);
   const stats = useQuery(api.dashboard.stats);
+  const navigate = useNavigate();
 
   const role = (user?.role ?? "technician") as UserRole;
 
@@ -303,28 +304,34 @@ export default function Dashboard() {
         <motion.div {...fadeIn} transition={{ delay: 0.35 }}>
           <Card className="border-border/50">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Atalhos Rápidos</CardTitle>
+              <CardTitle className="text-base">Ações Rápidas</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex flex-wrap gap-3">
-                <Link to="/entries">
-                  <Button variant="outline" className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    Nova Entrada
-                  </Button>
-                </Link>
-                <Link to="/requests">
-                  <Button variant="outline" className="gap-2">
-                    <OrderIcon className="h-4 w-4" />
-                    Nova Solicitação
-                  </Button>
-                </Link>
-                <Link to="/reports">
-                  <Button variant="outline" className="gap-2">
-                    <FileBarChart className="h-4 w-4" />
-                    Relatórios
-                  </Button>
-                </Link>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/entries")}>
+                  <Plus className="h-5 w-5 text-primary" />
+                  <span className="text-xs">Nova Entrada</span>
+                </Button>
+                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/requests")}>
+                  <OrderIcon className="h-5 w-5 text-primary" />
+                  <span className="text-xs">Nova Solicitação</span>
+                </Button>
+                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/gomaq")}>
+                  <ArrowUpRight className="h-5 w-5 text-primary" />
+                  <span className="text-xs">Troca GomaQ</span>
+                </Button>
+                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/assets")}>
+                  <Package className="h-5 w-5 text-primary" />
+                  <span className="text-xs">Novo Equipamento</span>
+                </Button>
+                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/inventory")}>
+                  <ClipboardList className="h-5 w-5 text-primary" />
+                  <span className="text-xs">Inventário</span>
+                </Button>
+                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/reports")}>
+                  <FileBarChart className="h-5 w-5 text-primary" />
+                  <span className="text-xs">Relatórios</span>
+                </Button>
               </div>
             </CardContent>
           </Card>

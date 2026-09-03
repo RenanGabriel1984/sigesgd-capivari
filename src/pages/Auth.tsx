@@ -80,26 +80,40 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="flex items-center justify-between px-4 sm:px-6 h-16 border-b border-border/60">
+    <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-background to-primary/5">
+      <header className="flex items-center justify-between px-4 sm:px-6 h-16 border-b border-border/60 bg-card/80 backdrop-blur-sm">
         <Link to="/" className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-xs">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm">
             SG
           </div>
           <div>
-            <p className="text-sm font-semibold leading-tight">SIGESGD</p>
+            <p className="text-sm font-bold leading-tight tracking-tight">SIGESGD</p>
             <p className="text-[10px] text-muted-foreground leading-tight">Capivari</p>
           </div>
         </Link>
       </header>
 
-      <div className="flex-1 flex items-center justify-center px-4">
-        <div className="flex items-center justify-center h-full flex-col">
-          <Card className="w-full max-w-[400px] border-border/50 shadow-lg">
-            <CardHeader className="text-center">
-              <CardTitle className="text-xl">Bem-vindo</CardTitle>
+      <div className="flex-1 flex items-center justify-center px-4 py-8">
+        <div className="w-full max-w-md">
+          {/* Institutional header */}
+          <div className="text-center mb-6">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground font-bold text-2xl mx-auto mb-4 shadow-lg">
+              SG
+            </div>
+            <h1 className="text-xl font-bold tracking-tight">SIGESGD Capivari</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Sistema Integrado de Gestão
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Secretaria de Gestão e Governo Digital
+            </p>
+          </div>
+
+          <Card className="border-border/50 shadow-lg">
+            <CardHeader className="text-center pb-2">
+              <CardTitle className="text-lg">Acesse o Sistema</CardTitle>
               <CardDescription>
-                Informe suas credenciais para acessar o sistema
+                Informe suas credenciais para continuar
               </CardDescription>
             </CardHeader>
             <form onSubmit={handleSignIn}>
