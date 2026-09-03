@@ -284,3 +284,103 @@ export const hasPassword = query({
     return !!record;
   },
 });
+
+/**
+ * Bootstrap: create the first admin user + password.
+ *
+ * This mutation is ONLY allowed when NO admin user exists yet.
+ * Once an admin exists, every subsequent call is rejected.
+ *
+ * Usage (from Convex dashboard or a one-time script):
+ *  1. Open the Convex dashboard → Functions → Run
+ *  2. Call: passwords.bootstrapAdmin
+ *     { name: "Administrador", email: "admin@capivari.sp.gov.br", password: "MinhaS3nh@" }
+ *  3. The function creates the user, hashes the password, and returns the userId.
+ */
+export const bootstrapAdmin = mutation({
+  args: {
+    name: v.string(),
+    email: v.string(),
+    password: v.string(),
+  },
+  handler: async (ctx, args) => {
+    // ── Safety: only allowed when zero admins exist ──
+    const existingAdmins = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "admin"))
+      .collect();
+
+    if (existingAdmins.length > 0) {
+      throw new Error(
+        "Já existe um administrador no sistema. " +
+        "Esta operação só é permitida no primeiro acesso. " +
+        "Use o painel de administração para criar novos usuários."
+      );
+    }
+
+    // ── Validate ──
+    const email = args.email.trim().toLowerCase();
+    if (!email) throw new Error("E-mail é obrigatório");
+    if (args.password.length < 6) {
+      throw new Error("A senha deve ter pelo menos 6 caracteres");
+    }
+
+    // ── Check for duplicate email ──
+    const existingUser = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .first();
+
+    if (existingUser) {
+      throw new Error("Já existe um usuário com este e-mail");
+    }
+
+    // ── Create user ──
+    const now = Date.now();
+    const userId = await ctx.db.insert("users", {
+      name: args.name.trim(),
+      email,
+      role: "admin",
+      active: true,
+      requiresPasswordReset: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // ── Create password ──
+    const { hash, salt } = await hashPassword(args.password);
+    await ctx.db.insert("passwords", {
+      userId,
+      passwordHash: hash,
+      salt,
+      requiresReset: false,
+    });
+
+    // ── Audit ──
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "create",
+      entity: "bootstrap",
+      entityId: userId,
+      details: `Bootstrap: primeiro administrador criado (${args.name} <${email}>)`,
+      timestamp: now,
+    });
+
+    return { userId, message: "Administrador criado com sucesso. Faça login." };
+  },
+});
+
+/**
+ * Check if the system has been bootstrapped (at least one admin exists).
+ * Used by the frontend to show/hide the bootstrap screen.
+ */
+export const hasAdmin = query({
+  args: {},
+  handler: async (ctx) => {
+    const admin = await ctx.db
+      .query("users")
+      .withIndex("by_role", (q) => q.eq("role", "admin"))
+      .first();
+    return !!admin;
+  },
+});
