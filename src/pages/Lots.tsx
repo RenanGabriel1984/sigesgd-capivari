@@ -5,12 +5,28 @@ import { AppShell } from "@/components/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Boxes, Search } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";import { Boxes, Search } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+
+function LoadingSkeleton() {
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
+        <div><Skeleton className="h-8 w-24 mb-2" /><Skeleton className="h-4 w-48" /></div>
+        <Skeleton className="h-10 max-w-md" />
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="skeleton h-12 w-full rounded-lg" />
+        ))}
+      </div>
+    </AppShell>
+  );
+}
 
 export default function Lots() {
   const lots = useQuery(api.lots.list);
   const [search, setSearch] = useState("");
+
+  if (lots === undefined) return <LoadingSkeleton />;
 
   const filtered = lots?.filter((l) => {
     const term = search.toLowerCase();

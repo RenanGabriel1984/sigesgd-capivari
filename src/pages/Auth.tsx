@@ -80,15 +80,18 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-background to-primary/5">
-      <header className="flex items-center justify-between px-4 sm:px-6 h-16 border-b border-border/60 bg-card/80 backdrop-blur-sm">
+    <div className="min-h-screen flex flex-col bg-gradient-to-b from-[#1a5632] via-[#1a5632] to-[#0d3a1f]">
+      {/* Top bar with Capivari blue accent */}
+      <div className="h-1 w-full bg-[#5b9bd5]" />
+
+      <header className="flex items-center justify-between px-4 sm:px-6 h-16 border-b border-white/10 bg-white/5 backdrop-blur-sm">
         <Link to="/" className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-sm shadow-sm">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-[#1a5632] font-bold text-sm shadow-sm">
             SG
           </div>
           <div>
-            <p className="text-sm font-bold leading-tight tracking-tight">SIGESGD</p>
-            <p className="text-[10px] text-muted-foreground leading-tight">Capivari</p>
+            <p className="text-sm font-bold leading-tight tracking-tight text-white">SIGESGD</p>
+            <p className="text-[10px] text-white/60 leading-tight">Capivari</p>
           </div>
         </Link>
       </header>
@@ -97,14 +100,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
         <div className="w-full max-w-md">
           {/* Institutional header */}
           <div className="text-center mb-6">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-primary-foreground font-bold text-2xl mx-auto mb-4 shadow-lg">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white text-[#1a5632] font-bold text-2xl mx-auto mb-4 shadow-lg">
               SG
             </div>
-            <h1 className="text-xl font-bold tracking-tight">SIGESGD Capivari</h1>
-            <p className="text-sm text-muted-foreground mt-1">
+            <h1 className="text-xl font-bold tracking-tight text-white">SIGESGD Capivari</h1>
+            <p className="text-sm text-white/70 mt-1">
               Sistema Integrado de Gestão
             </p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-white/50">
               Secretaria de Gestão e Governo Digital
             </p>
           </div>

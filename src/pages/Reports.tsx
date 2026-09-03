@@ -37,7 +37,22 @@ import {
   Truck,
 } from "lucide-react";
 import { UNIT_LABELS } from "@/types/constants";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+
+function LoadingSkeleton() {
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
+        <div><Skeleton className="h-8 w-28 mb-2" /><Skeleton className="h-4 w-48" /></div>
+        <Skeleton className="h-10 w-80" />
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="skeleton h-12 w-full rounded-lg" />
+        ))}
+      </div>
+    </AppShell>
+  );
+}
 
 function downloadCSV(filename: string, csvContent: string) {
   const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });

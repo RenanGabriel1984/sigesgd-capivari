@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/table";
 import { Shield, Filter } from "lucide-react";
 import { AUDIT_ACTION_LABELS, type AuditAction } from "@/types/constants";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const ALL_ACTIONS = [
   "create",

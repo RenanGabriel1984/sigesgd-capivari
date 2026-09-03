@@ -13,11 +13,28 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Pencil, Users as UsersIcon, Search, Plus, UserCheck, UserX, Key, Shield } from "lucide-react";
 import { ROLE_LABELS, type UserRole } from "@/types/constants";
 import type { Id } from "@/convex/_generated/dataModel";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+
+function LoadingSkeleton() {
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
+        <div><Skeleton className="h-8 w-24 mb-2" /><Skeleton className="h-4 w-48" /></div>
+        <Skeleton className="h-10 max-w-md" />
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="skeleton h-12 w-full rounded-lg" />
+        ))}
+      </div>
+    </AppShell>
+  );
+}
 
 export default function UsersPage() {
   const users = useQuery(api.users.listUsers);
   const orgs = useQuery(api.organizations.list);
+
+  if (users === undefined) return <LoadingSkeleton />;
   const createUser = useMutation(api.users.createUser);
   const updateUser = useMutation(api.users.updateUser);
   const activateUser = useMutation(api.users.activateUser);

@@ -13,7 +13,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Pencil, Building2, ChevronRight, ChevronDown, Package, X } from "lucide-react";
 import { ORG_TYPE_LABELS, type OrgType } from "@/types/constants";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+
+function LoadingSkeleton() {
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
+        <div><Skeleton className="h-8 w-40 mb-2" /><Skeleton className="h-4 w-48" /></div>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="skeleton h-16 w-full rounded-lg" />
+        ))}
+      </div>
+    </AppShell>
+  );
+}
 
 interface OrgForm { name: string; type: OrgType | ""; parentId: string; observation: string; startDate: string; endDate: string; }
 const emptyForm: OrgForm = { name: "", type: "", parentId: "", observation: "", startDate: "", endDate: "" };

@@ -24,8 +24,22 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ArrowRightLeft, Plus } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
+
+function LoadingSkeleton() {
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
+        <div><Skeleton className="h-8 w-40 mb-2" /><Skeleton className="h-4 w-48" /></div>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="skeleton h-12 w-full rounded-lg" />
+        ))}
+      </div>
+    </AppShell>
+  );
+}
 
 export default function StockTransfersPage() {
   const { user } = useAuth();
