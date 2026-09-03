@@ -384,3 +384,72 @@ export const hasAdmin = query({
     return !!admin;
   },
 });
+
+/**
+ * Bootstrap: set password for an existing user who has no password yet.
+ *
+ * Safe because:
+ *  - Only works when the target user has NO password record
+ *  - Does NOT create new users
+ *  - Does NOT change existing passwords
+ *
+ * Usage (Convex dashboard → Functions → Run):
+ *  passwords:bootstrapSetPassword
+ *  { email: "admin@capivari.sp.gov.br", password: "MinhaS3nh@2026" }
+ */
+export const bootstrapSetPassword = mutation({
+  args: {
+    email: v.string(),
+    password: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const email = args.email.trim().toLowerCase();
+    if (!email) throw new Error("E-mail é obrigatório");
+    if (args.password.length < 6) {
+      throw new Error("A senha deve ter pelo menos 6 caracteres");
+    }
+
+    // Find user by email
+    const user = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .first();
+
+    if (!user) {
+      throw new Error(`Usuário não encontrado com e-mail: ${email}`);
+    }
+
+    // Check if password already exists
+    const existingPassword = await ctx.db
+      .query("passwords")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .first();
+
+    if (existingPassword) {
+      throw new Error(
+        `Usuário ${email} já possui senha definida. ` +
+        "Use a opção de alteração de senha no painel."
+      );
+    }
+
+    // Create password
+    const { hash, salt } = await hashPassword(args.password);
+    await ctx.db.insert("passwords", {
+      userId: user._id,
+      passwordHash: hash,
+      salt,
+      requiresReset: false,
+    });
+
+    // Audit
+    await ctx.db.insert("auditLogs", {
+      action: "create",
+      entity: "passwords",
+      entityId: user._id,
+      details: `Bootstrap: senha definida para ${user.name ?? email}`,
+      timestamp: Date.now(),
+    });
+
+    return { message: `Senha definida para ${user.name ?? email}. Faça login.` };
+  },
+});
