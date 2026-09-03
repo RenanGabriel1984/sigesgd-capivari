@@ -330,7 +330,7 @@ const schema = defineSchema(
       receivedAt: v.number(),
       originType: v.union(
         v.literal("purchase"), v.literal("donation"), v.literal("transfer"),
-        v.literal("return"), v.literal("initial_inventory"), v.literal("other")
+        v.literal("return"), v.literal("initial_inventory"), v.literal("gomaq"), v.literal("other")
       ),
       supplierId: v.optional(v.id("suppliers")),
       invoiceNumber: v.optional(v.string()),

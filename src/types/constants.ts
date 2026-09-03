@@ -70,7 +70,7 @@ export const REQUEST_STATUS_COLORS: Record<RequestStatusType, string> = {
 };
 
 // ─── Audit Actions ───────────────────────────────────────────────────────────
-export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update" | "confirm_entry" | "reverse_entry" | "open_inventory" | "count_inventory" | "close_inventory" | "return_stock" | "reverse_exit" | "transfer_stock";
+export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update" | "confirm_entry" | "reverse_entry" | "open_inventory" | "count_inventory" | "close_inventory" | "return_stock" | "reverse_exit" | "transfer_stock" | "gomaq_exchange" | "gomaq_collection" | "gomaq_order";
 
 export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   create: "Criação",
@@ -96,6 +96,9 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   return_stock: "Devolução de Estoque",
   reverse_exit: "Estorno de Saída",
   transfer_stock: "Transferência de Estoque",
+  gomaq_exchange: "Troca de Suprimento",
+  gomaq_collection: "Coleta Gomaq",
+  gomaq_order: "Pedido Mensal Gomaq",
 };
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
@@ -134,6 +137,7 @@ export const PERMISSIONS = {
     canManageStorageLocations: true,
     canTransferStock: true,
     canReturnStock: true,
+    canManageGomaQ: true,
   },
   stock_manager: {
     canManageUsers: false,
@@ -154,6 +158,7 @@ export const PERMISSIONS = {
     canManageStorageLocations: true,
     canTransferStock: true,
     canReturnStock: true,
+    canManageGomaQ: true,
   },
   director: {
     canManageUsers: false,
@@ -174,6 +179,7 @@ export const PERMISSIONS = {
     canManageStorageLocations: false,
     canTransferStock: false,
     canReturnStock: false,
+    canManageGomaQ: false,
   },
   secretary: {
     canManageUsers: false,
@@ -194,6 +200,7 @@ export const PERMISSIONS = {
     canManageStorageLocations: false,
     canTransferStock: false,
     canReturnStock: false,
+    canManageGomaQ: false,
   },
   technician: {
     canManageUsers: false,
@@ -214,6 +221,7 @@ export const PERMISSIONS = {
     canManageStorageLocations: false,
     canTransferStock: false,
     canReturnStock: false,
+    canManageGomaQ: false,
   },
 } as const;
 

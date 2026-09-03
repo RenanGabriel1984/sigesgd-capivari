@@ -48,6 +48,9 @@ const ALL_ACTIONS = [
   "return_stock",
   "reverse_exit",
   "transfer_stock",
+  "gomaq_exchange",
+  "gomaq_collection",
+  "gomaq_order",
 ] as const;
 
 const ENTITY_OPTIONS = [

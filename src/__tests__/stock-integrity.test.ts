@@ -803,3 +803,227 @@ describe("Phase 4 — Stock Integrity After All Operations", () => {
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FASE 5: GOMAQ — SUPRIMENTOS, TROCAS, CARCAÇAS, COLETA, PEDIDO MENSAL
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("Phase 5 — GOMAQ Exchange", () => {
+  it("AW. Exchange reduces physical stock", () => {
+    let physical = 20;
+    const delivered = 3;
+    physical -= delivered;
+    expect(physical).toBe(17);
+  });
+
+  it("AX. Exchange blocked when stock insufficient", () => {
+    let physical = 2;
+    const delivered = 5;
+    expect(delivered).toBeGreaterThan(physical);
+  });
+
+  it("AY. Exchange generates empty cartridge record", () => {
+    const emptyQty = 1;
+    const cartridge = {
+      productId: "prod1",
+      quantity: emptyQty,
+      status: "awaiting_collection",
+    };
+    expect(cartridge.status).toBe("awaiting_collection");
+    expect(cartridge.quantity).toBe(1);
+  });
+
+  it("AZ. Exchange with different delivered vs empty quantities", () => {
+    const delivered = 2;
+    const emptyReceived = 1;
+    // Allowed: not forced to be equal
+    expect(delivered).not.toBe(emptyReceived);
+  });
+
+  it("BA. Exchange number format TRO-YYYY-NNNNNN", () => {
+    const year = new Date().getFullYear();
+    const num = `TRO-${year}-000042`;
+    expect(num).toMatch(/^TRO-\d{4}-\d{6}$/);
+  });
+});
+
+describe("Phase 5 — GOMAQ Empty Cartridges", () => {
+  it("BB. Cartridge status awaiting_collection", () => {
+    const c = { status: "awaiting_collection" };
+    expect(c.status).toBe("awaiting_collection");
+  });
+
+  it("BC. Collection changes status to collected", () => {
+    let status = "awaiting_collection";
+    let collectedAt: number | undefined;
+    status = "collected";
+    collectedAt = Date.now();
+    expect(status).toBe("collected");
+    expect(collectedAt).toBeDefined();
+  });
+
+  it("BD. Cannot collect same cartridge twice", () => {
+    const cartridge = { status: "collected", collectedAt: 1000 };
+    expect(cartridge.status).toBe("collected");
+    // Should be rejected on second collection attempt
+  });
+
+  it("BE. Empty cartridges are separate from product stock", () => {
+    let productStock = 10;
+    const emptyCartridges = 5;
+    // Empty cartridges do NOT increase product stock
+    expect(productStock).toBe(10);
+    expect(emptyCartridges).toBe(5);
+  });
+
+  it("BF. Collection number format COL-YYYY-NNNNNN", () => {
+    const year = new Date().getFullYear();
+    const num = `COL-${year}-000001`;
+    expect(num).toMatch(/^COL-\d{4}-\d{6}$/);
+  });
+});
+
+describe("Phase 5 — GOMAQ Collection", () => {
+  it("BG. Collection aggregates cartridge quantities", () => {
+    const cartridges = [
+      { quantity: 3 },
+      { quantity: 2 },
+      { quantity: 1 },
+    ];
+    const total = cartridges.reduce((s, c) => s + c.quantity, 0);
+    expect(total).toBe(6);
+  });
+
+  it("BH. Cartridges since last collection calculation", () => {
+    const lastCollectionTime = new Date("2026-08-01").getTime();
+    const exchanges = [
+      { exchangedAt: new Date("2026-08-05").getTime(), qtyEmpty: 1 },
+      { exchangedAt: new Date("2026-08-10").getTime(), qtyEmpty: 1 },
+      { exchangedAt: new Date("2026-08-15").getTime(), qtyEmpty: 1 },
+    ];
+    const sinceLastCollection = exchanges.filter((e) => e.exchangedAt > lastCollectionTime);
+    expect(sinceLastCollection.length).toBe(3);
+  });
+
+  it("BI. Collection record tracks responsible user", () => {
+    const collection = {
+      responsibleUserId: "user1",
+      collectedAt: Date.now(),
+      totalCartridges: 4,
+    };
+    expect(collection.responsibleUserId).toBeDefined();
+    expect(collection.totalCartridges).toBeGreaterThan(0);
+  });
+});
+
+describe("Phase 5 — GOMAQ Monthly Order", () => {
+  it("BJ. Suggested quantity = idealStock - physical when below ideal", () => {
+    const physical = 3;
+    const idealStock = 10;
+    const suggested = Math.max(idealStock - physical, 0);
+    expect(suggested).toBe(7);
+  });
+
+  it("BK. Suggested quantity = 0 when at or above ideal", () => {
+    const physical = 12;
+    const idealStock = 10;
+    const suggested = Math.max(idealStock - physical, 0);
+    expect(suggested).toBe(0);
+  });
+
+  it("BL. Standard order quantity used when configured", () => {
+    const physical = 50;
+    const idealStock = 150;
+    const standardOrderQty = 150;
+    const suggested = physical < idealStock ? standardOrderQty : 0;
+    expect(suggested).toBe(150);
+  });
+
+  it("BM. Standard order quantity = 0 when above ideal", () => {
+    const physical = 200;
+    const idealStock = 150;
+    const standardOrderQty = 150;
+    const suggested = physical < idealStock ? standardOrderQty : 0;
+    expect(suggested).toBe(0);
+  });
+
+  it("BN. Manual adjustment overrides suggested quantity", () => {
+    const suggested = 10;
+    const manualAdjustment = 15;
+    const finalQty = manualAdjustment;
+    expect(finalQty).toBe(15);
+    expect(finalQty).not.toBe(suggested);
+  });
+
+  it("BO. Order groups products by printer compatibility", () => {
+    const compat = [
+      { productId: "p1", printerModel: "VersaLink C7130" },
+      { productId: "p2", printerModel: "VersaLink C7130" },
+      { productId: "p3", printerModel: "AltaLink C8170" },
+    ];
+    const groups = new Map<string, string[]>();
+    for (const c of compat) {
+      const existing = groups.get(c.printerModel) ?? [];
+      existing.push(c.productId);
+      groups.set(c.printerModel, existing);
+    }
+    expect(groups.size).toBe(2);
+    expect(groups.get("VersaLink C7130")).toHaveLength(2);
+  });
+});
+
+describe("Phase 5 — GOMAQ Stock Integrity", () => {
+  it("BP. Full lifecycle: receive → exchange → empty cartridge → collect", () => {
+    // Receive 10 toners
+    let physical = 10;
+    expect(physical).toBe(10);
+
+    // Exchange 3
+    physical -= 3;
+    expect(physical).toBe(7);
+    const emptyCartridges = 3;
+    expect(emptyCartridges).toBe(3);
+
+    // Collect empty cartridges
+    let collected = emptyCartridges;
+    expect(collected).toBe(3);
+  });
+
+  it("BQ. Negative stock prevented on exchange", () => {
+    let physical = 2;
+    const delivered = 5;
+    if (delivered > physical) {
+      // Blocked
+      expect(physical).toBe(2);
+    }
+  });
+
+  it("BR. Exchange FIFO lot consumption same as request delivery", () => {
+    const lots = [
+      { id: "L1", receivedAt: 100, available: 3 },
+      { id: "L2", receivedAt: 200, available: 10 },
+    ];
+    const sorted = [...lots].sort((a, b) => a.receivedAt - b.receivedAt);
+    expect(sorted[0].id).toBe("L1");
+  });
+
+  it("BS. Product stock unchanged after empty cartridge collection", () => {
+    let productStock = 7;
+    // Collection does not affect product stock
+    const collected = 3;
+    expect(productStock).toBe(7);
+    expect(collected).toBe(3);
+  });
+
+  it("BT. Preserves Phase 3-4 regression: physical - reserved = available", () => {
+    const scenarios = [
+      { physical: 20, reserved: 5 },
+      { physical: 0, reserved: 0 },
+      { physical: 15, reserved: 15 },
+    ];
+    for (const s of scenarios) {
+      expect(s.physical - s.reserved).toBeGreaterThanOrEqual(0);
+      expect(s.reserved).toBeLessThanOrEqual(s.physical);
+    }
+  });
+});

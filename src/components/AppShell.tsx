@@ -71,6 +71,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },
   { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
   { label: "Impressoras", href: "/printers", icon: Printer, permission: "canManageProducts" },
+  { label: "GomaQ", href: "/gomaq", icon: ArrowRightLeft, permission: "canManageGomaQ" },
   { label: "Relatórios", href: "/reports", icon: BarChart3, permission: "canViewMovements" },
   { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
   { label: "Configurações", href: "/settings", icon: Settings, permission: "canManageSettings" },
