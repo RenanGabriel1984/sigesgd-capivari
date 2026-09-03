@@ -47,7 +47,7 @@ function LoadingSkeleton() {
         <div><Skeleton className="h-8 w-28 mb-2" /><Skeleton className="h-4 w-48" /></div>
         <Skeleton className="h-10 w-80" />
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="skeleton h-12 w-full rounded-lg" />
+          <Skeleton key={i} className="h-12 w-full rounded-lg" />
         ))}
       </div>
     </AppShell>
