@@ -1,6 +1,13 @@
 import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
+import { ConvexError } from "convex/values";
 import { api } from "../_generated/api";
 import type { DataModel } from "../_generated/dataModel";
+
+// IMPORTANT: `auth:signIn` is implemented as a Convex ACTION, and Convex
+// redacts plain `Error`s thrown inside actions to the generic message
+// "Server Error" before sending them to the client. To make real messages
+// ("E-mail ou senha incorretos", "Usuário inativo…") reach the login
+// screen we must throw `ConvexError`, which is never redacted.
 
 /**
  * Email + password authentication provider.
@@ -14,15 +21,15 @@ export const credentials = ConvexCredentials<DataModel>({
     const password = params.password;
 
     if (typeof email !== "string" || typeof password !== "string") {
-      throw new Error("E-mail e senha são obrigatórios");
+      throw new ConvexError("E-mail e senha são obrigatórios");
     }
 
     if (!email.trim()) {
-      throw new Error("E-mail é obrigatório");
+      throw new ConvexError("E-mail é obrigatório");
     }
 
     if (!password) {
-      throw new Error("Senha é obrigatória");
+      throw new ConvexError("Senha é obrigatória");
     }
 
     // Use the existing verifyCredentials query to validate
@@ -35,7 +42,7 @@ export const credentials = ConvexCredentials<DataModel>({
     );
 
     if (!result.success) {
-      throw new Error(result.error ?? "Credenciais inválidas");
+      throw new ConvexError(result.error ?? "Credenciais inválidas");
     }
 
     return { userId: result.userId };
