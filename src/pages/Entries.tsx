@@ -83,6 +83,17 @@ export default function Entries() {
   const [npModel, setNpModel] = useState("");
   const createProduct = useMutation(api.products.create);
 
+  // Contextual supplier creation
+  const [supplierModalOpen, setSupplierModalOpen] = useState(false);
+  const [newSupplierName, setNewSupplierName] = useState("");
+  const [newSupplierCnpj, setNewSupplierCnpj] = useState("");
+  const createSupplier = useMutation(api.suppliers.create);
+
+  // Contextual category creation
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const createCategory = useMutation(api.categories.create);
+
   const viewEntry = entries?.find((e) => e._id === viewId);
   const editEntryData = entries?.find((e) => e._id === editEntryId);
   const filteredEntries = entries?.filter((e) => {
@@ -251,6 +262,28 @@ export default function Entries() {
       toast.success("Entrada estornada");
       setReverseModalOpen(false); setReverseId(null); setReverseReason(""); setViewId(null);
     } catch (e: any) { toast.error(e.message ?? "Erro ao estornar"); }
+  };
+
+  // ─── Quick create supplier ───
+  const handleQuickCreateSupplier = async () => {
+    if (!newSupplierName.trim()) { toast.error("Razão social é obrigatória"); return; }
+    try {
+      const newId = await createSupplier({ legalName: newSupplierName.trim(), cnpj: newSupplierCnpj.trim() || undefined });
+      setcSupplierId(newId as string);
+      setSupplierModalOpen(false); setNewSupplierName(""); setNewSupplierCnpj("");
+      toast.success("Fornecedor criado e selecionado");
+    } catch (e: any) { toast.error(e.message ?? "Erro ao criar fornecedor"); }
+  };
+
+  // ─── Quick create category ───
+  const handleQuickCreateCategory = async () => {
+    if (!newCategoryName.trim()) { toast.error("Nome da categoria é obrigatório"); return; }
+    try {
+      const newId = await createCategory({ name: newCategoryName.trim() });
+      setNpCatId(newId as string);
+      setCategoryModalOpen(false); setNewCategoryName("");
+      toast.success("Categoria criada e selecionada");
+    } catch (e: any) { toast.error(e.message ?? "Erro ao criar categoria"); }
   };
 
   // ─── Quick create product ───
@@ -440,7 +473,7 @@ export default function Entries() {
               <div><Label>Origem *</Label><Select value={cOriginType} onValueChange={setcOriginType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(ORIGIN_LABELS).map(([k, v]) => (<SelectItem key={k} value={k}>{v}</SelectItem>))}</SelectContent></Select></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label>Fornecedor</Label><Select value={cSupplierId} onValueChange={setcSupplierId}><SelectTrigger className="mt-1"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{suppliers?.map((s) => (<SelectItem key={s._id} value={s._id}>{s.legalName}</SelectItem>))}</SelectContent></Select></div>
+              <div><Label>Fornecedor</Label><div className="flex gap-1"><Select value={cSupplierId} onValueChange={setcSupplierId}><SelectTrigger className="mt-1 flex-1"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{suppliers?.map((s) => (<SelectItem key={s._id} value={s._id}>{s.legalName}</SelectItem>))}</SelectContent></Select><Button type="button" variant="outline" size="icon" className="mt-1 h-9 w-9 shrink-0" onClick={() => setSupplierModalOpen(true)} title="Novo fornecedor"><Plus className="h-4 w-4" /></Button></div></div>
               <div><Label>Nº Nota Fiscal</Label><Input value={cInvoiceNumber} onChange={(e) => setcInvoiceNumber(e.target.value)} placeholder="Opcional" className="mt-1" /></div>
             </div>
             <div className="grid grid-cols-3 gap-3">
@@ -495,11 +528,31 @@ export default function Entries() {
         <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto"><DialogHeader><DialogTitle className="flex items-center gap-2"><ExternalLink className="h-4 w-4" /> Criar Item Rápido</DialogTitle></DialogHeader>
           <div className="space-y-4 py-2">
             <div><Label>Nome *</Label><Input value={npName} onChange={(e) => setNpName(e.target.value)} placeholder="Ex: SSD 480 GB SATA" /></div>
-            <div><Label>Categoria *</Label><Select value={npCatId} onValueChange={setNpCatId}><SelectTrigger><SelectValue placeholder="Selecionar" /></SelectTrigger><SelectContent>{categories?.map((c) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}</SelectContent></Select></div>
+            <div><Label>Categoria *</Label>{categories && categories.length === 0 ? (<div className="flex items-center gap-2 mt-1"><p className="text-sm text-muted-foreground">Nenhuma categoria cadastrada.</p><Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => setCategoryModalOpen(true)}>+ Criar categoria</Button></div>) : (<div className="flex gap-1"><Select value={npCatId} onValueChange={setNpCatId}><SelectTrigger className="flex-1"><SelectValue placeholder="Selecionar" /></SelectTrigger><SelectContent>{categories?.map((c) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}</SelectContent></Select><Button type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => setCategoryModalOpen(true)} title="Nova categoria"><Plus className="h-4 w-4" /></Button></div>)}</div>
             <div><Label>Unidade</Label><Select value={npUnit} onValueChange={setNpUnit}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{UNITS_OF_MEASURE.map((u) => (<SelectItem key={u} value={u}>{UNIT_LABELS[u] ?? u}</SelectItem>))}</SelectContent></Select></div>
             <div className="grid grid-cols-2 gap-3"><div><Label>Marca</Label><Input value={npBrand} onChange={(e) => setNpBrand(e.target.value)} placeholder="Opcional" /></div><div><Label>Modelo</Label><Input value={npModel} onChange={(e) => setNpModel(e.target.value)} placeholder="Opcional" /></div></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setProductModalOpen(false)}>Cancelar</Button><Button onClick={handleQuickCreateProduct}>Criar e Selecionar</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* ═══ Quick Create Supplier ═══ */}
+      <Dialog open={supplierModalOpen} onOpenChange={setSupplierModalOpen}>
+        <DialogContent className="max-w-md"><DialogHeader><DialogTitle className="flex items-center gap-2"><Plus className="h-4 w-4" /> Novo Fornecedor</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div><Label>Razão Social *</Label><Input value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)} placeholder="Nome do fornecedor" /></div>
+            <div><Label>CNPJ</Label><Input value={newSupplierCnpj} onChange={(e) => setNewSupplierCnpj(e.target.value)} placeholder="Opcional" /></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => { setSupplierModalOpen(false); setNewSupplierName(""); setNewSupplierCnpj(""); }}>Cancelar</Button><Button onClick={handleQuickCreateSupplier}>Criar e Selecionar</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ Quick Create Category ═══ */}
+      <Dialog open={categoryModalOpen} onOpenChange={setCategoryModalOpen}>
+        <DialogContent className="max-w-sm"><DialogHeader><DialogTitle className="flex items-center gap-2"><Plus className="h-4 w-4" /> Nova Categoria</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div><Label>Nome da Categoria *</Label><Input value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} placeholder="Ex: Toner, Cabo, Memória" /></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => { setCategoryModalOpen(false); setNewCategoryName(""); }}>Cancelar</Button><Button onClick={handleQuickCreateCategory}>Criar e Selecionar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </AppShell>

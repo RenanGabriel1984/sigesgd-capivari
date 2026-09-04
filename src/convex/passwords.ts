@@ -542,14 +542,18 @@ export const requestPasswordReset = mutation({
       timestamp: now,
     });
 
-    // TODO: Send email with the code when email service is configured
-    // For now, the code is visible in the Convex dashboard for development
-    console.log(`[PASSWORD RESET] Code for ${email}: ${code}`);
+    // ═══ PRODUCTION: Send email with the code ═══
+    // TODO: When an email service is configured (e.g. SendGrid, Resend, or the
+    // existing emailOtp provider), replace the console.log below with a real
+    // email-sending call. The email should contain:
+    //   - Subject: "Recuperação de senha — SIGESGD Capivari"
+    //   - Body: "Seu código de recuperação é: {code}\nVálido por 15 minutos."
+    // Until then, the code is logged server-side only (visible in Convex Logs
+    // dashboard) and never sent to the client.
+    console.log(`[SIGESGD] Password reset code for ${email}: ${code}`);
 
     return {
       message: "Se os dados estiverem cadastrados, enviaremos as instruções para recuperação.",
-      // Development only — remove when email is configured
-      _devCode: code,
     };
   },
 });

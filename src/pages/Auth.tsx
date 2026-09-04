@@ -50,7 +50,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [resetCode, setResetCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
-  const [resetDevCode, setResetDevCode] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) navigate(redirect);
@@ -88,7 +87,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setForgotLoading(true);
     try {
       const result = await requestPasswordReset({ email: forgotEmail.trim() });
-      setResetDevCode((result as any)?._devCode ?? null);
       setForgotStep("code");
       toast.success("Verifique seu e-mail para o código de recuperação.");
     } catch (e: any) {
@@ -113,7 +111,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       setForgotEmail("");
       setResetCode("");
       setNewPassword("");
-      setResetDevCode(null);
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao redefinir senha");
     }
@@ -264,7 +261,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     setForgotEmail(email);
                     setResetCode("");
                     setNewPassword("");
-                    setResetDevCode(null);
                   }}
                 >
                   Esqueceu sua senha?
@@ -282,7 +278,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           setForgotStep("email");
           setResetCode("");
           setNewPassword("");
-          setResetDevCode(null);
         }
       }}>
         <DialogContent className="max-w-sm">
@@ -311,13 +306,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             </div>
           ) : (
             <div className="space-y-4">
-              {resetDevCode && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <p className="text-xs font-medium text-amber-800">Código de desenvolvimento:</p>
-                  <p className="text-lg font-mono font-bold text-amber-900 mt-1">{resetDevCode}</p>
-                  <p className="text-[10px] text-amber-600 mt-1">Remova esta mensagem ao configurar envio de e-mail.</p>
-                </div>
-              )}
+
               <p className="text-sm text-muted-foreground">
                 Digite o código de 6 dígitos enviado para <strong>{forgotEmail}</strong>.
               </p>
@@ -352,7 +341,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               setForgotStep("email");
               setResetCode("");
               setNewPassword("");
-              setResetDevCode(null);
             }}>Cancelar</Button>
             <Button size="sm" onClick={forgotStep === "email" ? handleRequestReset : handleConfirmReset} disabled={forgotLoading}>
               {forgotLoading ? (

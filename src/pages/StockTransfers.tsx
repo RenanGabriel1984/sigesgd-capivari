@@ -104,7 +104,7 @@ export default function StockTransfersPage() {
           <div>
             <h1 className="text-2xl tracking-tight font-bold">Transferências</h1>
             <p className="text-sm text-muted-foreground">
-              Transferência de material entre locais de armazenamento
+              Transfere estoque entre locais físicos.
             </p>
           </div>
           {(user?.role === "admin" || user?.role === "stock_manager") && (
