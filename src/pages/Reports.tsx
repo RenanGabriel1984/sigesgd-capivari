@@ -250,7 +250,7 @@ export default function Reports() {
               <Monitor className="h-3.5 w-3.5" /> Equipamentos
             </TabsTrigger>
             <TabsTrigger value="gomaq" className="gap-1">
-              <Truck className="h-3.5 w-3.5" /> GomaQ
+              <Truck className="h-3.5 w-3.5" /> Gomaq
             </TabsTrigger>
           </TabsList>
 

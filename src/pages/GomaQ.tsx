@@ -67,7 +67,7 @@ export default function GomaQPage() {
     <AppShell>
       <div className="space-y-6 max-w-7xl mx-auto">
         <div>
-          <h1 className="text-2xl tracking-tight font-bold">GomaQ — Gestão de Suprimentos</h1>
+          <h1 className="text-2xl tracking-tight font-bold">Gomaq — Gestão de Suprimentos</h1>
           <p className="text-sm text-muted-foreground">
             Controle de recebimento, troca, carcaças vazias e pedido mensal
           </p>

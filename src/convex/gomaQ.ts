@@ -196,7 +196,8 @@ export const createExchange = mutation({
     printerId: v.id("printers"),
     quantityDelivered: v.number(),
     quantityEmptyReceived: v.number(),
-    receivedByUserId: v.id("users"),
+    receivedByUserId: v.optional(v.id("users")),
+    receivedByName: v.optional(v.string()),
     requestId: v.optional(v.id("requests")),
     organizationId: v.optional(v.id("organizations")),
     observation: v.optional(v.string()),
@@ -226,9 +227,13 @@ export const createExchange = mutation({
       throw new Error(`Estoque insuficiente. Disponível: ${availableStock} (físico: ${stock.physicalQuantity}, reservado: ${stock.reservedQuantity}). Necessário: ${args.quantityDelivered}`);
     }
 
-    // Validate receiver
-    const receiver = await ctx.db.get(args.receivedByUserId);
-    if (!receiver) throw new Error("Usuário recebedor não encontrado");
+    // Validate receiver — either userId or free-text name is required
+    if (args.receivedByUserId) {
+      const receiver = await ctx.db.get(args.receivedByUserId);
+      if (!receiver) throw new Error("Usuário recebedor não encontrado");
+    } else if (!args.receivedByName?.trim()) {
+      throw new Error("Informe o nome do recebedor ou selecione um usuário");
+    }
 
     const now = Date.now();
     const exchangeNumber = generateExchangeNumber();
@@ -299,6 +304,7 @@ export const createExchange = mutation({
       quantityEmptyReceived: args.quantityEmptyReceived,
       deliveredByUserId: userId,
       receivedByUserId: args.receivedByUserId,
+      receivedByName: args.receivedByName?.trim(),
       requestId: args.requestId,
       organizationId: args.organizationId,
       exchangedAt: now,

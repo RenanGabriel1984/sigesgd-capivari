@@ -9,11 +9,15 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
 import { useAuth } from "@/hooks/use-auth";
-import { ArrowRight, Loader2, Lock, Mail, Eye, EyeOff } from "lucide-react";
+import { ArrowRight, Loader2, Lock, Mail, Eye, EyeOff, KeyRound } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router";
+import { useMutation } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { toast } from "sonner";
 
 interface AuthProps {
   redirectAfterAuth?: string;
@@ -30,11 +34,23 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [searchParams] = useSearchParams();
   const redirect = resolveRedirectAfterAuth(searchParams.get("returnTo"), redirectAfterAuth);
 
+  const requestPasswordReset = useMutation(api.passwords.requestPasswordReset);
+  const confirmPasswordReset = useMutation(api.passwords.confirmPasswordReset);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Forgot password state
+  const [forgotDialogOpen, setForgotDialogOpen] = useState(false);
+  const [forgotStep, setForgotStep] = useState<"email" | "code">("email");
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [resetCode, setResetCode] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [resetDevCode, setResetDevCode] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) navigate(redirect);
@@ -65,6 +81,43 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       }
       setIsLoading(false);
     }
+  };
+
+  const handleRequestReset = async () => {
+    if (!forgotEmail.trim()) { toast.error("Informe seu e-mail"); return; }
+    setForgotLoading(true);
+    try {
+      const result = await requestPasswordReset({ email: forgotEmail.trim() });
+      setResetDevCode((result as any)?._devCode ?? null);
+      setForgotStep("code");
+      toast.success("Verifique seu e-mail para o código de recuperação.");
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao solicitar recuperação");
+    }
+    setForgotLoading(false);
+  };
+
+  const handleConfirmReset = async () => {
+    if (!resetCode.trim()) { toast.error("Informe o código"); return; }
+    if (!newPassword.trim() || newPassword.length < 6) { toast.error("A nova senha deve ter pelo menos 6 caracteres"); return; }
+    setForgotLoading(true);
+    try {
+      await confirmPasswordReset({
+        email: forgotEmail.trim(),
+        code: resetCode.trim(),
+        newPassword: newPassword.trim(),
+      });
+      toast.success("Senha redefinida com sucesso! Faça login.");
+      setForgotDialogOpen(false);
+      setForgotStep("email");
+      setForgotEmail("");
+      setResetCode("");
+      setNewPassword("");
+      setResetDevCode(null);
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao redefinir senha");
+    }
+    setForgotLoading(false);
   };
 
   const handleGuestLogin = async () => {
@@ -202,15 +255,115 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     <>Entrar<ArrowRight className="ml-2 h-4 w-4" /></>
                   )}
                 </Button>
-                <p className="text-xs text-muted-foreground text-center mt-2">
-                  Esqueceu sua senha?{" "}
-                  Contate o administrador do sistema para redefinição.
-                </p>
+                <button
+                  type="button"
+                  className="text-xs text-primary hover:underline text-center mt-2 cursor-pointer"
+                  onClick={() => {
+                    setForgotDialogOpen(true);
+                    setForgotStep("email");
+                    setForgotEmail(email);
+                    setResetCode("");
+                    setNewPassword("");
+                    setResetDevCode(null);
+                  }}
+                >
+                  Esqueceu sua senha?
+                </button>
               </CardFooter>
             </form>
           </Card>
         </div>
       </div>
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={forgotDialogOpen} onOpenChange={(open) => {
+        setForgotDialogOpen(open);
+        if (!open) {
+          setForgotStep("email");
+          setResetCode("");
+          setNewPassword("");
+          setResetDevCode(null);
+        }
+      }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4" />
+              {forgotStep === "email" ? "Recuperar Senha" : "Redefinir Senha"}
+            </DialogTitle>
+          </DialogHeader>
+          {forgotStep === "email" ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Informe o e-mail cadastrado. Enviaremos um código de recuperação.
+              </p>
+              <div>
+                <Label>E-mail</Label>
+                <Input
+                  type="email"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  placeholder="seu@email.com"
+                  className="mt-1"
+                  disabled={forgotLoading}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {resetDevCode && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-xs font-medium text-amber-800">Código de desenvolvimento:</p>
+                  <p className="text-lg font-mono font-bold text-amber-900 mt-1">{resetDevCode}</p>
+                  <p className="text-[10px] text-amber-600 mt-1">Remova esta mensagem ao configurar envio de e-mail.</p>
+                </div>
+              )}
+              <p className="text-sm text-muted-foreground">
+                Digite o código de 6 dígitos enviado para <strong>{forgotEmail}</strong>.
+              </p>
+              <div>
+                <Label>Código de Verificação</Label>
+                <Input
+                  type="text"
+                  value={resetCode}
+                  onChange={(e) => setResetCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="000000"
+                  className="mt-1 text-center text-lg tracking-[0.3em] font-mono"
+                  maxLength={6}
+                  disabled={forgotLoading}
+                />
+              </div>
+              <div>
+                <Label>Nova Senha</Label>
+                <Input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Mínimo 6 caracteres"
+                  className="mt-1"
+                  disabled={forgotLoading}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter className="flex-row gap-2">
+            <Button variant="outline" size="sm" onClick={() => {
+              setForgotDialogOpen(false);
+              setForgotStep("email");
+              setResetCode("");
+              setNewPassword("");
+              setResetDevCode(null);
+            }}>Cancelar</Button>
+            <Button size="sm" onClick={forgotStep === "email" ? handleRequestReset : handleConfirmReset} disabled={forgotLoading}>
+              {forgotLoading ? (
+                <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Processando...</>
+              ) : (
+                forgotStep === "email" ? "Enviar Código" : "Redefinir Senha"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

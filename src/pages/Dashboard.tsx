@@ -322,7 +322,7 @@ export default function Dashboard() {
                 </Button>
                 <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/gomaq")}>
                   <ArrowUpRight className="h-5 w-5 text-primary" />
-                  <span className="text-xs">Troca GomaQ</span>
+                  <span className="text-xs">Troca Gomaq</span>
                 </Button>
                 <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/assets")}>
                   <Package className="h-5 w-5 text-primary" />

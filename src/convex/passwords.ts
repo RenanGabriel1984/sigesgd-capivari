@@ -491,6 +491,222 @@ export const diagnosticListUsers = query({
 });
 
 /**
+ * Request password reset — generates a 6-digit code valid for 15 minutes.
+ * Does NOT reveal whether the email exists (security).
+ */
+export const requestPasswordReset = mutation({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    const email = args.email.trim().toLowerCase();
+    if (!email) throw new Error("E-mail é obrigatório");
+
+    // Find user by email
+    const user = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .first();
+
+    // Always return success to prevent email enumeration
+    if (!user) return { message: "Se os dados estiverem cadastrados, enviaremos as instruções para recuperação." };
+    if (user.active === false) return { message: "Se os dados estiverem cadastrados, enviaremos as instruções para recuperação." };
+
+    // Invalidate any existing tokens for this user
+    const existingTokens = await ctx.db
+      .query("passwordResets")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+
+    for (const token of existingTokens) {
+      if (!token.usedAt) {
+        await ctx.db.patch(token._id, { usedAt: Date.now() });
+      }
+    }
+
+    // Generate 6-digit code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const now = Date.now();
+
+    await ctx.db.insert("passwordResets", {
+      userId: user._id,
+      token: code,
+      expiresAt: now + 15 * 60 * 1000, // 15 minutes
+      createdAt: now,
+    });
+
+    // Audit
+    await ctx.db.insert("auditLogs", {
+      action: "password_reset",
+      entity: "passwordResets",
+      entityId: user._id,
+      details: `Solicitação de recuperação de senha para ${email}`,
+      timestamp: now,
+    });
+
+    // TODO: Send email with the code when email service is configured
+    // For now, the code is visible in the Convex dashboard for development
+    console.log(`[PASSWORD RESET] Code for ${email}: ${code}`);
+
+    return {
+      message: "Se os dados estiverem cadastrados, enviaremos as instruções para recuperação.",
+      // Development only — remove when email is configured
+      _devCode: code,
+    };
+  },
+});
+
+/**
+ * Confirm password reset with the 6-digit code.
+ * One-time use, expires after 15 minutes.
+ */
+export const confirmPasswordReset = mutation({
+  args: {
+    email: v.string(),
+    code: v.string(),
+    newPassword: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const email = args.email.trim().toLowerCase();
+    if (!email) throw new Error("E-mail é obrigatório");
+    if (args.newPassword.length < 6) {
+      throw new Error("A nova senha deve ter pelo menos 6 caracteres");
+    }
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .first();
+
+    // Generic error to prevent email enumeration
+    if (!user) throw new Error("Código inválido ou expirado");
+
+    // Find valid token
+    const tokens = await ctx.db
+      .query("passwordResets")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+
+    const validToken = tokens.find(
+      (t) => t.token === args.code && !t.usedAt && t.expiresAt > Date.now()
+    );
+
+    if (!validToken) throw new Error("Código inválido ou expirado");
+
+    // Mark token as used
+    await ctx.db.patch(validToken._id, { usedAt: Date.now() });
+
+    // Hash new password
+    const { hash, salt } = await hashPassword(args.newPassword);
+
+    // Update or create password record
+    const existingPw = await ctx.db
+      .query("passwords")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .first();
+
+    if (existingPw) {
+      await ctx.db.patch(existingPw._id, {
+        passwordHash: hash,
+        salt,
+        requiresReset: false,
+      });
+    } else {
+      await ctx.db.insert("passwords", {
+        userId: user._id,
+        passwordHash: hash,
+        salt,
+        requiresReset: false,
+      });
+    }
+
+    // Clear any lock on the account
+    const failedAttempts = await ctx.db
+      .query("failedLoginAttempts")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .first();
+    if (failedAttempts) {
+      await ctx.db.patch(failedAttempts._id, {
+        attempts: 0,
+        lockedUntil: undefined,
+      });
+    }
+
+    // Clear requiresPasswordReset flag
+    await ctx.db.patch(user._id, { requiresPasswordReset: false });
+
+    // Audit
+    await ctx.db.insert("auditLogs", {
+      action: "password_reset",
+      entity: "passwords",
+      entityId: user._id,
+      details: `Senha redefinida via recuperação para ${email}`,
+      timestamp: Date.now(),
+    });
+
+    return { message: "Senha redefinida com sucesso. Faça login." };
+  },
+});
+
+/**
+ * Check and record failed login attempt for brute force protection.
+ */
+export const recordFailedLogin = mutation({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    const email = args.email.trim().toLowerCase();
+    if (!email) return;
+
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("failedLoginAttempts")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .first();
+
+    if (existing) {
+      const newAttempts = (existing.attempts ?? 0) + 1;
+      const updates: any = {
+        attempts: newAttempts,
+        lastAttemptAt: now,
+      };
+      // Lock after 5 failed attempts for 15 minutes
+      if (newAttempts >= 5 && !existing.lockedUntil) {
+        updates.lockedUntil = now + 15 * 60 * 1000;
+      }
+      await ctx.db.patch(existing._id, updates);
+    } else {
+      await ctx.db.insert("failedLoginAttempts", {
+        email,
+        attempts: 1,
+        lastAttemptAt: now,
+      });
+    }
+  },
+});
+
+/**
+ * Check if an email is currently locked out due to brute force.
+ */
+export const isLockedOut = query({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    const email = args.email.trim().toLowerCase();
+    const record = await ctx.db
+      .query("failedLoginAttempts")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .first();
+
+    if (!record) return { locked: false };
+
+    const now = Date.now();
+    if (record.lockedUntil && record.lockedUntil > now) {
+      const remainingSeconds = Math.ceil((record.lockedUntil - now) / 1000);
+      return { locked: true, remainingSeconds };
+    }
+
+    return { locked: false };
+  },
+});
+
+/**
  * Bootstrap: reset password for an existing user (no login required).
  *
  * Safety:

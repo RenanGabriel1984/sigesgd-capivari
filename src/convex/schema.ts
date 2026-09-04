@@ -501,7 +501,8 @@ const schema = defineSchema(
       quantityDelivered: v.number(),
       quantityEmptyReceived: v.number(),
       deliveredByUserId: v.id("users"),
-      receivedByUserId: v.id("users"),
+      receivedByUserId: v.optional(v.id("users")),
+      receivedByName: v.optional(v.string()),
       requestId: v.optional(v.id("requests")),
       organizationId: v.optional(v.id("organizations")),
       exchangedAt: v.number(),
@@ -651,6 +652,24 @@ const schema = defineSchema(
       assignedByUserId: v.id("users"),
     }).index("by_license", ["licenseId"])
       .index("by_asset", ["assetId"]),
+
+    // ── Password Reset Tokens ──
+    passwordResets: defineTable({
+      userId: v.id("users"),
+      token: v.string(),
+      expiresAt: v.number(),
+      usedAt: v.optional(v.number()),
+      createdAt: v.number(),
+    }).index("by_user", ["userId"])
+      .index("by_token", ["token"]),
+
+    // ── Failed Login Attempts (brute force protection) ──
+    failedLoginAttempts: defineTable({
+      email: v.string(),
+      attempts: v.number(),
+      lastAttemptAt: v.number(),
+      lockedUntil: v.optional(v.number()),
+    }).index("by_email", ["email"]),
 
     // ── Audit Log ──
     auditLogs: defineTable({

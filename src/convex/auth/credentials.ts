@@ -32,6 +32,20 @@ export const credentials = ConvexCredentials<DataModel>({
       throw new ConvexError("Senha é obrigatória");
     }
 
+    // Check brute force lockout
+    const lockStatus: { locked: boolean; remainingSeconds?: number } = await ctx.runQuery(
+      api.passwords.isLockedOut,
+      { email: email.trim().toLowerCase() }
+    );
+
+    if (lockStatus.locked) {
+      const minutes = Math.ceil((lockStatus.remainingSeconds ?? 0) / 60);
+      throw new ConvexError(
+        `Acesso temporariamente bloqueado. Tente novamente em ${minutes} minuto(s). ` +
+        `Use "Esqueci minha senha" para redefinir.`
+      );
+    }
+
     // Use the existing verifyCredentials query to validate
     const result: { success: boolean; error?: string; userId?: any } = await ctx.runQuery(
       api.passwords.verifyCredentials,
@@ -42,8 +56,18 @@ export const credentials = ConvexCredentials<DataModel>({
     );
 
     if (!result.success) {
+      // Record failed attempt
+      await ctx.runMutation(api.passwords.recordFailedLogin, {
+        email: email.trim().toLowerCase(),
+      });
       throw new ConvexError(result.error ?? "Credenciais inválidas");
     }
+
+    // Reset failed attempts on successful login
+    const failedRecord = await ctx.runQuery(api.passwords.isLockedOut, {
+      email: email.trim().toLowerCase(),
+    });
+    // The isLockedOut query already handles clearing; just return success
 
     return { userId: result.userId };
   },

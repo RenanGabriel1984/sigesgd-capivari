@@ -68,7 +68,7 @@ const NAV_SECTIONS: NavSection[] = [
   { title: "Estoque", items: [
     { label: "Estoque", href: "/stock", icon: Warehouse, permission: "canManageStock" },
     { label: "Entradas", href: "/entries", icon: ShoppingCart, permission: "canCreateEntries" },
-    { label: "Lotes", href: "/lots", icon: Boxes, permission: "canCreateEntries" },
+    { label: "Lotes", href: "/lots", icon: Boxes, permission: "canManageStock" },
     { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
     { label: "Locais", href: "/storage-locations", icon: MapPin, permission: "canManageStorageLocations" },
   ]},
@@ -77,8 +77,8 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Devoluções", href: "/returns", icon: RotateCcw, permission: "canReturnStock" },
     { label: "Transferências", href: "/transfers", icon: ArrowRightLeft, permission: "canTransferStock" },
   ]},
-  { title: "GomaQ", items: [
-    { label: "GomaQ", href: "/gomaq", icon: ArrowRightLeft, permission: "canManageGomaQ" },
+  { title: "Gomaq", items: [
+    { label: "Gomaq", href: "/gomaq", icon: ArrowRightLeft, permission: "canManageGomaQ" },
   ]},
   { title: "Ativos", items: [
     { label: "Equipamentos", href: "/assets", icon: Monitor, permission: "canManageAssets" },

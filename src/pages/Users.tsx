@@ -33,14 +33,14 @@ function LoadingSkeleton() {
 export default function UsersPage() {
   const users = useQuery(api.users.listUsers);
   const orgs = useQuery(api.organizations.list);
-
-  if (users === undefined) return <LoadingSkeleton />;
   const createUser = useMutation(api.users.createUser);
   const updateUser = useMutation(api.users.updateUser);
   const activateUser = useMutation(api.users.activateUser);
   const deactivateUser = useMutation(api.users.deactivateUser);
   const createPassword = useMutation(api.passwords.createPassword);
   const adminResetPassword = useMutation(api.passwords.adminResetPassword);
+
+  if (users === undefined) return <LoadingSkeleton />;
 
   const [search, setSearch] = useState("");
   const [editDialog, setEditDialog] = useState(false);
