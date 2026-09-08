@@ -205,6 +205,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             <p className="text-xs text-muted-foreground/70 mt-0.5">
               Secretaria de Gestão e Governo Digital
             </p>
+            <img
+              src="/assets/bandeira.svg"
+              alt="Bandeira de Capivari"
+              className="mx-auto mt-4 h-8 w-auto opacity-90"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = "none";
+              }}
+            />
           </div>
 
           <Card className="border-border/50 shadow-lg">
