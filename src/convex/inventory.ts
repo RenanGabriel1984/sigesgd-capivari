@@ -39,20 +39,24 @@ async function generateInventoryNumber(ctx: any): Promise<string> {
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
+async function decorateInventory(ctx: any, inv: any) {
+  const responsible = await ctx.db.get(inv.responsibleUserId);
+  const closedBy = inv.closedByUserId ? await ctx.db.get(inv.closedByUserId) : null;
+  const location = inv.locationId ? await ctx.db.get(inv.locationId) : null;
+  const category = inv.categoryId ? await ctx.db.get(inv.categoryId) : null;
+  const counts = await ctx.db.query("inventoryCounts").withIndex("by_inventory", (q: any) => q.eq("inventoryId", inv._id)).collect();
+  const countsWithProduct = await Promise.all(counts.map(async (c: any) => {
+    const product = await ctx.db.get(c.productId);
+    return { ...c, product };
+  }));
+  return { ...inv, responsible, closedBy, location, category, counts: countsWithProduct };
+}
+
 export const list = query({
   args: {},
   handler: async (ctx) => {
     const inventories = await ctx.db.query("inventories").withIndex("by_date").order("desc").collect();
-    return Promise.all(inventories.map(async (inv) => {
-      const responsible = await ctx.db.get(inv.responsibleUserId);
-      const closedBy = inv.closedByUserId ? await ctx.db.get(inv.closedByUserId) : null;
-      const counts = await ctx.db.query("inventoryCounts").withIndex("by_inventory", (q: any) => q.eq("inventoryId", inv._id)).collect();
-      const countsWithProduct = await Promise.all(counts.map(async (c) => {
-        const product = await ctx.db.get(c.productId);
-        return { ...c, product };
-      }));
-      return { ...inv, responsible, closedBy, counts: countsWithProduct };
-    }));
+    return Promise.all(inventories.map((inv) => decorateInventory(ctx, inv)));
   },
 });
 
@@ -61,14 +65,7 @@ export const get = query({
   handler: async (ctx, args) => {
     const inv = await ctx.db.get(args.inventoryId);
     if (!inv) return null;
-    const responsible = await ctx.db.get(inv.responsibleUserId);
-    const closedBy = inv.closedByUserId ? await ctx.db.get(inv.closedByUserId) : null;
-    const counts = await ctx.db.query("inventoryCounts").withIndex("by_inventory", (q: any) => q.eq("inventoryId", inv._id)).collect();
-    const countsWithProduct = await Promise.all(counts.map(async (c) => {
-      const product = await ctx.db.get(c.productId);
-      return { ...c, product };
-    }));
-    return { ...inv, responsible, closedBy, counts: countsWithProduct };
+    return decorateInventory(ctx, inv);
   },
 });
 
@@ -78,6 +75,9 @@ export const get = query({
 export const create = mutation({
   args: {
     observation: v.optional(v.string()),
+    locationId: v.optional(v.id("storageLocations")),
+    categoryId: v.optional(v.id("categories")),
+    productIds: v.optional(v.array(v.id("products"))),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
@@ -89,6 +89,18 @@ export const create = mutation({
       throw new Error("Já existe um inventário ativo. Finalize ou cancele o inventário anterior antes de criar um novo.");
     }
 
+    // ── Validar escopo ──
+    if (args.locationId) {
+      const location = await ctx.db.get(args.locationId);
+      if (!location) throw new Error("Local de armazenamento não encontrado");
+      if (!location.active) throw new Error("O local de armazenamento selecionado está inativo");
+    }
+    if (args.categoryId) {
+      const category = await ctx.db.get(args.categoryId);
+      if (!category) throw new Error("Categoria não encontrada");
+      if (!category.active) throw new Error("A categoria selecionada está inativa");
+    }
+
     const now = Date.now();
     const inventoryNumber = await generateInventoryNumber(ctx);
 
@@ -98,24 +110,44 @@ export const create = mutation({
       responsibleUserId: userId,
       status: "draft",
       observation: args.observation || undefined,
+      locationId: args.locationId,
+      categoryId: args.categoryId,
+      productIds: args.productIds && args.productIds.length > 0 ? args.productIds : undefined,
       createdAt: now,
       updatedAt: now,
     });
 
-    // Populate counts with all active products
-    const products = await ctx.db.query("products").withIndex("by_active", (q) => q.eq("active", true)).collect();
+    // ── Populate counts conforme o escopo ──
+    let products = await ctx.db.query("products").withIndex("by_active", (q) => q.eq("active", true)).collect();
+    if (args.categoryId) products = products.filter((p) => p.categoryId === args.categoryId);
+    if (args.productIds && args.productIds.length > 0) {
+      const selected = new Set(args.productIds);
+      products = products.filter((p) => selected.has(p._id));
+    }
+
+    const scopeLabel = [
+      args.locationId ? `local ${args.locationId}` : "todos os locais",
+      args.categoryId ? `categoria ${args.categoryId}` : "",
+      args.productIds && args.productIds.length > 0 ? `${args.productIds.length} produto(s) selecionado(s)` : "",
+    ].filter(Boolean).join(", ");
+
     for (const product of products) {
       const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", product._id)).first();
+      let systemQuantity = stock?.physicalQuantity ?? 0;
+      if (args.locationId) {
+        const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", product._id)).collect();
+        systemQuantity = sbls.find((s) => s.locationId === args.locationId)?.quantity ?? 0;
+      }
       await ctx.db.insert("inventoryCounts", {
         inventoryId,
         productId: product._id,
-        systemQuantity: stock?.physicalQuantity ?? 0,
+        systemQuantity,
       });
     }
 
     await ctx.db.insert("auditLogs", {
       userId, action: "open_inventory", entity: "inventories", entityId: inventoryId,
-      details: `Inventário ${inventoryNumber} aberto com ${products.length} itens para contagem`,
+      details: `Inventário ${inventoryNumber} aberto com ${products.length} itens para contagem (${scopeLabel})`,
       timestamp: now,
     });
 
@@ -217,41 +249,73 @@ export const close = mutation({
     const counts = await ctx.db.query("inventoryCounts").withIndex("by_inventory", (q: any) => q.eq("inventoryId", args.inventoryId)).collect();
     const countsWithDiff = counts.filter((c) => c.difference !== null && c.difference !== undefined && c.difference !== 0);
     const now = Date.now();
+    const locationScope = inv.locationId ? await ctx.db.get(inv.locationId) : null;
+    const scopeSuffix = locationScope ? ` no local "${locationScope.name}"` : "";
 
     const adjustmentDetails: string[] = [];
 
     for (const count of countsWithDiff) {
       const countProduct = await ctx.db.get(count.productId);
       const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).first();
+      const counted = count.countedQuantity ?? 0;
+      const prevPhysical = stock?.physicalQuantity ?? 0;
+      const reserved = stock?.reservedQuantity ?? 0;
+
+      let newPhysical: number;
+
+      if (inv.locationId) {
+        // ── Inventário por local: ajusta o saldo do local e recalcula o global ──
+        const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
+        const sbl = sbls.find((s) => s.locationId === inv.locationId);
+        if (sbl) {
+          await ctx.db.patch(sbl._id, { quantity: counted });
+        } else if (counted > 0) {
+          await ctx.db.insert("stockByLocation", {
+            productId: count.productId,
+            locationId: inv.locationId,
+            quantity: counted,
+          });
+        }
+        const allSbl = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
+        newPhysical = allSbl.reduce((sum, s) => sum + s.quantity, 0);
+      } else {
+        // ── Inventário geral: saldo global é a contagem ──
+        newPhysical = counted;
+      }
+
+      // Nunca deixar o estoque abaixo das reservas
+      if (newPhysical < reserved) {
+        throw new Error(
+          `Ajuste de "${countProduct?.name ?? "item"}" deixaria o estoque (${newPhysical}) abaixo das unidades reservadas (${reserved}).`
+        );
+      }
 
       if (!stock) {
         // Create stock entry with counted quantity
         await ctx.db.insert("stock", {
           productId: count.productId,
-          physicalQuantity: count.countedQuantity ?? 0,
+          physicalQuantity: newPhysical,
           reservedQuantity: 0,
         });
       } else {
-        const prevPhysical = stock.physicalQuantity;
-        const newPhysical = count.countedQuantity ?? stock.physicalQuantity;
         await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
-
-        // Create adjustment movement
-        await ctx.db.insert("stockMovements", {
-          productId: count.productId,
-          type: "adjustment",
-          quantity: Math.abs(count.difference!),
-          previousPhysical: prevPhysical,
-          newPhysical,
-          previousReserved: stock.reservedQuantity,
-          newReserved: stock.reservedQuantity,
-          userId,
-          observation: `Ajuste via inventário ${inv.inventoryNumber}. Diferença: ${count.difference! >= 0 ? "+" : ""}${count.difference}`,
-          timestamp: now,
-        });
       }
 
-      adjustmentDetails.push(`${countProduct?.name ?? "item"}: ${count.systemQuantity} → ${count.countedQuantity} (${count.difference! >= 0 ? "+" : ""}${count.difference})`);
+      // Create adjustment movement
+      await ctx.db.insert("stockMovements", {
+        productId: count.productId,
+        type: "adjustment",
+        quantity: Math.abs(count.difference!),
+        previousPhysical: prevPhysical,
+        newPhysical,
+        previousReserved: reserved,
+        newReserved: reserved,
+        userId,
+        observation: `Ajuste via inventário ${inv.inventoryNumber}${scopeSuffix}. Diferença: ${count.difference! >= 0 ? "+" : ""}${count.difference}`,
+        timestamp: now,
+      });
+
+      adjustmentDetails.push(`${countProduct?.name ?? "item"}: ${count.systemQuantity} → ${count.countedQuantity} (${count.difference! >= 0 ? "+" : ""}${count.difference})${scopeSuffix}`);
     }
 
     // Close inventory
@@ -265,7 +329,7 @@ export const close = mutation({
     // Audit
     await ctx.db.insert("auditLogs", {
       userId, action: "close_inventory", entity: "inventories", entityId: args.inventoryId,
-      details: `Inventário ${inv.inventoryNumber} fechado. ${countsWithDiff.length} ajuste(s): ${adjustmentDetails.join("; ") || "nenhum"}`,
+      details: `Inventário ${inv.inventoryNumber} fechado${scopeSuffix}. ${countsWithDiff.length} ajuste(s): ${adjustmentDetails.join("; ") || "nenhum"}`,
       timestamp: now,
     });
 

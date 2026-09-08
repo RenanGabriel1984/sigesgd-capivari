@@ -153,7 +153,7 @@ export const auditActionValidator = v.union(
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
 export const UNIT_OF_MEASURE_VALUES = [
-  "un", "pc", "cx", "m", "rl", "pct", "outro",
+  "un", "pc", "cx", "m", "rl", "pct", "po", "kt", "outro",
 ] as const;
 
 // ─── Schema ──────────────────────────────────────────────────────────────────
@@ -428,6 +428,10 @@ const schema = defineSchema(
         v.literal("closed"), v.literal("cancelled")
       ),
       observation: v.optional(v.string()),
+      // ── Escopo do inventário (opcional; vazio = todos os locais/produtos) ──
+      locationId: v.optional(v.id("storageLocations")),
+      categoryId: v.optional(v.id("categories")),
+      productIds: v.optional(v.array(v.id("products"))),
       closedAt: v.optional(v.number()),
       closedByUserId: v.optional(v.id("users")),
       createdAt: v.number(),

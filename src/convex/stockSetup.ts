@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { hasInitialInventoryLot } from "./stockHelpers";
 
 async function requireAdmin(ctx: any) {
   const userId = await getAuthUserId(ctx);
@@ -61,21 +62,24 @@ export const initialStockLoad = mutation({
     const year = new Date().getFullYear();
 
     // ── Pre-check: block if any product already has initial_inventory lots ──
+    // A carga inicial é caracterizada por um lote ativo vinculado a uma entrada
+    // com originType "initial_inventory" (não confundir com lotes de compras).
     for (const item of args.items) {
       if (item.quantity <= 0) continue;
 
-      const existingInitialLots = await ctx.db
+      const existingLots = await ctx.db
         .query("lots")
         .withIndex("by_product", (q) => q.eq("productId", item.productId))
         .collect();
-      const hasInitialLot = existingInitialLots.some(
-        (l) => l.lotNumber.startsWith(`LOT-${year}-`) && l.active
+      const hasInitialLot = await hasInitialInventoryLot(
+        existingLots,
+        (entryId) => ctx.db.get(entryId as any)
       );
 
       if (hasInitialLot) {
         const product = await ctx.db.get(item.productId);
         throw new Error(
-          `Produto "${product?.name ?? item.productId}" já possui carga inicial. ` +
+          `Produto "${product?.name ?? item.productId}" já possui carga inicial confirmada. ` +
             `Use saída, transferência ou inventário para ajustar.`
         );
       }
@@ -464,5 +468,35 @@ export const hasInitialStock = query({
     const stocks = await ctx.db.query("stock").collect();
     const hasAny = stocks.some((s) => s.physicalQuantity > 0);
     return { hasInitialStock: hasAny, totalProducts: stocks.length };
+  },
+});
+
+/**
+ * Status da carga inicial por produto (usado pela tela de Implantação Inicial).
+ * Retorna, para cada produto ativo, se ele já possui carga inicial confirmada.
+ */
+export const getInitialLoadStatus = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const products = await ctx.db
+      .query("products")
+      .withIndex("by_active", (q) => q.eq("active", true))
+      .collect();
+    const lots = await ctx.db.query("lots").collect();
+    const entryCache = new Map<string, any>();
+
+    const result: Array<{ productId: string; loaded: boolean }> = [];
+    for (const product of products) {
+      const productLots = lots.filter((l) => l.productId === product._id);
+      const loaded = await hasInitialInventoryLot(productLots, async (entryId) => {
+        if (!entryCache.has(entryId)) {
+          entryCache.set(entryId, await ctx.db.get(entryId as any));
+        }
+        return entryCache.get(entryId);
+      });
+      result.push({ productId: product._id, loaded });
+    }
+    return result;
   },
 });
