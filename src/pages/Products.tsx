@@ -31,17 +31,21 @@ interface ProductForm {
   maximumStock: number;
   observation: string;
   hasSerial: boolean;
+  initialStock: number;
+  locationId: string;
 }
 
 const emptyForm: ProductForm = {
   name: "", description: "", categoryId: "", unitOfMeasure: "un",
   internalCode: "", manufacturer: "", model: "", brand: "", specification: "",
   minimumStock: 0, idealStock: 0, maximumStock: 0, observation: "", hasSerial: false,
+  initialStock: 0, locationId: "",
 };
 
 export default function Products() {
   const products = useQuery(api.products.list);
   const categories = useQuery(api.categories.listActive);
+  const locations = useQuery(api.storageLocations.listActive);
   const createProduct = useMutation(api.products.create);
   const updateProduct = useMutation(api.products.update);
 
@@ -99,6 +103,7 @@ export default function Products() {
       brand: p.brand ?? "", specification: p.specification ?? "",
       minimumStock: p.minimumStock, idealStock: p.idealStock, maximumStock: p.maximumStock,
       observation: p.observation ?? "", hasSerial: p.hasSerial ?? false,
+      initialStock: 0, locationId: "",
     });
     setEditingId(p._id);
     setDialogOpen(true);
@@ -171,7 +176,11 @@ export default function Products() {
         await updateProduct({ id: editingId as any, ...data });
         toast.success("Item atualizado");
       } else {
-        await createProduct(data);
+        await createProduct({
+          ...data,
+          initialStock: form.initialStock,
+          locationId: (form.locationId || undefined) as any,
+        });
         toast.success("Item criado");
       }
       setDialogOpen(false);
@@ -322,6 +331,47 @@ export default function Products() {
               <div><Label>Estoque Ideal</Label><Input type="number" min="0" value={form.idealStock || ""} onChange={(e) => setForm({ ...form, idealStock: e.target.value === "" ? 0 : Number(e.target.value) })} /></div>
               <div><Label>Estoque Máximo</Label><Input type="number" min="0" value={form.maximumStock || ""} onChange={(e) => setForm({ ...form, maximumStock: e.target.value === "" ? 0 : Number(e.target.value) })} /></div>
             </div>
+            {!editingId && (
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <Package className="h-4 w-4 text-primary" />
+                  Estoque Inicial (opcional)
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Informe a quantidade já existente em estoque e o local (ex.: Armário TI 01).
+                  O sistema cria a carga inicial com rastreabilidade por lote e movimentação auditada.
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>Estoque Atual</Label>
+                    <Input
+                      type="number" min="0"
+                      value={form.initialStock || ""}
+                      onChange={(e) => setForm({ ...form, initialStock: e.target.value === "" ? 0 : Number(e.target.value) })}
+                      placeholder="0"
+                    />
+                  </div>
+                  <div>
+                    <Label>Local</Label>
+                    {locations && locations.length === 0 ? (
+                      <div className="flex items-center gap-2 mt-1">
+                        <p className="text-sm text-muted-foreground">Nenhum local cadastrado.</p>
+                        <Link to="/storage-locations" onClick={() => setDialogOpen(false)} className="text-sm underline font-medium text-primary">
+                          Cadastrar local
+                        </Link>
+                      </div>
+                    ) : (
+                      <Select value={form.locationId} onValueChange={(v) => setForm({ ...form, locationId: v })}>
+                        <SelectTrigger><SelectValue placeholder="Selecionar local" /></SelectTrigger>
+                        <SelectContent>
+                          {locations?.map((l: any) => (<SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
             <div><Label>Observações</Label><Textarea value={form.observation} onChange={(e) => setForm({ ...form, observation: e.target.value })} rows={2} /></div>
 
             {/* ═══ Printer Compatibility ═══ */}

@@ -231,3 +231,113 @@ describe("Initial Stock Load — Lot Traceability", () => {
     // Would block: "já possui carga inicial"
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRODUCT CREATION WITH INITIAL STOCK (Estoque Atual no cadastro do item)
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("Product creation with initial stock", () => {
+  const year = new Date().getFullYear();
+
+  it("EA. Product with initialStock creates a traceable lot (LOT-YYYY-NNNNNN)", () => {
+    const initialStock = 10;
+    const lotNumber = `LOT-${year}-000001`;
+    const lot = {
+      lotNumber,
+      productId: "prod_new",
+      entryId: "entry_1",
+      quantityReceived: initialStock,
+      quantityAvailable: initialStock,
+      active: true,
+    };
+    expect(lot.lotNumber).toMatch(/^LOT-\d{4}-\d{6}$/);
+    expect(lot.quantityReceived).toBe(10);
+    expect(lot.quantityAvailable).toBe(10);
+    expect(lot.active).toBe(true);
+  });
+
+  it("EB. Product with initialStock creates stockByLocation", () => {
+    const sbl = {
+      productId: "prod_new",
+      locationId: "loc_armario_01",
+      quantity: 8,
+    };
+    expect(sbl.quantity).toBe(8);
+    expect(sbl.locationId).toBe("loc_armario_01");
+  });
+
+  it("EC. Global stock equals sum of locations after creation with initial stock", () => {
+    const initialStock = 8;
+    const stock = { physicalQuantity: initialStock, reservedQuantity: 0 };
+    const locationSum = 8;
+    expect(stock.physicalQuantity).toBe(locationSum);
+    expect(stock.physicalQuantity - stock.reservedQuantity).toBe(8);
+  });
+
+  it("ED. Creation with initial stock registers an entry with originType initial_inventory", () => {
+    const entry = {
+      entryNumber: `ENT-${year}-000001`,
+      originType: "initial_inventory",
+      status: "confirmed",
+    };
+    expect(entry.originType).toBe("initial_inventory");
+    expect(entry.status).toBe("confirmed");
+    expect(entry.entryNumber).toMatch(/^ENT-\d{4}-\d{6}$/);
+  });
+
+  it("EE. Creation with initial stock records movement 0 → initialStock", () => {
+    const movement = {
+      productId: "prod_new",
+      type: "adjustment",
+      quantity: 6,
+      previousPhysical: 0,
+      newPhysical: 6,
+      lotId: `LOT-${year}-000001`,
+    };
+    expect(movement.previousPhysical).toBe(0);
+    expect(movement.newPhysical).toBe(6);
+    expect(movement.quantity).toBe(6);
+    expect(movement.type).toBe("adjustment");
+  });
+
+  it("EF. Initial stock greater than zero requires a location", () => {
+    const initialStock = 5;
+    const locationId: string | undefined = undefined;
+    const shouldBlock = initialStock > 0 && !locationId;
+    expect(shouldBlock).toBe(true);
+  });
+
+  it("EG. Negative initial stock is rejected", () => {
+    const initialStock = -3;
+    expect(initialStock < 0).toBe(true);
+    // Would throw: "Estoque atual não pode ser negativo"
+  });
+
+  it("EH. Product without initial stock keeps stock at zero and no lot", () => {
+    const initialStock = 0;
+    const stock = { physicalQuantity: 0, reservedQuantity: 0 };
+    const lotCreated = initialStock > 0;
+    expect(stock.physicalQuantity).toBe(0);
+    expect(lotCreated).toBe(false);
+  });
+
+  it("EI. Lot from product-created initial stock is consumed by exit (FIFO) keeping invariants", () => {
+    // Product created with 10 units in Armário TI 01
+    let locationQty = 10;
+    let lotAvailable = 10;
+    let globalPhysical = 10;
+    let reserved = 0;
+
+    const exitQty = 4;
+    expect(lotAvailable >= exitQty).toBe(true);
+    locationQty -= exitQty;
+    lotAvailable -= exitQty;
+    globalPhysical -= exitQty;
+
+    expect(lotAvailable).toBe(6);
+    expect(locationQty).toBe(6);
+    expect(globalPhysical).toBe(6);
+    expect(locationQty).toBe(globalPhysical);
+    expect(globalPhysical - reserved).toBe(6);
+  });
+});

@@ -107,6 +107,14 @@ export const belowMinimum = query({
   },
 });
 
+/** Generate lot number: LOT-YYYY-NNNNNN (same pattern as entries/initial load) */
+async function generateLotNumber(ctx: any, productId: string): Promise<string> {
+  const year = new Date().getFullYear();
+  const existingLots = await ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect();
+  const seq = existingLots.length + 1;
+  return `LOT-${year}-${String(seq).padStart(6, "0")}`;
+}
+
 export const create = mutation({
   args: {
     name: v.string(), description: v.optional(v.string()), categoryId: v.id("categories"),
@@ -116,9 +124,13 @@ export const create = mutation({
     minimumStock: v.number(), idealStock: v.number(), maximumStock: v.number(),
     observation: v.optional(v.string()), photo: v.optional(v.string()),
     hasSerial: v.optional(v.boolean()),
+    // Estoque atual informado no cadastro (carga inicial com rastreabilidade por lote)
+    initialStock: v.optional(v.number()),
+    locationId: v.optional(v.id("storageLocations")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
+    const { initialStock, locationId, ...productArgs } = args;
     if (!args.name.trim()) throw new Error("Nome do item é obrigatório");
 
     // Validate category exists
@@ -134,17 +146,97 @@ export const create = mutation({
       throw new Error("Estoque ideal não pode ser maior que o estoque máximo");
     }
 
+    // Validate initial stock
+    if (initialStock !== undefined && initialStock < 0) {
+      throw new Error("Estoque atual não pode ser negativo");
+    }
+    if (initialStock !== undefined && initialStock > 0) {
+      if (!locationId) {
+        throw new Error("Informe o local de armazenamento para registrar o estoque atual");
+      }
+      const location = await ctx.db.get(locationId);
+      if (!location) throw new Error("Local de armazenamento não encontrado");
+      if (!location.active) throw new Error("O local de armazenamento selecionado está inativo");
+    }
+
     const id = await ctx.db.insert("products", {
-      ...args,
+      ...productArgs,
       name: args.name.trim(),
       // Auto-generate sequential internal code if not provided
-      internalCode: args.internalCode?.trim() || await generateInternalCode(ctx),
+      internalCode: productArgs.internalCode?.trim() || await generateInternalCode(ctx),
       active: true,
     });
-    await ctx.db.insert("stock", { productId: id, physicalQuantity: 0, reservedQuantity: 0 });
+    const stockId = await ctx.db.insert("stock", { productId: id, physicalQuantity: 0, reservedQuantity: 0 });
+
+    // ── Carga inicial: cria entrada, lote, saldo por local, saldo global e movimentação ──
+    let initialLotInfo = "";
+    if (initialStock !== undefined && initialStock > 0 && locationId) {
+      const now = Date.now();
+      const year = new Date().getFullYear();
+
+      const entrySeq = (await ctx.db.query("entries").collect()).length + 1;
+      const entryNumber = `ENT-${year}-${String(entrySeq).padStart(6, "0")}`;
+      const entryId = await ctx.db.insert("entries", {
+        entryNumber,
+        receivedAt: now,
+        originType: "initial_inventory",
+        responsibleUserId: userId,
+        observation: `Estoque inicial cadastrado junto com o item "${args.name}"`,
+        status: "confirmed",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const lotNumber = await generateLotNumber(ctx, id);
+      const lotId = await ctx.db.insert("lots", {
+        lotNumber,
+        productId: id,
+        entryId,
+        quantityReceived: initialStock,
+        quantityAvailable: initialStock,
+        receivedAt: now,
+        active: true,
+        observation: `Carga inicial cadastrada junto com o item — ${initialStock} unidades`,
+      });
+
+      await ctx.db.insert("entryItems", {
+        entryId,
+        productId: id,
+        quantity: initialStock,
+        unitOfMeasure: args.unitOfMeasure,
+        lotId: lotId as string,
+        locationId,
+      });
+
+      await ctx.db.insert("stockByLocation", {
+        productId: id,
+        locationId,
+        quantity: initialStock,
+      });
+
+      await ctx.db.patch(stockId, { physicalQuantity: initialStock });
+
+      await ctx.db.insert("stockMovements", {
+        productId: id,
+        type: "adjustment",
+        quantity: initialStock,
+        previousPhysical: 0,
+        newPhysical: initialStock,
+        previousReserved: 0,
+        newReserved: 0,
+        userId,
+        entryId,
+        lotId: lotId as string,
+        observation: `Estoque inicial — lote ${lotNumber} — ${initialStock} unidades (cadastro do item)`,
+        timestamp: now,
+      });
+
+      initialLotInfo = `; estoque inicial: ${initialStock} ${args.unitOfMeasure} no lote ${lotNumber}`;
+    }
+
     await ctx.db.insert("auditLogs", {
       userId, action: "create", entity: "products", entityId: id,
-      details: `Item "${args.name}" criado na categoria "${category.name}"`, timestamp: Date.now(),
+      details: `Item "${args.name}" criado na categoria "${category.name}"${initialLotInfo}`, timestamp: Date.now(),
     });
     return id;
   },
