@@ -78,7 +78,27 @@ export const getById = query({
       const user = await ctx.db.get(m.userId);
       return { ...m, user };
     }));
-    return { ...product, category, stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 }, recentMovements: movementsWithUser };
+    // ── Lotes do produto (rastreabilidade de origem) ──
+    const lots = await ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", args.id)).order("desc").collect();
+    const lotsWithInfo = await Promise.all(lots.map(async (l: any) => {
+      const entry = await ctx.db.get(l.entryId);
+      const supplier = l.supplierId ? await ctx.db.get(l.supplierId) : null;
+      return { ...l, entry, supplier };
+    }));
+    // ── Localizações (estoque por local) ──
+    const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
+    const locations = await Promise.all(sbls.map(async (s: any) => {
+      const location = await ctx.db.get(s.locationId);
+      return { location, quantity: s.quantity };
+    }));
+    return {
+      ...product,
+      category,
+      stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 },
+      recentMovements: movementsWithUser,
+      lots: lotsWithInfo,
+      locations,
+    };
   },
 });
 

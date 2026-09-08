@@ -50,7 +50,7 @@ export default function Lots() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Lotes</h1>
           <p className="text-sm text-muted-foreground">
-            Rastreabilidade de lotes de entrada — {lots?.length ?? 0} lote(s) total
+            Lotes registram de qual entrada, fornecedor, NF/AF, marca e data vieram os materiais — permite rastrear o consumo
           </p>
         </div>
 
@@ -69,7 +69,7 @@ export default function Lots() {
             <CardContent className="py-16 text-center">
               <Boxes className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
               <p className="text-muted-foreground">Nenhum lote registrado</p>
-              <p className="text-xs text-muted-foreground mt-1">Lotes são criados automaticamente ao confirmar uma entrada</p>
+              <p className="text-xs text-muted-foreground mt-1">Lotes são criados automaticamente ao confirmar uma entrada ou a implantação inicial</p>
             </CardContent>
           </Card>
         ) : (
@@ -89,6 +89,7 @@ export default function Lots() {
                           <TableHead className="text-xs">Custo Unit.</TableHead>
                           <TableHead className="text-xs">Fornecedor</TableHead>
                           <TableHead className="text-xs">NF</TableHead>
+                          <TableHead className="text-xs">Lote Fornec.</TableHead>
                           <TableHead className="text-xs">Data</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -121,6 +122,9 @@ export default function Lots() {
                             </TableCell>
                             <TableCell className="text-xs font-mono text-muted-foreground">
                               {l.invoiceNumber ?? "—"}
+                            </TableCell>
+                            <TableCell className="text-xs font-mono text-muted-foreground">
+                              {l.supplierLotNumber ?? "—"}
                             </TableCell>
                             <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                               {new Date(l.receivedAt).toLocaleDateString("pt-BR")}

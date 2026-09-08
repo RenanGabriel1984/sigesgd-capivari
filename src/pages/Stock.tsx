@@ -7,8 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
-import { Search, Warehouse, AlertTriangle, Package, CheckCircle2 } from "lucide-react";
+import { Search, Warehouse } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UNIT_LABELS } from "@/types/constants";
+import { getStockSituation, STOCK_SITUATION_LABELS, STOCK_SITUATION_BADGE_CLASSES } from "@/lib/stock-status";
+import type { ProductView } from "@/lib/product-types";
 
 function StockSkeleton() {
   return (
@@ -39,7 +42,7 @@ function StockSkeleton() {
 }
 
 export default function Stock() {
-  const products = useQuery(api.products.list);
+  const products = useQuery(api.products.list) as ProductView[] | undefined;
   const [search, setSearch] = useState("");
 
   if (products === undefined) return <StockSkeleton />;
@@ -48,19 +51,19 @@ export default function Stock() {
     (p) =>
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.internalCode?.toLowerCase().includes(search.toLowerCase()) ||
-      p.manufacturer?.toLowerCase().includes(search.toLowerCase())
+      p.manufacturer?.toLowerCase().includes(search.toLowerCase()) ||
+      p.brand?.toLowerCase().includes(search.toLowerCase())
   );
-
-  const getStockStatus = (physical: number, min: number, ideal: number) => {
-    if (physical === 0) return { label: "Zerado", color: "destructive" as const, icon: AlertTriangle, dotClass: "status-dot-danger" };
-    if (physical < min) return { label: "Crítico", color: "destructive" as const, icon: AlertTriangle, dotClass: "status-dot-danger" };
-    if (physical <= ideal) return { label: "Baixo", color: "secondary" as const, icon: Package, dotClass: "status-dot-warning" };
-    return { label: "Normal", color: "default" as const, icon: CheckCircle2, dotClass: "status-dot-success" };
-  };
 
   const criticalCount = filtered?.filter((p) => {
     const physical = p.stock?.physicalQuantity ?? 0;
-    return physical <= p.minimumStock;
+    return getStockSituation(physical, p.minimumStock, p.idealStock) === "critical";
+  }).length ?? 0;
+
+  const belowMinCount = filtered?.filter((p) => {
+    const physical = p.stock?.physicalQuantity ?? 0;
+    const s = getStockSituation(physical, p.minimumStock, p.idealStock);
+    return s === "critical" || s === "below_min";
   }).length ?? 0;
 
   return (
@@ -71,10 +74,15 @@ export default function Stock() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Estoque</h1>
             <p className="text-sm text-muted-foreground">
-              Visão geral do estoque de produtos
+              Saldo atual por produto — calculado pelas movimentações
               {criticalCount > 0 && (
                 <Badge variant="destructive" className="ml-2 text-xs">
                   {criticalCount} crítico{criticalCount !== 1 ? "s" : ""}
+                </Badge>
+              )}
+              {belowMinCount > 0 && (
+                <Badge variant="outline" className="ml-2 text-xs border-amber-200 bg-amber-50 text-amber-700">
+                  {belowMinCount} abaixo do mínimo
                 </Badge>
               )}
             </p>
@@ -99,27 +107,30 @@ export default function Stock() {
                   <TableRow>
                     <TableHead>Produto</TableHead>
                     <TableHead>Categoria</TableHead>
-                    <TableHead className="text-center">Em Estoque</TableHead>
+                    <TableHead className="text-center">Estoque Físico</TableHead>
                     <TableHead className="text-center">Reservado</TableHead>
                     <TableHead className="text-center">Disponível</TableHead>
-                    <TableHead className="text-center">Níveis (mín / ideal / máx)</TableHead>
-                    <TableHead className="w-[160px]">Status</TableHead>
+                    <TableHead className="text-center">Mínimo</TableHead>
+                    <TableHead className="text-center">Ideal</TableHead>
+                    <TableHead className="w-[170px]">Situação</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filtered?.map((p) => {
                     const physical = p.stock?.physicalQuantity ?? 0;
                     const reserved = p.stock?.reservedQuantity ?? 0;
-                    const available = physical - reserved;
-                    const status = getStockStatus(physical, p.minimumStock, p.idealStock);
-                    const percentage = p.maximumStock > 0 ? Math.min(100, (physical / p.maximumStock) * 100) : 0;
-                    const StatusIcon = status.icon;
+                    const available = Math.max(physical - reserved, 0);
+                    const situation = getStockSituation(physical, p.minimumStock, p.idealStock);
+                    const isLow = situation === "critical" || situation === "below_min";
                     return (
-                      <TableRow key={p._id} className={physical <= p.minimumStock ? "bg-rose-50/30" : ""}>
+                      <TableRow key={p._id} className={isLow ? "bg-rose-50/30" : ""}>
                         <TableCell>
                           <div>
                             <p className="font-medium">{p.name}</p>
-                            <p className="text-xs text-muted-foreground">{p.manufacturer} {p.model}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {p.brand || p.manufacturer ? `${p.brand ?? p.manufacturer}${p.model ? ` ${p.model}` : ""}` : p.internalCode ?? ""}
+                              <span className="ml-1 text-[10px] text-muted-foreground/70">({UNIT_LABELS[p.unitOfMeasure] ?? p.unitOfMeasure})</span>
+                            </p>
                           </div>
                         </TableCell>
                         <TableCell>
@@ -130,16 +141,19 @@ export default function Stock() {
                           {reserved > 0 ? reserved : "—"}
                         </TableCell>
                         <TableCell className="text-center font-mono">{available}</TableCell>
-                        <TableCell className="text-center text-xs text-muted-foreground font-mono">
-                          {p.minimumStock} / {p.idealStock} / {p.maximumStock}
-                        </TableCell>
+                        <TableCell className="text-center font-mono text-muted-foreground">{p.minimumStock}</TableCell>
+                        <TableCell className="text-center font-mono text-muted-foreground">{p.idealStock}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            <Progress value={percentage} className="h-1.5 flex-1" />
-                            <Badge variant={status.color} className="text-[10px] shrink-0 gap-1">
-                              <StatusIcon className="h-3 w-3" />
-                              {status.label}
+                            <Badge className={`text-[10px] shrink-0 ${STOCK_SITUATION_BADGE_CLASSES[situation]}`}>
+                              {STOCK_SITUATION_LABELS[situation]}
                             </Badge>
+                            {p.maximumStock > 0 && (
+                              <Progress
+                                value={Math.min(100, (physical / p.maximumStock) * 100)}
+                                className="h-1.5 flex-1"
+                              />
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -147,7 +161,7 @@ export default function Stock() {
                   })}
                   {filtered?.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7}>
+                      <TableCell colSpan={8}>
                         <div className="empty-state py-12">
                           <Warehouse className="empty-state-icon" />
                           <p className="empty-state-title">
@@ -171,25 +185,27 @@ export default function Stock() {
           {filtered?.map((p) => {
             const physical = p.stock?.physicalQuantity ?? 0;
             const reserved = p.stock?.reservedQuantity ?? 0;
-            const available = physical - reserved;
-            const status = getStockStatus(physical, p.minimumStock, p.idealStock);
-            const percentage = p.maximumStock > 0 ? Math.min(100, (physical / p.maximumStock) * 100) : 0;
+            const available = Math.max(physical - reserved, 0);
+            const situation = getStockSituation(physical, p.minimumStock, p.idealStock);
+            const isLow = situation === "critical" || situation === "below_min";
             return (
-              <Card key={p._id} className={`border-border/50 ${physical <= p.minimumStock ? "border-rose-200 bg-rose-50/20" : ""}`}>
+              <Card key={p._id} className={`border-border/50 ${isLow ? "border-rose-200 bg-rose-50/20" : ""}`}>
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate">{p.name}</p>
-                      <p className="text-xs text-muted-foreground">{p.manufacturer} {p.model}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {p.category?.name ?? "—"} • {UNIT_LABELS[p.unitOfMeasure] ?? p.unitOfMeasure}
+                      </p>
                     </div>
-                    <Badge variant={status.color} className="text-[10px] shrink-0 ml-2">
-                      {status.label}
+                    <Badge className={`text-[10px] shrink-0 ml-2 ${STOCK_SITUATION_BADGE_CLASSES[situation]}`}>
+                      {STOCK_SITUATION_LABELS[situation]}
                     </Badge>
                   </div>
                   <div className="grid grid-cols-3 gap-3 text-center">
                     <div>
                       <p className="text-lg font-bold font-mono">{physical}</p>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Estoque</p>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Físico</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold font-mono text-amber-600">{reserved || "—"}</p>
@@ -200,12 +216,14 @@ export default function Stock() {
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Disponível</p>
                     </div>
                   </div>
-                  <div className="mt-3">
-                    <Progress value={percentage} className="h-1.5" />
-                    <p className="text-[10px] text-muted-foreground mt-1 text-right">
-                      Mín: {p.minimumStock} / Ideal: {p.idealStock}
-                    </p>
+                  <div className="mt-3 flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span>Mínimo: {p.minimumStock}</span>
+                    <span>Ideal: {p.idealStock}</span>
+                    <span>Máximo: {p.maximumStock}</span>
                   </div>
+                  {p.maximumStock > 0 && (
+                    <Progress value={Math.min(100, (physical / p.maximumStock) * 100)} className="h-1.5 mt-2" />
+                  )}
                 </CardContent>
               </Card>
             );

@@ -384,6 +384,7 @@ const schema = defineSchema(
       lotId: v.optional(v.string()),
       locationId: v.optional(v.id("storageLocations")),
       photoStorageId: v.optional(v.string()),
+      supplierLotNumber: v.optional(v.string()),
       observation: v.optional(v.string()),
     }).index("by_entry", ["entryId"])
       .index("by_product", ["productId"]),
@@ -404,6 +405,7 @@ const schema = defineSchema(
       invoiceNumber: v.optional(v.string()),
       purchaseAuthorizationNumber: v.optional(v.string()),
       photoStorageId: v.optional(v.string()),
+      supplierLotNumber: v.optional(v.string()),
       active: v.boolean(),
       observation: v.optional(v.string()),
     }).index("by_product", ["productId"])

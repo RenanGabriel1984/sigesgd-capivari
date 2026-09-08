@@ -12,8 +12,10 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Pencil, Search, Package, ArrowUpRight, AlertTriangle, Printer, X } from "lucide-react";
+import { Plus, Pencil, Search, Package, ArrowUpRight, AlertTriangle, Printer, X, Info } from "lucide-react";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
+import { getStockSituation, STOCK_SITUATION_LABELS, STOCK_SITUATION_BADGE_CLASSES } from "@/lib/stock-status";
+import type { ProductView } from "@/lib/product-types";
 import { toast } from "sonner";
 
 interface ProductForm {
@@ -31,21 +33,17 @@ interface ProductForm {
   maximumStock: number;
   observation: string;
   hasSerial: boolean;
-  initialStock: number;
-  locationId: string;
 }
 
 const emptyForm: ProductForm = {
   name: "", description: "", categoryId: "", unitOfMeasure: "un",
   internalCode: "", manufacturer: "", model: "", brand: "", specification: "",
   minimumStock: 0, idealStock: 0, maximumStock: 0, observation: "", hasSerial: false,
-  initialStock: 0, locationId: "",
 };
 
 export default function Products() {
-  const products = useQuery(api.products.list);
+  const products = useQuery(api.products.list) as ProductView[] | undefined;
   const categories = useQuery(api.categories.listActive);
-  const locations = useQuery(api.storageLocations.listActive);
   const createProduct = useMutation(api.products.create);
   const updateProduct = useMutation(api.products.update);
 
@@ -72,7 +70,7 @@ export default function Products() {
     return models.sort();
   }, [printers]);
 
-  const filtered = products?.filter((p: any) => {
+  const filtered = products?.filter((p) => {
     const q = search.toLowerCase();
     const matchesSearch = !q ||
       p.name.toLowerCase().includes(q) ||
@@ -82,11 +80,16 @@ export default function Products() {
       p.description?.toLowerCase().includes(q);
     const matchesCategory = categoryFilter === "all" || p.categoryId === categoryFilter;
     const stock = p.stock?.physicalQuantity ?? 0;
-    const matchesBelowMin = !onlyBelowMin || stock <= p.minimumStock;
+    const situation = getStockSituation(stock, p.minimumStock, p.idealStock);
+    const matchesBelowMin = !onlyBelowMin || situation === "critical" || situation === "below_min";
     return matchesSearch && matchesCategory && matchesBelowMin;
   });
 
-  const belowMinCount = products?.filter((p: any) => (p.stock?.physicalQuantity ?? 0) <= p.minimumStock).length ?? 0;
+  const belowMinCount = products?.filter((p) => {
+    const stock = p.stock?.physicalQuantity ?? 0;
+    const situation = getStockSituation(stock, p.minimumStock, p.idealStock);
+    return situation === "critical" || situation === "below_min";
+  }).length ?? 0;
 
   const openCreate = () => { setForm(emptyForm); setEditingId(null); setCompatEntries([]); setDialogOpen(true); };
   const compatEntriesList = useQuery(
@@ -94,7 +97,7 @@ export default function Products() {
     editingId ? { productId: editingId as any } : "skip"
   );
 
-  const openEdit = (e: React.MouseEvent, p: any) => {
+  const openEdit = (e: React.MouseEvent, p: ProductView) => {
     e.preventDefault(); e.stopPropagation();
     setForm({
       name: p.name, description: p.description ?? "", categoryId: p.categoryId,
@@ -103,7 +106,6 @@ export default function Products() {
       brand: p.brand ?? "", specification: p.specification ?? "",
       minimumStock: p.minimumStock, idealStock: p.idealStock, maximumStock: p.maximumStock,
       observation: p.observation ?? "", hasSerial: p.hasSerial ?? false,
-      initialStock: 0, locationId: "",
     });
     setEditingId(p._id);
     setDialogOpen(true);
@@ -176,12 +178,8 @@ export default function Products() {
         await updateProduct({ id: editingId as any, ...data });
         toast.success("Item atualizado");
       } else {
-        await createProduct({
-          ...data,
-          initialStock: form.initialStock,
-          locationId: (form.locationId || undefined) as any,
-        });
-        toast.success("Item criado");
+        await createProduct(data as any);
+        toast.success("Item criado. O estoque atual é 0 até que seja registrada uma entrada ou inventário.");
       }
       setDialogOpen(false);
     } catch (e: any) { toast.error(e.message ?? "Erro ao salvar item"); }
@@ -194,10 +192,15 @@ export default function Products() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Itens do Estoque</h1>
             <p className="text-sm text-muted-foreground">
-              {filtered?.length ?? 0} item{(filtered?.length ?? 0) !== 1 ? "s" : ""} cadastrado{(filtered?.length ?? 0) !== 1 ? "s" : ""}
+              Cadastro de materiais — o estoque atual é calculado pelas movimentações
             </p>
           </div>
           <Button onClick={openCreate} className="gap-2"><Plus className="h-4 w-4" /> Novo Item</Button>
+        </div>
+
+        <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          <Info className="h-4 w-4 mt-0.5 shrink-0" />
+          <p>Os estoques mínimo, ideal e máximo servem para alertas e planejamento. O estoque atual é calculado automaticamente pelas movimentações.</p>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
@@ -218,7 +221,7 @@ export default function Products() {
             onClick={() => setOnlyBelowMin(!onlyBelowMin)}
           >
             <AlertTriangle className="h-4 w-4" />
-            Abaixo do Mínimo
+            Crítico / Abaixo do Mínimo
             {belowMinCount > 0 && (
               <Badge variant={onlyBelowMin ? "secondary" : "destructive"} className="ml-1 text-[10px] h-5 min-w-5 px-1.5">
                 {belowMinCount}
@@ -236,11 +239,12 @@ export default function Products() {
           </CardContent></Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered?.map((p: any) => {
+            {filtered?.map((p) => {
               const stock = p.stock?.physicalQuantity ?? 0;
               const reserved = p.stock?.reservedQuantity ?? 0;
               const available = stock - reserved;
-              const isLow = stock < p.minimumStock;
+              const situation = getStockSituation(stock, p.minimumStock, p.idealStock);
+              const isLow = situation === "critical" || situation === "below_min";
               const stockPct = p.maximumStock > 0 ? Math.min(100, (stock / p.maximumStock) * 100) : 0;
               return (
                 <Link key={p._id} to={`/products/${p._id}`} className="group">
@@ -267,16 +271,44 @@ export default function Products() {
                         )}
                       </p>
                       {p.specification && <p className="text-[10px] text-muted-foreground mb-2 truncate">{p.specification}</p>}
-                      <div className="flex items-center gap-2 mb-3">
+                      <div className="flex items-center gap-2 mb-3 flex-wrap">
                         {p.category && <Badge variant="secondary" className="text-[10px]">{p.category.name}</Badge>}
-                        <Badge variant={isLow ? "destructive" : "outline"} className="text-[10px]">{stock} {UNIT_LABELS[p.unitOfMeasure] ?? p.unitOfMeasure}</Badge>
+                        <Badge className={`text-[10px] ${STOCK_SITUATION_BADGE_CLASSES[situation]}`}>
+                          {STOCK_SITUATION_LABELS[situation]}
+                        </Badge>
                         {p.hasSerial && <Badge variant="outline" className="text-[10px]">S/N</Badge>}
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-center mb-3">
+                        <div>
+                          <p className="text-sm font-bold font-mono">{stock}</p>
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Atual</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold font-mono text-amber-600">{reserved}</p>
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Reservado</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold font-mono">{available}</p>
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Disponível</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-mono">{p.minimumStock}</p>
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Mínimo</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-mono">{p.idealStock}</p>
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Ideal</p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-mono">{p.maximumStock}</p>
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Máximo</p>
+                        </div>
                       </div>
                       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                         <div className="flex-1 h-1 bg-muted rounded-full overflow-hidden">
                           <div className={`h-full rounded-full transition-all ${isLow ? "bg-rose-500" : "bg-emerald-500"}`} style={{ width: `${stockPct}%` }} />
                         </div>
-                        <span>{available} disp.</span>
+                        <span>{UNIT_LABELS[p.unitOfMeasure] ?? p.unitOfMeasure}</span>
                       </div>
                     </CardContent>
                   </Card>
@@ -299,9 +331,9 @@ export default function Products() {
                   <p className="font-medium text-amber-800 dark:text-amber-200">Nenhuma categoria cadastrada</p>
                   <p className="text-amber-700 dark:text-amber-300 mt-0.5">
                     Cadastre uma categoria antes de criar itens.{" "}
-                    <Link to="/categories" onClick={() => setDialogOpen(false)} className="underline font-medium hover:text-amber-900 dark:hover:text-amber-100">
-                      Cadastrar Categoria Primeiro →
-                    </Link>
+                    <Button type="button" variant="link" size="sm" className="h-auto p-0 text-amber-800 dark:text-amber-200 underline" onClick={() => setCatModalOpen(true)}>
+                      Criar Categoria Agora →
+                    </Button>
                   </p>
                 </div>
               </div>
@@ -331,44 +363,22 @@ export default function Products() {
               <div><Label>Estoque Ideal</Label><Input type="number" min="0" value={form.idealStock || ""} onChange={(e) => setForm({ ...form, idealStock: e.target.value === "" ? 0 : Number(e.target.value) })} /></div>
               <div><Label>Estoque Máximo</Label><Input type="number" min="0" value={form.maximumStock || ""} onChange={(e) => setForm({ ...form, maximumStock: e.target.value === "" ? 0 : Number(e.target.value) })} /></div>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Os estoques mínimo, ideal e máximo são parâmetros de alerta e planejamento. Eles não alteram o estoque atual.
+            </p>
             {!editingId && (
-              <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-3">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <Package className="h-4 w-4 text-primary" />
-                  Estoque Inicial (opcional)
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Informe a quantidade já existente em estoque e o local (ex.: Armário TI 01).
-                  O sistema cria a carga inicial com rastreabilidade por lote e movimentação auditada.
-                </p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Estoque Atual</Label>
-                    <Input
-                      type="number" min="0"
-                      value={form.initialStock || ""}
-                      onChange={(e) => setForm({ ...form, initialStock: e.target.value === "" ? 0 : Number(e.target.value) })}
-                      placeholder="0"
-                    />
-                  </div>
-                  <div>
-                    <Label>Local</Label>
-                    {locations && locations.length === 0 ? (
-                      <div className="flex items-center gap-2 mt-1">
-                        <p className="text-sm text-muted-foreground">Nenhum local cadastrado.</p>
-                        <Link to="/storage-locations" onClick={() => setDialogOpen(false)} className="text-sm underline font-medium text-primary">
-                          Cadastrar local
-                        </Link>
-                      </div>
-                    ) : (
-                      <Select value={form.locationId} onValueChange={(v) => setForm({ ...form, locationId: v })}>
-                        <SelectTrigger><SelectValue placeholder="Selecionar local" /></SelectTrigger>
-                        <SelectContent>
-                          {locations?.map((l: any) => (<SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
+              <div className="flex items-start gap-3 p-3 rounded-lg border border-blue-200 bg-blue-50">
+                <Info className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
+                <div className="text-sm text-blue-800">
+                  <p className="font-medium">Produto cadastrado = estoque 0</p>
+                  <p className="text-blue-700 mt-0.5">
+                    O estoque atual é calculado pelas movimentações e não é editado no cadastro.{" "}
+                    Para informar a quantidade física que já existe, use{" "}
+                    <Link to="/inventory" onClick={() => setDialogOpen(false)} className="underline font-medium hover:text-blue-900">
+                      Inventário → Implantação Inicial
+                    </Link>
+                    . Para materiais que chegarem depois, use <Link to="/entries" onClick={() => setDialogOpen(false)} className="underline font-medium hover:text-blue-900">Entradas</Link>.
+                  </p>
                 </div>
               </div>
             )}

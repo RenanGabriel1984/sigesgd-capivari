@@ -27,9 +27,9 @@ const STATUS_COLORS: Record<string, string> = { draft: "text-amber-600 bg-amber-
 type EntryItemDraft = {
   productId: string; quantity: string; unitOfMeasure: string; unitCost: string;
   brand: string; model: string; specification: string; locationId: string; observation: string;
-  photoStorageId: string;
+  photoStorageId: string; supplierLotNumber: string;
 };
-const EMPTY_ITEM: EntryItemDraft = { productId: "", quantity: "1", unitOfMeasure: "un", unitCost: "", brand: "", model: "", specification: "", locationId: "", observation: "", photoStorageId: "" };
+const EMPTY_ITEM: EntryItemDraft = { productId: "", quantity: "1", unitOfMeasure: "un", unitCost: "", brand: "", model: "", specification: "", locationId: "", observation: "", photoStorageId: "", supplierLotNumber: "" };
 
 export default function Entries() {
   const entries = useQuery(api.entries.list);
@@ -124,6 +124,7 @@ export default function Entries() {
         unitCost: item.unitCost != null ? String(item.unitCost) : "",
         brand: item.brand ?? "", model: item.model ?? "", specification: item.specification ?? "",
         locationId: item.locationId ?? "", observation: item.observation ?? "", photoStorageId: item.photoStorageId ?? "",
+        supplierLotNumber: item.supplierLotNumber ?? "",
       });
     }
     seteItemIds(itemIds);
@@ -169,6 +170,7 @@ export default function Entries() {
           model: i.model || undefined, specification: i.specification || undefined,
           locationId: i.locationId ? (i.locationId as any) : undefined,
           photoStorageId: i.photoStorageId || undefined, observation: i.observation || undefined,
+          supplierLotNumber: i.supplierLotNumber || undefined,
         })),
       });
       toast.success("Entrada criada como rascunho");
@@ -233,6 +235,7 @@ export default function Entries() {
           specification: item.specification || undefined,
           locationId: item.locationId ? (item.locationId as any) : undefined,
           photoStorageId: item.photoStorageId || undefined,
+          supplierLotNumber: item.supplierLotNumber || undefined,
           observation: item.observation || undefined,
         });
         newItemIds.push(newId as string);
@@ -348,7 +351,7 @@ export default function Entries() {
     <AppShell>
       <div className="space-y-6 max-w-7xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div><h1 className="text-2xl font-bold tracking-tight">Entradas</h1><p className="text-sm text-muted-foreground">Entradas de estoque com rastreabilidade por lote — {entries?.length ?? 0} entrada(s)</p></div>
+          <div><h1 className="text-2xl font-bold tracking-tight">Entradas</h1><p className="text-sm text-muted-foreground">Registre aqui materiais que chegaram fisicamente ao estoque — {entries?.length ?? 0} entrada(s)</p></div>
           <Button onClick={() => { resetCreateForm(); setCreateDialogOpen(true); }} className="gap-2"><Plus className="h-4 w-4" /> Nova Entrada</Button>
         </div>
 
@@ -499,6 +502,10 @@ export default function Entries() {
                     <div><Label className="text-xs">Modelo</Label><Input value={item.model} onChange={(e) => updateCItem(idx, "model", e.target.value)} className="mt-1 h-8" /></div>
                     <div><Label className="text-xs">Custo Unit.</Label><Input type="number" step="0.01" min="0" value={item.unitCost} onChange={(e) => updateCItem(idx, "unitCost", e.target.value)} placeholder="R$" className="mt-1 h-8" /></div>
                     <div><Label className="text-xs">Local</Label><Select value={item.locationId} onValueChange={(v) => updateCItem(idx, "locationId", v)}><SelectTrigger className="mt-1 h-8"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{locations?.map((l) => (<SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>))}</SelectContent></Select></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><Label className="text-xs">Lote do Fornecedor</Label><Input value={item.supplierLotNumber} onChange={(e) => updateCItem(idx, "supplierLotNumber", e.target.value)} placeholder="Lote impresso na embalagem (opcional)" className="mt-1 h-8" /></div>
+                    <div><Label className="text-xs">Especificação</Label><Input value={item.specification} onChange={(e) => updateCItem(idx, "specification", e.target.value)} placeholder="Opcional" className="mt-1 h-8" /></div>
                   </div>
                   <div><Label className="text-xs">Foto do Item</Label><FileUpload storageId={item.photoStorageId} onUpload={(sid) => updateCItem(idx, "photoStorageId", sid)} onRemove={() => updateCItem(idx, "photoStorageId", "")} size="sm" label="Foto do item recebido" /></div>
                 </div>

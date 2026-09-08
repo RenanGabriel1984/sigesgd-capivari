@@ -132,6 +132,7 @@ export const create = mutation({
       specification: v.optional(v.string()),
       locationId: v.optional(v.id("storageLocations")),
       photoStorageId: v.optional(v.string()),
+      supplierLotNumber: v.optional(v.string()),
       observation: v.optional(v.string()),
     })),
   },
@@ -183,6 +184,7 @@ export const create = mutation({
         specification: item.specification,
         locationId: item.locationId,
         photoStorageId: item.photoStorageId,
+        supplierLotNumber: item.supplierLotNumber || undefined,
         observation: item.observation,
       });
     }
@@ -239,6 +241,7 @@ export const confirm = mutation({
         invoiceNumber: entry.invoiceNumber,
         purchaseAuthorizationNumber: entry.purchaseAuthorizationNumber,
         photoStorageId: item.photoStorageId,
+        supplierLotNumber: item.supplierLotNumber || undefined,
         active: true,
         observation: item.observation,
       });
@@ -305,6 +308,7 @@ export const addItem = mutation({
     specification: v.optional(v.string()),
     locationId: v.optional(v.id("storageLocations")),
     photoStorageId: v.optional(v.string()),
+    supplierLotNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -331,6 +335,7 @@ export const addItem = mutation({
       specification: args.specification,
       locationId: args.locationId,
       photoStorageId: args.photoStorageId,
+      supplierLotNumber: args.supplierLotNumber || undefined,
       observation: args.observation,
     });
 
@@ -358,6 +363,7 @@ export const updateItem = mutation({
     specification: v.optional(v.string()),
     locationId: v.optional(v.id("storageLocations")),
     photoStorageId: v.optional(v.string()),
+    supplierLotNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -391,6 +397,7 @@ export const updateItem = mutation({
     if (args.specification !== undefined) updates.specification = args.specification;
     if (args.locationId !== undefined) updates.locationId = args.locationId;
     if (args.photoStorageId !== undefined) updates.photoStorageId = args.photoStorageId;
+    if (args.supplierLotNumber !== undefined) updates.supplierLotNumber = args.supplierLotNumber;
     if (args.observation !== undefined) updates.observation = args.observation;
 
     await ctx.db.patch(args.itemId, updates);

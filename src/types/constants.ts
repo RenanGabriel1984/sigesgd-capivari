@@ -123,7 +123,7 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
 export const UNITS_OF_MEASURE = [
-  "un", "pc", "cx", "m", "rl", "pct", "outro",
+  "un", "pc", "cx", "m", "rl", "pct", "po", "kt", "outro",
 ] as const;
 
 export const UNIT_LABELS: Record<string, string> = {
@@ -133,6 +133,8 @@ export const UNIT_LABELS: Record<string, string> = {
   m: "Metro (M)",
   rl: "Rolo (RL)",
   pct: "Pacote (PCT)",
+  po: "Pote (PO)",
+  kt: "Kit (KT)",
   outro: "Outro",
 };
 
