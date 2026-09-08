@@ -8,19 +8,36 @@ async function requireAdmin(ctx: any) {
   const user = await ctx.db.get(userId);
   if (!user) throw new Error("Perfil de usuário não encontrado");
   if (user.role !== "admin" && user.role !== "stock_manager")
-    throw new Error("Apenas administradores ou gerentes de estoque podem executar esta operação");
+    throw new Error(
+      "Apenas administradores ou gerentes de estoque podem executar esta operação"
+    );
   return { userId, user };
 }
 
 /**
- * Quick initial stock loading (implantação inicial).
+ * Generate lot number: LOT-YYYY-NNNNNN
+ */
+async function generateLotNumber(ctx: any, productId: string): Promise<string> {
+  const year = new Date().getFullYear();
+  const existingLots = await ctx.db
+    .query("lots")
+    .withIndex("by_product", (q: any) => q.eq("productId", productId))
+    .collect();
+  const seq = existingLots.length + 1;
+  return `LOT-${year}-${String(seq).padStart(6, "0")}`;
+}
+
+/**
+ * Initial stock loading (implantação inicial).
  *
- * For each product/location combination, creates or updates:
- *   - stockByLocation (per-location quantity)
- *   - stock (global quantity)
- *   - stockMovements (audit trail)
+ * For each product/location combination:
+ *   - Creates a lot (initial_inventory) for FIFO traceability
+ *   - Creates stockByLocation
+ *   - Creates/updates stock (global)
+ *   - Creates stockMovements
  *
- * Idempotent: if stock already exists for that product+location, adjusts the difference.
+ * BLOCKS if product already has an initial_inventory lot (prevents duplication).
+ * All quantities from initial load are traceable via the created lot.
  */
 export const initialStockLoad = mutation({
   args: {
@@ -41,17 +58,79 @@ export const initialStockLoad = mutation({
     }
 
     const now = Date.now();
+    const year = new Date().getFullYear();
+
+    // ── Pre-check: block if any product already has initial_inventory lots ──
+    for (const item of args.items) {
+      if (item.quantity <= 0) continue;
+
+      const existingInitialLots = await ctx.db
+        .query("lots")
+        .withIndex("by_product", (q) => q.eq("productId", item.productId))
+        .collect();
+      const hasInitialLot = existingInitialLots.some(
+        (l) => l.lotNumber.startsWith(`LOT-${year}-`) && l.active
+      );
+
+      if (hasInitialLot) {
+        const product = await ctx.db.get(item.productId);
+        throw new Error(
+          `Produto "${product?.name ?? item.productId}" já possui carga inicial. ` +
+            `Use saída, transferência ou inventário para ajustar.`
+        );
+      }
+    }
+
+    // ── Create entry header for the initial load ──
+    const entrySeq = (await ctx.db.query("entries").collect()).length + 1;
+    const entryNumber = `ENT-${year}-${String(entrySeq).padStart(6, "0")}`;
+    const entryId = await ctx.db.insert("entries", {
+      entryNumber,
+      receivedAt: now,
+      originType: "initial_inventory",
+      responsibleUserId: userId,
+      observation: args.observation ?? "Carga inicial de estoque",
+      status: "confirmed",
+      createdAt: now,
+      updatedAt: now,
+    });
+
     const summary: string[] = [];
     let totalProductsUpdated = 0;
     let totalQuantityLoaded = 0;
 
     for (const item of args.items) {
       if (item.quantity < 0) {
-        throw new Error(`Quantidade negativa não permitida para produto ${item.productId}`);
+        throw new Error(
+          `Quantidade negativa não permitida para produto ${item.productId}`
+        );
       }
-      if (item.quantity === 0) continue; // skip zero quantities
+      if (item.quantity === 0) continue;
 
-      // ── 1. stockByLocation ──
+      // ── 1. Create lot for traceability ──
+      const lotNumber = await generateLotNumber(ctx, item.productId);
+      const lotId = await ctx.db.insert("lots", {
+        lotNumber,
+        productId: item.productId,
+        entryId,
+        quantityReceived: item.quantity,
+        quantityAvailable: item.quantity,
+        receivedAt: now,
+        active: true,
+        observation: `Carga inicial — ${item.quantity} unidades`,
+      });
+
+      // ── 2. Create entry item ──
+      await ctx.db.insert("entryItems", {
+        entryId,
+        productId: item.productId,
+        quantity: item.quantity,
+        unitOfMeasure: "un",
+        lotId,
+        locationId: item.locationId,
+      });
+
+      // ── 3. stockByLocation ──
       const existingSbl = await ctx.db
         .query("stockByLocation")
         .withIndex("by_product", (q) => q.eq("productId", item.productId))
@@ -60,23 +139,19 @@ export const initialStockLoad = mutation({
         (s) => s.locationId === item.locationId
       );
 
-      const previousLocQty = sblForLocation?.quantity ?? 0;
-      const newLocQty = item.quantity;
-
       if (sblForLocation) {
-        // Adjust difference
-        const diff = newLocQty - previousLocQty;
-        if (diff === 0) continue;
-        await ctx.db.patch(sblForLocation._id, { quantity: newLocQty });
+        await ctx.db.patch(sblForLocation._id, {
+          quantity: sblForLocation.quantity + item.quantity,
+        });
       } else {
         await ctx.db.insert("stockByLocation", {
           productId: item.productId,
           locationId: item.locationId,
-          quantity: newLocQty,
+          quantity: item.quantity,
         });
       }
 
-      // ── 2. stock (global) ──
+      // ── 4. stock (global) ──
       const existingStock = await ctx.db
         .query("stock")
         .withIndex("by_product", (q) => q.eq("productId", item.productId))
@@ -104,26 +179,28 @@ export const initialStockLoad = mutation({
         });
       }
 
-      // ── 3. stockMovement (audit trail) ──
+      // ── 5. stockMovement (audit trail) ──
       await ctx.db.insert("stockMovements", {
         productId: item.productId,
         type: "adjustment",
-        quantity: newLocQty,
+        quantity: item.quantity,
         previousPhysical: previousGlobal,
         newPhysical: newGlobal,
         previousReserved: existingStock?.reservedQuantity ?? 0,
         newReserved: existingStock?.reservedQuantity ?? 0,
         userId,
-        observation: args.observation ?? `Carga inicial — ${newLocQty} unidades`,
+        entryId,
+        lotId: lotId as string,
+        observation: `Carga inicial — lote ${lotNumber} — ${item.quantity} unidades`,
         timestamp: now,
       });
 
       const product = await ctx.db.get(item.productId);
       const location = await ctx.db.get(item.locationId);
       summary.push(
-        `${product?.name ?? item.productId} → ${location?.name ?? item.locationId}: ${newLocQty}`
+        `${product?.name ?? item.productId} → ${location?.name ?? item.locationId}: ${item.quantity} (lote ${lotNumber})`
       );
-      totalQuantityLoaded += newLocQty;
+      totalQuantityLoaded += item.quantity;
       totalProductsUpdated++;
     }
 
@@ -132,12 +209,14 @@ export const initialStockLoad = mutation({
       userId,
       action: "create",
       entity: "stock",
-      details: `Carga inicial: ${totalProductsUpdated} itens, ${totalQuantityLoaded} unidades total`,
+      entityId: entryId,
+      details: `Carga inicial: ${totalProductsUpdated} itens, ${totalQuantityLoaded} unidades total, entrada ${entryNumber}`,
       timestamp: now,
     });
 
     return {
       message: "Carga inicial concluída",
+      entryNumber,
       productsUpdated: totalProductsUpdated,
       totalQuantity: totalQuantityLoaded,
       summary,
@@ -148,15 +227,15 @@ export const initialStockLoad = mutation({
 /**
  * Quick stock exit (saída simples).
  * Simplified exit without the full request/approval flow.
- * Uses FIFO lot consumption.
+ * Uses FIFO lot consumption. Reduces both global and location stock.
  */
 export const quickExit = mutation({
   args: {
     productId: v.id("products"),
     quantity: v.number(),
     locationId: v.optional(v.id("storageLocations")),
-    destination: v.string(), // Secretaria/destino
-    receiverName: v.string(), // Nome de quem recebeu
+    destination: v.string(),
+    receiverName: v.string(),
     reason: v.optional(v.string()),
     osNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
@@ -179,7 +258,8 @@ export const quickExit = mutation({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .first();
 
-    const available = (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
+    const available =
+      (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
 
     if (args.quantity > available) {
       throw new Error(
@@ -191,15 +271,19 @@ export const quickExit = mutation({
     const previousPhysical = stock?.physicalQuantity ?? 0;
     const previousReserved = stock?.reservedQuantity ?? 0;
 
-    // ── 1. Consume lots (FIFO) ──
+    // ── 1. Consume lots (FIFO: oldest first, then by lotNumber) ──
     const lots = await ctx.db
       .query("lots")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
-    
+
     const activeLots = lots
       .filter((l) => l.active && l.quantityAvailable > 0)
-      .sort((a, b) => a.receivedAt - b.receivedAt || a.lotNumber.localeCompare(b.lotNumber));
+      .sort(
+        (a, b) =>
+          a.receivedAt - b.receivedAt ||
+          a.lotNumber.localeCompare(b.lotNumber)
+      );
 
     let remaining = args.quantity;
     const consumedLots: Array<{ lotId: string; quantity: number }> = [];
@@ -230,7 +314,9 @@ export const quickExit = mutation({
         .query("stockByLocation")
         .withIndex("by_product", (q) => q.eq("productId", args.productId))
         .collect();
-      const sblForLocation = sbl.find((s) => s.locationId === args.locationId);
+      const sblForLocation = sbl.find(
+        (s) => s.locationId === args.locationId
+      );
 
       if (sblForLocation) {
         const newLocQty = sblForLocation.quantity - args.quantity;
@@ -294,26 +380,23 @@ export const quickExit = mutation({
 });
 
 /**
- * Cleanup mutation: remove test/homologation data.
- * Only deletes records that are clearly test data (not real operational data).
- * Preserves: users, passwords, auth, schema, audit logs.
+ * Cleanup: remove test/homologation data.
+ * Preserves users, passwords, auth, schema, audit logs.
  */
 export const cleanupTestData = mutation({
   args: {
-    confirm: v.literal(true), // must explicitly confirm
+    confirm: v.literal(true),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireAdmin(ctx);
-
     const deleted: Record<string, number> = {};
 
-    // Delete test entries (draft only — confirmed entries are real)
+    // Delete draft entries
     const drafts = await ctx.db
       .query("entries")
       .withIndex("by_status", (q) => q.eq("status", "draft"))
       .collect();
     for (const d of drafts) {
-      // Delete entry items first
       const items = await ctx.db
         .query("entryItems")
         .withIndex("by_entry", (q) => q.eq("entryId", d._id))
@@ -323,7 +406,7 @@ export const cleanupTestData = mutation({
     }
     deleted.entries_drafts = drafts.length;
 
-    // Delete pending requests (never approved)
+    // Delete pending requests
     const pendingRequests = await ctx.db
       .query("requests")
       .withIndex("by_status", (q) => q.eq("status", "pending"))
@@ -352,7 +435,7 @@ export const cleanupTestData = mutation({
     }
     deleted.lots_reset = lots.length;
 
-    // Reset stockByLocation
+    // Delete stockByLocation
     const sbl = await ctx.db.query("stockByLocation").collect();
     for (const s of sbl) {
       await ctx.db.delete(s._id);
@@ -368,15 +451,12 @@ export const cleanupTestData = mutation({
       timestamp: Date.now(),
     });
 
-    return {
-      message: "Dados de homologação limpos",
-      deleted,
-    };
+    return { message: "Dados de homologação limpos", deleted };
   },
 });
 
 /**
- * Check if initial stock has been loaded (for UI to show/hide the setup wizard).
+ * Check if initial stock has been loaded.
  */
 export const hasInitialStock = query({
   args: {},
