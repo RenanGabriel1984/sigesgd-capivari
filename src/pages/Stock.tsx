@@ -41,18 +41,43 @@ function StockSkeleton() {
   );
 }
 
+type StockFilter = "all" | "available" | "below_min" | "out";
+
+const FILTER_LABELS: Record<StockFilter, string> = {
+  all: "Todos",
+  available: "Disponível",
+  below_min: "Abaixo do mínimo",
+  out: "Sem estoque",
+};
+
 export default function Stock() {
   const products = useQuery(api.products.list) as ProductView[] | undefined;
   const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<StockFilter>("all");
 
   if (products === undefined) return <StockSkeleton />;
 
+  const situationOf = (p: ProductView) =>
+    getStockSituation(p.stock?.physicalQuantity ?? 0, p.minimumStock, p.idealStock);
+
   const filtered = products?.filter(
-    (p) =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.internalCode?.toLowerCase().includes(search.toLowerCase()) ||
-      p.manufacturer?.toLowerCase().includes(search.toLowerCase()) ||
-      p.brand?.toLowerCase().includes(search.toLowerCase())
+    (p) => {
+      const matchesSearch =
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.internalCode?.toLowerCase().includes(search.toLowerCase()) ||
+        p.manufacturer?.toLowerCase().includes(search.toLowerCase()) ||
+        p.brand?.toLowerCase().includes(search.toLowerCase());
+      if (!matchesSearch) return false;
+      const physical = p.stock?.physicalQuantity ?? 0;
+      const available = Math.max(0, physical - (p.stock?.reservedQuantity ?? 0));
+      if (filter === "available") return available > 0;
+      if (filter === "below_min") {
+        const s = situationOf(p);
+        return s === "critical" || s === "below_min";
+      }
+      if (filter === "out") return physical === 0;
+      return true;
+    }
   );
 
   const criticalCount = filtered?.filter((p) => {
@@ -90,12 +115,30 @@ export default function Stock() {
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Buscar produto..."
+              placeholder="O que você está procurando?"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 max-w-sm"
             />
           </div>
+        </div>
+
+        {/* Filtros simples */}
+        <div className="flex flex-wrap gap-2">
+          {(Object.keys(FILTER_LABELS) as StockFilter[]).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              className={
+                filter === f
+                  ? "px-3 py-1.5 rounded-full text-xs font-semibold bg-[var(--capivari-green)] text-white"
+                  : "px-3 py-1.5 rounded-full text-xs font-medium border text-muted-foreground hover:bg-muted/50"
+              }
+            >
+              {FILTER_LABELS[f]}
+            </button>
+          ))}
         </div>
 
         {/* Desktop Table */}

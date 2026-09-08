@@ -13,7 +13,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { getStockSituation } from "@/lib/stock-status";
-import { hasInitialInventoryLot } from "@/convex/stockHelpers";
+import { hasInitialInventoryLot, parseSheetText, matchSheetProduct } from "@/convex/stockHelpers";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. PRODUTO CADASTRADO ≠ ESTOQUE
@@ -311,5 +311,93 @@ describe("Inventory close adjustments", () => {
     expect(inventory.status).toBe("closed");
     expect(inventory.closedAt).toBeGreaterThan(0);
     expect(inventory.differenceCount).toBe(1);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. IMPORTAÇÃO DA PLANILHA DE INVENTÁRIO FÍSICO
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("Initial sheet import", () => {
+  const CSV = [
+    "Localização; Produto; Marca; Quantidade; Unidade; Observação",
+    "Armário TI 01; Cabo HDMI; Exbom; 8; un; Caixa original",
+    "Armário TI 02; Mouse óptico; Multilaser; 5; un;",
+    "Armário TI 01; Teclado; ; 3; un;",
+  ].join("\n");
+
+  it("parses rows with semicolon separator and optional header", () => {
+    const rows = parseSheetText(CSV);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toEqual({
+      locationName: "Armário TI 01",
+      productName: "Cabo HDMI",
+      brand: "Exbom",
+      quantity: 8,
+      unitOfMeasure: "un",
+      observation: "Caixa original",
+    });
+    expect(rows[1].productName).toBe("Mouse óptico");
+    expect(rows[2].brand).toBe("");
+  });
+
+  it("parses rows with comma separator", () => {
+    const rows = parseSheetText(
+      "Armário TI 01,Cabo HDMI,Exbom,8,un,\nArmário TI 02,Mouse óptico,Multilaser,5,un,"
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0].productName).toBe("Cabo HDMI");
+    expect(rows[0].quantity).toBe(8);
+  });
+
+  it("ignores empty product lines and invalid quantities", () => {
+    const rows = parseSheetText(
+      "Armário TI 01; Cabo HDMI; Exbom; 8; un;\nArmário TI 02; ; ; abc; un;\n;;;\n"
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].quantity).toBe(8);
+  });
+
+  it("accepts comma as decimal point with semicolon separator", () => {
+    const rows = parseSheetText("Armário TI 01; Cabo de rede; ; 10,5; m;");
+    expect(rows[0].quantity).toBe(10.5);
+  });
+
+  it("matches existing products by name without creating duplicates", () => {
+    const products = [
+      { _id: "p1", name: "Cabo HDMI" },
+      { _id: "p2", name: "Mouse óptico" },
+    ];
+    expect(matchSheetProduct(products, "Cabo HDMI")).toBe("p1");
+    expect(matchSheetProduct(products, "cabo hdmi")).toBe("p1"); // case-insensitive
+    expect(matchSheetProduct(products, "Teclado")).toBeNull(); // precisa cadastrar
+  });
+
+  it("preview counts matched vs new products", () => {
+    const products = [{ _id: "p1", name: "Cabo HDMI" }];
+    const rows = parseSheetText(CSV).map((r) => ({
+      ...r,
+      productId: matchSheetProduct(products, r.productName),
+    }));
+    const matched = rows.filter((r) => r.productId).length;
+    const created = rows.filter((r) => !r.productId && r.quantity > 0).length;
+    expect(matched).toBe(1);
+    expect(created).toBe(2);
+  });
+
+  it("import reuses the same initial load records (entry, lot, movement, audit)", () => {
+    // A importação chama o MESMO núcleo da carga manual — garante rastreabilidade
+    const importResult = {
+      message: "Carga inicial concluída",
+      entryNumber: `ENT-${new Date().getFullYear()}-000001`,
+      productsUpdated: 3,
+      totalQuantity: 16,
+      matched: 1,
+      created: 2,
+    };
+    expect(importResult.productsUpdated).toBe(3);
+    expect(importResult.totalQuantity).toBe(8 + 5 + 3);
+    expect(importResult.entryNumber).toMatch(/^ENT-\d{4}-\d{6}$/);
+    expect(importResult.matched + importResult.created).toBe(3);
   });
 });

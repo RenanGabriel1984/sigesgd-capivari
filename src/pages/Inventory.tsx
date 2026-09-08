@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
@@ -13,12 +13,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, ClipboardCheck, Play, Eye, CheckCircle, XCircle, Package, PackagePlus, Info } from "lucide-react";
+import { Plus, ClipboardCheck, Play, Eye, CheckCircle, XCircle, Package, PackagePlus, Info, Upload } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
+import { parseSheetText, matchSheetProduct } from "@/convex/stockHelpers";
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "Rascunho",
@@ -52,12 +53,13 @@ type InventoryView = Doc<"inventories"> & {
 export default function Inventory() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const canInitialLoad = isAdmin || user?.role === "stock_manager";
 
   const inventories = useQuery(api.inventory.list) as InventoryView[] | undefined;
   const locations = useQuery(api.storageLocations.listActive);
   const products = useQuery(api.products.listActive);
   const categories = useQuery(api.categories.listActive);
-  const initialStatus = useQuery(api.stockSetup.getInitialLoadStatus, isAdmin ? {} : "skip");
+  const initialStatus = useQuery(api.stockSetup.getInitialLoadStatus, canInitialLoad ? {} : "skip");
 
   const createInventory = useMutation(api.inventory.create);
   const startCounting = useMutation(api.inventory.startCounting);
@@ -66,6 +68,7 @@ export default function Inventory() {
   const closeInventory = useMutation(api.inventory.close);
   const cancelInventory = useMutation(api.inventory.cancel);
   const initialStockLoad = useMutation(api.stockSetup.initialStockLoad);
+  const importInitialSheet = useMutation(api.stockSetup.importInitialSheet);
   const createProduct = useMutation(api.products.create);
   const createCategory = useMutation(api.categories.create);
 
@@ -99,6 +102,11 @@ export default function Inventory() {
   // Criação contextual de categoria
   const [catModalOpen, setCatModalOpen] = useState(false);
   const [newCatName, setNewCatName] = useState("");
+
+  // Importação da planilha de inventário físico
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetText, setSheetText] = useState("");
+  const [importing, setImporting] = useState(false);
 
   const [loadingInitial, setLoadingInitial] = useState(false);
 
@@ -260,6 +268,50 @@ export default function Inventory() {
     }
   };
 
+  const sheetRows = useMemo(() => {
+    const parsed = parseSheetText(sheetText);
+    const locByName = new Map((locations ?? []).map((l) => [l.name.trim().toLowerCase(), l]));
+    return parsed.map((row) => {
+      const location = locByName.get(row.locationName.trim().toLowerCase());
+      const productId = matchSheetProduct(products ?? [], row.productName);
+      return { ...row, locationId: location?._id ?? null, productId };
+    });
+  }, [sheetText, locations, products]);
+
+  const sheetValidRows = sheetRows.filter((r) => r.locationId && r.quantity > 0);
+  const sheetMatched = sheetRows.filter((r) => r.productId).length;
+  const sheetNew = sheetRows.filter((r) => !r.productId && r.locationId && r.quantity > 0).length;
+  const sheetUnknownLocations = sheetRows.filter((r) => !r.locationId).length;
+
+  const handleImportSheet = async () => {
+    if (sheetValidRows.length === 0) {
+      toast.error("Nenhuma linha válida (verifique local e quantidade)");
+      return;
+    }
+    setImporting(true);
+    try {
+      const res = await importInitialSheet({
+        rows: sheetValidRows.map((r) => ({
+          locationId: r.locationId as any,
+          productName: r.productName,
+          brand: r.brand || undefined,
+          quantity: r.quantity,
+          unitOfMeasure: r.unitOfMeasure || undefined,
+          observation: r.observation || undefined,
+        })),
+        observation: "Importação da planilha de inventário físico",
+      });
+      toast.success(
+        `Importação concluída: ${res.productsUpdated} produto(s), ${res.totalQuantity} unidade(s) — ${res.matched} associado(s), ${res.created} cadastrado(s)`
+      );
+      setSheetOpen(false);
+      setSheetText("");
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao importar planilha");
+    }
+    setImporting(false);
+  };
+
   const handleConfirmInitialLoad = async () => {
     if (!initialLocationId) { toast.error("Selecione o local de armazenamento"); return; }
     const items = Object.entries(quantities)
@@ -294,11 +346,10 @@ export default function Inventory() {
           )}
         </div>
 
-        <Tabs value={mainTab} onValueChange={setMainTab}>
-          <TabsList>
-            <TabsTrigger value="inventories">Inventários</TabsTrigger>
-            {isAdmin && <TabsTrigger value="initial">Implantação Inicial</TabsTrigger>}
-          </TabsList>
+        <Tabs value={mainTab} onValueChange={setMainTab}>            <TabsList>
+              <TabsTrigger value="inventories">Inventários</TabsTrigger>
+              {canInitialLoad && <TabsTrigger value="initial">Implantação Inicial</TabsTrigger>}
+            </TabsList>
 
           {/* ═══ Inventários ═══ */}
           <TabsContent value="inventories" className="space-y-4">
@@ -484,7 +535,7 @@ export default function Inventory() {
           </TabsContent>
 
           {/* ═══ Implantação Inicial ═══ */}
-          {isAdmin && (
+          {canInitialLoad && (
             <TabsContent value="initial" className="space-y-4">
               <Card className="border-primary/20 bg-primary/5">
                 <CardContent className="py-4 flex gap-3 items-start">
@@ -516,6 +567,9 @@ export default function Inventory() {
                     </div>
                     <Button variant="outline" className="gap-2" onClick={() => setProductModalOpen(true)}>
                       <PackagePlus className="h-4 w-4" /> Novo Produto
+                    </Button>
+                    <Button variant="outline" className="gap-2" onClick={() => setSheetOpen(true)}>
+                      <Upload className="h-4 w-4" /> Importar planilha
                     </Button>
                   </div>
 
@@ -729,6 +783,78 @@ export default function Inventory() {
             <DialogFooter>
               <Button variant="outline" onClick={() => setProductModalOpen(false)}>Cancelar</Button>
               <Button onClick={handleQuickCreateProduct}>Criar Produto</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ═══ Importar planilha de inventário físico ═══ */}
+        <Dialog open={sheetOpen} onOpenChange={setSheetOpen}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><Upload className="h-4 w-4" /> Importar planilha de inventário</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Cole as linhas da planilha (separadas por <code>;</code> ou <code>,</code>). Colunas:
+                <strong> Localização; Produto; Marca; Quantidade; Unidade; Observação</strong>.
+                Produtos existentes são associados pelo nome — novos produtos são cadastrados automaticamente (categoria "Diversos").
+              </p>
+              <Textarea
+                value={sheetText}
+                onChange={(e) => setSheetText(e.target.value)}
+                rows={8}
+                placeholder={"Localização; Produto; Marca; Quantidade; Unidade; Observação\nArmário TI 01; Cabo HDMI; Exbom; 8; un; Caixa original\nArmário TI 02; Mouse óptico; Multilaser; 5; un;"}
+                className="font-mono text-xs"
+              />
+              {sheetText.trim() && (
+                <div className="border rounded-lg p-3 space-y-2">
+                  <p className="text-sm font-medium">Prévia</p>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <Badge variant="secondary">{sheetRows.length} linha(s)</Badge>
+                    <Badge variant="secondary" className="text-emerald-700 bg-emerald-50 border-emerald-200">{sheetMatched} associado(s) a produtos existentes</Badge>
+                    <Badge variant="secondary" className="text-amber-700 bg-amber-50 border-amber-200">{sheetNew} novo(s) serão cadastrados</Badge>
+                    {sheetUnknownLocations > 0 && (
+                      <Badge variant="destructive">{sheetUnknownLocations} com local não reconhecido</Badge>
+                    )}
+                  </div>
+                  <div className="overflow-x-auto max-h-48 overflow-y-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="text-xs">Local</TableHead>
+                          <TableHead className="text-xs">Produto</TableHead>
+                          <TableHead className="text-xs">Qtd</TableHead>
+                          <TableHead className="text-xs">Situação</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sheetRows.map((r, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="text-xs">{r.locationName || "—"}</TableCell>
+                            <TableCell className="text-xs">{r.productName}</TableCell>
+                            <TableCell className="text-xs font-mono">{r.quantity}</TableCell>
+                            <TableCell>
+                              {!r.locationId ? (
+                                <Badge variant="destructive" className="text-[10px]">Local não reconhecido</Badge>
+                              ) : r.productId ? (
+                                <Badge variant="secondary" className="text-[10px]">Existente</Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-[10px] text-amber-700">Será cadastrado</Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setSheetOpen(false); setSheetText(""); }}>Cancelar</Button>
+              <Button onClick={handleImportSheet} disabled={importing || sheetValidRows.length === 0}>
+                {importing ? "Importando..." : `Confirmar importação (${sheetValidRows.length} linha(s))`}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

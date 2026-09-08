@@ -13,16 +13,15 @@ import {
   ClipboardList,
   ArrowUpRight,
   AlertTriangle,
-  ShoppingCart,
   BarChart3,
-  ShoppingCart as OrderIcon,
   Plus,
   FileBarChart,
   Truck,
   Wrench,
   Key,
+  ClipboardCheck,
 } from "lucide-react";
-import { ROLE_LABELS } from "@/types/constants";
+import { getPermissions, ROLE_LABELS } from "@/types/constants";
 import type { UserRole } from "@/types/constants";
 import { useEffect, lazy, Suspense } from "react";
 
@@ -76,6 +75,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   const role = (user?.role ?? "technician") as UserRole;
+  const permissions = getPermissions(role);
 
   // Record login timestamp on mount
   useEffect(() => {
@@ -88,16 +88,175 @@ export default function Dashboard() {
   return (
     <AppShell>
       <div className="space-y-6 max-w-7xl mx-auto">
+        {/* ─── Hero institucional ─── */}
         <motion.div {...fadeIn}>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Olá{user?.name ? `, ${user.name.split(" ")[0]}` : ""}
-          </h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            {ROLE_LABELS[role]} — Painel de Gestão
-          </p>
+          <div className="relative overflow-hidden rounded-2xl bg-[var(--capivari-green-dark)] text-white">
+            <img
+              src="/assets/bandeira.svg"
+              alt=""
+              aria-hidden
+              className="absolute right-0 top-0 h-full w-48 sm:w-72 object-cover opacity-10"
+            />
+            <div className="relative flex items-center gap-4 p-5 sm:p-7">
+              <img
+                src="/assets/brasao.svg"
+                alt="Brasão de Capivari"
+                className="h-14 w-14 sm:h-16 sm:w-16 object-contain rounded-full bg-white/95 p-1 shrink-0"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              />
+              <div className="min-w-0">
+                <p className="text-xs text-white/70">Prefeitura Municipal de Capivari — SP</p>
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight mt-0.5">
+                  Olá{user?.name ? `, ${user.name.split(" ")[0]}` : ""}
+                </h1>
+                <p className="text-sm text-white/80 mt-0.5">Como podemos ajudar?</p>
+              </div>
+            </div>
+          </div>
         </motion.div>
 
-        {/* ─── KPI Cards ─── */}
+        {/* ─── Tarefas principais ─── */}
+        <motion.div {...fadeIn} transition={{ delay: 0.05 }}>
+          <h2 className="text-sm font-semibold text-muted-foreground mb-2">O que você precisa fazer?</h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {permissions.canCreateEntries && (
+              <Button
+                variant="outline"
+                className="h-auto flex-col items-start gap-2 p-4 rounded-xl border-2 border-[var(--capivari-green)]/30 hover:border-[var(--capivari-green)] hover:bg-[var(--capivari-green)]/5"
+                onClick={() => navigate("/exit")}
+              >
+                <ArrowUpRight className="h-6 w-6 text-[var(--capivari-green)]" />
+                <span className="font-semibold text-sm">Dar saída</span>
+                <span className="text-[10px] text-muted-foreground font-normal">Retirar material do estoque</span>
+              </Button>
+            )}
+            {permissions.canCreateEntries && (
+              <Button
+                variant="outline"
+                className="h-auto flex-col items-start gap-2 p-4 rounded-xl border-2 border-blue-200 hover:border-blue-500 hover:bg-blue-50"
+                onClick={() => navigate("/entries")}
+              >
+                <Plus className="h-6 w-6 text-blue-600" />
+                <span className="font-semibold text-sm">Registrar entrada</span>
+                <span className="text-[10px] text-muted-foreground font-normal">Material que chegou</span>
+              </Button>
+            )}
+            {permissions.canCreateRequests && (
+              <Button
+                variant="outline"
+                className="h-auto flex-col items-start gap-2 p-4 rounded-xl border-2 border-amber-200 hover:border-amber-500 hover:bg-amber-50"
+                onClick={() => navigate("/requests")}
+              >
+                <ClipboardList className="h-6 w-6 text-amber-600" />
+                <span className="font-semibold text-sm">Nova solicitação</span>
+                <span className="text-[10px] text-muted-foreground font-normal">Pedir um material</span>
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              className="h-auto flex-col items-start gap-2 p-4 rounded-xl border-2 border-emerald-200 hover:border-emerald-500 hover:bg-emerald-50"
+              onClick={() => navigate("/stock")}
+            >
+              <Package className="h-6 w-6 text-emerald-600" />
+              <span className="font-semibold text-sm">Consultar estoque</span>
+              <span className="text-[10px] text-muted-foreground font-normal">Ver o que tem disponível</span>
+            </Button>
+          </div>
+          {(permissions.canManageInventory || permissions.canViewMovements) && (
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              {permissions.canManageInventory && (
+                <Button variant="ghost" className="h-auto justify-start gap-2 p-3 rounded-xl border hover:bg-muted/50" onClick={() => navigate("/inventory")}>
+                  <ClipboardCheck className="h-5 w-5 text-[var(--capivari-green)]" />
+                  <span className="text-sm font-medium">Fazer inventário</span>
+                  <span className="text-[10px] text-muted-foreground">Conferir estoque físico</span>
+                </Button>
+              )}
+              {permissions.canViewMovements && (
+                <Button variant="ghost" className="h-auto justify-start gap-2 p-3 rounded-xl border hover:bg-muted/50" onClick={() => navigate("/reports")}>
+                  <FileBarChart className="h-5 w-5 text-blue-600" />
+                  <span className="text-sm font-medium">Relatórios</span>
+                  <span className="text-[10px] text-muted-foreground">Consumo e movimentações</span>
+                </Button>
+              )}
+            </div>
+          )}
+        </motion.div>
+
+        {/* ─── Indicadores ─── */}
+        <div className="pt-2">
+          <h2 className="text-sm font-semibold text-muted-foreground mb-3">Indicadores</h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+            <motion.div {...fadeIn} transition={{ delay: 0.05 }}>
+              <Card className="border-border/50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                      <Package className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold">{loading ? "—" : s!.totalProducts}</p>
+                      <p className="text-xs text-muted-foreground">Itens no Catálogo</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <motion.div {...fadeIn} transition={{ delay: 0.1 }}>
+              <Card className="border-border/50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
+                      <AlertTriangle className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold">{loading ? "—" : s!.criticalStock}</p>
+                      <p className="text-xs text-muted-foreground">Estoque Crítico</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <motion.div {...fadeIn} transition={{ delay: 0.15 }}>
+              <Card className="border-border/50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
+                      <ClipboardList className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-2xl font-bold">{loading ? "—" : s!.pendingThisMonth}</p>
+                      <p className="text-xs text-muted-foreground">Solicitações Pendentes (Mês)</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            <motion.div {...fadeIn} transition={{ delay: 0.2 }}>
+              <Card className="border-border/50">
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                      <BarChart3 className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-emerald-600">+{loading ? "—" : s!.entriesThisMonth}</span>
+                        <span className="text-muted-foreground text-xs">/</span>
+                        <span className="text-sm font-bold text-rose-600">-{loading ? "—" : s!.exitsThisMonth}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Entradas / Saídas (Mês)</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </div>
+        </div>
+
+        {/* ─── KPI Cards (2ª linha) ─── */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
           <motion.div {...fadeIn} transition={{ delay: 0.05 }}>
             <Card className="border-border/50">
@@ -303,43 +462,6 @@ export default function Dashboard() {
             </Card>
           </motion.div>
         </div>
-
-        {/* ─── Quick Actions ─── */}
-        <motion.div {...fadeIn} transition={{ delay: 0.35 }}>
-          <Card className="border-border/50">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Ações Rápidas</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/entries")}>
-                  <Plus className="h-5 w-5 text-primary" />
-                  <span className="text-xs">Nova Entrada</span>
-                </Button>
-                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/requests")}>
-                  <OrderIcon className="h-5 w-5 text-primary" />
-                  <span className="text-xs">Nova Solicitação</span>
-                </Button>
-                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/gomaq")}>
-                  <ArrowUpRight className="h-5 w-5 text-primary" />
-                  <span className="text-xs">Troca Gomaq</span>
-                </Button>
-                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/assets")}>
-                  <Package className="h-5 w-5 text-primary" />
-                  <span className="text-xs">Novo Equipamento</span>
-                </Button>
-                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/inventory")}>
-                  <ClipboardList className="h-5 w-5 text-primary" />
-                  <span className="text-xs">Inventário</span>
-                </Button>
-                <Button variant="outline" className="gap-2 h-auto py-3 flex-col" onClick={() => navigate("/reports")}>
-                  <FileBarChart className="h-5 w-5 text-primary" />
-                  <span className="text-xs">Relatórios</span>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
       </div>
     </AppShell>
   );

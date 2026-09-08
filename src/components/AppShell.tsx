@@ -30,6 +30,7 @@ import {
   Key,
   RotateCcw,
   ArrowRightLeft,
+  PackageMinus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -53,6 +54,8 @@ interface NavItem {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   permission: keyof ReturnType<typeof getPermissions>;
+  /** Permissão alternativa (ex.: técnico pode consultar estoque) */
+  permission2?: keyof ReturnType<typeof getPermissions>;
   badge?: number;
 }
 
@@ -61,41 +64,39 @@ interface NavSection {
   items: NavItem[];
 }
 
+// Navegação organizada por TAREFAS (não pela estrutura técnica do banco).
 const NAV_SECTIONS: NavSection[] = [
   { items: [
-    { label: "Painel", href: "/dashboard", icon: LayoutDashboard, permission: "canViewMovements" },
+    { label: "Início", href: "/dashboard", icon: LayoutDashboard, permission: "canViewMovements", permission2: "canCreateRequests" },
   ]},
-  { title: "Estoque", items: [
-    { label: "Estoque", href: "/stock", icon: Warehouse, permission: "canManageStock" },
-    { label: "Entradas", href: "/entries", icon: ShoppingCart, permission: "canCreateEntries" },
-    { label: "Lotes", href: "/lots", icon: Boxes, permission: "canManageStock" },
-    { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
-    { label: "Locais", href: "/storage-locations", icon: MapPin, permission: "canManageStorageLocations" },
-  ]},
-  { title: "Movimentações", items: [
+  { title: "Operação", items: [
+    { label: "Estoque", href: "/stock", icon: Warehouse, permission: "canViewMovements", permission2: "canCreateRequests" },
+    { label: "Entrada de material", href: "/entries", icon: ShoppingCart, permission: "canCreateEntries" },
+    { label: "Dar saída", href: "/exit", icon: PackageMinus, permission: "canCreateEntries" },
     { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests" },
-    { label: "Devoluções", href: "/returns", icon: RotateCcw, permission: "canReturnStock" },
-    { label: "Transferências", href: "/transfers", icon: ArrowRightLeft, permission: "canTransferStock" },
+    { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
   ]},
-  { title: "Gomaq", items: [
-    { label: "Gomaq", href: "/gomaq", icon: ArrowRightLeft, permission: "canManageGomaQ" },
-  ]},
-  { title: "Ativos", items: [
+  { title: "Equipamentos", items: [
+    { label: "Impressoras / Gomaq", href: "/gomaq", icon: Printer, permission: "canManageGomaQ" },
     { label: "Equipamentos", href: "/assets", icon: Monitor, permission: "canManageAssets" },
     { label: "Licenças", href: "/licenses", icon: Key, permission: "canManageLicenses" },
     { label: "Impressoras", href: "/printers", icon: Printer, permission: "canManageProducts" },
   ]},
-  { title: "Análises", items: [
+  { title: "Consultas", items: [
     { label: "Relatórios", href: "/reports", icon: BarChart3, permission: "canViewMovements" },
-    { label: "Movimentações", href: "/movements", icon: ArrowLeftRight, permission: "canViewMovements" },
-    { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
+    { label: "Histórico", href: "/movements", icon: ArrowLeftRight, permission: "canViewMovements" },
+    { label: "Devoluções", href: "/returns", icon: RotateCcw, permission: "canReturnStock" },
+    { label: "Transferências", href: "/transfers", icon: ArrowRightLeft, permission: "canTransferStock" },
   ]},
   { title: "Administração", items: [
     { label: "Produtos", href: "/products", icon: Package, permission: "canManageProducts" },
     { label: "Categorias", href: "/categories", icon: Tags, permission: "canManageCategories" },
     { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
+    { label: "Lotes", href: "/lots", icon: Boxes, permission: "canManageStock" },
+    { label: "Locais", href: "/storage-locations", icon: MapPin, permission: "canManageStorageLocations" },
     { label: "Organizações", href: "/organization", icon: Building2, permission: "canManageOrg" },
     { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },
+    { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
     { label: "Configurações", href: "/settings", icon: Settings, permission: "canManageSettings" },
   ]},
 ];
@@ -193,7 +194,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const filteredSections = NAV_SECTIONS.map((section) => ({
     ...section,
-    items: section.items.filter((item) => permissions[item.permission]),
+    items: section.items.filter(
+      (item) => permissions[item.permission] || (item.permission2 ? permissions[item.permission2] : false)
+    ),
   })).filter((section) => section.items.length > 0);
 
   const handleSignOut = async () => {

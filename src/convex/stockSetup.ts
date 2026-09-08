@@ -40,76 +40,73 @@ async function generateLotNumber(ctx: any, productId: string): Promise<string> {
  * BLOCKS if product already has an initial_inventory lot (prevents duplication).
  * All quantities from initial load are traceable via the created lot.
  */
-export const initialStockLoad = mutation({
-  args: {
-    items: v.array(
-      v.object({
-        productId: v.id("products"),
-        locationId: v.id("storageLocations"),
-        quantity: v.number(),
-      })
-    ),
-    observation: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const { userId } = await requireAdmin(ctx);
+/**
+ * Núcleo compartilhado da implantação inicial (usado pela carga manual e pela
+ * importação da planilha). Gera entrada, lote, saldo por local, saldo global,
+ * movimentação e auditoria — sempre com a mesma lógica.
+ */
+async function performInitialLoad(
+  ctx: any,
+  userId: string,
+  items: Array<{ productId: string; locationId: string; quantity: number }>,
+  observation: string
+) {
+  if (!items || items.length === 0) {
+    throw new Error("Nenhum item informado para carga inicial");
+  }
 
-    if (!args.items || args.items.length === 0) {
-      throw new Error("Nenhum item informado para carga inicial");
-    }
+  const now = Date.now();
+  const year = new Date().getFullYear();
 
-    const now = Date.now();
-    const year = new Date().getFullYear();
+  // ── Pre-check: block if any product already has initial_inventory lots ──
+  // A carga inicial é caracterizada por um lote ativo vinculado a uma entrada
+  // com originType "initial_inventory" (não confundir com lotes de compras).
+  for (const item of items) {
+    if (item.quantity <= 0) continue;
 
-    // ── Pre-check: block if any product already has initial_inventory lots ──
-    // A carga inicial é caracterizada por um lote ativo vinculado a uma entrada
-    // com originType "initial_inventory" (não confundir com lotes de compras).
-    for (const item of args.items) {
-      if (item.quantity <= 0) continue;
+    const existingLots = await ctx.db
+      .query("lots")
+      .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+      .collect();
+    const hasInitialLot = await hasInitialInventoryLot(
+      existingLots,
+      (entryId) => ctx.db.get(entryId as any)
+    );
 
-      const existingLots = await ctx.db
-        .query("lots")
-        .withIndex("by_product", (q) => q.eq("productId", item.productId))
-        .collect();
-      const hasInitialLot = await hasInitialInventoryLot(
-        existingLots,
-        (entryId) => ctx.db.get(entryId as any)
+    if (hasInitialLot) {
+      const product = await ctx.db.get(item.productId);
+      throw new Error(
+        `Produto "${product?.name ?? item.productId}" já possui carga inicial confirmada. ` +
+          `Use saída, transferência ou inventário para ajustar.`
       );
-
-      if (hasInitialLot) {
-        const product = await ctx.db.get(item.productId);
-        throw new Error(
-          `Produto "${product?.name ?? item.productId}" já possui carga inicial confirmada. ` +
-            `Use saída, transferência ou inventário para ajustar.`
-        );
-      }
     }
+  }
 
-    // ── Create entry header for the initial load ──
-    const entrySeq = (await ctx.db.query("entries").collect()).length + 1;
-    const entryNumber = `ENT-${year}-${String(entrySeq).padStart(6, "0")}`;
-    const entryId = await ctx.db.insert("entries", {
-      entryNumber,
-      receivedAt: now,
-      originType: "initial_inventory",
-      responsibleUserId: userId,
-      observation: args.observation ?? "Carga inicial de estoque",
-      status: "confirmed",
-      createdAt: now,
-      updatedAt: now,
-    });
+  // ── Create entry header for the initial load ──
+  const entrySeq = (await ctx.db.query("entries").collect()).length + 1;
+  const entryNumber = `ENT-${year}-${String(entrySeq).padStart(6, "0")}`;
+  const entryId = await ctx.db.insert("entries", {
+    entryNumber,
+    receivedAt: now,
+    originType: "initial_inventory",
+    responsibleUserId: userId,
+    observation,
+    status: "confirmed",
+    createdAt: now,
+    updatedAt: now,
+  });
 
-    const summary: string[] = [];
-    let totalProductsUpdated = 0;
-    let totalQuantityLoaded = 0;
+  const summary: string[] = [];
+  let totalProductsUpdated = 0;
+  let totalQuantityLoaded = 0;
 
-    for (const item of args.items) {
-      if (item.quantity < 0) {
-        throw new Error(
-          `Quantidade negativa não permitida para produto ${item.productId}`
-        );
-      }
-      if (item.quantity === 0) continue;
+  for (const item of items) {
+    if (item.quantity < 0) {
+      throw new Error(
+        `Quantidade negativa não permitida para produto ${item.productId}`
+      );
+    }
+    if (item.quantity === 0) continue;
 
       // ── 1. Create lot for traceability ──
       const lotNumber = await generateLotNumber(ctx, item.productId);
@@ -137,10 +134,10 @@ export const initialStockLoad = mutation({
       // ── 3. stockByLocation ──
       const existingSbl = await ctx.db
         .query("stockByLocation")
-        .withIndex("by_product", (q) => q.eq("productId", item.productId))
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
         .collect();
       const sblForLocation = existingSbl.find(
-        (s) => s.locationId === item.locationId
+        (s: any) => s.locationId === item.locationId
       );
 
       if (sblForLocation) {
@@ -158,16 +155,16 @@ export const initialStockLoad = mutation({
       // ── 4. stock (global) ──
       const existingStock = await ctx.db
         .query("stock")
-        .withIndex("by_product", (q) => q.eq("productId", item.productId))
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
         .first();
 
       const previousGlobal = existingStock?.physicalQuantity ?? 0;
       const totalForProduct = await ctx.db
         .query("stockByLocation")
-        .withIndex("by_product", (q) => q.eq("productId", item.productId))
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
         .collect();
       const newGlobal = totalForProduct.reduce(
-        (sum, s) => sum + s.quantity,
+        (sum: number, s: any) => sum + s.quantity,
         0
       );
 
@@ -225,6 +222,178 @@ export const initialStockLoad = mutation({
       totalQuantity: totalQuantityLoaded,
       summary,
     };
+}
+
+/**
+ * Carga inicial manual (implantação inicial).
+ */
+export const initialStockLoad = mutation({
+  args: {
+    items: v.array(
+      v.object({
+        productId: v.id("products"),
+        locationId: v.id("storageLocations"),
+        quantity: v.number(),
+      })
+    ),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireAdmin(ctx);
+    return performInitialLoad(
+      ctx,
+      userId,
+      args.items,
+      args.observation ?? "Carga inicial de estoque"
+    );
+  },
+});
+
+/**
+ * Importação da planilha de inventário físico (implantação inicial em massa).
+ *
+ * Cada linha é associada a um produto existente pelo nome (sem duplicatas) ou
+ * cria um produto novo (categoria padrão "Diversos" criada idempotentemente).
+ * Depois reutiliza o MESMO núcleo da carga inicial: entrada, lote,
+ * stockByLocation, stock, movimentação e auditoria.
+ */
+export const importInitialSheet = mutation({
+  args: {
+    rows: v.array(
+      v.object({
+        locationId: v.id("storageLocations"),
+        productName: v.string(),
+        brand: v.optional(v.string()),
+        quantity: v.number(),
+        unitOfMeasure: v.optional(v.string()),
+        observation: v.optional(v.string()),
+      })
+    ),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireAdmin(ctx);
+
+    if (!args.rows || args.rows.length === 0) {
+      throw new Error("Nenhuma linha informada para importação");
+    }
+
+    // Categoria padrão para produtos novos (idempotente)
+    const allCategories = await ctx.db.query("categories").collect();
+    let fallbackCategory: any = allCategories.find(
+      (c: any) => c.name.toLowerCase() === "diversos"
+    );
+    if (!fallbackCategory) {
+      const catId = await ctx.db.insert("categories", {
+        name: "Diversos",
+        description: "Categoria padrão para itens importados da planilha inicial",
+        active: true,
+      });
+      fallbackCategory = await ctx.db.get(catId);
+    }
+
+    const products = await ctx.db
+      .query("products")
+      .withIndex("by_active", (q: any) => q.eq("active", true))
+      .collect();
+
+    const items: Array<{ productId: string; locationId: string; quantity: number }> = [];
+    let matched = 0;
+    let created = 0;
+
+    for (const row of args.rows) {
+      const name = (row.productName ?? "").trim();
+      if (!name || row.quantity <= 0) continue;
+
+      const existing = products.find(
+        (p: any) => p.name.trim().toLowerCase() === name.toLowerCase()
+      );
+      let productId: string;
+      if (existing) {
+        productId = existing._id;
+        matched++;
+      } else {
+        const id = await ctx.db.insert("products", {
+          name,
+          categoryId: fallbackCategory._id,
+          unitOfMeasure: row.unitOfMeasure ?? "un",
+          brand: row.brand || undefined,
+          minimumStock: 0,
+          idealStock: 0,
+          maximumStock: 0,
+          active: true,
+        });
+        await ctx.db.insert("auditLogs", {
+          userId,
+          action: "create",
+          entity: "products",
+          entityId: id,
+          details: `Produto criado pela importação da planilha inicial: ${name}`,
+          timestamp: Date.now(),
+        });
+        products.push({ _id: id } as any);
+        productId = id;
+        created++;
+      }
+
+      items.push({
+        productId,
+        locationId: row.locationId,
+        quantity: row.quantity,
+      });
+    }
+
+    if (items.length === 0) {
+      throw new Error("Nenhuma linha válida para importar (verifique nomes e quantidades)");
+    }
+
+    const result = await performInitialLoad(
+      ctx,
+      userId,
+      items,
+      args.observation ?? "Importação da planilha de inventário físico"
+    );
+
+    return {
+      ...result,
+      matched,
+      created,
+      totalRows: args.rows.length,
+    };
+  },
+});
+
+/**
+ * Resumo de localizações por produto (usado no fluxo "Dar saída").
+ */
+export const productLocationSummary = query({
+  args: {},
+  handler: async (ctx) => {
+    const sbl = await ctx.db.query("stockByLocation").collect();
+    const locIds = [...new Set(sbl.map((s) => s.locationId))];
+    const locs = await Promise.all(locIds.map((id) => ctx.db.get(id)));
+    const locName = new Map(
+      locs
+        .filter((l): l is NonNullable<typeof l> => !!l)
+        .map((l) => [l._id, l.name])
+    );
+    const byProduct = new Map<
+      string,
+      Array<{ locationId: string; locationName: string; quantity: number }>
+    >();
+    for (const s of sbl) {
+      const arr = byProduct.get(s.productId) ?? [];
+      arr.push({
+        locationId: s.locationId,
+        locationName: locName.get(s.locationId) ?? "—",
+        quantity: s.quantity,
+      });
+      byProduct.set(s.productId, arr);
+    }
+    return Array.from(byProduct.entries()).map(([productId, locations]) => ({
+      productId,
+      locations,
+    }));
   },
 });
 
