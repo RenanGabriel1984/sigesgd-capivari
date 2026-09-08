@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import type { Doc } from "@/convex/_generated/dataModel";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,8 +33,21 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: "text-red-600 bg-red-50",
 };
 
+// Formato retornado por api.inventory.list (inventário + contagens + joins)
+type InventoryCountView = Doc<"inventoryCounts"> & {
+  product: Doc<"products"> | null;
+};
+
+type InventoryView = Doc<"inventories"> & {
+  responsible: Doc<"users"> | null;
+  closedBy: Doc<"users"> | null;
+  location: Doc<"storageLocations"> | null;
+  category: Doc<"categories"> | null;
+  counts: InventoryCountView[];
+};
+
 export default function Inventory() {
-  const inventories = useQuery(api.inventory.list);
+  const inventories = useQuery(api.inventory.list) as InventoryView[] | undefined;
   const createInventory = useMutation(api.inventory.create);
   const startCounting = useMutation(api.inventory.startCounting);
   const saveCount = useMutation(api.inventory.saveCount);
