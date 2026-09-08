@@ -223,20 +223,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="flex h-16 items-center gap-2.5 border-b border-border/60 px-4">
           {!collapsed && (
             <Link to="/dashboard" className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-xs shrink-0">
+              <img
+                src="/assets/brasao.svg"
+                alt="Brasão de Capivari"
+                className="h-8 w-8 object-contain shrink-0"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                  const fb = (e.target as HTMLElement).nextElementSibling;
+                  if (fb) (fb as HTMLElement).style.display = "flex";
+                }}
+              />
+              <div className="hidden h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-xs shrink-0">
                 SG
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-semibold truncate leading-tight">SIGESGD</p>
+                <p className="text-sm font-semibold truncate leading-tight text-[var(--capivari-green)]">SIGESGD</p>
                 <p className="text-[10px] text-muted-foreground truncate leading-tight">Capivari</p>
               </div>
             </Link>
           )}
           {collapsed && (
             <Link to="/dashboard" className="mx-auto">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-xs">
-                SG
-              </div>
+              <img
+                src="/assets/brasao.svg"
+                alt="Brasão"
+                className="h-8 w-8 object-contain"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                }}
+              />
             </Link>
           )}
         </div>
@@ -298,11 +313,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <div className="flex h-16 items-center justify-between border-b border-border/60 px-4">
                 <Link to="/dashboard" className="flex items-center gap-2.5">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-xs">
-                    SG
-                  </div>
+                  <img
+                    src="/assets/brasao.svg"
+                    alt="Brasão de Capivari"
+                    className="h-8 w-8 object-contain"
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
+                  />
                   <div>
-                    <p className="text-sm font-semibold leading-tight">SIGESGD</p>
+                    <p className="text-sm font-semibold leading-tight text-[var(--capivari-green)]">SIGESGD</p>
                     <p className="text-[10px] text-muted-foreground leading-tight">Capivari</p>
                   </div>
                 </Link>
@@ -342,10 +362,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
         {/* PWA Install Banner */}
         {showInstallBanner && (
-          <div className="flex items-center gap-3 bg-primary/5 border-b border-primary/20 px-4 py-2.5 shrink-0">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-[10px] shrink-0">
-              SG
-            </div>
+          <div className="flex items-center gap-3 bg-[var(--capivari-green)]/5 border-b border-[var(--capivari-green)]/20 px-4 py-2.5 shrink-0">
+            <img
+              src="/assets/brasao.svg"
+              alt="Brasão"
+              className="h-8 w-8 object-contain shrink-0"
+              onError={(e) => {(e.target as HTMLImageElement).style.display = "none";}}
+            />
             <p className="text-sm text-foreground flex-1 min-w-0">
               <span className="font-medium">Instalar o SIGESGD</span> na Tela Inicial para acesso rápido.
             </p>

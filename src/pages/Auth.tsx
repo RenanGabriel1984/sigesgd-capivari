@@ -10,12 +10,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 import { useAuth } from "@/hooks/use-auth";
-import { ArrowRight, Loader2, Lock, Mail, Eye, EyeOff, KeyRound } from "lucide-react";
+import { ArrowRight, Loader2, Lock, Mail, Eye, EyeOff, KeyRound, ShieldCheck, AlertTriangle } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
 
@@ -36,6 +37,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   const requestPasswordReset = useMutation(api.passwords.requestPasswordReset);
   const confirmPasswordReset = useMutation(api.passwords.confirmPasswordReset);
+  const forceChangePassword = useMutation(api.passwords.forceChangePassword);
+  const user = useQuery(api.users.currentUser);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -51,9 +54,23 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [newPassword, setNewPassword] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
 
+  // First access state
+  const [firstAccessOpen, setFirstAccessOpen] = useState(false);
+  const [faNewPassword, setFaNewPassword] = useState("");
+  const [faConfirmPassword, setFaConfirmPassword] = useState("");
+  const [faLoading, setFaLoading] = useState(false);
+  const [faShowPassword, setFaShowPassword] = useState(false);
+
   useEffect(() => {
-    if (!authLoading && isAuthenticated) navigate(redirect);
-  }, [authLoading, isAuthenticated, navigate, redirect]);
+    if (!authLoading && isAuthenticated) {
+      // Check if user needs to change password (first access)
+      if (user?.requiresPasswordReset) {
+        setFirstAccessOpen(true);
+        return;
+      }
+      navigate(redirect);
+    }
+  }, [authLoading, isAuthenticated, navigate, redirect, user]);
 
   const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -71,12 +88,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       navigate(redirect);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Erro ao entrar";
-      if (msg.includes("inativo")) {
-        setError("Usuário inativo. Contate o administrador do sistema.");
-      } else if (msg.includes("não encontrado") || msg.includes("incorretos") || msg.includes("não configurada")) {
-        setError("E-mail ou senha incorretos");
-      } else {
+      if (msg.includes("inativo") || msg.includes("desativado")) {
+        setError("Seu acesso está desativado. Procure o administrador do sistema.");
+      } else if (msg.includes("bloqueado")) {
         setError(msg);
+      } else if (msg.includes("não encontrado") || msg.includes("incorretos") || msg.includes("não configurada") || msg.includes("inválidos")) {
+        setError("E-mail ou senha inválidos.");
+      } else {
+        setError("E-mail ou senha inválidos.");
       }
       setIsLoading(false);
     }
@@ -86,9 +105,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     if (!forgotEmail.trim()) { toast.error("Informe seu e-mail"); return; }
     setForgotLoading(true);
     try {
-      const result = await requestPasswordReset({ email: forgotEmail.trim() });
+      await requestPasswordReset({ email: forgotEmail.trim() });
       setForgotStep("code");
-      toast.success("Verifique seu e-mail para o código de recuperação.");
+      toast.success("Se os dados estiverem cadastrados, enviaremos as instruções para recuperação.");
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao solicitar recuperação");
     }
@@ -117,47 +136,73 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setForgotLoading(false);
   };
 
-  const handleGuestLogin = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      await signIn("anonymous");
-      navigate(redirect);
-    } catch (error) {
-      setError(`Não foi possível entrar como visitante: ${error instanceof Error ? error.message : "Erro desconhecido"}`);
-      setIsLoading(false);
+  const handleFirstAccess = async () => {
+    if (!faNewPassword.trim() || faNewPassword.length < 6) {
+      toast.error("A nova senha deve ter pelo menos 6 caracteres");
+      return;
     }
+    if (faNewPassword !== faConfirmPassword) {
+      toast.error("As senhas não coincidem");
+      return;
+    }
+    setFaLoading(true);
+    try {
+      await forceChangePassword({ newPassword: faNewPassword.trim() });
+      toast.success("Senha definida com sucesso! Bem-vindo ao SIGESGD.");
+      setFirstAccessOpen(false);
+      navigate(redirect);
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao definir senha");
+    }
+    setFaLoading(false);
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-b from-[#1a5632] via-[#1a5632] to-[#0d3a1f]">
-      {/* Top bar with Capivari blue accent */}
-      <div className="h-1 w-full bg-[#5b9bd5]" />
+    <div className="min-h-screen flex flex-col">
+      {/* Top accent stripe — Capivari blue */}
+      <div className="h-1 w-full bg-[var(--capivari-blue)]" />
 
-      <header className="flex items-center justify-between px-4 sm:px-6 h-16 border-b border-white/10 bg-white/5 backdrop-blur-sm">
+      {/* Header bar */}
+      <header className="flex items-center justify-between px-4 sm:px-6 h-14 border-b border-border/40 bg-card/80 backdrop-blur-sm">
         <Link to="/" className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white text-[#1a5632] font-bold text-sm shadow-sm">
-            SG
-          </div>
+          <img
+            src="/assets/brasao.svg"
+            alt="Brasão de Capivari"
+            className="h-8 w-8 object-contain"
+            onError={(e) => {
+              (e.target as HTMLImageElement).style.display = "none";
+            }}
+          />
           <div>
-            <p className="text-sm font-bold leading-tight tracking-tight text-white">SIGESGD</p>
-            <p className="text-[10px] text-white/60 leading-tight">Capivari</p>
+            <p className="text-sm font-bold leading-tight tracking-tight text-[var(--capivari-green)]">SIGESGD</p>
+            <p className="text-[10px] text-muted-foreground leading-tight">Capivari</p>
           </div>
         </Link>
       </header>
 
-      <div className="flex-1 flex items-center justify-center px-4 py-8">
+      <div className="flex-1 flex items-center justify-center px-4 py-8 bg-gradient-to-b from-[#f8faf9] to-background">
         <div className="w-full max-w-md">
-          {/* Institutional header */}
-          <div className="text-center mb-6">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white text-[#1a5632] font-bold text-2xl mx-auto mb-4 shadow-lg">
+          {/* Institutional header with coat of arms */}
+          <div className="text-center mb-8">
+            <img
+              src="/assets/brasao.svg"
+              alt="Brasão Municipal de Capivari"
+              className="h-20 w-20 mx-auto mb-4 object-contain drop-shadow-sm"
+              onError={(e) => {
+                // Fallback to styled div
+                (e.target as HTMLImageElement).style.display = "none";
+                const fallback = document.getElementById("brasao-fallback");
+                if (fallback) fallback.style.display = "flex";
+              }}
+            />
+            <div id="brasao-fallback" style={{ display: "none" }} className="h-20 w-20 mx-auto mb-4 items-center justify-center rounded-2xl bg-[var(--capivari-green)] text-white font-bold text-2xl shadow-lg">
               SG
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-white">SIGESGD Capivari</h1>
-            <p className="text-sm text-white/70 mt-1">
+            <h1 className="text-xl font-bold tracking-tight text-[var(--capivari-green)]">SIGESGD Capivari</h1>
+            <p className="text-sm text-muted-foreground mt-1">
               Sistema Integrado de Gestão
             </p>
-            <p className="text-xs text-white/50">
+            <p className="text-xs text-muted-foreground/70 mt-0.5">
               Secretaria de Gestão e Governo Digital
             </p>
           </div>
@@ -173,13 +218,13 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               <CardContent>
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="email">E-mail</Label>
+                    <Label htmlFor="email">E-mail institucional</Label>
                     <div className="relative">
                       <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                       <Input
                         id="email"
                         name="email"
-                        placeholder="seu@email.com"
+                        placeholder="seu.email@capivari.sp.gov.br"
                         type="email"
                         className="pl-9"
                         disabled={isLoading}
@@ -221,31 +266,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 </div>
 
                 {error && (
-                  <p className="mt-3 text-sm text-destructive text-center">{error}</p>
+                  <Alert variant="destructive" className="mt-3">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription className="text-sm">{error}</AlertDescription>
+                  </Alert>
                 )}
-
-                <div className="mt-4">
-                  <div className="relative">
-                    <div className="absolute inset-0 flex items-center">
-                      <span className="w-full border-t" />
-                    </div>
-                    <div className="relative flex justify-center text-xs uppercase">
-                      <span className="bg-background px-2 text-muted-foreground">Ou</span>
-                    </div>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full mt-4"
-                    onClick={handleGuestLogin}
-                    disabled={isLoading}
-                  >
-                    Entrar como Visitante
-                  </Button>
-                </div>
               </CardContent>
-              <CardFooter className="flex-col gap-2">
-                <Button type="submit" className="w-full" disabled={isLoading || !email.trim() || !password}>
+              <CardFooter className="flex-col gap-3">
+                <Button type="submit" className="w-full bg-[var(--capivari-green)] hover:bg-[var(--capivari-green-dark)]" disabled={isLoading || !email.trim() || !password}>
                   {isLoading ? (
                     <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Entrando...</>
                   ) : (
@@ -254,7 +282,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 </Button>
                 <button
                   type="button"
-                  className="text-xs text-primary hover:underline text-center mt-2 cursor-pointer"
+                  className="text-xs text-[var(--capivari-blue)] hover:underline text-center cursor-pointer"
                   onClick={() => {
                     setForgotDialogOpen(true);
                     setForgotStep("email");
@@ -268,10 +296,17 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               </CardFooter>
             </form>
           </Card>
+
+          {/* Footer */}
+          <div className="mt-6 text-center">
+            <p className="text-[10px] text-muted-foreground/50">
+              Prefeitura Municipal de Capivari — SP
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* Forgot Password Dialog */}
+      {/* ═══ Forgot Password Dialog ═══ */}
       <Dialog open={forgotDialogOpen} onOpenChange={(open) => {
         setForgotDialogOpen(open);
         if (!open) {
@@ -293,12 +328,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 Informe o e-mail cadastrado. Enviaremos um código de recuperação.
               </p>
               <div>
-                <Label>E-mail</Label>
+                <Label>E-mail institucional</Label>
                 <Input
                   type="email"
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}
-                  placeholder="seu@email.com"
+                  placeholder="seu.email@capivari.sp.gov.br"
                   className="mt-1"
                   disabled={forgotLoading}
                 />
@@ -306,7 +341,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             </div>
           ) : (
             <div className="space-y-4">
-
               <p className="text-sm text-muted-foreground">
                 Digite o código de 6 dígitos enviado para <strong>{forgotEmail}</strong>.
               </p>
@@ -342,11 +376,85 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               setResetCode("");
               setNewPassword("");
             }}>Cancelar</Button>
-            <Button size="sm" onClick={forgotStep === "email" ? handleRequestReset : handleConfirmReset} disabled={forgotLoading}>
+            <Button size="sm" className="bg-[var(--capivari-green)] hover:bg-[var(--capivari-green-dark)]" onClick={forgotStep === "email" ? handleRequestReset : handleConfirmReset} disabled={forgotLoading}>
               {forgotLoading ? (
                 <><Loader2 className="h-3 w-3 animate-spin mr-1" /> Processando...</>
               ) : (
                 forgotStep === "email" ? "Enviar Código" : "Redefinir Senha"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ═══ First Access — Forced Password Change ═══ */}
+      <Dialog open={firstAccessOpen} onOpenChange={() => {}}>
+        <DialogContent className="max-w-sm" onPointerDownOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-5 w-5 text-[var(--capivari-green)]" />
+              Primeiro Acesso
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Alert>
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                Por segurança, defina sua senha pessoal para continuar.
+                A senha temporária fornecida pelo administrador não poderá ser reutilizada.
+              </AlertDescription>
+            </Alert>
+            <div className="space-y-3">
+              <div>
+                <Label>Nova Senha</Label>
+                <div className="relative mt-1">
+                  <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type={faShowPassword ? "text" : "password"}
+                    value={faNewPassword}
+                    onChange={(e) => setFaNewPassword(e.target.value)}
+                    placeholder="Mínimo 6 caracteres"
+                    className="pl-9 pr-9"
+                    disabled={faLoading}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1 h-7 w-7"
+                    onClick={() => setFaShowPassword(!faShowPassword)}
+                    tabIndex={-1}
+                  >
+                    {faShowPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+              <div>
+                <Label>Confirmar Nova Senha</Label>
+                <Input
+                  type="password"
+                  value={faConfirmPassword}
+                  onChange={(e) => setFaConfirmPassword(e.target.value)}
+                  placeholder="Digite a senha novamente"
+                  className="mt-1"
+                  disabled={faLoading}
+                />
+              </div>
+            </div>
+            {faNewPassword && faConfirmPassword && faNewPassword !== faConfirmPassword && (
+              <p className="text-xs text-destructive">As senhas não coincidem</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              className="w-full bg-[var(--capivari-green)] hover:bg-[var(--capivari-green-dark)]"
+              onClick={handleFirstAccess}
+              disabled={faLoading || !faNewPassword || !faConfirmPassword || faNewPassword !== faConfirmPassword || faNewPassword.length < 6}
+            >
+              {faLoading ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Salvando...</>
+              ) : (
+                "Definir Senha e Entrar"
               )}
             </Button>
           </DialogFooter>

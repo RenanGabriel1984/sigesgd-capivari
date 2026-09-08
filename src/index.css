@@ -49,12 +49,14 @@
 :root {
   --radius: 0.5rem;
 
-  /* Core palette — Capivari municipal */
+  /* Core palette — Capivari municipal (bandeira oficial) */
   --capivari-green: #1a5632;
+  --capivari-green-dark: #0d3a1f;
   --capivari-green-light: #2d7a4a;
   --capivari-blue: #5b9bd5;
   --capivari-blue-light: #7fb8e8;
   --capivari-sky: #a8d4f0;
+  --capivari-gold: #C8A84E;
 
   /* Semantic tokens */
   --background: oklch(0.985 0.002 240);

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" fill="none">
+  <!-- Crown -->
+  <path d="M60 45 L80 20 L100 40 L120 20 L140 45 Z" fill="#C8A84E" stroke="#8B6914" stroke-width="1.5"/>
+  <rect x="58" y="43" width="84" height="10" rx="2" fill="#C8A84E" stroke="#8B6914" stroke-width="1"/>
+  
+  <!-- Shield -->
+  <path d="M50 53 L150 53 L150 140 C150 175 100 200 100 200 C100 200 50 175 50 140 Z" fill="#FFFFFF" stroke="#1a5632" stroke-width="3"/>
+  
+  <!-- Shield divisions -->
+  <line x1="100" y1="53" x2="100" y2="140" stroke="#1a5632" stroke-width="1.5"/>
+  <line x1="50" y1="100" x2="150" y2="100" stroke="#1a5632" stroke-width="1.5"/>
+  
+  <!-- Top left: cow/ox silhouette -->
+  <text x="75" y="85" font-family="serif" font-size="16" fill="#1a5632" text-anchor="middle">🐄</text>
+  
+  <!-- Top right: red element -->
+  <ellipse cx="125" cy="78" rx="12" ry="10" fill="#8B2500"/>
+  
+  <!-- Bottom left: blue water -->
+  <path d="M55 105 Q75 115 95 105 Q75 120 55 105" fill="#5b9bd5" opacity="0.6"/>
+  
+  <!-- Bottom right: tool/horseshoe -->
+  <path d="M110 115 C110 108 140 108 140 115 L135 115 C135 112 115 112 115 115 Z" fill="#8B6914" stroke="#6B4F12" stroke-width="1"/>
+  
+  <!-- Center: initials -->
+  <text x="100" y="130" font-family="serif" font-size="14" font-weight="bold" fill="#1a5632" text-anchor="middle">C</text>
+  
+  <!-- Olive branches -->
+  <path d="M45 100 C35 85 30 70 40 55" stroke="#1a5632" stroke-width="2" fill="none"/>
+  <ellipse cx="38" cy="65" rx="5" ry="3" fill="#2d7a4a" transform="rotate(-20,38,65)"/>
+  <ellipse cx="35" cy="78" rx="5" ry="3" fill="#2d7a4a" transform="rotate(-10,35,78)"/>
+  <ellipse cx="37" cy="90" rx="5" ry="3" fill="#2d7a4a" transform="rotate(5,37,90)"/>
+  
+  <path d="M155 100 C165 85 170 70 160 55" stroke="#1a5632" stroke-width="2" fill="none"/>
+  <ellipse cx="162" cy="65" rx="5" ry="3" fill="#2d7a4a" transform="rotate(20,162,65)"/>
+  <ellipse cx="165" cy="78" rx="5" ry="3" fill="#2d7a4a" transform="rotate(10,165,78)"/>
+  <ellipse cx="163" cy="90" rx="5" ry="3" fill="#2d7a4a" transform="rotate(-5,163,90)"/>
+  
+  <!-- Text: CAPIVARI -->
+  <text x="100" y="35" font-family="serif" font-size="18" font-weight="bold" fill="#8B2500" text-anchor="middle" letter-spacing="3">CAPIVARI</text>
+  
+  <!-- Motto banner -->
+  <path d="M40 210 C60 200 140 200 160 210 L155 225 C135 218 65 218 45 225 Z" fill="#F5F0E0" stroke="#8B6914" stroke-width="1"/>
+  <text x="100" y="219" font-family="serif" font-size="8" fill="#1a5632" text-anchor="middle">PAULISTA POR MERCÊ DE DEUS</text>
+</svg>
