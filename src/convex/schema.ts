@@ -361,6 +361,12 @@ const schema = defineSchema(
       responsibleUserId: v.id("users"),
       observation: v.optional(v.string()),
       documentStorageId: v.optional(v.string()),
+      // ── NF-e importada (XML) ──
+      accessKey: v.optional(v.string()),
+      series: v.optional(v.string()),
+      totalValue: v.optional(v.number()),
+      xmlStorageId: v.optional(v.string()),
+      importedFromXml: v.optional(v.boolean()),
       status: v.union(
         v.literal("draft"), v.literal("confirmed"), v.literal("reversed")
       ),
@@ -368,7 +374,8 @@ const schema = defineSchema(
       updatedAt: v.number(),
     }).index("by_status", ["status"])
       .index("by_number", ["entryNumber"])
-      .index("by_date", ["receivedAt"]),
+      .index("by_date", ["receivedAt"])
+      .index("by_access_key", ["accessKey"]),
 
     // ── Entry Items (Itens da Entrada) ──
     entryItems: defineTable({
@@ -386,6 +393,11 @@ const schema = defineSchema(
       photoStorageId: v.optional(v.string()),
       supplierLotNumber: v.optional(v.string()),
       observation: v.optional(v.string()),
+      // ── Identificadores originais da NF-e ──
+      supplierCode: v.optional(v.string()),
+      ncm: v.optional(v.string()),
+      cfop: v.optional(v.string()),
+      ean: v.optional(v.string()),
     }).index("by_entry", ["entryId"])
       .index("by_product", ["productId"]),
 

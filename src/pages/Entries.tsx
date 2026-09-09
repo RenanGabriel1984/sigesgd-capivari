@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -12,10 +12,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, ShoppingCart, CheckCircle, RotateCcw, Eye, Trash2, ExternalLink, Save, Pencil } from "lucide-react";
+import { Plus, ShoppingCart, CheckCircle, RotateCcw, Eye, Trash2, ExternalLink, Save, Pencil, FileUp, FileText, Loader2 } from "lucide-react";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
 import { FileUpload } from "@/components/FileUpload";
 import { toast } from "sonner";
+import {
+  parseNfeXml, findSupplierMatch, findEntryByAccessKey, matchNfeProduct,
+  buildEntryDraftFromNfe, mapNfeUnit,
+  type NfeData, type NfeItem, type ProductMatchStatus,
+} from "@/lib/nfe";
 
 const ORIGIN_LABELS: Record<string, string> = {
   purchase: "Compra", donation: "Doação", transfer: "Transferência",
@@ -81,7 +86,11 @@ export default function Entries() {
   const [npUnit, setNpUnit] = useState("un");
   const [npBrand, setNpBrand] = useState("");
   const [npModel, setNpModel] = useState("");
+  const [npInternalCode, setNpInternalCode] = useState("");
+  // null = diálogo manual (preenche item do formulário); número = preenche item da NF importada
+  const [productModalTarget, setProductModalTarget] = useState<number | null>(null);
   const createProduct = useMutation(api.products.create);
+  const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
 
   // Contextual supplier creation
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
@@ -93,6 +102,24 @@ export default function Entries() {
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const createCategory = useMutation(api.categories.create);
+
+  // ─── Importação NF-e XML ───
+  type NfeReviewItem = { item: NfeItem; productId: string; matchStatus: ProductMatchStatus; locationId: string; supplierLot: string };
+  const [importOpen, setImportOpen] = useState(false);
+  const [importStep, setImportStep] = useState<"file" | "review" | "location">("file");
+  const [importLoading, setImportLoading] = useState(false);
+  const [importSaving, setImportSaving] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [nfe, setNfe] = useState<NfeData | null>(null);
+  const [nfeXmlFile, setNfeXmlFile] = useState<File | null>(null);
+  const [nfeItems, setNfeItems] = useState<NfeReviewItem[]>([]);
+  const [nfeSupplierId, setNfeSupplierId] = useState("");
+  const [nfeSupplierFound, setNfeSupplierFound] = useState(true);
+  const [nfeContract, setNfeContract] = useState("");
+  const [importLocationId, setImportLocationId] = useState("");
+  const [importDocStorageId, setImportDocStorageId] = useState("");
+  const [importObservation, setImportObservation] = useState("");
+  const nfeFileInputRef = useRef<HTMLInputElement>(null);
 
   const viewEntry = entries?.find((e) => e._id === viewId);
   const editEntryData = entries?.find((e) => e._id === editEntryId);
@@ -272,7 +299,12 @@ export default function Entries() {
     if (!newSupplierName.trim()) { toast.error("Razão social é obrigatória"); return; }
     try {
       const newId = await createSupplier({ legalName: newSupplierName.trim(), cnpj: newSupplierCnpj.trim() || undefined });
-      setcSupplierId(newId as string);
+      if (nfe) {
+        // Fluxo de importação: associa à NF
+        setNfeSupplierId(newId as string); setNfeSupplierFound(true);
+      } else {
+        setcSupplierId(newId as string);
+      }
       setSupplierModalOpen(false); setNewSupplierName(""); setNewSupplierCnpj("");
       toast.success("Fornecedor criado e selecionado");
     } catch (e: any) { toast.error(e.message ?? "Erro ao criar fornecedor"); }
@@ -294,11 +326,158 @@ export default function Entries() {
     if (!npName.trim()) { toast.error("Nome é obrigatório"); return; }
     if (!npCatId) { toast.error("Selecione categoria"); return; }
     try {
-      const newId = await createProduct({ name: npName.trim(), categoryId: npCatId as any, unitOfMeasure: npUnit, brand: npBrand || undefined, model: npModel || undefined, minimumStock: 0, idealStock: 0, maximumStock: 0 });
-      const n = [...cItems]; n[cItems.length - 1].productId = newId as string; setCItems(n);
-      setProductModalOpen(false); setNpName(""); setNpCatId(""); setNpUnit("un"); setNpBrand(""); setNpModel("");
+      const newId = await createProduct({
+        name: npName.trim(), categoryId: npCatId as any, unitOfMeasure: npUnit,
+        brand: npBrand || undefined, model: npModel || undefined,
+        internalCode: npInternalCode.trim() || undefined,
+        minimumStock: 0, idealStock: 0, maximumStock: 0,
+      });
+      if (productModalTarget !== null) {
+        const n = [...nfeItems]; n[productModalTarget].productId = newId as string; n[productModalTarget].matchStatus = "found"; setNfeItems(n);
+      } else {
+        const n = [...cItems]; n[cItems.length - 1].productId = newId as string; setCItems(n);
+      }
+      setProductModalOpen(false); setNpName(""); setNpCatId(""); setNpUnit("un"); setNpBrand(""); setNpModel(""); setNpInternalCode(""); setProductModalTarget(null);
       toast.success("Item criado e selecionado");
     } catch (e: any) { toast.error(e.message ?? "Erro ao criar item"); }
+  };
+
+  // ─── Importação NF-e XML ───
+  const resetImport = () => {
+    setImportStep("file"); setImportLoading(false); setImportSaving(false); setImportError("");
+    setNfe(null); setNfeXmlFile(null); setNfeItems([]); setNfeSupplierId(""); setNfeSupplierFound(true);
+    setNfeContract(""); setImportLocationId(""); setImportDocStorageId(""); setImportObservation("");
+    setProductModalTarget(null);
+  };
+
+  const readXmlText = async (file: File): Promise<string> => {
+    let text = await file.text();
+    if (text.includes("\uFFFD")) {
+      // XMLs emitidos pela SEFAZ costumam ser ISO-8859-1 — relê nesse charset
+      text = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(new Error("Não foi possível ler o arquivo XML"));
+        reader.readAsText(file, "iso-8859-1");
+      });
+    }
+    return text;
+  };
+
+  const handleNfeFile = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".xml")) { toast.error("Selecione um arquivo .xml de NF-e"); return; }
+    if (file.size > 10 * 1024 * 1024) { toast.error("Arquivo muito grande (máx. 10MB)"); return; }
+    setImportLoading(true); setImportError("");
+    try {
+      const text = await readXmlText(file);
+      const parsed = parseNfeXml(text);
+      if (!parsed.accessKey || !parsed.number) throw new Error("NF-e sem chave de acesso ou número — arquivo incompleto.");
+      const dup = findEntryByAccessKey(entries ?? [], parsed.accessKey);
+      if (dup) {
+        setImportError(`Esta NF-e já foi registrada (entrada ${dup.entryNumber}). Não é possível duplicar o estoque.`);
+        return;
+      }
+      const supplierMatch = findSupplierMatch(parsed, suppliers ?? []);
+      setNfe(parsed); setNfeXmlFile(file);
+      setNfeSupplierId(supplierMatch.supplierId ?? "");
+      setNfeSupplierFound(supplierMatch.found);
+      setNfeContract(parsed.orderReference ?? "");
+      setNfeItems(parsed.items.map((item) => {
+        const m = matchNfeProduct(item, products ?? []);
+        return { item, productId: m.productId ?? "", matchStatus: m.status, locationId: "", supplierLot: "" };
+      }));
+      setImportStep("review");
+      toast.success("NF-e lida com sucesso. Confira os itens antes de confirmar.");
+    } catch (e: any) {
+      setImportError(e.message ?? "Não foi possível ler a NF-e");
+    } finally { setImportLoading(false); }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!nfe || !nfeXmlFile) return;
+    if (nfeItems.some((r) => !r.productId)) {
+      toast.error("Todos os itens precisam de um produto associado. Cadastre os itens 🔴 antes de confirmar.");
+      return;
+    }
+    if (nfeItems.some((r) => !r.locationId)) {
+      toast.error("Informe o local de armazenamento de cada item (o local padrão aplica a todos).");
+      return;
+    }
+    const dup = findEntryByAccessKey(entries ?? [], nfe.accessKey);
+    if (dup) { toast.error(`Esta NF-e já foi registrada (entrada ${dup.entryNumber}).`); return; }
+    setImportSaving(true);
+    try {
+      // 1) Preserva o XML original no armazenamento
+      const uploadUrl = await generateUploadUrl();
+      const upRes = await fetch(uploadUrl, {
+        method: "POST", headers: { "Content-Type": "application/xml" }, body: nfeXmlFile,
+      });
+      if (!upRes.ok) throw new Error("Falha ao salvar o XML original");
+      const { storageId: xmlStorageId } = await upRes.json();
+
+      // 2) Monta o rascunho (NÃO altera estoque — só rascunho)
+      const draft = buildEntryDraftFromNfe(nfe, nfeItems.map((r) => ({
+        productId: r.productId, locationId: r.locationId || undefined, supplierLotNumber: r.supplierLot || undefined,
+      })), {
+        supplierId: nfeSupplierId || undefined,
+        contractNumber: nfeContract || undefined,
+        observation: importObservation || undefined,
+        documentStorageId: importDocStorageId || undefined,
+        xmlStorageId: xmlStorageId as string,
+      });
+
+      const entryId = await createEntry({
+        receivedAt: Date.now(),
+        originType: "purchase" as any,
+        supplierId: draft.supplierId ? (draft.supplierId as any) : undefined,
+        invoiceNumber: draft.invoiceNumber, invoiceDate: draft.invoiceDate, series: draft.series,
+        contractNumber: draft.contractNumber, observation: draft.observation,
+        documentStorageId: draft.documentStorageId,
+        accessKey: draft.accessKey, totalValue: draft.totalValue,
+        xmlStorageId: draft.xmlStorageId, importedFromXml: true,
+        items: draft.items.map((i) => ({
+          productId: i.productId as any, quantity: i.quantity, unitOfMeasure: i.unitOfMeasure,
+          unitCost: i.unitCost, totalCost: i.totalCost, specification: i.specification,
+          locationId: i.locationId ? (i.locationId as any) : undefined,
+          supplierLotNumber: i.supplierLotNumber,
+          supplierCode: i.supplierCode, ncm: i.ncm, cfop: i.cfop, ean: i.ean,
+        })),
+      });
+
+      // 3) Efetiva a entrada (estoque, lote, movimentação, auditoria)
+      try {
+        await confirmEntry({ entryId: entryId as any });
+        toast.success("Entrada confirmada — estoque atualizado a partir da NF-e");
+      } catch (e2: any) {
+        toast.warning("Entrada criada como rascunho: " + (e2.message ?? "revise e confirme na lista de entradas"));
+      }
+      setImportOpen(false); resetImport();
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao registrar entrada");
+    }
+    setImportSaving(false);
+  };
+
+  const openProductModalForImport = (idx: number) => {
+    const review = nfeItems[idx];
+    if (!review) return;
+    setNpName(review.item.description.slice(0, 90));
+    setNpInternalCode(review.item.code);
+    setNpBrand(""); setNpModel(""); setNpCatId(""); setNpUnit(mapNfeUnitSafe(review.item.unit));
+    setProductModalTarget(idx);
+    setProductModalOpen(true);
+  };
+
+  const mapNfeUnitSafe = (u: string): string => {
+    const mapped = mapNfeUnit(u);
+    return mapped === "outro" ? "un" : mapped;
+  };
+
+  // ─── Badge de situação de correspondência (NF-e) ───
+  const renderMatchBadge = (s: ProductMatchStatus) => {
+    if (s === "found") return <Badge className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">🟢 Produto encontrado</Badge>;
+    if (s === "possible") return <Badge className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">🟡 Possível — confirmar</Badge>;
+    return <Badge className="text-[10px] bg-rose-50 text-rose-700 border-rose-200">🔴 Não encontrado</Badge>;
   };
 
   // ─── Item card for edit mode ───
@@ -352,7 +531,10 @@ export default function Entries() {
       <div className="space-y-6 max-w-7xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div><h1 className="text-2xl font-bold tracking-tight">Entrada de material</h1><p className="text-sm text-muted-foreground">Registre aqui materiais que chegaram fisicamente ao estoque — {entries?.length ?? 0} entrada(s)</p></div>
-          <Button onClick={() => { resetCreateForm(); setCreateDialogOpen(true); }} className="gap-2"><Plus className="h-4 w-4" /> Nova Entrada</Button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => { resetImport(); setImportOpen(true); }} className="gap-2"><FileUp className="h-4 w-4" /> Importar NF-e XML</Button>
+            <Button onClick={() => { resetCreateForm(); setCreateDialogOpen(true); }} className="gap-2"><Plus className="h-4 w-4" /> Nova Entrada</Button>
+          </div>
         </div>
 
         <Tabs value={tab} onValueChange={setTab}><TabsList><TabsTrigger value="all">Todas</TabsTrigger><TabsTrigger value="draft">Rascunho</TabsTrigger><TabsTrigger value="confirmed">Confirmadas</TabsTrigger><TabsTrigger value="reversed">Estornadas</TabsTrigger></TabsList></Tabs>
@@ -369,7 +551,8 @@ export default function Entries() {
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold text-sm">{entry.entryNumber}</h3>
                         <Badge className={`text-[10px] ${STATUS_COLORS[entry.status]}`}>{STATUS_LABELS[entry.status]}</Badge>
-                        {entry.documentStorageId && <Badge variant="secondary" className="text-[10px]">📄 NF anexada</Badge>}
+                        {entry.importedFromXml && <Badge variant="secondary" className="text-[10px]">📄 NF-e XML</Badge>}
+                        {entry.documentStorageId && !entry.importedFromXml && <Badge variant="secondary" className="text-[10px]">📄 NF anexada</Badge>}
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">{entry.responsible?.name ?? "—"} • {new Date(entry.receivedAt).toLocaleDateString("pt-BR")} • {ORIGIN_LABELS[entry.originType]}</p>
                     </div>
@@ -416,12 +599,16 @@ export default function Entries() {
                 {viewEntry.supplier && <div><span className="text-muted-foreground">Fornecedor:</span> {viewEntry.supplier.legalName}</div>}
                 {viewEntry.invoiceNumber && <div><span className="text-muted-foreground">NF:</span> {viewEntry.invoiceNumber}</div>}
                 {viewEntry.invoiceDate && <div><span className="text-muted-foreground">Data NF:</span> {viewEntry.invoiceDate}</div>}
+                {viewEntry.series && <div><span className="text-muted-foreground">Série:</span> {viewEntry.series}</div>}
+                {viewEntry.totalValue != null && <div><span className="text-muted-foreground">Valor total NF:</span> R$ {viewEntry.totalValue.toFixed(2)}</div>}
+                {viewEntry.accessKey && <div className="col-span-2"><span className="text-muted-foreground">Chave de acesso:</span> <span className="font-mono text-xs break-all">{viewEntry.accessKey}</span></div>}
                 {viewEntry.purchaseAuthorizationNumber && <div><span className="text-muted-foreground">AF:</span> {viewEntry.purchaseAuthorizationNumber}</div>}
                 {viewEntry.processNumber && <div><span className="text-muted-foreground">Processo:</span> {viewEntry.processNumber}</div>}
                 {viewEntry.contractNumber && <div><span className="text-muted-foreground">Contrato:</span> {viewEntry.contractNumber}</div>}
               </div>
               {viewEntry.observation && <div className="text-sm"><span className="text-muted-foreground">Observação:</span> {viewEntry.observation}</div>}
               {viewEntry.documentStorageId && <div className="text-sm"><FileUpload storageId={viewEntry.documentStorageId} onUpload={() => {}} size="sm" label="Documento da entrada" disabled /></div>}
+              {viewEntry.xmlStorageId && <div className="text-sm"><FileUpload storageId={viewEntry.xmlStorageId} onUpload={() => {}} size="sm" label="XML original da NF-e" disabled /></div>}
               <div>
                 <h4 className="font-medium text-sm mb-2">Itens da Entrada</h4>
                 <div className="border rounded-lg overflow-hidden">
@@ -520,6 +707,177 @@ export default function Entries() {
         </DialogContent>
       </Dialog>
 
+      {/* ═══ Import NF-e XML Dialog ═══ */}
+      <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) resetImport(); }}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Importar NF-e XML</DialogTitle></DialogHeader>
+
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className={importStep === "file" ? "font-semibold text-primary" : ""}>1. Arquivo</span><span>→</span>
+            <span className={importStep === "review" ? "font-semibold text-primary" : ""}>2. Conferir itens</span><span>→</span>
+            <span className={importStep === "location" ? "font-semibold text-primary" : ""}>3. Localização e confirmação</span>
+          </div>
+
+          {importStep === "file" && (
+            <div className="space-y-4 py-3">
+              <input
+                ref={nfeFileInputRef}
+                type="file"
+                accept=".xml,application/xml,text/xml"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleNfeFile(f); e.target.value = ""; }}
+              />
+              <div
+                className="border-2 border-dashed rounded-xl p-10 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                onClick={() => nfeFileInputRef.current?.click()}
+              >
+                {importLoading ? (
+                  <><Loader2 className="h-8 w-8 mx-auto animate-spin text-primary" /><p className="mt-3 text-sm text-muted-foreground">Lendo a NF-e...</p></>
+                ) : (
+                  <>
+                    <FileUp className="h-8 w-8 mx-auto text-primary" />
+                    <p className="mt-3 text-sm font-medium">Selecione o arquivo XML da NF-e</p>
+                    <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">O sistema lê os dados da nota e monta uma entrada em modo de conferência. O estoque só é alterado após a sua confirmação.</p>
+                  </>
+                )}
+              </div>
+              {importError && <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm p-3">{importError}</div>}
+            </div>
+          )}
+
+          {importStep === "review" && nfe && (
+            <div className="space-y-4 py-2">
+              <div className="rounded-lg border bg-emerald-50/60 p-3 flex items-center gap-2">
+                <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+                <p className="text-sm font-medium text-emerald-800">NF encontrada — confira os dados e a associação dos itens</p>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                <div className="col-span-2">
+                  <span className="text-muted-foreground">Fornecedor: </span>
+                  {nfeSupplierFound && nfeSupplierId ? (
+                    <span className="font-medium">{suppliers?.find((s) => s._id === nfeSupplierId)?.legalName ?? nfe.emitterName}</span>
+                  ) : (
+                    <span className="text-amber-700 font-medium">Fornecedor não cadastrado ({nfe.emitterName})</span>
+                  )}
+                </div>
+                <div><span className="text-muted-foreground">NF:</span> <span className="font-medium">{nfe.number}</span></div>
+                <div><span className="text-muted-foreground">Série:</span> <span className="font-medium">{nfe.series || "—"}</span></div>
+                <div><span className="text-muted-foreground">Data de emissão:</span> <span className="font-medium">{nfe.emissionDate ? new Date(nfe.emissionDate + "T12:00:00").toLocaleDateString("pt-BR") : "—"}</span></div>
+                <div><span className="text-muted-foreground">Valor total:</span> <span className="font-medium">{nfe.totalValue != null ? `R$ ${nfe.totalValue.toFixed(2)}` : "—"}</span></div>
+                <div className="col-span-2 sm:col-span-3"><span className="text-muted-foreground">Chave de acesso:</span> <span className="font-mono text-[10px] break-all">{nfe.accessKey}</span></div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {!nfeSupplierFound && (
+                  <Button size="sm" variant="outline" className="gap-1 text-xs h-7" onClick={() => { setNewSupplierName(nfe.emitterName ?? ""); setNewSupplierCnpj(nfe.emitterCnpj ?? ""); setSupplierModalOpen(true); }}>
+                    <Plus className="h-3 w-3" /> Cadastrar fornecedor
+                  </Button>
+                )}
+                {!nfeSupplierFound && nfeSupplierId && <span className="text-xs text-emerald-700">✓ {suppliers?.find((s) => s._id === nfeSupplierId)?.legalName}</span>}
+                <Select value={nfeSupplierId} onValueChange={(v) => { setNfeSupplierId(v); setNfeSupplierFound(true); }}>
+                  <SelectTrigger className="h-7 w-52 text-xs"><SelectValue placeholder="Selecionar fornecedor" /></SelectTrigger>
+                  <SelectContent>{suppliers?.map((s) => (<SelectItem key={s._id} value={s._id}>{s.legalName}</SelectItem>))}</SelectContent>
+                </Select>
+                <div className="flex items-center gap-1 ml-auto">
+                  <span className="text-[10px]">Pedido/contrato:</span>
+                  <Input value={nfeContract} onChange={(e) => setNfeContract(e.target.value)} placeholder="Opcional" className="h-7 w-40 text-xs" />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-xs">
+                <Badge className="text-[10px] bg-emerald-50 text-emerald-700">🟢 {nfeItems.filter((r) => r.matchStatus === "found").length} encontrados</Badge>
+                <Badge className="text-[10px] bg-amber-50 text-amber-700">🟡 {nfeItems.filter((r) => r.matchStatus === "possible").length} possíveis</Badge>
+                <Badge className="text-[10px] bg-rose-50 text-rose-700">🔴 {nfeItems.filter((r) => r.matchStatus === "not_found").length} não encontrados</Badge>
+              </div>
+
+              <div className="border rounded-lg overflow-x-auto">
+                <Table><TableHeader><TableRow><TableHead className="text-xs">#</TableHead><TableHead className="text-xs">Produto da NF</TableHead><TableHead className="text-xs text-center">Qtd</TableHead><TableHead className="text-xs">Unid.</TableHead><TableHead className="text-xs">Situação</TableHead><TableHead className="text-xs">Produto SIGESGD</TableHead></TableRow></TableHeader>
+                  <TableBody>{nfeItems.map((r, idx) => (
+                    <TableRow key={idx} className={!r.productId ? "bg-rose-50/40" : ""}>
+                      <TableCell className="text-xs text-muted-foreground">{r.item.lineNumber}</TableCell>
+                      <TableCell className="text-xs max-w-[220px]">
+                        <p className="font-medium leading-tight">{r.item.description}</p>
+                        <p className="text-[10px] text-muted-foreground font-mono">{r.item.code}{r.item.ncm ? ` · NCM ${r.item.ncm}` : ""}{r.item.cfop ? ` · CFOP ${r.item.cfop}` : ""}</p>
+                      </TableCell>
+                      <TableCell className="text-center font-mono text-sm">{r.item.quantity}</TableCell>
+                      <TableCell className="text-xs">{r.item.unit}</TableCell>
+                      <TableCell>{renderMatchBadge(r.matchStatus)}</TableCell>
+                      <TableCell className="min-w-[180px]">
+                        <div className="flex items-center gap-1">
+                          <Select value={r.productId} onValueChange={(v) => {
+                            const n = [...nfeItems]; n[idx].productId = v; n[idx].matchStatus = "found"; setNfeItems(n);
+                          }}>
+                            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Selecionar" /></SelectTrigger>
+                            <SelectContent>{products?.map((p) => (<SelectItem key={p._id} value={p._id}>{p.name}{p.brand ? ` (${p.brand})` : ""}</SelectItem>))}</SelectContent>
+                          </Select>
+                          <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" title="Cadastrar produto" onClick={() => openProductModalForImport(idx)}><Plus className="h-3.5 w-3.5" /></Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}</TableBody></Table>
+                </div>
+
+                <div className="flex justify-between pt-2">
+                  <Button variant="outline" onClick={() => { setImportStep("file"); setImportError(""); }}>Voltar</Button>
+                  <Button onClick={() => {
+                    if (nfeItems.some((r) => !r.productId)) { toast.error("Todos os itens precisam de um produto associado (🟡 confirme ou cadastre os 🔴)"); return; }
+                    setImportStep("location");
+                  }}>Continuar → Localização</Button>
+                </div>
+              </div>
+          )}
+
+          {importStep === "location" && nfe && (
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">Escolha onde os materiais serão guardados. O XML não pode definir isso — é uma informação interna da Secretaria.</p>
+
+              <div>
+                <Label className="text-xs">Local padrão (aplica a todos os itens) *</Label>
+                <Select value={importLocationId} onValueChange={(v) => {
+                  setImportLocationId(v);
+                  setNfeItems(nfeItems.map((r) => ({ ...r, locationId: v })));
+                }}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Ex: Armário TI 02" /></SelectTrigger>
+                  <SelectContent>{locations?.map((l) => (<SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>))}</SelectContent>
+                </Select>
+              </div>
+
+              <div className="border rounded-lg divide-y">
+                {nfeItems.map((r, idx) => (
+                  <div key={idx} className="p-3 grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
+                    <div className="sm:col-span-5"><p className="text-xs font-medium leading-tight">{r.item.description}</p><p className="text-[10px] text-muted-foreground font-mono">{r.item.code} · {r.item.quantity} {r.item.unit}</p></div>
+                    <div className="sm:col-span-4">
+                      <Select value={r.locationId} onValueChange={(v) => { const n = [...nfeItems]; n[idx].locationId = v; setNfeItems(n); }}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Local (opcional)" /></SelectTrigger>
+                        <SelectContent>{locations?.map((l) => (<SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>))}</SelectContent>
+                      </Select>
+                    </div>
+                    <div className="sm:col-span-3">
+                      <Input value={r.supplierLot} onChange={(e) => { const n = [...nfeItems]; n[idx].supplierLot = e.target.value; setNfeItems(n); }} placeholder="Lote do fornecedor" className="h-8 text-xs" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border rounded-lg p-3 bg-muted/30">
+                <Label className="text-xs font-medium">Documentos da entrega (opcional)</Label>
+                <FileUpload storageId={importDocStorageId} onUpload={setImportDocStorageId} onRemove={() => setImportDocStorageId("")} accept="image/*,.pdf" label="PDF/DANFE ou foto da entrega" />
+              </div>
+              <div><Label className="text-xs">Observação interna</Label><Textarea value={importObservation} onChange={(e) => setImportObservation(e.target.value)} rows={2} placeholder="Opcional" className="mt-1" /></div>
+
+              <div className="flex justify-between pt-2">
+                <Button variant="outline" onClick={() => setImportStep("review")} disabled={importSaving}>Voltar</Button>
+                <Button onClick={handleConfirmImport} disabled={importSaving} className="gap-1.5">
+                  {importSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> Registrando...</> : <><CheckCircle className="h-4 w-4" /> Confirmar entrada</>}
+                </Button>
+              </div>
+              <p className="text-[10px] text-muted-foreground text-center">A confirmação efetiva a entrada: estoque, lote, movimentação e auditoria. Antes disso, nada é alterado.</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* ═══ Reverse Modal ═══ */}
       <Dialog open={reverseModalOpen} onOpenChange={setReverseModalOpen}>
         <DialogContent className="max-w-md"><DialogHeader><DialogTitle>Estornar Entrada</DialogTitle></DialogHeader>
@@ -536,6 +894,7 @@ export default function Entries() {
           <div className="space-y-4 py-2">
             <div><Label>Nome *</Label><Input value={npName} onChange={(e) => setNpName(e.target.value)} placeholder="Ex: SSD 480 GB SATA" /></div>
             <div><Label>Categoria *</Label>{categories && categories.length === 0 ? (<div className="flex items-center gap-2 mt-1"><p className="text-sm text-muted-foreground">Nenhuma categoria cadastrada.</p><Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => setCategoryModalOpen(true)}>+ Criar categoria</Button></div>) : (<div className="flex gap-1"><Select value={npCatId} onValueChange={setNpCatId}><SelectTrigger className="flex-1"><SelectValue placeholder="Selecionar" /></SelectTrigger><SelectContent>{categories?.map((c) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}</SelectContent></Select><Button type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => setCategoryModalOpen(true)} title="Nova categoria"><Plus className="h-4 w-4" /></Button></div>)}</div>
+            <div><Label>Código interno</Label><Input value={npInternalCode} onChange={(e) => setNpInternalCode(e.target.value)} placeholder="Código do fornecedor (permite reconhecer em próximas NFs)" /></div>
             <div><Label>Unidade</Label><Select value={npUnit} onValueChange={setNpUnit}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{UNITS_OF_MEASURE.map((u) => (<SelectItem key={u} value={u}>{UNIT_LABELS[u] ?? u}</SelectItem>))}</SelectContent></Select></div>
             <div className="grid grid-cols-2 gap-3"><div><Label>Marca</Label><Input value={npBrand} onChange={(e) => setNpBrand(e.target.value)} placeholder="Opcional" /></div><div><Label>Modelo</Label><Input value={npModel} onChange={(e) => setNpModel(e.target.value)} placeholder="Opcional" /></div></div>
           </div>

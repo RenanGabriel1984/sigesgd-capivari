@@ -124,6 +124,12 @@ export const create = mutation({
     contractNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
     documentStorageId: v.optional(v.string()),
+    // ── NF-e importada (XML) ──
+    accessKey: v.optional(v.string()),
+    series: v.optional(v.string()),
+    totalValue: v.optional(v.number()),
+    xmlStorageId: v.optional(v.string()),
+    importedFromXml: v.optional(v.boolean()),
     items: v.array(v.object({
       productId: v.id("products"),
       quantity: v.number(),
@@ -137,12 +143,26 @@ export const create = mutation({
       photoStorageId: v.optional(v.string()),
       supplierLotNumber: v.optional(v.string()),
       observation: v.optional(v.string()),
+      // ── Identificadores originais da NF-e ──
+      supplierCode: v.optional(v.string()),
+      ncm: v.optional(v.string()),
+      cfop: v.optional(v.string()),
+      ean: v.optional(v.string()),
     })),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
 
     if (args.items.length === 0) throw new Error("A entrada deve ter pelo menos um item");
+
+    // NF-e: impedir importação/efetivação duplicada da mesma chave de acesso
+    if (args.accessKey) {
+      const accessKey = args.accessKey.trim();
+      const existing = await ctx.db.query("entries").withIndex("by_access_key", (q: any) => q.eq("accessKey", accessKey)).first();
+      if (existing) {
+        throw new Error(`Esta NF-e já foi registrada (entrada ${existing.entryNumber}). Não é possível duplicar o estoque.`);
+      }
+    }
 
     // Validate each item
     for (const item of args.items) {
@@ -169,6 +189,11 @@ export const create = mutation({
       responsibleUserId: userId,
       observation: args.observation || undefined,
       documentStorageId: args.documentStorageId || undefined,
+      accessKey: args.accessKey ? args.accessKey.trim() : undefined,
+      series: args.series || undefined,
+      totalValue: args.totalValue,
+      xmlStorageId: args.xmlStorageId || undefined,
+      importedFromXml: args.importedFromXml || undefined,
       status: "draft",
       createdAt: now,
       updatedAt: now,
@@ -189,6 +214,10 @@ export const create = mutation({
         photoStorageId: item.photoStorageId,
         supplierLotNumber: item.supplierLotNumber || undefined,
         observation: item.observation,
+        supplierCode: item.supplierCode || undefined,
+        ncm: item.ncm || undefined,
+        cfop: item.cfop || undefined,
+        ean: item.ean || undefined,
       });
     }
 
@@ -313,6 +342,10 @@ export const addItem = mutation({
     photoStorageId: v.optional(v.string()),
     supplierLotNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
+    supplierCode: v.optional(v.string()),
+    ncm: v.optional(v.string()),
+    cfop: v.optional(v.string()),
+    ean: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
@@ -340,6 +373,10 @@ export const addItem = mutation({
       photoStorageId: args.photoStorageId,
       supplierLotNumber: args.supplierLotNumber || undefined,
       observation: args.observation,
+      supplierCode: args.supplierCode || undefined,
+      ncm: args.ncm || undefined,
+      cfop: args.cfop || undefined,
+      ean: args.ean || undefined,
     });
 
     await ctx.db.patch(args.entryId, { updatedAt: Date.now() });
