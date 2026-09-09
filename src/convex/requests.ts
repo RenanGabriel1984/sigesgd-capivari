@@ -73,6 +73,7 @@ export const listByUser = query({
 export const get = query({
   args: { requestId: v.id("requests") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const request = await ctx.db.get(args.requestId);
     if (!request) return null;
     return enrichRequest(ctx, request);

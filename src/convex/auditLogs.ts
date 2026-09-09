@@ -1,5 +1,14 @@
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+
+async function requireUser(ctx: any) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error("Não autenticado");
+  const user = await ctx.db.get(userId);
+  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
+  return { userId, user };
+}
 
 /** List audit logs with user info. */
 export const list = query({
@@ -7,6 +16,7 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const limit = args.limit ?? 100;
     const logs = await ctx.db
       .query("auditLogs")
@@ -30,6 +40,7 @@ export const byEntity = query({
     entityId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     let q = ctx.db
       .query("auditLogs")
       .withIndex("by_entity", (q) => q.eq("entity", args.entity));
@@ -60,6 +71,7 @@ export const listFiltered = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const limit = args.limit ?? 300;
 
     // Try to use index if possible, otherwise scan

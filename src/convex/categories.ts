@@ -33,6 +33,8 @@ export const list = query({
 export const listActive = query({
   args: {},
   handler: async (ctx) => {
+    // Proteção: exige sessão autenticada
+    await requireUser(ctx);
     return await ctx.db.query("categories").withIndex("by_active", (q) => q.eq("active", true)).collect();
   },
 });

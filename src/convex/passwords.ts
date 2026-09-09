@@ -1,5 +1,5 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword, verifyPassword } from "./auth/passwords";
 import { api } from "./_generated/api";
@@ -226,7 +226,9 @@ export const forceChangePassword = mutation({
 });
 
 /** Verify email and password (used by auth provider). */
-export const verifyCredentials = query({
+// INTERNAL: usada pelo provider de credenciais (server-side). Cliente NÃO pode
+// chamá-la diretamente — evita oráculo público de validação de senha.
+export const verifyCredentials = internalQuery({
   args: {
     email: v.string(),
     password: v.string(),
@@ -459,7 +461,8 @@ export const bootstrapSetPassword = mutation({
  * Diagnostic: list all users and whether they have a password.
  * Useful for figuring out login issues.
  */
-export const diagnosticListUsers = query({
+// INTERNAL: diagnóstico de usuários deve ficar inacessível ao cliente.
+export const diagnosticListUsers = internalQuery({
   args: {},
   handler: async (ctx) => {
     const users = await ctx.db.query("users").collect();
@@ -686,7 +689,8 @@ export const recordFailedLogin = mutation({
 /**
  * Check if an email is currently locked out due to brute force.
  */
-export const isLockedOut = query({
+// INTERNAL: usada pelo provider de credenciais (server-side).
+export const isLockedOut = internalQuery({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();

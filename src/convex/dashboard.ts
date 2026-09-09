@@ -1,5 +1,14 @@
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+
+async function requireUser(ctx: any) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error("Não autenticado");
+  const user = await ctx.db.get(userId);
+  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
+  return { userId, user };
+}
 
 /**
  * Dashboard KPIs:
@@ -13,6 +22,7 @@ import { v } from "convex/values";
 export const stats = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const now = Date.now();
     const monthStart = new Date();
     monthStart.setDate(1);
@@ -172,6 +182,7 @@ export const stats = query({
 export const stockPosition = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const products = await ctx.db.query("products").collect();
     return Promise.all(
       products.map(async (p) => {
@@ -215,6 +226,7 @@ export const movementReport = query({
     endDate: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     let q = ctx.db.query("stockMovements").withIndex("by_timestamp").order("desc");
     if (args.startDate) {
       q = ctx.db.query("stockMovements").withIndex("by_timestamp", (idx) =>
@@ -258,6 +270,7 @@ export const movementReport = query({
 export const consumptionByOrg = query({
   args: { organizationId: v.id("organizations") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const delivered = await ctx.db
       .query("requests")
       .withIndex("by_secretaria", (q) => q.eq("secretariaId", args.organizationId))

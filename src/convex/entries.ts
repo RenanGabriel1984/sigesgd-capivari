@@ -58,6 +58,7 @@ async function generateLotNumber(ctx: any): Promise<string> {
 export const list = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const entries = await ctx.db.query("entries").withIndex("by_date").order("desc").take(100);
     return Promise.all(entries.map(async (e: any) => {
       const responsible = await ctx.db.get(e.responsibleUserId);
@@ -76,6 +77,7 @@ export const list = query({
 export const get = query({
   args: { entryId: v.id("entries") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const entry = await ctx.db.get(args.entryId);
     if (!entry) return null;
     const responsible = await ctx.db.get(entry.responsibleUserId);
@@ -94,6 +96,7 @@ export const get = query({
 export const getByLot = query({
   args: { lotNumber: v.string() },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const lot = await ctx.db.query("lots").withIndex("by_number", (q) => q.eq("lotNumber", args.lotNumber)).first();
     if (!lot) return null;
     const product = await ctx.db.get(lot.productId);

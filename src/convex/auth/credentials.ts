@@ -1,6 +1,6 @@
 import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
 import { ConvexError } from "convex/values";
-import { api } from "../_generated/api";
+import { api, internal } from "../_generated/api";
 import type { DataModel } from "../_generated/dataModel";
 
 // IMPORTANT: `auth:signIn` is implemented as a Convex ACTION, and Convex
@@ -34,7 +34,7 @@ export const credentials = ConvexCredentials<DataModel>({
 
     // Check brute force lockout
     const lockStatus: { locked: boolean; remainingSeconds?: number } = await ctx.runQuery(
-      api.passwords.isLockedOut,
+      internal.passwords.isLockedOut,
       { email: email.trim().toLowerCase() }
     );
 
@@ -48,7 +48,7 @@ export const credentials = ConvexCredentials<DataModel>({
 
     // Use the existing verifyCredentials query to validate
     const result: { success: boolean; error?: string; userId?: any } = await ctx.runQuery(
-      api.passwords.verifyCredentials,
+      internal.passwords.verifyCredentials,
       {
         email: email.trim().toLowerCase(),
         password,
@@ -64,7 +64,7 @@ export const credentials = ConvexCredentials<DataModel>({
     }
 
     // Reset failed attempts on successful login
-    const failedRecord = await ctx.runQuery(api.passwords.isLockedOut, {
+    const failedRecord = await ctx.runQuery(internal.passwords.isLockedOut, {
       email: email.trim().toLowerCase(),
     });
     // The isLockedOut query already handles clearing; just return success

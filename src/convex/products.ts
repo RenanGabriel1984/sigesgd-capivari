@@ -39,6 +39,7 @@ async function generateInternalCode(ctx: any): Promise<string> {
 export const list = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const products = await ctx.db.query("products").collect();
     // Pre-fetch all compatibility records to flag toner products
     const allCompat = await ctx.db.query("printerCompatibility").collect();
@@ -54,6 +55,7 @@ export const list = query({
 export const listActive = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const products = await ctx.db.query("products").withIndex("by_active", (q) => q.eq("active", true)).collect();
     // Pre-fetch all compatibility records to flag toner products
     const allCompat = await ctx.db.query("printerCompatibility").collect();
@@ -69,6 +71,7 @@ export const listActive = query({
 export const getById = query({
   args: { id: v.id("products") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const product = await ctx.db.get(args.id);
     if (!product) return null;
     const category = await ctx.db.get(product.categoryId);
@@ -105,6 +108,7 @@ export const getById = query({
 export const getStock = query({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
     return stock ?? { physicalQuantity: 0, reservedQuantity: 0 };
   },
@@ -113,6 +117,7 @@ export const getStock = query({
 export const belowMinimum = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const products = await ctx.db.query("products").withIndex("by_active", (q) => q.eq("active", true)).collect();
     const result = [];
     for (const p of products) {

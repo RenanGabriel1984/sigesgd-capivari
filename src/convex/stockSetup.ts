@@ -3,11 +3,16 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { hasInitialInventoryLot } from "./stockHelpers";
 
-async function requireAdmin(ctx: any) {
+async function requireUser(ctx: any) {
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error("Não autenticado");
   const user = await ctx.db.get(userId);
   if (!user) throw new Error("Perfil de usuário não encontrado");
+  return { userId, user };
+}
+
+async function requireAdmin(ctx: any) {
+  const { userId, user } = await requireUser(ctx);
   if (user.role !== "admin" && user.role !== "stock_manager")
     throw new Error(
       "Apenas administradores ou gerentes de estoque podem executar esta operação"
@@ -369,6 +374,7 @@ export const importInitialSheet = mutation({
 export const productLocationSummary = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const sbl = await ctx.db.query("stockByLocation").collect();
     const locIds = [...new Set(sbl.map((s) => s.locationId))];
     const locs = await Promise.all(locIds.map((id) => ctx.db.get(id)));
@@ -634,6 +640,7 @@ export const cleanupTestData = mutation({
 export const hasInitialStock = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const stocks = await ctx.db.query("stock").collect();
     const hasAny = stocks.some((s) => s.physicalQuantity > 0);
     return { hasInitialStock: hasAny, totalProducts: stocks.length };

@@ -24,6 +24,7 @@ async function requireStockManagerOrAdmin(ctx: any) {
 export const list = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     return await ctx.db.query("suppliers").collect();
   },
 });
@@ -31,6 +32,7 @@ export const list = query({
 export const listActive = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     return await ctx.db.query("suppliers").withIndex("by_active", (q) => q.eq("active", true)).collect();
   },
 });
@@ -38,6 +40,7 @@ export const listActive = query({
 export const get = query({
   args: { id: v.id("suppliers") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db.get(args.id);
   },
 });

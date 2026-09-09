@@ -24,6 +24,7 @@ async function requireStockManagerOrAdmin(ctx: any) {
 export const list = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const movements = await ctx.db.query("stockMovements").withIndex("by_timestamp").order("desc").take(200);
     return Promise.all(movements.map(async (m) => {
       const product = await ctx.db.get(m.productId);
@@ -37,6 +38,7 @@ export const list = query({
 export const byProduct = query({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const movements = await ctx.db.query("stockMovements").withIndex("by_product", (q) => q.eq("productId", args.productId)).order("desc").collect();
     return Promise.all(movements.map(async (m) => {
       const user = await ctx.db.get(m.userId);

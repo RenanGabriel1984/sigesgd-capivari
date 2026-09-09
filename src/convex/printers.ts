@@ -26,6 +26,7 @@ async function requireManagerOrAdmin(ctx: any) {
 export const list = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const printers = await ctx.db.query("printers").collect();
     return Promise.all(
       printers.map(async (p) => {
@@ -39,6 +40,7 @@ export const list = query({
 export const listActive = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const printers = await ctx.db
       .query("printers")
       .withIndex("by_active", (q) => q.eq("active", true))
@@ -55,6 +57,7 @@ export const listActive = query({
 export const listByOrganization = query({
   args: { organizationId: v.id("organizations") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const printers = await ctx.db
       .query("printers")
       .withIndex("by_organization", (q) => q.eq("organizationId", args.organizationId))
@@ -131,6 +134,7 @@ export const update = mutation({
 export const listCompatibility = query({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db
       .query("printerCompatibility")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
@@ -142,6 +146,7 @@ export const listCompatibility = query({
 export const listAllCompatibility = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const all = await ctx.db.query("printerCompatibility").collect();
     const grouped: Record<string, string[]> = {};
     for (const c of all) {
@@ -215,6 +220,7 @@ export const removeCompatibility = mutation({
 export const tonerMetrics = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     // Find all toner products (products that have compatibility entries)
     const allCompat = await ctx.db.query("printerCompatibility").collect();
     const tonerProductIds = [...new Set(allCompat.map((c) => c.productId))];

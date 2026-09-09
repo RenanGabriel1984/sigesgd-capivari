@@ -55,6 +55,7 @@ async function decorateInventory(ctx: any, inv: any) {
 export const list = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const inventories = await ctx.db.query("inventories").withIndex("by_date").order("desc").collect();
     return Promise.all(inventories.map((inv) => decorateInventory(ctx, inv)));
   },
@@ -63,6 +64,7 @@ export const list = query({
 export const get = query({
   args: { inventoryId: v.id("inventories") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const inv = await ctx.db.get(args.inventoryId);
     if (!inv) return null;
     return decorateInventory(ctx, inv);

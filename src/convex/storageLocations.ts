@@ -24,6 +24,7 @@ async function requireManagerOrAdmin(ctx: any) {
 export const list = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     return await ctx.db.query("storageLocations").collect();
   },
 });
@@ -31,6 +32,7 @@ export const list = query({
 export const listActive = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     return await ctx.db
       .query("storageLocations")
       .withIndex("by_active", (q) => q.eq("active", true))

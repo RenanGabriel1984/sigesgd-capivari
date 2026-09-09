@@ -14,6 +14,9 @@ export const generateUploadUrl = mutation({
 export const getUrl = query({
   args: { storageId: v.string() },
   handler: async (ctx, args) => {
+    // Proteção: exige sessão autenticada (documentos/fotos são internos)
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Não autenticado");
     const url = await ctx.storage.getUrl(args.storageId as any);
     return url;
   },
@@ -22,6 +25,9 @@ export const getUrl = query({
 export const getUrls = query({
   args: { storageIds: v.array(v.string()) },
   handler: async (ctx, args) => {
+    // Proteção: exige sessão autenticada
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Não autenticado");
     const urls: Record<string, string | null> = {};
     for (const id of args.storageIds) {
       urls[id] = await ctx.storage.getUrl(id as any);

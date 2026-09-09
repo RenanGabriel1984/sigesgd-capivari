@@ -49,6 +49,7 @@ export const listActive = query({
 export const get = query({
   args: { id: v.id("organizations") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     return await ctx.db.get(args.id);
   },
 });

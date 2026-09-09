@@ -1,9 +1,19 @@
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+
+async function requireUser(ctx: any) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error("Não autenticado");
+  const user = await ctx.db.get(userId);
+  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
+  return { userId, user };
+}
 
 export const list = query({
   args: {},
   handler: async (ctx) => {
+    await requireUser(ctx);
     const lots = await ctx.db.query("lots").collect();
     return Promise.all(lots.map(async (l) => {
       const product = await ctx.db.get(l.productId);
@@ -17,6 +27,7 @@ export const list = query({
 export const listByProduct = query({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const lots = await ctx.db
       .query("lots")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
@@ -32,6 +43,7 @@ export const listByProduct = query({
 export const listActiveByProduct = query({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const lots = await ctx.db
       .query("lots")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
@@ -47,6 +59,7 @@ export const listActiveByProduct = query({
 export const get = query({
   args: { lotId: v.id("lots") },
   handler: async (ctx, args) => {
+    await requireUser(ctx);
     const lot = await ctx.db.get(args.lotId);
     if (!lot) return null;
     const product = await ctx.db.get(lot.productId);
