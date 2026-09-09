@@ -4,6 +4,14 @@ import { v } from "convex/values";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
+async function requireUser(ctx: any) {
+  const userId = await getAuthUserId(ctx);
+  if (!userId) throw new Error("Não autenticado");
+  const user = await ctx.db.get(userId);
+  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
+  return { userId, user };
+}
+
 async function requireAdmin(ctx: any) {
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error("Não autenticado");
@@ -16,6 +24,8 @@ async function requireAdmin(ctx: any) {
 export const list = query({
   args: {},
   handler: async (ctx) => {
+    // Proteção: exige sessão autenticada (evita exposição pública da estrutura municipal)
+    await requireUser(ctx);
     const orgs = await ctx.db.query("organizations").collect();
     const byParent: Record<string, typeof orgs> = {};
     for (const org of orgs) {
@@ -30,6 +40,8 @@ export const list = query({
 export const listActive = query({
   args: {},
   handler: async (ctx) => {
+    // Proteção: exige sessão autenticada
+    await requireUser(ctx);
     return await ctx.db.query("organizations").withIndex("by_active", (q) => q.eq("active", true)).collect();
   },
 });

@@ -24,6 +24,8 @@ async function requireManagerOrAdmin(ctx: any) {
 export const list = query({
   args: {},
   handler: async (ctx) => {
+    // Proteção: exige sessão autenticada
+    await requireUser(ctx);
     return await ctx.db.query("categories").collect();
   },
 });

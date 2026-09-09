@@ -73,6 +73,8 @@ export const getUserById = query({
 export const listUsers = query({
   args: {},
   handler: async (ctx) => {
+    // Proteção: exige sessão autenticada (evita exposição pública de PII)
+    await requireUser(ctx);
     const users = await ctx.db.query("users").collect();
     return Promise.all(
       users.map(async (u: any) => {
