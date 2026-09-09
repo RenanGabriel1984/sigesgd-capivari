@@ -97,7 +97,7 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Organizações", href: "/organization", icon: Building2, permission: "canManageOrg" },
     { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },
     { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
-    { label: "Configurações", href: "/settings", icon: Settings, permission: "canManageSettings" },
+    { label: "Configurações", href: "/settings", icon: Settings, permission: "canManageUsers" },
   ]},
 ];
 
@@ -125,7 +125,7 @@ function SidebarLink({
           : "text-muted-foreground hover:bg-muted hover:text-foreground"
       )}
     >
-      <item.icon className={cn("h-4.5 w-4.5 shrink-0", isActive && "text-primary")} />
+      <item.icon className={cn("h-4.5 w-4.5 shrink-0", isActive ? "text-primary" : "text-muted-foreground/70")} />
       <span className="flex-1 truncate">{item.label}</span>
       {item.href === "/requests" && pendingCount !== undefined && pendingCount > 0 && (
         <Badge variant="destructive" className="h-5 min-w-5 text-[10px] px-1.5">
@@ -223,38 +223,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
       >
         {/* Logo */}
-        <div className="flex h-16 items-center gap-2.5 border-b border-border/60 px-4">
+        <div className="relative flex h-16 items-center gap-2.5 border-b border-border/60 px-4">
+          <div aria-hidden className="absolute bottom-0 left-4 right-4 h-px bg-[var(--capivari-gold)]/60" />
           {!collapsed && (
             <Link to="/dashboard" className="flex items-center gap-2.5 min-w-0">
-              <img
-                src="/assets/brasao.svg"
-                alt="Brasão de Capivari"
-                className="h-8 w-8 object-contain shrink-0"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
-                  const fb = (e.target as HTMLElement).nextElementSibling;
-                  if (fb) (fb as HTMLElement).style.display = "flex";
-                }}
-              />
-              <div className="hidden h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-xs shrink-0">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-xs shrink-0 ring-2 ring-[var(--capivari-gold)]/70">
                 SG
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-semibold truncate leading-tight text-[var(--capivari-green)]">SIGESGD</p>
-                <p className="text-[10px] text-muted-foreground truncate leading-tight">Capivari</p>
+                <p className="text-[10px] text-muted-foreground truncate leading-tight">Capivari — SP</p>
               </div>
             </Link>
           )}
           {collapsed && (
             <Link to="/dashboard" className="mx-auto">
-              <img
-                src="/assets/brasao.svg"
-                alt="Brasão"
-                className="h-8 w-8 object-contain"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = "none";
-                }}
-              />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-xs ring-2 ring-[var(--capivari-gold)]/70">
+                SG
+              </div>
             </Link>
           )}
         </div>
@@ -316,17 +302,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <div className="flex h-16 items-center justify-between border-b border-border/60 px-4">
                 <Link to="/dashboard" className="flex items-center gap-2.5">
-                  <img
-                    src="/assets/brasao.svg"
-                    alt="Brasão de Capivari"
-                    className="h-8 w-8 object-contain"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = "none";
-                    }}
-                  />
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-xs ring-2 ring-[var(--capivari-gold)]/70">
+                    SG
+                  </div>
                   <div>
                     <p className="text-sm font-semibold leading-tight text-[var(--capivari-green)]">SIGESGD</p>
-                    <p className="text-[10px] text-muted-foreground leading-tight">Capivari</p>
+                    <p className="text-[10px] text-muted-foreground leading-tight">Capivari — SP</p>
                   </div>
                 </Link>
                 <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(false)}>
@@ -366,12 +347,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* PWA Install Banner */}
         {showInstallBanner && (
           <div className="flex items-center gap-3 bg-[var(--capivari-green)]/5 border-b border-[var(--capivari-green)]/20 px-4 py-2.5 shrink-0">
-            <img
-              src="/assets/brasao.svg"
-              alt="Brasão"
-              className="h-8 w-8 object-contain shrink-0"
-              onError={(e) => {(e.target as HTMLImageElement).style.display = "none";}}
-            />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-[10px] shrink-0 ring-1 ring-[var(--capivari-gold)]/70">
+              SG
+            </div>
             <p className="text-sm text-foreground flex-1 min-w-0">
               <span className="font-medium">Instalar o SIGESGD</span> na Tela Inicial para acesso rápido.
             </p>

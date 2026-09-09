@@ -91,19 +91,14 @@ export default function Dashboard() {
         {/* ─── Hero institucional ─── */}
         <motion.div {...fadeIn}>
           <div className="relative overflow-hidden rounded-2xl bg-[var(--capivari-green-dark)] text-white">
-            <img
-              src="/assets/bandeira.svg"
-              alt=""
-              aria-hidden
-              className="absolute right-0 top-0 h-full w-48 sm:w-72 object-cover opacity-10"
-            />
+            {/* Detalhe dourado institucional (faixa superior) */}
+            <div aria-hidden className="absolute inset-x-0 top-0 h-1 bg-[var(--capivari-gold)]" />
+            <div aria-hidden className="absolute -right-10 -bottom-16 h-48 w-48 rounded-full bg-white/5" />
+            <div aria-hidden className="absolute right-16 -bottom-20 h-32 w-32 rounded-full bg-[var(--capivari-blue)]/20" />
             <div className="relative flex items-center gap-4 p-5 sm:p-7">
-              <img
-                src="/assets/brasao.svg"
-                alt="Brasão de Capivari"
-                className="h-14 w-14 sm:h-16 sm:w-16 object-contain rounded-full bg-white/95 p-1 shrink-0"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-              />
+              <div className="h-14 w-14 sm:h-16 sm:w-16 shrink-0 flex items-center justify-center rounded-xl bg-white/95 text-[var(--capivari-green-dark)] font-bold text-lg sm:text-xl shadow-sm ring-2 ring-[var(--capivari-gold)]/70">
+                SG
+              </div>
               <div className="min-w-0">
                 <p className="text-xs text-white/70">Prefeitura Municipal de Capivari — SP</p>
                 <h1 className="text-xl sm:text-2xl font-bold tracking-tight mt-0.5">
@@ -254,77 +249,6 @@ export default function Dashboard() {
               </Card>
             </motion.div>
           </div>
-        </div>
-
-        {/* ─── KPI Cards (2ª linha) ─── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-          <motion.div {...fadeIn} transition={{ delay: 0.05 }}>
-            <Card className="border-border/50">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-                    <Package className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{loading ? "—" : s!.totalProducts}</p>
-                    <p className="text-xs text-muted-foreground">Itens no Catálogo</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          <motion.div {...fadeIn} transition={{ delay: 0.1 }}>
-            <Card className="border-border/50">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
-                    <AlertTriangle className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{loading ? "—" : s!.criticalStock}</p>
-                    <p className="text-xs text-muted-foreground">Estoque Crítico</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          <motion.div {...fadeIn} transition={{ delay: 0.15 }}>
-            <Card className="border-border/50">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
-                    <ClipboardList className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold">{loading ? "—" : s!.pendingThisMonth}</p>
-                    <p className="text-xs text-muted-foreground">Pedidos Pendentes (Mês)</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          <motion.div {...fadeIn} transition={{ delay: 0.2 }}>
-            <Card className="border-border/50">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
-                    <BarChart3 className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-emerald-600">+{loading ? "—" : s!.entriesThisMonth}</span>
-                      <span className="text-muted-foreground text-xs">/</span>
-                      <span className="text-sm font-bold text-rose-600">-{loading ? "—" : s!.exitsThisMonth}</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">Entradas / Saídas (Mês)</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
         </div>
 
         {/* ─── GOMAQ + Assets + Licenses Cards ─── */}

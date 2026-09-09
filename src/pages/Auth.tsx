@@ -165,37 +165,21 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       {/* Header bar */}
       <header className="flex items-center justify-between px-4 sm:px-6 h-14 border-b border-border/40 bg-card/80 backdrop-blur-sm">
         <Link to="/" className="flex items-center gap-2.5">
-          <img
-            src="/assets/brasao.svg"
-            alt="Brasão de Capivari"
-            className="h-8 w-8 object-contain"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = "none";
-            }}
-          />
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-xs ring-2 ring-[var(--capivari-gold)]/70">
+            SG
+          </div>
           <div>
             <p className="text-sm font-bold leading-tight tracking-tight text-[var(--capivari-green)]">SIGESGD</p>
-            <p className="text-[10px] text-muted-foreground leading-tight">Capivari</p>
+            <p className="text-[10px] text-muted-foreground leading-tight">Capivari — SP</p>
           </div>
         </Link>
       </header>
 
       <div className="flex-1 flex items-center justify-center px-4 py-8 bg-gradient-to-b from-[#f8faf9] to-background">
         <div className="w-full max-w-md">
-          {/* Institutional header with coat of arms */}
+          {/* Institutional header — brasão removido até o asset oficial ser fornecido */}
           <div className="text-center mb-8">
-            <img
-              src="/assets/brasao.svg"
-              alt="Brasão Municipal de Capivari"
-              className="h-20 w-20 mx-auto mb-4 object-contain drop-shadow-sm"
-              onError={(e) => {
-                // Fallback to styled div
-                (e.target as HTMLImageElement).style.display = "none";
-                const fallback = document.getElementById("brasao-fallback");
-                if (fallback) fallback.style.display = "flex";
-              }}
-            />
-            <div id="brasao-fallback" style={{ display: "none" }} className="h-20 w-20 mx-auto mb-4 items-center justify-center rounded-2xl bg-[var(--capivari-green)] text-white font-bold text-2xl shadow-lg">
+            <div className="h-20 w-20 mx-auto mb-4 flex items-center justify-center rounded-2xl bg-[var(--capivari-green)] text-white font-bold text-2xl shadow-lg ring-2 ring-[var(--capivari-gold)]/70">
               SG
             </div>
             <h1 className="text-xl font-bold tracking-tight text-[var(--capivari-green)]">SIGESGD Capivari</h1>
@@ -205,14 +189,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             <p className="text-xs text-muted-foreground/70 mt-0.5">
               Secretaria de Gestão e Governo Digital
             </p>
-            <img
-              src="/assets/bandeira.svg"
-              alt="Bandeira de Capivari"
-              className="mx-auto mt-4 h-8 w-auto opacity-90"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
-              }}
-            />
           </div>
 
           <Card className="border-border/50 shadow-lg">

@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Pencil, Users as UsersIcon, Search, Plus, UserCheck, UserX, Key, Shield } from "lucide-react";
 import { ROLE_LABELS, type UserRole } from "@/types/constants";
-import type { Id } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
@@ -40,13 +40,12 @@ export default function UsersPage() {
   const createPassword = useMutation(api.passwords.createPassword);
   const adminResetPassword = useMutation(api.passwords.adminResetPassword);
 
-  if (users === undefined) return <LoadingSkeleton />;
-
+  // ─── Hooks: TODOS acima de qualquer return condicional (Rules of Hooks) ───
   const [search, setSearch] = useState("");
   const [editDialog, setEditDialog] = useState(false);
   const [createDialog, setCreateDialog] = useState(false);
-  const [passwordDialog, setPasswordDialog] = useState<{ userId: any; userName: string; isNew: boolean } | null>(null);
-  const [editUser, setEditUser] = useState<any>(null);
+  const [passwordDialog, setPasswordDialog] = useState<{ userId: string; userName: string; isNew: boolean } | null>(null);
+  const [editUser, setEditUser] = useState<Doc<"users"> | null>(null);
 
   // Form states
   const [name, setName] = useState("");
@@ -56,6 +55,9 @@ export default function UsersPage() {
   const [active, setActive] = useState(true);
   const [password, setPassword] = useState("");
   const [tempPassword, setTempPassword] = useState("");
+
+  // Loading: somente DEPOIS de todos os hooks
+  if (users === undefined) return <LoadingSkeleton />;
 
   const filtered = users?.filter((u: any) =>
     u.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -85,7 +87,7 @@ export default function UsersPage() {
     if (!tempPassword.trim()) { toast.error("A senha temporária é obrigatória"); return; }
     if (tempPassword.length < 6) { toast.error("A senha temporária deve ter pelo menos 6 caracteres"); return; }
     try {
-      const newUserId = await createUser({ name: name.trim(), email: email.trim(), role, organizationId: (orgId || undefined) as any });
+      const newUserId = await createUser({ name: name.trim(), email: email.trim(), role, organizationId: (orgId || undefined) as Id<"organizations"> | undefined });
       // Auto-create password with requiresReset: true
       await createPassword({ userId: newUserId as Id<"users">, password: tempPassword, requiresReset: true });
       toast.success("Usuário criado com sucesso. Obrigará troca de senha no primeiro acesso.");
@@ -96,13 +98,13 @@ export default function UsersPage() {
   const handleEdit = async () => {
     if (!editUser) return;
     try {
-      await updateUser({ userId: editUser._id, role, organizationId: (orgId || undefined) as any, active });
+      await updateUser({ userId: editUser._id, role, organizationId: (orgId || undefined) as Id<"organizations"> | undefined, active });
       toast.success("Usuário atualizado");
       setEditDialog(false);
     } catch (e: any) { toast.error(e.message ?? "Erro ao atualizar"); }
   };
 
-  const handleToggleActive = async (userId: any, currentActive: boolean, userName: string) => {
+  const handleToggleActive = async (userId: Id<"users">, currentActive: boolean, userName: string) => {
     if (currentActive) {
       if (!confirm(`Tem certeza que deseja desativar o usuário "${userName}"?`)) return;
       try {
@@ -243,7 +245,7 @@ export default function UsersPage() {
             <div><Label>Perfil</Label><Select value={role} onValueChange={(v) => setRole(v as UserRole)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(ROLE_LABELS).map(([k, v]) => (<SelectItem key={k} value={k}>{v}</SelectItem>))}</SelectContent></Select></div>
             <div><Label>Unidade Organizacional</Label><Select value={orgId} onValueChange={setOrgId}><SelectTrigger><SelectValue placeholder="Nenhuma" /></SelectTrigger><SelectContent>{orgs?.orgs.map((o: any) => (<SelectItem key={o._id} value={o._id}>{o.name}</SelectItem>))}</SelectContent></Select></div>
             <div><Label>Status</Label><Select value={active ? "active" : "inactive"} onValueChange={(v) => setActive(v === "active")} disabled={editUser?._id === users?.find((u: any) => u.role === "admin")?._id}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">Ativo</SelectItem><SelectItem value="inactive">Inativo</SelectItem></SelectContent></Select></div>
-            <div><Button variant="outline" size="sm" className="gap-2" onClick={() => { setEditDialog(false); openPassword(editUser._id, editUser.name ?? editUser.email, false); }}><Key className="h-3.5 w-3.5" /> Redefinir Senha</Button></div>
+            <div><Button variant="outline" size="sm" className="gap-2" onClick={() => { if (!editUser) return; setEditDialog(false); openPassword(editUser._id, editUser.name ?? editUser.email ?? "Usuário", false); }}><Key className="h-3.5 w-3.5" /> Redefinir Senha</Button></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setEditDialog(false)}>Cancelar</Button><Button onClick={handleEdit}>Salvar</Button></DialogFooter>
         </DialogContent>
