@@ -116,6 +116,20 @@ export default function Inventory() {
   // Count editing state
   const [countEdits, setCountEdits] = useState<Record<string, string>>({});
 
+  // IMPORTANTE (Rules of Hooks): todos os hooks precisam rodar em TODOS os
+  // renders, na mesma ordem. Este useMemo fica ANTES de qualquer return
+  // condicional — hooks após um early return mudam a contagem de hooks entre
+  // renders e disparam o erro React #310.
+  const sheetRows = useMemo(() => {
+    const parsed = parseSheetText(sheetText);
+    const locByName = new Map((locations ?? []).map((l) => [l.name.trim().toLowerCase(), l]));
+    return parsed.map((row) => {
+      const location = locByName.get(row.locationName.trim().toLowerCase());
+      const productId = matchSheetProduct(products ?? [], row.productName);
+      return { ...row, locationId: location?._id ?? null, productId };
+    });
+  }, [sheetText, locations, products]);
+
   if (inventories === undefined) {
     return (
       <AppShell>
@@ -267,16 +281,6 @@ export default function Inventory() {
       toast.error(e.message ?? "Erro ao criar produto");
     }
   };
-
-  const sheetRows = useMemo(() => {
-    const parsed = parseSheetText(sheetText);
-    const locByName = new Map((locations ?? []).map((l) => [l.name.trim().toLowerCase(), l]));
-    return parsed.map((row) => {
-      const location = locByName.get(row.locationName.trim().toLowerCase());
-      const productId = matchSheetProduct(products ?? [], row.productName);
-      return { ...row, locationId: location?._id ?? null, productId };
-    });
-  }, [sheetText, locations, products]);
 
   const sheetValidRows = sheetRows.filter((r) => r.locationId && r.quantity > 0);
   const sheetMatched = sheetRows.filter((r) => r.productId).length;

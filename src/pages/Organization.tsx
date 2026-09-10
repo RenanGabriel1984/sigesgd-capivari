@@ -81,6 +81,13 @@ export default function Organization() {
     selectedOrg ? { organizationId: selectedOrg._id } : "skip"
   );
 
+  // Enquanto a query não resolve (carregando ou erro), mostra skeleton em vez
+  // de exibir indevidamente "Nenhuma unidade" — evita interpretação errada
+  // de que a estrutura foi perdida.
+  if (orgData === undefined) {
+    return <LoadingSkeleton />;
+  }
+
   const rootOrgs = orgData?.orgs.filter((o) => !o.parentId) ?? [];
 
   const openCreate = (parentId?: string) => { setForm({ ...emptyForm, parentId: parentId ?? "" }); setEditingId(null); setDialogOpen(true); };

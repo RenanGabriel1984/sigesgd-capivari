@@ -1,7 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { hasInitialInventoryLot } from "./stockHelpers";
+import { hasInitialInventoryLot, tonerKitObservation } from "./stockHelpers";
 
 async function requireUser(ctx: any) {
   const userId = await getAuthUserId(ctx);
@@ -313,16 +313,35 @@ export const importInitialSheet = mutation({
       const existing = products.find(
         (p: any) => p.name.trim().toLowerCase() === name.toLowerCase()
       );
+      // Toner de kit original de 4 cores (VersaLink, AltaLink, Lexmark CX735,
+      // Lexmark XM5365): a observação padrão é aplicada (informação
+      // observacional — nunca altera quantidade física nem agrupa produtos).
+      const kitObservation = tonerKitObservation({
+        name,
+        brand: row.brand,
+      });
       let productId: string;
       if (existing) {
         productId = existing._id;
         matched++;
+        if (kitObservation && !existing.observation) {
+          await ctx.db.patch(existing._id, { observation: kitObservation });
+          await ctx.db.insert("auditLogs", {
+            userId,
+            action: "update",
+            entity: "products",
+            entityId: existing._id,
+            details: `Observação de kit aplicada pela importação: ${kitObservation}`,
+            timestamp: Date.now(),
+          });
+        }
       } else {
         const id = await ctx.db.insert("products", {
           name,
           categoryId: fallbackCategory._id,
           unitOfMeasure: row.unitOfMeasure ?? "un",
           brand: row.brand || undefined,
+          observation: row.observation || kitObservation || undefined,
           minimumStock: 0,
           idealStock: 0,
           maximumStock: 0,

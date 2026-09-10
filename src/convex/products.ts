@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { tonerKitObservation } from "./stockHelpers";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -184,11 +185,22 @@ export const create = mutation({
       if (!location.active) throw new Error("O local de armazenamento selecionado está inativo");
     }
 
+    // Toners de kit original de 4 cores (VersaLink, AltaLink, Lexmark CX735,
+    // Lexmark XM5365) ganham a observação padrão quando nenhuma foi informada.
+    // É apenas observacional — não altera estoque físico nem agrupa produtos.
+    const kitObservation = tonerKitObservation({
+      name: args.name,
+      brand: args.brand,
+      model: args.model,
+      specification: args.specification,
+    });
+
     const id = await ctx.db.insert("products", {
       ...productArgs,
       name: args.name.trim(),
       // Auto-generate sequential internal code if not provided
       internalCode: productArgs.internalCode?.trim() || await generateInternalCode(ctx),
+      observation: kitObservation ?? productArgs.observation,
       active: true,
     });
     const stockId = await ctx.db.insert("stock", { productId: id, physicalQuantity: 0, reservedQuantity: 0 });

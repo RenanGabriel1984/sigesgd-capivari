@@ -80,6 +80,42 @@ export function matchSheetProduct(
 }
 
 /**
+ * Observação padrão dos toners que fazem parte de um kit original de 4 cores.
+ * Aplica-se a: Xerox VersaLink, Xerox AltaLink, Lexmark CX735 e Lexmark XM5365.
+ * É apenas informação relacional/observacional — NÃO altera estoque físico e
+ * NÃO agrupa os toners em um produto "kit".
+ */
+export const TONER_KIT_OBSERVATION = "Parte do kit original e 4 cores";
+
+/**
+ * Detecta se um item pertence a uma família de toner de kit de 4 cores e
+ * retorna a observação padrão. Retorna null quando não se aplica.
+ *
+ * A detecção usa marca/modelo/especificação (nunca apenas "toner") para não
+ * agrupar produtos diferentes — ex.: "TONER" genérico não corresponde.
+ */
+export function tonerKitObservation(input: {
+  name?: string | null;
+  brand?: string | null;
+  model?: string | null;
+  specification?: string | null;
+}): string | null {
+  const text = [input.name, input.brand, input.model, input.specification]
+    .filter((v): v is string => !!v && v.trim().length > 0)
+    .join(" ")
+    .toLowerCase();
+
+  // As famílias são identificadas pelo modelo característico (como ocorre nas
+  // descrições reais de NF-e, que nem sempre citam a marca): VersaLink,
+  // AltaLink, CX-735 (Lexmark) e XM5365 (Lexmark).
+  if (/versalink/.test(text)) return TONER_KIT_OBSERVATION;
+  if (/altalink/.test(text)) return TONER_KIT_OBSERVATION;
+  if (/cx\s*-?\s*735/.test(text)) return TONER_KIT_OBSERVATION;
+  if (/xm\s*5365/.test(text)) return TONER_KIT_OBSERVATION;
+  return null;
+}
+
+/**
  * Verifica se um produto já possui carga inicial confirmada.
  *
  * Uma carga inicial é caracterizada por um lote ATIVO vinculado a uma entrada
