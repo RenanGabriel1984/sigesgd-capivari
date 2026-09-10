@@ -236,12 +236,22 @@ export const startReview = mutation({
  * This is an atomic operation.
  */
 export const close = mutation({
-  args: { inventoryId: v.id("inventories") },
+  args: {
+    inventoryId: v.id("inventories"),
+    // Justificativa obrigatória: qualquer ajuste de saldo precisa de motivo
+    // auditável — nunca alterar saldo silenciosamente.
+    justification: v.string(),
+  },
   handler: async (ctx, args) => {
     const { userId, user } = await requireStockManagerOrAdmin(ctx);
     const role = (user.role ?? "technician") as UserRole;
     if (role !== "admin" && role !== "stock_manager") {
       throw new Error("Apenas administradores e responsáveis pelo estoque podem fechar inventário");
+    }
+
+    const justification = (args.justification ?? "").trim();
+    if (!justification) {
+      throw new Error("A justificativa do fechamento é obrigatória (ajuste de saldo auditável)");
     }
 
     const inv = await ctx.db.get(args.inventoryId);
@@ -303,7 +313,7 @@ export const close = mutation({
         await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
       }
 
-      // Create adjustment movement
+      // Create adjustment movement (com a justificativa obrigatória)
       await ctx.db.insert("stockMovements", {
         productId: count.productId,
         type: "adjustment",
@@ -313,7 +323,7 @@ export const close = mutation({
         previousReserved: reserved,
         newReserved: reserved,
         userId,
-        observation: `Ajuste via inventário ${inv.inventoryNumber}${scopeSuffix}. Diferença: ${count.difference! >= 0 ? "+" : ""}${count.difference}`,
+        observation: `Ajuste via inventário ${inv.inventoryNumber}${scopeSuffix}. Diferença: ${count.difference! >= 0 ? "+" : ""}${count.difference}. Justificativa: ${justification}`,
         timestamp: now,
       });
 
@@ -328,10 +338,10 @@ export const close = mutation({
       updatedAt: now,
     });
 
-    // Audit
+    // Audit (com a justificativa obrigatória)
     await ctx.db.insert("auditLogs", {
       userId, action: "close_inventory", entity: "inventories", entityId: args.inventoryId,
-      details: `Inventário ${inv.inventoryNumber} fechado${scopeSuffix}. ${countsWithDiff.length} ajuste(s): ${adjustmentDetails.join("; ") || "nenhum"}`,
+      details: `Inventário ${inv.inventoryNumber} fechado${scopeSuffix}. ${countsWithDiff.length} ajuste(s): ${adjustmentDetails.join("; ") || "nenhum"}. Justificativa: ${justification}`,
       timestamp: now,
     });
 

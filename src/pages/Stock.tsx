@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -7,10 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
-import { Search, Warehouse } from "lucide-react";
+import { Search, Warehouse, ClipboardList } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UNIT_LABELS } from "@/types/constants";
 import { getStockSituation, STOCK_SITUATION_LABELS, STOCK_SITUATION_BADGE_CLASSES } from "@/lib/stock-status";
+import { matchesStockSearch } from "@/convex/stockHelpers";
 import type { ProductView } from "@/lib/product-types";
 
 function StockSkeleton() {
@@ -62,11 +64,7 @@ export default function Stock() {
 
   const filtered = products?.filter(
     (p) => {
-      const matchesSearch =
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.internalCode?.toLowerCase().includes(search.toLowerCase()) ||
-        p.manufacturer?.toLowerCase().includes(search.toLowerCase()) ||
-        p.brand?.toLowerCase().includes(search.toLowerCase());
+      const matchesSearch = matchesStockSearch(p, search);
       if (!matchesSearch) return false;
       const physical = p.stock?.physicalQuantity ?? 0;
       const available = Math.max(0, physical - (p.stock?.reservedQuantity ?? 0));
@@ -156,6 +154,7 @@ export default function Stock() {
                     <TableHead className="text-center">Mínimo</TableHead>
                     <TableHead className="text-center">Ideal</TableHead>
                     <TableHead className="w-[170px]">Situação</TableHead>
+                    <TableHead className="w-[90px] text-right">Ação</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -199,12 +198,20 @@ export default function Stock() {
                             )}
                           </div>
                         </TableCell>
+                        <TableCell className="text-right">
+                          <Link
+                            to={`/requests?product=${p._id}`}
+                            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline shrink-0"
+                          >
+                            <ClipboardList className="h-3.5 w-3.5" /> Solicitar
+                          </Link>
+                        </TableCell>
                       </TableRow>
                     );
                   })}
                   {filtered?.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8}>
+                      <TableCell colSpan={9}>
                         <div className="empty-state py-12">
                           <Warehouse className="empty-state-icon" />
                           <p className="empty-state-title">
@@ -267,6 +274,12 @@ export default function Stock() {
                   {p.maximumStock > 0 && (
                     <Progress value={Math.min(100, (physical / p.maximumStock) * 100)} className="h-1.5 mt-2" />
                   )}
+                  <Link
+                    to={`/requests?product=${p._id}`}
+                    className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs font-semibold text-primary active:scale-[0.98]"
+                  >
+                    <ClipboardList className="h-3.5 w-3.5" /> Solicitar este item
+                  </Link>
                 </CardContent>
               </Card>
             );

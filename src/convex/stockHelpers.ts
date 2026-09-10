@@ -80,6 +80,38 @@ export function matchSheetProduct(
 }
 
 /**
+ * Busca de estoque: casa o termo com nome, marca, modelo, especificação,
+ * fabricante e códigos internos (case-insensitive). Usada na tela de Estoque
+ * para que o usuário encontre um item mesmo sem saber o nome exato.
+ */
+export function matchesStockSearch(
+  product: {
+    name: string;
+    internalCode?: string | null;
+    manufacturer?: string | null;
+    brand?: string | null;
+    model?: string | null;
+    specification?: string | null;
+  },
+  term: string
+): boolean {
+  const t = term.trim().toLowerCase();
+  if (!t) return true;
+  const haystack = [
+    product.name,
+    product.internalCode,
+    product.manufacturer,
+    product.brand,
+    product.model,
+    product.specification,
+  ]
+    .filter((v): v is string => !!v)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(t);
+}
+
+/**
  * Observação padrão dos toners que fazem parte de um kit original de 4 cores.
  * Aplica-se a: Xerox VersaLink, Xerox AltaLink, Lexmark CX735 e Lexmark XM5365.
  * É apenas informação relacional/observacional — NÃO altera estoque físico e

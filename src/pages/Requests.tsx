@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useSearchParams } from "react-router";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
@@ -64,8 +65,11 @@ export default function Requests() {
   const cancelRequest = useMutation(api.requests.cancel);
 
   // ─── Create dialog state ───
-  const [createDialog, setCreateDialog] = useState(false);
-  const [items, setItems] = useState<RequestItemForm[]>([{ productId: "", quantity: 1, targetPrinterId: "" }]);
+  // Pré-seleção vinda da tela de Estoque ("Solicitar este item" → /requests?product=<id>)
+  const [searchParams] = useSearchParams();
+  const prefillProduct = searchParams.get("product") ?? "";
+  const [createDialog, setCreateDialog] = useState(!!prefillProduct);
+  const [items, setItems] = useState<RequestItemForm[]>([{ productId: prefillProduct, quantity: 1, targetPrinterId: "" }]);
   const [observation, setObservation] = useState("");
   const [secretariaId, setSecretariaId] = useState("");
   const [departamentoId, setDepartamentoId] = useState("");

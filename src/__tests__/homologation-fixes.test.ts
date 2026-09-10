@@ -14,7 +14,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { parseSheetText, tonerKitObservation, TONER_KIT_OBSERVATION } from "@/convex/stockHelpers";
+import { parseSheetText, tonerKitObservation, matchesStockSearch, TONER_KIT_OBSERVATION } from "@/convex/stockHelpers";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // A/B. REGRA DOS HOOKS — NENHUM HOOK APÓS RETURN CONDICIONAL (React #310)
@@ -177,6 +177,107 @@ describe("Organizações — página e hierarquia", () => {
 
   it("F) A árvore filtra filhos pelo parentId (Secretaria → Departamento → Unidade)", () => {
     expect(src).toMatch(/allOrgs\.filter\(\(o\) => o\.parentId === org\._id\)/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// P3. ESTOQUE OPERACIONAL — busca ampla + "Solicitar este item"
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("Estoque operacional — busca", () => {
+  const toner = {
+    name: "CART. TONER PRETO 28K CX-735 (81C8XK0)",
+    internalCode: "0110000735",
+    manufacturer: "Gomaq",
+    brand: "Lexmark",
+    model: "CX735",
+    specification: "Compatível com CX-735 / 28K páginas",
+  };
+
+  it("encontra por nome, marca, modelo, especificação, fabricante e código", () => {
+    expect(matchesStockSearch(toner, "toner preto")).toBe(true);
+    expect(matchesStockSearch(toner, "Lexmark")).toBe(true);
+    expect(matchesStockSearch(toner, "CX735")).toBe(true);
+    expect(matchesStockSearch(toner, "28k páginas")).toBe(true);
+    expect(matchesStockSearch(toner, "Gomaq")).toBe(true);
+    expect(matchesStockSearch(toner, "0110000735")).toBe(true);
+  });
+
+  it("não encontra termos ausentes e ignora caixa/acentos irrelevantes", () => {
+    expect(matchesStockSearch(toner, "ribbon")).toBe(false);
+    expect(matchesStockSearch(toner, "")).toBe(true); // termo vazio = sem filtro
+  });
+
+  it("não agrupa toners diferentes apenas por descrição semelhante", () => {
+    const ciano = { ...toner, name: "CART. TONER CIANO 16.2K CX-735 (81C8XC0)", internalCode: "0110002735" };
+    expect(matchesStockSearch(ciano, "ciano")).toBe(true);
+    expect(matchesStockSearch(ciano, "preto")).toBe(false);
+  });
+});
+
+describe("Estoque operacional — botão Solicitar este item", () => {
+  it("a tela de Estoque navega para /requests?product=<id> (desktop e mobile)", () => {
+    const src = readFileSync(join(process.cwd(), "src/pages/Stock.tsx"), "utf-8");
+    expect(src).toMatch(/\/requests\?product=\$\{p\._id\}/);
+    expect(src).toMatch(/Solicitar este item/);
+  });
+
+  it("a tela de Solicitações pré-seleciona o produto vindo da URL", () => {
+    const src = readFileSync(join(process.cwd(), "src/pages/Requests.tsx"), "utf-8");
+    expect(src).toMatch(/useSearchParams\(\)/);
+    expect(src).toMatch(/prefillProduct = searchParams\.get\("product"\)/);
+    expect(src).toMatch(/productId: prefillProduct/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// P4. SOLICITAÇÃO → APROVAÇÃO → ENTREGA — confirmação autenticada
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("Entrega autenticada e autoaprovação", () => {
+  const reqSrc = readFileSync(join(process.cwd(), "src/convex/requests.ts"), "utf-8");
+
+  it("a entrega exige confirmação por senha (assinatura eletrônica)", () => {
+    expect(reqSrc).toMatch(/confirmationPassword: v\.string\(\)/);
+    expect(reqSrc).toMatch(/verifyPassword\(args\.confirmationPassword/);
+    expect(reqSrc).toMatch(/Assinado eletronicamente por/);
+  });
+
+  it("a entrega registra quem entregou e quem recebeu", () => {
+    expect(reqSrc).toMatch(/receivedByUserId/);
+    expect(reqSrc).toMatch(/deliveredBySignature/);
+  });
+
+  it("a entrega baixa físico e reservado juntos (FIFO por lote)", () => {
+    expect(reqSrc).toMatch(/newPhysical = freshStock\.physicalQuantity - input\.quantityDelivered/);
+    expect(reqSrc).toMatch(/newReserved = freshStock\.reservedQuantity - input\.quantityDelivered/);
+    expect(reqSrc).toMatch(/requestItemLots/);
+  });
+
+  it("técnico não pode aprovar a própria solicitação", () => {
+    expect(reqSrc).toMatch(/Não é possível aprovar sua própria solicitação/);
+    expect(reqSrc).toMatch(/Técnicos não podem aprovar solicitações/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// P5. INVENTÁRIO — justificativa obrigatória no fechamento
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("Inventário — ajuste nunca silencioso", () => {
+  const invSrc = readFileSync(join(process.cwd(), "src/convex/inventory.ts"), "utf-8");
+  const pageSrc = readFileSync(join(process.cwd(), "src/pages/Inventory.tsx"), "utf-8");
+
+  it("o fechamento exige justificativa obrigatória no backend", () => {
+    expect(invSrc).toMatch(/justification: v\.string\(\)/);
+    expect(invSrc).toMatch(/justificativa do fechamento é obrigatória/);
+    expect(invSrc).toMatch(/Justificativa: \$\{justification\}/);
+  });
+
+  it("a tela pede a justificativa antes de fechar (diálogo)", () => {
+    expect(pageSrc).toMatch(/A justificativa é obrigatória para fechar o inventário/);
+    expect(pageSrc).toMatch(/Justificativa \*/);
+    expect(pageSrc).toMatch(/closeInventory\(\{ inventoryId: closeTarget as any, justification/);
   });
 });
 

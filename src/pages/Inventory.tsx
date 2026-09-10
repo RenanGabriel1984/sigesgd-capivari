@@ -116,6 +116,11 @@ export default function Inventory() {
   // Count editing state
   const [countEdits, setCountEdits] = useState<Record<string, string>>({});
 
+  // Fechamento com justificativa obrigatória (ajuste de saldo auditável)
+  const [closeTarget, setCloseTarget] = useState<string | null>(null);
+  const [closeJustification, setCloseJustification] = useState("");
+  const [closing, setClosing] = useState(false);
+
   // IMPORTANTE (Rules of Hooks): todos os hooks precisam rodar em TODOS os
   // renders, na mesma ordem. Este useMemo fica ANTES de qualquer return
   // condicional — hooks após um early return mudam a contagem de hooks entre
@@ -214,15 +219,24 @@ export default function Inventory() {
     }
   };
 
-  const handleClose = async (id: string) => {
+  const handleClose = async () => {
+    if (!closeTarget) return;
+    if (!closeJustification.trim()) {
+      toast.error("A justificativa é obrigatória para fechar o inventário e ajustar saldos");
+      return;
+    }
+    setClosing(true);
     try {
-      const result = await closeInventory({ inventoryId: id as any });
+      const result = await closeInventory({ inventoryId: closeTarget as any, justification: closeJustification.trim() });
       const adj = (result as any)?.adjustments ?? 0;
       toast.success(`Inventário fechado. ${adj} ajuste(s) gerado(s).`);
+      setCloseTarget(null);
+      setCloseJustification("");
       setViewId(null);
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao fechar inventário");
     }
+    setClosing(false);
   };
 
   const handleCancel = async (id: string) => {
@@ -414,7 +428,7 @@ export default function Inventory() {
                               </Button>
                             )}
                             {inv.status === "review" && (
-                              <Button size="sm" className="gap-1" onClick={() => handleClose(inv._id)}>
+                              <Button size="sm" className="gap-1" onClick={() => setCloseTarget(inv._id)}>
                                 <CheckCircle className="h-3 w-3" /> Fechar e Ajustar
                               </Button>
                             )}
@@ -858,6 +872,38 @@ export default function Inventory() {
               <Button variant="outline" onClick={() => { setSheetOpen(false); setSheetText(""); }}>Cancelar</Button>
               <Button onClick={handleImportSheet} disabled={importing || sheetValidRows.length === 0}>
                 {importing ? "Importando..." : `Confirmar importação (${sheetValidRows.length} linha(s))`}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* ═══ Fechar Inventário — justificativa obrigatória ═══ */}
+        <Dialog open={closeTarget !== null} onOpenChange={(open) => { if (!open) { setCloseTarget(null); setCloseJustification(""); } }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2"><CheckCircle className="h-4 w-4" /> Fechar Inventário e Ajustar Saldos</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <p className="text-sm text-muted-foreground">
+                O fechamento gera movimentações de ajuste auditadas para as divergências
+                encontradas. <strong>A justificativa é obrigatória</strong> — o saldo nunca é
+                alterado silenciosamente.
+              </p>
+              <div>
+                <Label>Justificativa *</Label>
+                <Textarea
+                  value={closeJustification}
+                  onChange={(e) => setCloseJustification(e.target.value)}
+                  rows={3}
+                  placeholder="Ex: Contagem física realizada em conjunto com o responsável pelo armário; diferenças conferidas item a item."
+                  className="mt-1"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => { setCloseTarget(null); setCloseJustification(""); }}>Cancelar</Button>
+              <Button onClick={handleClose} disabled={closing}>
+                {closing ? "Fechando..." : "Confirmar Fechamento"}
               </Button>
             </DialogFooter>
           </DialogContent>
