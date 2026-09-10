@@ -328,10 +328,11 @@ describe("Importação da planilha de carga inicial", () => {
 describe("Toner Lexmark XM5365 na carga inicial", () => {
   const csv = readFileSync(join(process.cwd(), "docs/planilha-carga-inicial.csv"), "utf-8");
 
-  it("G) A planilha contém o registro real do XM5365 no Armário TI 02", () => {
+  it("G) A planilha oficial contém os 53 registros reais, incluindo o XM5365 no Armário TI 02", () => {
     const rows = parseSheetText(csv);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
+    expect(rows).toHaveLength(53);
+    const xm5365 = rows.find((r) => r.productName.toLowerCase().includes("xm5365"));
+    expect(xm5365).toMatchObject({
       locationName: "Armário TI 02",
       productName: "Toner Lexmark XM5365",
       brand: "Lexmark",
@@ -339,6 +340,19 @@ describe("Toner Lexmark XM5365 na carga inicial", () => {
       unitOfMeasure: "un",
       observation: TONER_KIT_OBSERVATION,
     });
+  });
+
+  it("G) Observações com ';' interno são preservadas integralmente na importação", () => {
+    const rows = parseSheetText(csv);
+    const cx735 = rows.filter((r) => r.productName.includes("Toner CX735"));
+    expect(cx735).toHaveLength(2);
+    for (const r of cx735) {
+      expect(r.observation).toBe("Parte do kit original e 4 cores; CX735");
+    }
+    const rj45 = rows.find((r) => r.productName === "Conector RJ45 Cat5E");
+    expect(rj45?.observation).toBe("Cat5E; 5 caixas com 100");
+    const montado = rows.find((r) => r.productName === "Telefone VoIP TIP 125I — Montado");
+    expect(montado?.observation).toBe("TIP 125I; montado");
   });
 
   it("G) Nenhuma quantidade fictícia para outras cores da XM5365 foi incluída", () => {

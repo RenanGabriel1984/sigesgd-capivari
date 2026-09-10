@@ -26,8 +26,29 @@ export interface SheetRow {
  *   Localização; Produto; Marca; Quantidade; Unidade; Observação
  *   Armário TI 01; Cabo HDMI; Exbom; 8; un; Caixa original
  *
+ * A Observação é a ÚLTIMA coluna: tudo após o 5º separador é preservado
+ * integralmente (inclusive separadores internos e espaços), pois observações
+ * reais contêm `;` — ex.: "Parte do kit original e 4 cores; CX735",
+ * "Cat5E; 5 caixas com 100".
+ *
  * Linhas sem produto são ignoradas; quantidade inválida vira 0.
  */
+/** Divide a linha nos 5 primeiros campos; o restante vira o 6º (observação). */
+function splitWithRest(line: string, sep: string): string[] {
+  const out: string[] = [];
+  let rest = line;
+  for (let k = 0; k < 5; k++) {
+    const idx = rest.indexOf(sep);
+    if (idx === -1) break;
+    out.push(rest.slice(0, idx));
+    rest = rest.slice(idx + sep.length);
+  }
+  out.push(rest);
+  return out;
+}
+
+const clean = (s: string) => s.trim().replace(/^"|"$/g, "");
+
 export function parseSheetText(text: string): SheetRow[] {
   const lines = text
     .split(/\r?\n/)
@@ -43,7 +64,7 @@ export function parseSheetText(text: string): SheetRow[] {
   const rows: SheetRow[] = [];
   let isFirstLine = true;
   for (const line of lines) {
-    const cols = line.split(sep).map((c) => c.trim().replace(/^"|"$/g, ""));
+    const cols = splitWithRest(line, sep).map(clean);
     if (isFirstLine) {
       const first = (cols[0] ?? "").toLowerCase();
       if (["local", "localização", "localizacao", "location", "localidade"].includes(first)) {
@@ -52,15 +73,18 @@ export function parseSheetText(text: string): SheetRow[] {
       }
       isFirstLine = false;
     }
-    const [locationName, productName, brand, quantity, unitOfMeasure, observation] = cols;
-    if (!productName) continue;
+    if (!cols[1]) continue;
+    // splitWithRest garante no máximo 6 campos: cols[5] é a observação
+    // integral (com separadores internos preservados).
+    const observation = cols[5] ?? "";
+    const [locationName, productName, brand, quantity, unitOfMeasure] = cols;
     rows.push({
       locationName: locationName ?? "",
       productName,
       brand: brand ?? "",
       quantity: Math.max(0, Number((quantity ?? "").replace(",", ".")) || 0),
-      unitOfMeasure: unitOfMeasure ?? "un",
-      observation: observation ?? "",
+      unitOfMeasure: unitOfMeasure || "un",
+      observation,
     });
   }
   return rows;

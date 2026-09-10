@@ -24,6 +24,7 @@ A confirmação gera, por item: entrada `initial_inventory`, lote rastreável, `
 
 ## Estado atual
 
-- 1 registro real incluído: **Toner Lexmark XM5365** (Armário TI 02, 1 un, marca Lexmark).
-- Os 52 registros da relação atual de estoque dos armários estão com o responsável pelo estoque (fora deste ambiente) e devem ser **acrescentados a este arquivo** antes da importação — o sistema não inventa quantidades.
-- **Pré-requisito**: os locais `Armário TI 01` e `Armário TI 02` precisam estar cadastrados (Administração → Locais ou seed `seedStorageLocations`).
+- A planilha contém a **carga inicial oficial completa: 53 registros** (Armário TI 01 com 34, Armário TI 02 com 19), incluindo o **Toner Lexmark XM5365** (Armário TI 02, 1 un).
+- A carga foi **efetivada** (entrada `initial_inventory` com 53 lotes rastreáveis, saldos por local e globais conferidos, movimentações e auditoria). A proteção contra duplicação impede nova carga inicial para os mesmos produtos.
+- Observações com `;` interno (ex.: `Parte do kit original e 4 cores; CX735`, `Cat5E; 5 caixas com 100`) são preservadas integralmente pelo parser — a observação é sempre a última coluna da linha.
+- **Pré-requisito já atendido**: os locais `Armário TI 01` e `Armário TI 02` estão cadastrados.
