@@ -290,6 +290,17 @@ export const confirm = mutation({
         await ctx.db.insert("stock", { productId: item.productId, physicalQuantity: item.quantity, reservedQuantity: 0 });
       }
 
+      // Update stock by location (saldo por localização) — keeps global × location consistent
+      if (item.locationId) {
+        const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        const sbl = sblList.find((s: any) => s.locationId === item.locationId);
+        if (sbl) {
+          await ctx.db.patch(sbl._id, { quantity: sbl.quantity + item.quantity });
+        } else {
+          await ctx.db.insert("stockByLocation", { productId: item.productId, locationId: item.locationId, quantity: item.quantity });
+        }
+      }
+
       // Create movement record
       await ctx.db.insert("stockMovements", {
         productId: item.productId,
@@ -563,6 +574,21 @@ export const reverse = mutation({
 
       const newPhysical = stock.physicalQuantity - item.quantity;
       await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+
+      // Reverse stock by location (same location used at confirmation)
+      if (item.locationId) {
+        const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        const sbl = sblList.find((s: any) => s.locationId === item.locationId);
+        if (sbl && sbl.quantity < item.quantity) {
+          throw new Error(
+            `Não é possível estornar "${product?.name ?? "item"}" no local: saldo do local (${sbl.quantity}) é menor que a quantidade da entrada (${item.quantity}). ` +
+            `Faça um inventário/transferência para regularizar a localização antes de estornar.`
+          );
+        }
+        if (sbl) {
+          await ctx.db.patch(sbl._id, { quantity: sbl.quantity - item.quantity });
+        }
+      }
 
       // Mark related lots as inactive
       const lots = await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
