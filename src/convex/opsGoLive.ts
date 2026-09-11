@@ -33,18 +33,19 @@ const CATEGORY_SUPRIMENTOS = "Suprimentos de Impressão";
 const GOMAQ_ITEMS: Array<{
   code: string;
   name: string;
+  brand: string;
   model?: string;
   unit: string;
   qty: number;
 }> = [
-  { code: "0110000735", name: "Toner CX735 — Preto", model: "81C8XK0 — 28K", unit: "un", qty: 1 },
-  { code: "0110001735", name: "Toner CX735 — Amarelo", model: "81C8XY0 — 16.2K", unit: "un", qty: 1 },
-  { code: "0110002735", name: "Toner CX735 — Ciano", model: "81C8XC0 — 16.2K", unit: "un", qty: 1 },
-  { code: "0110053004", name: "Kit Ribbon Color YMCKT p/ Sigma", model: "525100-004", unit: "kit", qty: 1 },
-  { code: "0131091359", name: "Toner AltaLink — Ciano", model: "006R01759 (C8145/C8155/C8170/C8270)", unit: "un", qty: 1 },
-  { code: "1110000080", name: "Cartão PVC para crachá", model: "CR80 86x54x0,76mm — branco", unit: "un", qty: 400 },
-  { code: "1110038040", name: "Papel para impressora térmica", model: "Bobina térmica 80x40 — caixa c/ 30", unit: "rolo", qty: 90 },
-  { code: "4000003491", name: "Toner Brother MFC-L6902DW — Preto", model: "TN-3492BR — 20K", unit: "un", qty: 40 },
+  { code: "0110000735", name: "Toner CX735 — Preto", brand: "Lexmark", model: "81C8XK0 — 28K", unit: "un", qty: 1 },
+  { code: "0110001735", name: "Toner CX735 — Amarelo", brand: "Lexmark", model: "81C8XY0 — 16.2K", unit: "un", qty: 1 },
+  { code: "0110002735", name: "Toner CX735 — Ciano", brand: "Lexmark", model: "81C8XC0 — 16.2K", unit: "un", qty: 1 },
+  { code: "0110053004", name: "Kit Ribbon Color YMCKT p/ Sigma", brand: "Sigma", model: "525100-004", unit: "kit", qty: 1 },
+  { code: "0131091359", name: "Toner AltaLink — Ciano", brand: "Xerox", model: "006R01759 (C8145/C8155/C8170/C8270)", unit: "un", qty: 1 },
+  { code: "1110000080", name: "Cartão PVC para crachá", brand: "Extracard", model: "CR80 86x54x0,76mm — branco", unit: "un", qty: 400 },
+  { code: "1110038040", name: "Papel para impressora térmica", brand: "Sem marca", model: "Bobina térmica 80x40 — caixa c/ 30", unit: "rolo", qty: 90 },
+  { code: "4000003491", name: "Toner Brother MFC-L6902DW — Preto", brand: "Brother", model: "TN-3492BR — 20K", unit: "un", qty: 40 },
 ];
 
 export const registerGomaqNfe372043 = internalMutation({
@@ -91,27 +92,31 @@ export const registerGomaqNfe372043 = internalMutation({
     if (!category) throw new Error("Categoria \"Suprimentos de Impressão\" não encontrada");
 
     const products = await ctx.db.query("products").collect();
-    const lotSeqBase = (await ctx.db.query("lots").collect()).length;
+    const allLots = await ctx.db.query("lots").collect();
+    const lotSeqBase = allLots.reduce((m: number, l: any) => {
+      const x = l.lotNumber.match(/^LOT-\d{4}-(\d+)$/);
+      return x ? Math.max(m, parseInt(x[1], 10)) : m;
+    }, 0);
 
     const resolved: Array<{
       productId: string; created: boolean; code: string; qty: number;
-      unit: string; model?: string;
+      unit: string; model?: string; brand: string;
     }> = [];
     for (const it of GOMAQ_ITEMS) {
-      const existing = products.find(
-        (p: any) => p.active && p.name === it.name && (p.brand ?? "Lexmark") === "Lexmark"
-      );
+      // Match determinístico por nome EXATO (nomes do catálogo são únicos —
+      // ver carga inicial). Não agrupa toners diferentes por descrição.
+      const existing = products.find((p: any) => p.active && p.name === it.name);
       if (existing) {
-        resolved.push({ productId: existing._id, created: false, code: it.code, qty: it.qty, unit: it.unit, model: it.model });
+        resolved.push({ productId: existing._id, created: false, code: it.code, qty: it.qty, unit: it.unit, model: it.model, brand: it.brand });
         continue;
       }
       const newId = await ctx.db.insert("products", {
         name: it.name,
         categoryId: category._id,
         unitOfMeasure: it.unit,
-        brand: "Lexmark",
+        brand: it.brand,
         model: it.model,
-        supplierCode: it.code,
+        specification: "Código Gomaq " + it.code,
         internalCode: "ITEM-" + String(products.filter((p: any) => /^ITEM-\d+$/.test(p.internalCode ?? "")).length + resolved.filter((r) => r.created).length + 1).padStart(4, "0"),
         minimumStock: 0, idealStock: 0, maximumStock: 0,
         active: true,
@@ -121,7 +126,7 @@ export const registerGomaqNfe372043 = internalMutation({
         details: "Item criado via NF-e Gomaq 372043: " + it.name + " (código Gomaq " + it.code + ")",
         timestamp: Date.now(),
       });
-      resolved.push({ productId: newId, created: true, code: it.code, qty: it.qty, unit: it.unit, model: it.model });
+      resolved.push({ productId: newId, created: true, code: it.code, qty: it.qty, unit: it.unit, model: it.model, brand: it.brand });
     }
 
     // ── 4. Entrada (mesma estrutura de entries.create, já confirmada) ──
@@ -174,7 +179,7 @@ export const registerGomaqNfe372043 = internalMutation({
         lotNumber,
         productId: r.productId,
         entryId,
-        brand: "Lexmark",
+        brand: r.brand,
         model: r.model,
         specification: "Código Gomaq " + r.code,
         quantityReceived: r.qty,
