@@ -14,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, ShoppingCart, CheckCircle, RotateCcw, Eye, Trash2, ExternalLink, Save, Pencil, FileUp, FileText, Loader2 } from "lucide-react";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
+import { IMPLEMENTATION_STOCK_DATE } from "@/convex/stockHelpers";
 import { FileUpload } from "@/components/FileUpload";
 import { toast } from "sonner";
 import {
@@ -24,7 +25,11 @@ import {
 
 const ORIGIN_LABELS: Record<string, string> = {
   purchase: "Compra", donation: "Doação", transfer: "Transferência",
-  return: "Devolução", initial_inventory: "Inventário Inicial", other: "Outro",
+  return: "Devolução",
+  // A carga inicial representa o estoque físico existente na data de
+  // implantação do SIGESGD (15/09/2026).
+  initial_inventory: `Estoque de implantação (${IMPLEMENTATION_STOCK_DATE})`,
+  other: "Outro",
 };
 const STATUS_LABELS: Record<string, string> = { draft: "Rascunho", confirmed: "Confirmada", reversed: "Estornada" };
 const STATUS_COLORS: Record<string, string> = { draft: "text-amber-600 bg-amber-50", confirmed: "text-emerald-600 bg-emerald-50", reversed: "text-red-600 bg-red-50" };

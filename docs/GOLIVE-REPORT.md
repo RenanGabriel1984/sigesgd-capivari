@@ -108,4 +108,26 @@ alternativamente, pela função operacional interna
 
 ---
 
+## 6. Revisão operacional — Estoque de Implantação (15/09/2026)
+
+The carga inicial passou a ser tratada como o **ESTOQUE DE IMPLANTAÇÃO** do
+SIGESGD, com data de implantação **15/09/2026**, preservando a origem
+`initial_inventory`, os 53 lotes, as 53 movimentações e toda a auditoria.
+
+| Item | Estado |
+|---|---|
+| Carimbo na entrada `ENT-2026-000001` (observação + auditoria) | ✅ aplicado via `opsGoLive:stampImplementationStock` (idempotente) |
+| Pipeline de carga inicial (`performInitialLoad`) | ✅ passa a carimbar automaticamente novas implantações |
+| Validação de integridade na UI (`stockSetup.implementationStockStatus`) | ✅ somente leitura, exibida em **Estoque** |
+| Rótulo da carga inicial na UI | ✅ “Estoque de implantação (15/09/2026)” em **Entradas** |
+| Saldo global × localização | ✅ 2.803 = 2.803 (0 divergências) |
+| Duplicação (lote inicial por produto / nomes repetidos) | ✅ 0 / 0 |
+| NF-e 372043 | ⏳ **não registrada** — importar pela UI (Entradas → Importar NF-e XML) |
+
+Revalidar a qualquer momento com `bunx convex export --path tmp/export`,
+`unzip -q -o tmp/export -d tmp/export-dir` e
+`node scripts/verify-implementation-stock.mjs tmp/export-dir`.
+
+---
+
 *Relatório gerado como parte da ETAPA 2/3 + 3/3 do SIGESGD Capivari.*

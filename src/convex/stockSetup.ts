@@ -1,7 +1,13 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { hasInitialInventoryLot, tonerKitObservation } from "./stockHelpers";
+import {
+  applyImplementationStockStamp,
+  hasInitialInventoryLot,
+  IMPLEMENTATION_STOCK_DATE,
+  isImplementationStockStamped,
+  tonerKitObservation,
+} from "./stockHelpers";
 
 async function requireUser(ctx: any) {
   const userId = await getAuthUserId(ctx);
@@ -95,7 +101,9 @@ async function performInitialLoad(
     receivedAt: now,
     originType: "initial_inventory",
     responsibleUserId: userId,
-    observation,
+    // Estoque de implantação: o carimbo é metadado (data de implantação) e
+    // preserva integralmente a observação original.
+    observation: applyImplementationStockStamp(observation),
     status: "confirmed",
     createdAt: now,
     updatedAt: now,
@@ -650,6 +658,194 @@ export const cleanupTestData = mutation({
     });
 
     return { message: "Dados de homologação limpos", deleted };
+  },
+});
+
+/**
+ * SIGESGD — ESTOQUE DE IMPLANTAÇÃO: validação de integridade (somente leitura).
+ *
+ * A carga inicial (originType "initial_inventory") representa o estoque físico
+ * existente na data de implantação. Esta query NÃO altera nada: apenas confere
+ *  - as entradas de implantação (itens, lotes, movimentações, unidades);
+ *  - saldo global × saldo por localização, produto a produto;
+ *  - ausência de duplicação (1 carga inicial por produto; sem nomes repetidos);
+ *  - presença do carimbo de implantação na entrada.
+ */
+export const implementationStockStatus = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+
+    const entries = await ctx.db.query("entries").collect();
+    const initialEntries = entries.filter(
+      (e) => e.originType === "initial_inventory"
+    );
+    const initialEntryIds = new Set<string>(initialEntries.map((e) => e._id as string));
+    const allMovements = await ctx.db.query("stockMovements").collect();
+    const allLots = await ctx.db.query("lots").collect();
+
+    const productIds = new Set<string>();
+    const entriesSummary: Array<{
+      entryNumber: string;
+      receivedAt: number;
+      stamped: boolean;
+      responsible: string | null;
+      itemCount: number;
+      lots: number;
+      movements: number;
+      units: number;
+      observation: string | null;
+    }> = [];
+    let totalUnits = 0;
+    let totalLots = 0;
+    let totalMovements = 0;
+    let totalItems = 0;
+
+    for (const entry of initialEntries) {
+      const items = await ctx.db
+        .query("entryItems")
+        .withIndex("by_entry", (q) => q.eq("entryId", entry._id))
+        .collect();
+      const entryLots = allLots.filter((l) => l.entryId === entry._id);
+      const entryMovements = allMovements.filter((m) => m.entryId === entry._id);
+      const responsible = await ctx.db.get(entry.responsibleUserId);
+      const units = items.reduce((sum, i) => sum + i.quantity, 0);
+
+      for (const lot of entryLots) productIds.add(lot.productId as string);
+      totalUnits += units;
+      totalLots += entryLots.length;
+      totalMovements += entryMovements.length;
+      totalItems += items.length;
+
+      entriesSummary.push({
+        entryNumber: entry.entryNumber,
+        receivedAt: entry.receivedAt,
+        stamped: isImplementationStockStamped(entry.observation),
+        responsible: responsible?.name ?? responsible?.email ?? null,
+        itemCount: items.length,
+        lots: entryLots.length,
+        movements: entryMovements.length,
+        units,
+        observation: entry.observation ?? null,
+      });
+    }
+
+    // ── Saldo global × localização (produto a produto) ──
+    const mismatches: Array<{
+      productId: string;
+      name: string;
+      global: number;
+      byLocation: number;
+    }> = [];
+    const initialLoadsPerProduct: Array<{
+      productId: string;
+      name: string;
+      initialLots: number;
+    }> = [];
+    const locationTotals = new Map<string, { name: string; quantity: number }>();
+    let globalTotal = 0;
+    let byLocationTotal = 0;
+
+    for (const productId of productIds) {
+      const stock = await ctx.db
+        .query("stock")
+        .withIndex("by_product", (q) => q.eq("productId", productId as any))
+        .first();
+      const sblRows = await ctx.db
+        .query("stockByLocation")
+        .withIndex("by_product", (q) => q.eq("productId", productId as any))
+        .collect();
+      const product = (await ctx.db.get(productId as any)) as {
+        name?: string;
+      } | null;
+      const physical = stock?.physicalQuantity ?? 0;
+      const byLocation = sblRows.reduce((sum, row) => sum + row.quantity, 0);
+
+      globalTotal += physical;
+      byLocationTotal += byLocation;
+
+      if (physical !== byLocation) {
+        mismatches.push({
+          productId,
+          name: product?.name ?? productId,
+          global: physical,
+          byLocation,
+        });
+      }
+
+      const initialLots = allLots.filter(
+        (l) =>
+          l.productId === productId &&
+          !!l.entryId &&
+          initialEntryIds.has(l.entryId) &&
+          l.active
+      ).length;
+      if (initialLots > 1) {
+        initialLoadsPerProduct.push({
+          productId,
+          name: product?.name ?? productId,
+          initialLots,
+        });
+      }
+
+      for (const row of sblRows) {
+        const location = await ctx.db.get(row.locationId);
+        const key = row.locationId as string;
+        const current = locationTotals.get(key) ?? {
+          name: location?.name ?? key,
+          quantity: 0,
+        };
+        current.quantity += row.quantity;
+        locationTotals.set(key, current);
+      }
+    }
+
+    // ── Duplicação de cadastro (nomes repetidos entre produtos ativos) ──
+    const activeProducts = await ctx.db
+      .query("products")
+      .withIndex("by_active", (q) => q.eq("active", true))
+      .collect();
+    const nameCounts = new Map<string, number>();
+    for (const product of activeProducts) {
+      const key = product.name.trim().toLowerCase();
+      nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
+    }
+    const duplicateProductNames: string[] = [];
+    nameCounts.forEach((count, name) => {
+      if (count > 1) duplicateProductNames.push(name);
+    });
+
+    return {
+      implementationDate: IMPLEMENTATION_STOCK_DATE,
+      entries: entriesSummary,
+      totals: {
+        entries: initialEntries.length,
+        items: totalItems,
+        units: totalUnits,
+        lots: totalLots,
+        movements: totalMovements,
+        products: productIds.size,
+      },
+      stock: {
+        globalTotal,
+        byLocationTotal,
+        consistent: mismatches.length === 0,
+        mismatches,
+      },
+      locations: Array.from(locationTotals.entries()).map(([locationId, v]) => ({
+        locationId,
+        name: v.name,
+        quantity: v.quantity,
+      })),
+      duplicates: {
+        initialLoadsPerProduct,
+        duplicateProductNames,
+      },
+      integrityOk:
+        mismatches.length === 0 &&
+        initialLoadsPerProduct.length === 0 &&
+        duplicateProductNames.length === 0,
+    };
   },
 });
 

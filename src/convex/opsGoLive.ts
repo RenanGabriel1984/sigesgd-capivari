@@ -21,6 +21,11 @@
  */
 import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import {
+  applyImplementationStockStamp,
+  IMPLEMENTATION_STOCK_DATE,
+  isImplementationStockStamped,
+} from "./stockHelpers";
 
 const GOMAQ_ACCESS_KEY = "35260961457941000143550010003720431466669127";
 const GOMAQ_CNPJ = "61457941000143";
@@ -47,6 +52,84 @@ const GOMAQ_ITEMS: Array<{
   { code: "1110038040", name: "Papel para impressora térmica", brand: "Sem marca", model: "Bobina térmica 80x40 — caixa c/ 30", unit: "rolo", qty: 90 },
   { code: "4000003491", name: "Toner Brother MFC-L6902DW — Preto", brand: "Brother", model: "TN-3492BR — 20K", unit: "un", qty: 40 },
 ];
+
+/**
+ * SIGESGD — ESTOQUE DE IMPLANTAÇÃO (data 15/09/2026)
+ *
+ * Carimba as entradas de carga inicial (originType "initial_inventory") como
+ * ESTOQUE DE IMPLANTAÇÃO do SIGESGD.
+ *
+ * SOMENTE METADADOS: grava a data de implantação na observação da entrada e
+ * um registro de auditoria. NÃO altera quantidades, lotes, saldos por
+ * localização, saldo global nem movimentações — a carga inicial permanece
+ * exatamente como conferida fisicamente.
+ *
+ * Idempotente: entradas já carimbadas são retornadas em `skipped`.
+ * FUNÇÃO INTERNA: sem rota pública; pode ser executada pela UI administrativa
+ * ou por `convex run opsGoLive:stampImplementationStock`.
+ */
+export const stampImplementationStock = internalMutation({
+  args: { confirm: v.literal("ESTOQUE-DE-IMPLANTACAO") },
+  handler: async (ctx: any) => {
+    const entries = await ctx.db.query("entries").collect();
+    const initialEntries = entries.filter(
+      (e: any) => e.originType === "initial_inventory"
+    );
+
+    if (initialEntries.length === 0) {
+      return {
+        date: IMPLEMENTATION_STOCK_DATE,
+        stamped: [],
+        skipped: [],
+        message: "Nenhuma entrada de carga inicial encontrada.",
+      };
+    }
+
+    const now = Date.now();
+    const stamped: string[] = [];
+    const skipped: string[] = [];
+
+    for (const entry of initialEntries) {
+      if (isImplementationStockStamped(entry.observation)) {
+        skipped.push(entry.entryNumber);
+        continue;
+      }
+
+      await ctx.db.patch(entry._id, {
+        observation: applyImplementationStockStamp(entry.observation),
+        updatedAt: now,
+      });
+
+      await ctx.db.insert("auditLogs", {
+        userId: entry.responsibleUserId,
+        action: "update",
+        entity: "entries",
+        entityId: entry._id,
+        details:
+          "Carga inicial " +
+          entry.entryNumber +
+          " tratada como ESTOQUE DE IMPLANTAÇÃO — data de implantação " +
+          IMPLEMENTATION_STOCK_DATE +
+          " (apenas metadados; itens, lotes, saldos e movimentações preservados)",
+        timestamp: now,
+      });
+
+      stamped.push(entry.entryNumber);
+    }
+
+    return {
+      date: IMPLEMENTATION_STOCK_DATE,
+      stamped,
+      skipped,
+      message:
+        stamped.length > 0
+          ? "Estoque de implantação registrado em " +
+            stamped.join(", ") +
+            "."
+          : "Todas as cargas iniciais já estavam carimbadas.",
+    };
+  },
+});
 
 export const registerGomaqNfe372043 = internalMutation({
   args: { confirm: v.literal("REGISTRAR-NF-372043") },

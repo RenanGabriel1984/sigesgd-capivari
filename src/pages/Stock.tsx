@@ -54,6 +54,7 @@ const FILTER_LABELS: Record<StockFilter, string> = {
 
 export default function Stock() {
   const products = useQuery(api.products.list) as ProductView[] | undefined;
+  const implementation = useQuery(api.stockSetup.implementationStockStatus);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<StockFilter>("all");
 
@@ -120,6 +121,45 @@ export default function Stock() {
             />
           </div>
         </div>
+
+        {/* Estoque de implantação (carga inicial conferida fisicamente) */}
+        {implementation && implementation.entries.length > 0 && (
+          <div className="rounded-xl border border-[var(--capivari-green)]/20 bg-[var(--capivari-green)]/5 px-4 py-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--capivari-green)]">
+                  Estoque de implantação
+                </span>
+                <span className="text-sm font-semibold">{implementation.implementationDate}</span>
+                <span className="text-xs text-muted-foreground">
+                  Carga inicial {implementation.entries.map((e) => e.entryNumber).join(", ")} —{" "}
+                  {implementation.totals.items} itens · {implementation.totals.units} unidades ·{" "}
+                  {implementation.totals.lots} lotes · {implementation.totals.movements} movimentações
+                </span>
+              </div>
+              <Badge
+                variant="outline"
+                className={
+                  implementation.integrityOk
+                    ? "border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 shrink-0"
+                    : "border-amber-300 bg-amber-50 text-[10px] text-amber-700 shrink-0"
+                }
+              >
+                {implementation.integrityOk
+                  ? "Saldo global × localização conferido"
+                  : `${implementation.stock.mismatches.length} divergência(s) de saldo`}
+              </Badge>
+            </div>
+            {implementation.locations.length > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Locais de implantação:{" "}
+                {implementation.locations
+                  .map((l) => `${l.name} (${l.quantity})`)
+                  .join(" · ")}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Filtros simples */}
         <div className="flex flex-wrap gap-2">
