@@ -172,6 +172,45 @@ export function tonerKitObservation(input: {
 }
 
 /**
+ * SIGESGD — Estoque de Implantação (data 15/09/2026)
+ *
+ * A carga inicial (entrada ENT-2026-000001, originType "initial_inventory",
+ * 53 itens) representa o estoque físico EXISTENTE na data de implantação.
+ * A partir da implantação o SIGESGD opera normalmente sobre esse estoque:
+ * saídas consomem os lotes normalmente e novos recebimentos entram como
+ * Entrada de Material. O carimbo é APENAS de metadados/auditoria — nunca
+ * altera quantidades, lotes, saldos ou movimentações.
+ */
+export const IMPLEMENTATION_STOCK_DATE = "15/09/2026";
+
+/** Marcador canônico gravado na observação da entrada de implantação. */
+export const IMPLEMENTATION_STOCK_STAMP =
+  `ESTOQUE DE IMPLANTAÇÃO DO SIGESGD — data de implantação ${IMPLEMENTATION_STOCK_DATE} ` +
+  `(estoque físico existente na implantação; saídas e entradas posteriores operam normalmente sobre este saldo)`;
+
+/**
+ * Verifica se um texto já contém o marcador de implantação.
+ * Usado para idempotência: aplicar o carimbo duas vezes não duplica.
+ */
+export function isImplementationStockStamped(observation?: string | null): boolean {
+  if (!observation) return false;
+  return observation.includes("ESTOQUE DE IMPLANTAÇÃO DO SIGESGD");
+}
+
+/**
+ * Aplica o carimbo de implantação a uma observação existente, preservando
+ * o texto original. Pure function: retorna a observação final que a mutation
+ * gravará. Idempotente — observar duas vezes produz o mesmo resultado.
+ */
+export function applyImplementationStockStamp(
+  observation?: string | null
+): string {
+  if (isImplementationStockStamped(observation)) return observation as string;
+  const prior = (observation ?? "").trim();
+  return prior ? `${prior} | ${IMPLEMENTATION_STOCK_STAMP}` : IMPLEMENTATION_STOCK_STAMP;
+}
+
+/**
  * Verifica se um produto já possui carga inicial confirmada.
  *
  * Uma carga inicial é caracterizada por um lote ATIVO vinculado a uma entrada
