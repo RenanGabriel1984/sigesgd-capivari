@@ -1,5 +1,5 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { mutation, query, internalQuery } from "./_generated/server";
+import { mutation, query, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword, verifyPassword } from "./auth/passwords";
 import { api } from "./_generated/api";
@@ -300,7 +300,15 @@ export const hasPassword = query({
  *     { name: "Administrador", email: "admin@capivari.sp.gov.br", password: "MinhaS3nh@" }
  *  3. The function creates the user, hashes the password, and returns the userId.
  */
-export const bootstrapAdmin = mutation({
+/**
+ * INTERNAL: cria o primeiro administrador (bootstrap).
+ *
+ * Somente permitido quando NÃO existe nenhum admin. Como qualquer mutation
+ * pública seria um vetor de criação de contas, esta função é INTERNAL —
+ * executável apenas via CLI do deployment (convex run) ou dashboard, nunca
+ * pelo cliente.
+ */
+export const bootstrapAdmin = internalMutation({
   args: {
     name: v.string(),
     email: v.string(),
@@ -372,7 +380,6 @@ export const bootstrapAdmin = mutation({
     return { userId, message: "Administrador criado com sucesso. Faça login." };
   },
 });
-
 /**
  * Check if the system has been bootstrapped (at least one admin exists).
  * Used by the frontend to show/hide the bootstrap screen.
@@ -400,7 +407,13 @@ export const hasAdmin = query({
  *  passwords:bootstrapSetPassword
  *  { email: "admin@capivari.sp.gov.br", password: "MinhaS3nh@2026" }
  */
-export const bootstrapSetPassword = mutation({
+/**
+ * INTERNAL: define senha para usuário existente SEM senha.
+ *
+ * Executável apenas via CLI/dashboard do deployment (convex run).
+ * NÃO é acessível pelo cliente — não há endpoint público de senha.
+ */
+export const bootstrapSetPassword = internalMutation({
   args: {
     email: v.string(),
     password: v.string(),
@@ -443,6 +456,15 @@ export const bootstrapSetPassword = mutation({
       salt,
       requiresReset: false,
     });
+
+    // Clear any brute-force lock so the new password works immediately
+    const failedAttempts = await ctx.db
+      .query("failedLoginAttempts")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .first();
+    if (failedAttempts) {
+      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined });
+    }
 
     // Audit
     await ctx.db.insert("auditLogs", {
@@ -718,7 +740,15 @@ export const isLockedOut = internalQuery({
  *  - Only targets users with role admin or stock_manager
  *  - Records the reset in auditLogs
  */
-export const bootstrapResetPassword = mutation({
+/**
+ * INTERNAL: redefine senha de administrador/gerente sem exigir login.
+ *
+ * Plano de recuperação de acesso administrativo. Executável APENAS via CLI
+ * do deployment (bunx convex run passwords:bootstrapResetPassword ...) ou
+ * pelo dashboard — o cliente web NÃO consegue chamá-la.
+ * Limpa o bloqueio de tentativas para o novo acesso funcionar imediatamente.
+ */
+export const bootstrapResetPassword = internalMutation({
   args: {
     email: v.string(),
     newPassword: v.string(),
@@ -763,6 +793,15 @@ export const bootstrapResetPassword = mutation({
         salt,
         requiresReset: false,
       });
+    }
+
+    // Clear any brute-force lock so the new password works immediately
+    const failedAttempts = await ctx.db
+      .query("failedLoginAttempts")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .first();
+    if (failedAttempts) {
+      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined });
     }
 
     await ctx.db.insert("auditLogs", {
