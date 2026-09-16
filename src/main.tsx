@@ -9,6 +9,18 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 
+// ── Deployment Convex oficial do SIGESGD ────────────────────────────────────
+// O ambiente de build pode injetar um VITE_CONVEX_URL desatualizado (outro
+// deployment, sem a carga oficial). A URL passada a aceitar fica fixa aqui;
+// qualquer valor divergente é descartado em favor do deployment com os dados
+// oficiais (53 produtos, estoque de implantação ENT-2026-000001, 72 orgs).
+const OFFICIAL_CONVEX_URL = "https://first-herring-264.convex.cloud";
+const envConvexUrl = import.meta.env.VITE_CONVEX_URL as string | undefined;
+const convexUrl =
+  envConvexUrl && envConvexUrl.startsWith(OFFICIAL_CONVEX_URL)
+    ? envConvexUrl
+    : OFFICIAL_CONVEX_URL;
+
 // Lazy load route components
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
@@ -81,7 +93,7 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+const convex = new ConvexReactClient(convexUrl);
 
 function RouteSyncer() {
   const location = useLocation();
