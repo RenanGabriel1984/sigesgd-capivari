@@ -371,6 +371,7 @@ export const environmentCheckInternal = internalMutation({
     const initial = entries.filter((e) => e.originType === "initial_inventory");
     return {
       environmentCheck: true,
+      deploymentUrl: (process.env as Record<string, string | undefined>).CONVEX_CLOUD_URL ?? null,
       productsCount: products.length,
       stockCount: stock.length,
       stockByLocationCount: sbl.length,
