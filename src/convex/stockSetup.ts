@@ -59,7 +59,7 @@ async function generateLotNumber(ctx: any, productId: string): Promise<string> {
 async function performInitialLoad(
   ctx: any,
   userId: string,
-  items: Array<{ productId: string; locationId: string; quantity: number }>,
+  items: Array<{ productId: string; locationId: string; quantity: number; unitOfMeasure?: string }>,
   observation: string
 ) {
   if (!items || items.length === 0) {
@@ -139,7 +139,9 @@ async function performInitialLoad(
         entryId,
         productId: item.productId,
         quantity: item.quantity,
-        unitOfMeasure: "un",
+        // Preserva a UOM original informada (un, pc, cx, m, rl, pct, po, kt,
+        // outro). NUNCA converte: 13 caixas continuam 13 cx, não 650 un.
+        unitOfMeasure: item.unitOfMeasure ?? (await ctx.db.get(item.productId))?.unitOfMeasure ?? "un",
         lotId,
         locationId: item.locationId,
       });
@@ -247,6 +249,7 @@ export const initialStockLoad = mutation({
         productId: v.id("products"),
         locationId: v.id("storageLocations"),
         quantity: v.number(),
+        unitOfMeasure: v.optional(v.string()),
       })
     ),
     observation: v.optional(v.string()),
@@ -310,7 +313,12 @@ export const importInitialSheet = mutation({
       .withIndex("by_active", (q: any) => q.eq("active", true))
       .collect();
 
-    const items: Array<{ productId: string; locationId: string; quantity: number }> = [];
+    const items: Array<{
+      productId: string;
+      locationId: string;
+      quantity: number;
+      unitOfMeasure?: string;
+    }> = [];
     let matched = 0;
     let created = 0;
 
@@ -372,6 +380,9 @@ export const importInitialSheet = mutation({
         productId,
         locationId: row.locationId,
         quantity: row.quantity,
+        // UOM original da planilha: a quantidade fica semanticamente na
+        // unidade registrada (cx permanece cx, pct permanece pct).
+        unitOfMeasure: row.unitOfMeasure || (existing?.unitOfMeasure ?? "un"),
       });
     }
 

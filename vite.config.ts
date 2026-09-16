@@ -12,7 +12,10 @@ export default defineConfig({
     vlyPlugin(),
     tailwindcss(),
     VitePWA({
-      registerType: "prompt",
+      // autoUpdate: a nova versão do service worker assume imediatamente
+      // (skipWaiting + clientsClaim) e o cache desatualizado é apagado —
+      // nenhuma versão antiga do app fica presa apresentando dados antigos.
+      registerType: "autoUpdate",
       includeAssets: ["/logo.svg"],
       manifest: {
         name: "SIGESGD — Gestão de Estoque de TI",
@@ -42,19 +45,11 @@ export default defineConfig({
         globPatterns: ["**/*.{js,css,html,ico,svg,png,woff2}"],
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//, /^\/auth\//],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/.*\.convex\.cloud\/.*/i,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "convex-api-cache",
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60, // 1 hour
-              },
-            },
-          },
-        ],
+        // IMPORTANTE: nenhum runtimeCaching. Dados de produtos, estoque,
+        // organizações, solicitações, movimentações, entradas, lotes e
+        // usuários (Convex) NUNCA passam pelo cache do service worker —
+        // o cliente Convex fala direto com o deployment em tempo real.
+        cleanupOutdatedCaches: true,
       },
     }),
   ],
