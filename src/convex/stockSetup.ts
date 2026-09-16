@@ -66,6 +66,12 @@ async function performInitialLoad(
     throw new Error("Nenhum item informado para carga inicial");
   }
 
+  // ── Defesa numérica (Int64 → number) ──
+  // O validador v.number() do Convex aceita Int64 (bigint) quando a mutation
+  // é chamada via CLI com literais JSON inteiros. Normaliza explicitamente
+  // para number JS para que nenhuma aritmética misture bigint com number.
+  items = items.map((i) => ({ ...i, quantity: Number(i.quantity) }));
+
   const now = Date.now();
   const year = new Date().getFullYear();
 
@@ -459,6 +465,9 @@ export const quickExit = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireAdmin(ctx);
+
+    // Defesa numérica: normaliza Int64 → number (v.number() aceita Int64 via CLI)
+    args = { ...args, quantity: Number(args.quantity) };
 
     if (args.quantity <= 0) {
       throw new Error("Quantidade deve ser maior que zero");

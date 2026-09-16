@@ -51,9 +51,19 @@ describe("A–T: reconciliação e diagnóstico admin", () => {
     expect(DIAG).toContain("if (corrections.length > 0)");
   });
 
-  it("legacyRecordsCheck existe e nunca exclui nada", () => {
+  it("legacyRecordsCheck existe; diagnóstico nunca exclui; limpeza exige confirmação", () => {
     expect(DIAG).toContain("export const legacyRecordsCheck = query(");
-    expect(DIAG).not.toContain("ctx.db.delete");
+    // Funções de diagnóstico (environmentCheck/legacyRecordsCheck/bigintScan)
+    // NUNCA deletam. Somente a limpeza controlada com confirmação literal
+    // (testCleanupExecuteInternal / deactivateUnusedCategoriesInternal)
+    // pode deletar — por design desta rodada.
+    const cleanupStart = DIAG.indexOf("export const deactivateUnusedCategoriesInternal");
+    expect(cleanupStart).toBeGreaterThan(0);
+    const diagnosticsSection = DIAG.slice(0, cleanupStart);
+    expect(diagnosticsSection.includes("ctx.db.delete")).toBe(false);
+    const cleanupSection = DIAG.slice(cleanupStart);
+    expect(cleanupSection).toContain("CLEANUP-SSD-TESTE");
+    expect(cleanupSection).toContain("limpeza abortada");
   });
 });
 
