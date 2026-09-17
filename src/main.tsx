@@ -10,16 +10,12 @@ import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 
 // ── Deployment Convex oficial do SIGESGD ────────────────────────────────────
-// O ambiente de build pode injetar um VITE_CONVEX_URL desatualizado (outro
-// deployment, sem a carga oficial). A URL passada a aceitar fica fixa aqui;
-// qualquer valor divergente é descartado em favor do deployment com os dados
-// oficiais (53 produtos, estoque de implantação ENT-2026-000001, 72 orgs).
-const OFFICIAL_CONVEX_URL = "https://first-herring-264.convex.cloud";
-const envConvexUrl = import.meta.env.VITE_CONVEX_URL as string | undefined;
-const convexUrl =
-  envConvexUrl && envConvexUrl.startsWith(OFFICIAL_CONVEX_URL)
-    ? envConvexUrl
-    : OFFICIAL_CONVEX_URL;
+// A URL fica fixa no código de propósito: o ambiente de build da plataforma
+// pode injetar um VITE_CONVEX_URL desatualizado (outro deployment, sem a carga
+// oficial) e esse valor acabava embutido como literal morto no bundle
+// publicado. Fixando aqui, o frontend publicado conecta exclusivamente no
+// deployment com os dados oficiais (53 produtos, ENT-2026-000001, 72 orgs).
+const convexUrl = "https://first-herring-264.convex.cloud";
 
 // Lazy load route components
 const Landing = lazy(() => import("./pages/Landing.tsx"));
