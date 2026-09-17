@@ -30,6 +30,13 @@
  *  6. testCleanupPreviewInternal / testCleanupExecuteInternal
  *     Mapeamento e limpeza dos dados de teste SSD Kingston — somente objetos
  *     exclusivamente de teste, com proteções da carga oficial ENT-2026-000001.
+ *
+ *  7. officialProductsInternal
+ *     Inventário oficial somente leitura (identificação inequívoca dos produtos
+ *     da carga: marca, modelo, especificação, UOM, categoria e saldo).
+ *
+ * A CLASSIFICAÇÃO OFICIAL DOS 53 PRODUTOS vive em `convex/productClassification.ts`
+ * (módulo separado, igualmente internal-only).
  */
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
@@ -579,9 +586,7 @@ export const categoryAuditInternal = internalQuery({
     );
 
     const rows = categories.map((c) => {
-      const productsUsing = products.filter(
-        (p) => p.categoryId === c._id && p.active
-      );
+      const productsUsing = products.filter((p) => p.categoryId === c._id && p.active);
       const officialUsing = productsUsing.filter((p) => officialProductIds.has(p._id as string));
       return {
         categoryId: c._id,
@@ -1048,5 +1053,60 @@ export const testCleanupExecuteInternal = internalMutation({
     });
 
     return { ok: true, deleted, officialEntryPreserved: officialEntry._id };
+  },
+});
+
+/**
+ * Inventário oficial (somente leitura): lista TODOS os produtos com os campos
+ * necessários para identificação inequívoca (nome, marca, modelo, especificação,
+ * UOM, categoria atual, saldo físico) e marca quais têm lote na carga oficial
+ * ENT-2026-000001. Base auditável da classificação por categoria.
+ */
+export const officialProductsInternal = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const products = await ctx.db.query("products").collect();
+    const categories = await ctx.db.query("categories").collect();
+    const lots = await ctx.db.query("lots").collect();
+    const entries = await ctx.db.query("entries").collect();
+    const stock = await ctx.db.query("stock").collect();
+
+    const catById = new Map(categories.map((c) => [c._id as string, c]));
+    const stockByProduct = new Map(stock.map((s) => [s.productId as string, s]));
+    const officialEntry = entries.find(
+      (e) => e.entryNumber === OFFICIAL_ENTRY_NUMBER && e.originType === "initial_inventory"
+    );
+    const officialIds = new Set(
+      (officialEntry ? lots.filter((l) => l.entryId === officialEntry._id) : []).map(
+        (l) => l.productId as string
+      )
+    );
+
+    const rows = products
+      .map((p) => {
+        const st = stockByProduct.get(p._id as string);
+        return {
+          productId: p._id as string,
+          name: p.name,
+          brand: p.brand ?? null,
+          model: p.model ?? null,
+          specification: p.specification ?? null,
+          unitOfMeasure: p.unitOfMeasure ?? null,
+          category: catById.get(p.categoryId as string)?.name ?? null,
+          physical: Number(st?.physicalQuantity ?? 0),
+          active: p.active,
+          official: officialIds.has(p._id as string),
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+
+    return {
+      total: rows.length,
+      activeTotal: rows.filter((r) => r.active).length,
+      officialCount: rows.filter((r) => r.official).length,
+      officialEntryNumber: officialEntry?.entryNumber ?? null,
+      notOfficial: rows.filter((r) => !r.official).map((r) => r.name),
+      rows,
+    };
   },
 });
