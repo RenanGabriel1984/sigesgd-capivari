@@ -74,7 +74,7 @@ export default function ProductDetail() {
             <div className="flex items-start gap-3">
               <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-primary shrink-0"><Package className="h-7 w-7" /></div>
               <div className="min-w-0">
-                <h1 className="text-2xl font-bold tracking-tight truncate">{product.name}</h1>
+                <h1 className="text-2xl font-bold tracking-tight app-break">{product.name}</h1>
                 <div className="flex flex-wrap items-center gap-2 mt-1.5">
                   {product.category && <Badge variant="secondary" className="text-xs"><Tag className="h-3 w-3 mr-1" />{product.category.name}</Badge>}
                   <Badge variant={product.active ? "default" : "secondary"} className="text-[10px]">{product.active ? "Ativo" : "Inativo"}</Badge>

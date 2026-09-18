@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
+import { SearchInput } from "@/components/SearchInput";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -183,13 +184,11 @@ export default function PrintersPage() {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
+          <div className="relative flex-1 min-w-0 max-w-md">
+            <SearchInput
               placeholder="Buscar por nome, marca, modelo ou patrimônio..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
             />
           </div>
           <Select value={orgFilter} onValueChange={setOrgFilter}>

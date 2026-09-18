@@ -32,6 +32,9 @@ function LoadingSkeleton() {
 interface OrgForm { name: string; type: OrgType | ""; parentId: string; observation: string; startDate: string; endDate: string; }
 const emptyForm: OrgForm = { name: "", type: "", parentId: "", observation: "", startDate: "", endDate: "" };
 
+/** Indentação visual da hierarquia (px por nível) — todos alinhados à esquerda */
+const TREE_INDENT = 20;
+
 function OrgTreeNode({ org, allOrgs, onEdit, onSelect, isSelected, level = 0 }: {
   org: any; allOrgs: any[]; onEdit: (org: any) => void; onSelect: (org: any) => void; isSelected: boolean; level?: number;
 }) {
@@ -40,24 +43,29 @@ function OrgTreeNode({ org, allOrgs, onEdit, onSelect, isSelected, level = 0 }: 
   return (
     <div>
       <div
-        className={`flex items-center gap-2 py-2 px-3 rounded-lg transition-colors group cursor-pointer ${isSelected ? "bg-primary/10 border border-primary/20" : "hover:bg-muted/50"}`}
-        style={{ paddingLeft: `${level * 24 + 12}px` }}
+        className={`flex items-start gap-2 py-2 pr-2 rounded-lg transition-colors group cursor-pointer ${isSelected ? "bg-primary/10 border border-primary/20" : "hover:bg-muted/50"}`}
+        style={{ paddingLeft: `${level * TREE_INDENT + 12}px` }}
         onClick={() => onSelect(org)}
       >
         {grandchildren.length > 0 ? (
-          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}>
+          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 mt-0.5" onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}>
             {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           </Button>
         ) : (<div className="w-6 shrink-0" />)}
-        <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
-        <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium truncate">{org.name}</span>
-          <Badge variant="secondary" className="ml-2 text-[10px]">{ORG_TYPE_LABELS[org.type as OrgType]}</Badge>
+        <Building2 className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+        {/* Nome: cresce verticalmente, nunca truncado, nunca sobrepõe o status */}
+        <div className="flex-1 min-w-0 py-0.5">
+          <span className="text-sm font-medium app-break leading-snug">{org.name}</span>
+          <div className="mt-1">
+            <Badge variant="secondary" className="text-[10px]">{ORG_TYPE_LABELS[org.type as OrgType]}</Badge>
+          </div>
         </div>
-        <Badge variant={org.active ? "default" : "secondary"} className="text-[10px] shrink-0">{org.active ? "Ativo" : "Inativo"}</Badge>
-        <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 shrink-0" onClick={(e) => { e.stopPropagation(); onEdit(org); }}>
-          <Pencil className="h-3.5 w-3.5" />
-        </Button>
+        <div className="flex flex-col items-end gap-1 shrink-0 mt-0.5">
+          <Badge variant={org.active ? "default" : "secondary"} className="text-[10px]">{org.active ? "Ativo" : "Inativo"}</Badge>
+          <Button variant="ghost" size="icon" className="h-7 w-7 opacity-0 group-hover:opacity-100 max-sm:opacity-100" onClick={(e) => { e.stopPropagation(); onEdit(org); }}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
       {expanded && grandchildren.map((child) => (
         <OrgTreeNode key={child._id} org={child} allOrgs={allOrgs} onEdit={onEdit} onSelect={onSelect} isSelected={isSelected} level={level + 1} />

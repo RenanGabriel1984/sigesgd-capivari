@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -103,7 +103,7 @@ const NAV_SECTIONS: NavSection[] = [
   ]},
 ];
 
-function SidebarLink({
+const SidebarLink = memo(function SidebarLink({
   item,
   isActive,
   onClick,
@@ -141,7 +141,7 @@ function SidebarLink({
       )}
     </Link>
   );
-}
+});
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
@@ -270,7 +270,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Desktop sidebar */}
       <aside
         className={cn(
-          "hidden lg:flex flex-col border-r border-border/60 bg-card transition-all duration-300",
+          "hidden lg:flex flex-col border-r border-border/60 bg-card transition-[width] duration-200 ease-out",
           "h-dvh supports-[height:100dvh]:h-dvh",
           collapsed ? "w-16" : "w-64"
         )}
@@ -350,10 +350,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               onClick={() => setSidebarOpen(false)}
             />
             <motion.aside
-              initial={{ x: -280 }}
+              initial={{ x: "-100%" }}
               animate={{ x: 0 }}
-              exit={{ x: -280 }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              exit={{ x: "-100%" }}
+              /* Fluidez: apenas transform (composição na GPU), 180ms, easing
+               * iOS-like. Sem spring — resposta imediata ao toque, sem o
+               * "tranco" final percebido como travamento ao fechar. */
+              transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
               className="fixed left-0 top-0 z-50 w-[min(19.5rem,100vw)] max-w-full bg-card border-r border-border/60 flex flex-col lg:hidden"
               style={{
                 height: "100dvh",

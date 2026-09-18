@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Link } from "react-router";
 import { AppShell } from "@/components/AppShell";
+import { SearchInput } from "@/components/SearchInput";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Pencil, Search, Package, ArrowUpRight, AlertTriangle, Printer, X, Info } from "lucide-react";
+import { Plus, Pencil, Package, ArrowUpRight, AlertTriangle, Printer, X, Info } from "lucide-react";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
 import { getStockSituation, STOCK_SITUATION_LABELS, STOCK_SITUATION_BADGE_CLASSES } from "@/lib/stock-status";
 import type { ProductView } from "@/lib/product-types";
@@ -204,9 +205,8 @@ export default function Products() {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Buscar por nome, código, marca ou modelo..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+          <div className="relative flex-1 min-w-0 max-w-md">
+            <SearchInput placeholder="Buscar por nome, código, marca ou modelo..." value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
             <SelectTrigger className="w-full sm:w-48"><SelectValue placeholder="Todas as categorias" /></SelectTrigger>
@@ -270,7 +270,7 @@ export default function Products() {
                           <span>{p.internalCode}</span>
                         )}
                       </p>
-                      {p.specification && <p className="text-[10px] text-muted-foreground mb-2 truncate">{p.specification}</p>}
+                      {p.specification && <p className="text-[10px] text-muted-foreground mb-2 app-break">{p.specification}</p>}
                       <div className="flex items-center gap-2 mb-3 flex-wrap">
                         {p.category && <Badge variant="secondary" className="text-[10px]">{p.category.name}</Badge>}
                         <Badge className={`text-[10px] ${STOCK_SITUATION_BADGE_CLASSES[situation]}`}>

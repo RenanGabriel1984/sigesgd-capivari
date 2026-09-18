@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
+import { SearchInput } from "@/components/SearchInput";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,7 +74,7 @@ export default function Suppliers() {
           </div>
           <Button onClick={openCreate} className="gap-2"><Plus className="h-4 w-4" /> Novo Fornecedor</Button>
         </div>
-        <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" /><Input placeholder="Buscar por razão social, nome fantasia ou CNPJ..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 max-w-md" /></div>
+        <div className="relative"><SearchInput placeholder="Buscar por razão social, nome fantasia ou CNPJ..." value={search} onChange={(e) => setSearch(e.target.value)} className="max-w-md" /></div>
         <Card className="border-border/50"><CardContent className="p-0"><div className="overflow-x-auto"><Table>
           <TableHeader><TableRow><TableHead>Razão Social</TableHead><TableHead>Nome Fantasia</TableHead><TableHead>CNPJ</TableHead><TableHead>Contato</TableHead><TableHead>Status</TableHead><TableHead className="w-10"></TableHead></TableRow></TableHeader>
           <TableBody>

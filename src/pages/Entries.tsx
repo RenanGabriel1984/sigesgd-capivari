@@ -810,6 +810,12 @@ export default function Entries() {
                       <TableCell>{renderMatchBadge(r.matchStatus)}</TableCell>
                       <TableCell className="min-w-[180px]">
                         <div className="flex items-center gap-1">
+                          {/* Categoria do material mapeado (regra: fornecedor ≠ categoria) */}
+                          {r.productId && (
+                            <Badge variant="secondary" className="hidden sm:inline-flex text-[9px] shrink-0 max-w-[96px] whitespace-normal app-break">
+                              {products?.find((p: any) => p._id === r.productId)?.category?.name}
+                            </Badge>
+                          )}
                           <Select value={r.productId} onValueChange={(v) => {
                             const n = [...nfeItems]; n[idx].productId = v; n[idx].matchStatus = "found"; setNfeItems(n);
                           }}>

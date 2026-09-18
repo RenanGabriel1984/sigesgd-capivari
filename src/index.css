@@ -115,7 +115,13 @@
   }
   html {
     scroll-behavior: smooth;
-    font-feature-settings: "ss01", "ss02", "cv01";
+    /* IMPORTANTE: NÃO usar font-feature-settings aqui. Features opentype de
+     * conjuntos estilizados (ss01/ss02/cv01) fazem a fonte do sistema trocar
+     * glifos individuais (ex.: letra B maiúscula aparecia menor/elevada em
+     * campos de busca no celular). Cada caractere deve renderizar no tamanho
+     * e posição normais. */
+    font-feature-settings: normal;
+    font-variant-caps: normal;
   }
 }/* ─── Design System Utility Classes ─── */
 @layer utilities {
@@ -189,7 +195,7 @@
     }
   }
 
-  /* ─── Responsividade global (mobile/PWA) ───────────────────────────────
+  /* ─── Responsividade global (mobile/PWA) ─────────────────────────────────
      Safe-area (notch/barra gestual) + guardas anti-overflow.               */
   .page-x-pad {
     padding-left: max(1rem, env(safe-area-inset-left));
@@ -220,6 +226,12 @@
   .app-break {
     overflow-wrap: break-word;
     word-break: break-word;
+  }
+  /* Nomes/entidades nunca truncados: quebram em várias linhas e o contêiner
+     cresce verticalmente (usar sempre com min-w-0 no pai). */
+  .app-break {
+    white-space: normal;
+    text-overflow: clip;
   }
   html,
   body {

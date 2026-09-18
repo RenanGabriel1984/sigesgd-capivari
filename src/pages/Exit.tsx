@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
+import { SearchInput } from "@/components/SearchInput";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -197,13 +198,13 @@ export default function Exit() {
                   <div>
                     <Label className="text-base font-semibold">Qual material será retirado?</Label>
                     <div className="relative mt-2">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-                      <Input
+                      <SearchInput
                         autoFocus
                         value={search}
                         onChange={(e) => setSearch(e.target.value)}
                         placeholder="Digite o nome do material..."
-                        className="pl-10 h-12 text-base"
+                        className="h-12 text-base"
+                        iconClassName="left-3 top-1/2 h-5 w-5 -translate-y-1/2"
                       />
                     </div>
                   </div>
@@ -226,7 +227,7 @@ export default function Exit() {
                         >
                           <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="font-medium text-sm truncate">{p.name}</p>
+                              <p className="font-medium text-sm app-break">{p.name}</p>
                               <p className="text-xs text-muted-foreground">
                                 {p.brand ?? p.category?.name ?? "—"}
                               </p>

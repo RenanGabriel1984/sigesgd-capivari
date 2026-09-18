@@ -3,12 +3,12 @@ import { Link } from "react-router";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
+import { SearchInput } from "@/components/SearchInput";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
-import { Search, Warehouse, ClipboardList } from "lucide-react";
+import { Warehouse, ClipboardList } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UNIT_LABELS } from "@/types/constants";
 import { getStockSituation, STOCK_SITUATION_LABELS, STOCK_SITUATION_BADGE_CLASSES } from "@/lib/stock-status";
@@ -112,12 +112,11 @@ export default function Stock() {
             </p>
           </div>
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
+            <SearchInput
               placeholder="O que você está procurando?"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 max-w-sm"
+              className="max-w-sm"
             />
           </div>
         </div>
@@ -283,7 +282,7 @@ export default function Stock() {
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{p.name}</p>
+                      <p className="font-medium app-break">{p.name}</p>
                       <p className="text-xs text-muted-foreground">
                         {p.category?.name ?? "—"} • {UNIT_LABELS[p.unitOfMeasure] ?? p.unitOfMeasure}
                       </p>

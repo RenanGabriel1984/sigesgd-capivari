@@ -614,6 +614,9 @@ export default function Requests() {
                       <Input
                         value={histSerialSearch}
                         onChange={(e) => setHistSerialSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
+                        }}
                         placeholder="Buscar patrimônio..."
                         className="mt-1 pl-8"
                       />
