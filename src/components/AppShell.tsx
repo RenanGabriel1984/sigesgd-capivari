@@ -17,6 +17,7 @@ import {
   Menu,
   X,
   ChevronLeft,
+  ChevronDown,
   Warehouse,
   Shield,
   FileText,
@@ -33,13 +34,14 @@ import {
   PackageMinus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { getPermissions, ROLE_LABELS } from "@/types/constants";
 import type { UserRole } from "@/types/constants";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useIsDesktop } from "@/hooks/use-mobile";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -148,6 +150,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
+  // iOS: 100vh ignora a barra de endereço; dvh corrige.
+  useEffect(() => {
+    const setVH = () => {
+      document.documentElement.style.setProperty("--app-vh", `${window.innerHeight * 0.01}px`);
+    };
+    setVH();
+    window.addEventListener("resize", setVH);
+    window.addEventListener("orientationchange", setVH);
+    return () => {
+      window.removeEventListener("resize", setVH);
+      window.removeEventListener("orientationchange", setVH);
+    };
+  }, []);
+
   // ─── PWA Install Prompt ───
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
@@ -188,9 +204,45 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const permissions = getPermissions(role);
   const alertCount = belowMinItems?.length ?? 0;
 
+  // ── Mobile menu ────────────────────────────────────────────────────────────
+  // Grupos recolhíveis apenas no mobile: reduz a altura do drawer sem remover
+  // nenhuma rota. No desktop (lg+) tudo fica expandido como sempre.
+  const isDesktop = useIsDesktop();
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    // Na primeira abertura, todas as seções começam abertas.
+    try {
+      const saved = sessionStorage.getItem("sigesgd-sidebar-sections");
+      if (saved) return JSON.parse(saved) as Record<string, boolean>;
+    } catch {
+      /* sessionStorage indisponível — segue com padrão */
+    }
+    return {};
+  });
+  const toggleSection = (title: string) => {
+    setOpenSections((prev) => {
+      const next = { ...prev, [title]: !prev[title] };
+      try {
+        sessionStorage.setItem("sigesgd-sidebar-sections", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
   useEffect(() => {
     setSidebarOpen(false);
   }, [location.pathname]);
+
+  // Bloqueia o scroll da página atrás do drawer (iOS incluído).
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [sidebarOpen]);
 
   const filteredSections = NAV_SECTIONS.map((section) => ({
     ...section,
@@ -214,11 +266,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     : "??";
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-dvh overflow-hidden bg-background">
       {/* Desktop sidebar */}
       <aside
         className={cn(
           "hidden lg:flex flex-col border-r border-border/60 bg-card transition-all duration-300",
+          "h-dvh supports-[height:100dvh]:h-dvh",
           collapsed ? "w-16" : "w-64"
         )}
       >
@@ -245,9 +298,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )}
         </div>
 
-        {/* Nav */}
-        <ScrollArea className="flex-1 px-3 py-3">
-          <nav className="flex flex-col gap-1">
+        {/* Nav — rolagem nativa (overflow-y-auto) para garantir alcance total por toque e teclado */}
+        <nav
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3"
+          style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+        >
+          <div className="flex flex-col gap-1">
             {filteredSections.map((section, sIdx) => (
               <div key={sIdx}>
                 {section.title && !collapsed && (
@@ -266,8 +322,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 ))}
               </div>
             ))}
-          </nav>
-        </ScrollArea>
+          </div>
+        </nav>
 
         {/* Collapse toggle */}
         <div className="border-t border-border/60 p-3">
@@ -298,9 +354,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               animate={{ x: 0 }}
               exit={{ x: -280 }}
               transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed inset-y-0 left-0 z-50 w-72 bg-card border-r border-border/60 flex flex-col lg:hidden"
+              className="fixed left-0 top-0 z-50 w-[min(19.5rem,100vw)] max-w-full bg-card border-r border-border/60 flex flex-col lg:hidden"
+              style={{
+                height: "100dvh",
+                maxHeight: "100dvh",
+                paddingBottom: "env(safe-area-inset-bottom)",
+              }}
             >
-              <div className="flex h-16 items-center justify-between border-b border-border/60 px-4">
+              {/* Cabeçalho sempre visível */}
+              <div className="flex h-16 shrink-0 items-center justify-between border-b border-border/60 px-4">
                 <Link to="/dashboard" className="flex items-center gap-2.5">
                   <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-xs ring-2 ring-[var(--capivari-gold)]/70">
                     SG
@@ -310,33 +372,72 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <p className="text-[10px] text-muted-foreground leading-tight">Capivari — SP</p>
                   </div>
                 </Link>
-                <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(false)}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Fechar menu"
+                  className="touch-manipulation"
+                  onClick={() => setSidebarOpen(false)}
+                >
                   <X className="h-5 w-5" />
                 </Button>
               </div>
-              <ScrollArea className="flex-1 px-3 py-3">
-                <nav className="flex flex-col gap-1">
+              {/* Lista com rolagem vertical própria — chega até o último item */}
+              <nav
+                className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-3"
+                style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
+              >
+                <div className="flex flex-col gap-1 pb-2">
                   {filteredSections.map((section, sIdx) => (
                     <div key={sIdx}>
-                      {section.title && (
-                        <p className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                          {section.title}
-                        </p>
+                      {section.title ? (
+                        <Collapsible
+                          open={isDesktop || (openSections[section.title] ?? true)}
+                          onOpenChange={() => toggleSection(section.title!)}
+                        >
+                          <CollapsibleTrigger asChild>
+                            <button
+                              type="button"
+                              aria-expanded={openSections[section.title] ?? true}
+                              className="flex w-full touch-manipulation items-center justify-between rounded-md px-3 pt-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70"
+                            >
+                              {section.title}
+                              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", (openSections[section.title] ?? true) && "rotate-180")} />
+                            </button>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <div className="flex flex-col gap-1">
+                              {section.items.map((item) => (
+                                <SidebarLink
+                                  key={item.href}
+                                  item={item}
+                                  isActive={location.pathname === item.href || (item.href !== "/dashboard" && location.pathname.startsWith(item.href))}
+                                  onClick={() => setSidebarOpen(false)}
+                                  pendingCount={pendingCount}
+                                  alertCount={alertCount}
+                                />
+                              ))}
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      ) : (
+                        <div className="flex flex-col gap-1">
+                          {section.items.map((item) => (
+                            <SidebarLink
+                              key={item.href}
+                              item={item}
+                              isActive={location.pathname === item.href || (item.href !== "/dashboard" && location.pathname.startsWith(item.href))}
+                              onClick={() => setSidebarOpen(false)}
+                              pendingCount={pendingCount}
+                              alertCount={alertCount}
+                            />
+                          ))}
+                        </div>
                       )}
-                      {section.items.map((item) => (
-                        <SidebarLink
-                          key={item.href}
-                          item={item}
-                          isActive={location.pathname === item.href || (item.href !== "/dashboard" && location.pathname.startsWith(item.href))}
-                          onClick={() => setSidebarOpen(false)}
-                          pendingCount={pendingCount}
-                          alertCount={alertCount}
-                        />
-                      ))}
                     </div>
                   ))}
-                </nav>
-              </ScrollArea>
+                </div>
+              </nav>
             </motion.aside>
           </>
         )}
@@ -363,7 +464,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
 
         {/* Top bar */}
-        <header className="flex h-16 items-center gap-4 border-b border-border/60 bg-card/80 backdrop-blur-sm px-4 lg:px-6 shrink-0">
+        <header className="flex h-16 items-center gap-4 border-b border-border/60 bg-card/80 backdrop-blur-sm page-x-pad shrink-0">
           <Button
             variant="ghost"
             size="icon"
@@ -409,7 +510,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Page content */}
         <main className="flex-1 overflow-auto bg-background/50">
-          <div className="h-full p-4 lg:p-6">
+          <div className="h-full page-x-pad page-bot-pad py-4 lg:py-6">
             {children}
           </div>
         </main>

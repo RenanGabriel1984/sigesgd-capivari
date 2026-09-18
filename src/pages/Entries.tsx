@@ -596,7 +596,7 @@ export default function Entries() {
           <DialogHeader><DialogTitle>{viewEntry?.entryNumber ?? "Entrada"}</DialogTitle></DialogHeader>
           {viewEntry && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div><span className="text-muted-foreground">Status:</span> <Badge className={`text-[10px] ${STATUS_COLORS[viewEntry.status]}`}>{STATUS_LABELS[viewEntry.status]}</Badge></div>
                 <div><span className="text-muted-foreground">Origem:</span> {ORIGIN_LABELS[viewEntry.originType]}</div>
                 <div><span className="text-muted-foreground">Recebido:</span> {new Date(viewEntry.receivedAt).toLocaleDateString("pt-BR")}</div>

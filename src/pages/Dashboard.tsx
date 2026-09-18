@@ -113,7 +113,7 @@ export default function Dashboard() {
         {/* ─── Tarefas principais ─── */}
         <motion.div {...fadeIn} transition={{ delay: 0.05 }}>
           <h2 className="text-sm font-semibold text-muted-foreground mb-2">O que você precisa fazer?</h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-4 gap-3">
             {permissions.canCreateEntries && (
               <Button
                 variant="outline"
@@ -158,19 +158,23 @@ export default function Dashboard() {
             </Button>
           </div>
           {(permissions.canManageInventory || permissions.canViewMovements) && (
-            <div className="grid grid-cols-2 gap-3 mt-3">
+            <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3 mt-3">
               {permissions.canManageInventory && (
-                <Button variant="ghost" className="h-auto justify-start gap-2 p-3 rounded-xl border hover:bg-muted/50" onClick={() => navigate("/inventory")}>
-                  <ClipboardCheck className="h-5 w-5 text-[var(--capivari-green)]" />
-                  <span className="text-sm font-medium">Fazer inventário</span>
-                  <span className="text-[10px] text-muted-foreground">Conferir estoque físico</span>
+                <Button variant="ghost" className="h-auto min-h-14 flex-col items-start gap-1 p-3 rounded-xl border text-left hover:bg-muted/50" onClick={() => navigate("/inventory")}>
+                  <span className="flex items-center gap-2">
+                    <ClipboardCheck className="h-5 w-5 shrink-0 text-[var(--capivari-green)]" />
+                    <span className="text-sm font-medium">Fazer inventário</span>
+                  </span>
+                  <span className="text-[10px] text-muted-foreground text-left">Conferir estoque físico</span>
                 </Button>
               )}
               {permissions.canViewMovements && (
-                <Button variant="ghost" className="h-auto justify-start gap-2 p-3 rounded-xl border hover:bg-muted/50" onClick={() => navigate("/reports")}>
-                  <FileBarChart className="h-5 w-5 text-blue-600" />
-                  <span className="text-sm font-medium">Relatórios</span>
-                  <span className="text-[10px] text-muted-foreground">Consumo e movimentações</span>
+                <Button variant="ghost" className="h-auto min-h-14 flex-col items-start gap-1 p-3 rounded-xl border text-left hover:bg-muted/50" onClick={() => navigate("/reports")}>
+                  <span className="flex items-center gap-2">
+                    <FileBarChart className="h-5 w-5 shrink-0 text-blue-600" />
+                    <span className="text-sm font-medium">Relatórios</span>
+                  </span>
+                  <span className="text-[10px] text-muted-foreground text-left">Consumo e movimentações</span>
                 </Button>
               )}
             </div>
@@ -180,15 +184,15 @@ export default function Dashboard() {
         {/* ─── Indicadores ─── */}
         <div className="pt-2">
           <h2 className="text-sm font-semibold text-muted-foreground mb-3">Indicadores</h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
             <motion.div {...fadeIn} transition={{ delay: 0.05 }}>
               <Card className="border-border/50">
                 <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                       <Package className="h-5 w-5" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-2xl font-bold">{loading ? "—" : s!.totalProducts}</p>
                       <p className="text-xs text-muted-foreground">Itens no Catálogo</p>
                     </div>
@@ -200,11 +204,11 @@ export default function Dashboard() {
             <motion.div {...fadeIn} transition={{ delay: 0.1 }}>
               <Card className="border-border/50">
                 <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
                       <AlertTriangle className="h-5 w-5" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-2xl font-bold">{loading ? "—" : s!.criticalStock}</p>
                       <p className="text-xs text-muted-foreground">Estoque Crítico</p>
                     </div>
@@ -216,11 +220,11 @@ export default function Dashboard() {
             <motion.div {...fadeIn} transition={{ delay: 0.15 }}>
               <Card className="border-border/50">
                 <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
                       <ClipboardList className="h-5 w-5" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-2xl font-bold">{loading ? "—" : s!.pendingThisMonth}</p>
                       <p className="text-xs text-muted-foreground">Solicitações Pendentes (Mês)</p>
                     </div>
@@ -232,11 +236,11 @@ export default function Dashboard() {
             <motion.div {...fadeIn} transition={{ delay: 0.2 }}>
               <Card className="border-border/50">
                 <CardContent className="p-4">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
                       <BarChart3 className="h-5 w-5" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-bold text-emerald-600">+{loading ? "—" : s!.entriesThisMonth}</span>
                         <span className="text-muted-foreground text-xs">/</span>
@@ -252,11 +256,11 @@ export default function Dashboard() {
         </div>
 
         {/* ─── GOMAQ + Assets + Licenses Cards ─── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
           <motion.div {...fadeIn} transition={{ delay: 0.25 }}>
             <Card className="border-border/50">
               <CardContent className="p-4">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600">
                     <Truck className="h-5 w-5" />
                   </div>
@@ -272,7 +276,7 @@ export default function Dashboard() {
           <motion.div {...fadeIn} transition={{ delay: 0.27 }}>
             <Card className="border-border/50">
               <CardContent className="p-4">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
                     <Wrench className="h-5 w-5" />
                   </div>
@@ -288,7 +292,7 @@ export default function Dashboard() {
           <motion.div {...fadeIn} transition={{ delay: 0.29 }}>
             <Card className="border-border/50">
               <CardContent className="p-4">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-pink-50 text-pink-600">
                     <Key className="h-5 w-5" />
                   </div>
@@ -304,7 +308,7 @@ export default function Dashboard() {
           <motion.div {...fadeIn} transition={{ delay: 0.31 }}>
             <Card className="border-border/50">
               <CardContent className="p-4">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-50 text-cyan-600">
                     <Truck className="h-5 w-5" />
                   </div>

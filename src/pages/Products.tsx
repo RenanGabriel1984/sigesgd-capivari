@@ -340,16 +340,16 @@ export default function Products() {
             )}
             <div><Label>Nome *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ex: SSD 480 GB SATA" /></div>
             <div><Label>Descrição</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={2} placeholder="Descrição detalhada do item" /></div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div><Label>Categoria *</Label>{categories && categories.length === 0 ? (<div className="flex items-center gap-2 mt-1"><p className="text-sm text-muted-foreground">Nenhuma categoria cadastrada.</p><Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => setCatModalOpen(true)}>+ Criar categoria</Button></div>) : (<div className="flex gap-1"><Select value={form.categoryId} onValueChange={(v) => setForm({ ...form, categoryId: v })}><SelectTrigger className="flex-1"><SelectValue placeholder="Selecionar" /></SelectTrigger><SelectContent>{categories?.map((c: any) => (<SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>))}</SelectContent></Select><Button type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => setCatModalOpen(true)} title="Nova categoria"><Plus className="h-4 w-4" /></Button></div>)}</div>
               <div><Label>Unidade de Medida</Label><Select value={form.unitOfMeasure} onValueChange={(v) => setForm({ ...form, unitOfMeasure: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{UNITS_OF_MEASURE.map((u) => (<SelectItem key={u} value={u}>{UNIT_LABELS[u] ?? u}</SelectItem>))}</SelectContent></Select></div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div><Label>Marca</Label><Input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="Ex: Kingston, SanDisk" /></div>
               <div><Label>Modelo</Label><Input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="Ex: A400, SSD Plus" /></div>
             </div>
             <div><Label>Especificação</Label><Input value={form.specification} onChange={(e) => setForm({ ...form, specification: e.target.value })} placeholder="Ex: 480 GB, SATA III, Leitura 500MB/s" /></div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div><Label>Código Interno</Label><Input value={form.internalCode} onChange={(e) => setForm({ ...form, internalCode: e.target.value })} placeholder="Opcional — gerado automaticamente" /></div>
               <div className="flex items-end pb-1">
                 <div className="flex items-center gap-2">

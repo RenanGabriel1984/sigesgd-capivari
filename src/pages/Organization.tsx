@@ -152,7 +152,7 @@ export default function Organization() {
                       <p><span className="font-medium">Status:</span> <Badge variant={selectedOrg.active ? "default" : "secondary"}>{selectedOrg.active ? "Ativo" : "Inativo"}</Badge></p>
                     </TabsContent>
                     <TabsContent value="history" className="mt-3">
-                      <div className="grid grid-cols-2 gap-3 mb-4">
+                      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3 mb-4">
                         <div className="border rounded px-3 py-2 text-center">
                           <p className="text-2xl font-bold">{totalDelivered}</p>
                           <p className="text-xs text-muted-foreground">Pedidos Entregues</p>
@@ -209,7 +209,7 @@ export default function Organization() {
           <div><Label>Nome *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
           <div><Label>Tipo *</Label><Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as OrgType })}><SelectTrigger><SelectValue placeholder="Selecionar tipo" /></SelectTrigger><SelectContent>{Object.entries(ORG_TYPE_LABELS).map(([k, v]) => (<SelectItem key={k} value={k}>{v}</SelectItem>))}</SelectContent></Select></div>
           <div><Label>Unidade Superior</Label><Select value={form.parentId} onValueChange={(v) => setForm({ ...form, parentId: v })}><SelectTrigger><SelectValue placeholder="Nenhuma (raiz)" /></SelectTrigger><SelectContent>{orgData?.orgs.filter((o) => o._id !== editingId).map((o) => (<SelectItem key={o._id} value={o._id}>{o.name}</SelectItem>))}</SelectContent></Select></div>
-          <div className="grid grid-cols-2 gap-4"><div><Label>Data Início</Label><Input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></div><div><Label>Data Término</Label><Input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} /></div></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div><Label>Data Início</Label><Input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} /></div><div><Label>Data Término</Label><Input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} /></div></div>
           <div><Label>Observações</Label><Textarea value={form.observation} onChange={(e) => setForm({ ...form, observation: e.target.value })} rows={2} /></div>
         </div>
         <DialogFooter><Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button><Button onClick={handleSave}>{editingId ? "Salvar" : "Criar"}</Button></DialogFooter>
