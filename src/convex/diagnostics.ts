@@ -39,9 +39,11 @@
  * (módulo separado, igualmente internal-only).
  */
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
+import { api, internal } from "./_generated/api";
+import { verifyPassword } from "./auth/passwords";
 
 const OFFICIAL_ENTRY_NUMBER = "ENT-2026-000001";
 
@@ -1107,6 +1109,148 @@ export const officialProductsInternal = internalQuery({
       officialEntryNumber: officialEntry?.entryNumber ?? null,
       notOfficial: rows.filter((r) => !r.official).map((r) => r.name),
       rows,
+    };
+  },
+});
+
+/**
+ * 8. passwordResetE2EInternal (ação interna — canal CLI/dashboard)
+ *
+ * Exercita o fluxo completo de recuperação de senha CONTRA O DEPLOYMENT REAL,
+ * sem expor o código e SEM depender do scheduler (injeção neutra):
+ *
+ *   request (reset real, mutation pública) → scheduler neutro → envio pelo
+ *   transporte do emailOtp (aceite reportado) → confirmPasswordReset (fluxo
+ *   público real) → token usado → senha nova válida → restauração da senha
+ *   original (hash + salt idênticos, rejeitando a senha de teste).
+ *
+ * NUNCA retorna o código nem grava código em logs.
+ *
+ * NOTA: o tipo de retorno é anotado explicitamente porque a inferência a
+ * partir do corpo (que referencia o registro `api`/`internal`) fecha um
+ * ciclo de tipos com o próprio módulo (TS7022) e envenena o registro gerado.
+ */
+type PasswordResetE2EResult = {
+  ok: boolean;
+  resetCreated: boolean;
+  resetExpiresInMinutes: number;
+  previousTokensInvalidated: number;
+  transportProbe: "accepted" | "failed" | "skipped";
+  tokenUsed: boolean;
+  probePasswordWorks: boolean;
+  restoredToOriginal: boolean;
+  probeRejectedAfterRestore: boolean;
+};
+
+export const passwordResetE2EInternal = internalAction({
+  args: {
+    email: v.string(),
+    probePassword: v.string(),
+    restore: v.boolean(),
+  },
+  handler: async (ctx, args): Promise<PasswordResetE2EResult> => {
+    const email = args.email.trim().toLowerCase();
+
+    const s0 = await ctx.runQuery(internal.pwResetHelpers.pwE2EStateInternal, { email });
+    if (!s0.passwordRecordId || !s0.passwordHash || !s0.salt) {
+      throw new Error("Usuário alvo não possui senha registrada");
+    }
+
+    const originalHash: string = s0.passwordHash;
+    const originalSalt: string = s0.salt;
+    const originalRequiresReset: boolean = s0.requiresReset ?? false;
+
+    // ── 1) requestPasswordReset REAL (fluxo público, sem args de código) ──
+    await ctx.runMutation(api.passwords.requestPasswordReset, { email });
+
+    // Localiza o reset ativo gerado (via índice by_user).
+    const s1 = await ctx.runQuery(internal.pwResetHelpers.pwE2EStateInternal, { email });
+    const active = s1.resets
+      .filter((r) => r.usedAt === null && r.expiresAt > Date.now())
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+    if (!active) throw new Error("requestPasswordReset não gerou reset ativo");
+
+    // Verifica invalidação de tokens anteriores (regra 6).
+    const invalidatedOthers = s1.resets.filter(
+      (r) => r.id !== active.id && r.usedAt !== null
+    ).length;
+
+    // ── 2) transporte: envio direto pelo serviço do emailOtp ──
+    const payload = await ctx.runQuery(internal.email.getPasswordResetForEmailInternal, {
+      resetId: active.id,
+    });
+    if (!payload) throw new Error("getPasswordResetForEmailInternal não retornou payload");
+    if (payload.email !== email) throw new Error("payload de e-mail divergente");
+
+    let transportAccepted = false;
+    if (args.restore) {
+      try {
+        await ctx.runAction(internal.email.sendPasswordResetEmailInternal, {
+          resetId: active.id,
+        });
+        transportAccepted = true;
+      } catch {
+        transportAccepted = false;
+      }
+    }
+
+    // Política de senha (mesma validação do confirmPasswordReset).
+    if (args.probePassword.length < 6) {
+      throw new Error("probePassword deve ter ao menos 6 caracteres");
+    }
+
+    // ── 3) confirmPasswordReset REAL (fluxo público) ──
+    await ctx.runMutation(api.passwords.confirmPasswordReset, {
+      email,
+      code: payload.code,
+      newPassword: args.probePassword,
+    });
+
+    // ── 4) verificação pós-confirmação ──
+    const s2 = await ctx.runQuery(internal.pwResetHelpers.pwE2EStateInternal, { email });
+    const postReset = s2.resets.find((r) => r.id === active.id);
+    const tokenUsed = postReset?.usedAt !== null && postReset?.usedAt !== undefined;
+
+    const probeValid = await verifyPassword(
+      args.probePassword,
+      s2.passwordHash!,
+      s2.salt!
+    );
+
+    // ── 5) restauração do estado original (mutation interna) ──
+    if (args.restore) {
+      await ctx.runMutation(internal.pwResetHelpers.restorePasswordInternal, {
+        passwordRecordId: s0.passwordRecordId,
+        passwordHash: originalHash,
+        salt: originalSalt,
+        requiresReset: originalRequiresReset,
+        userId: s0.userId,
+      });
+    }
+
+    // Prova de restauração: registro volta a ser IDÊNTICO ao original
+    // (hash + salt) e a senha de teste deixa de validar.
+    const s3 = await ctx.runQuery(internal.pwResetHelpers.pwE2EStateInternal, { email });
+    const restoredOk = args.restore
+      ? s3.passwordHash === originalHash && s3.salt === originalSalt
+      : false;
+    const probeInvalidAfterRestore = args.restore
+      ? !(await verifyPassword(args.probePassword, s3.passwordHash!, s3.salt!))
+      : false;
+
+    return {
+      ok:
+        tokenUsed &&
+        probeValid &&
+        (!args.restore || (restoredOk && probeInvalidAfterRestore)),
+      resetCreated: true,
+      resetExpiresInMinutes: Math.round((active.expiresAt - active.createdAt) / 60000),
+      previousTokensInvalidated: invalidatedOthers,
+      transportProbe: args.restore ? (transportAccepted ? "accepted" : "failed") : "skipped",
+      tokenUsed,
+      probePasswordWorks: probeValid,
+      restoredToOriginal: restoredOk,
+      probeRejectedAfterRestore: probeInvalidAfterRestore,
     };
   },
 });

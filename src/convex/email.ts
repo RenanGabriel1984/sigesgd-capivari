@@ -1,110 +1,108 @@
-import { action } from "./_generated/server";
 import { v } from "convex/values";
+import { action, internalAction, internalQuery } from "./_generated/server";
+import { internal } from "./_generated/api";
 
 /**
- * Send a password reset email via Resend API.
+ * SIGESGD — Transporte de e-mail.
  *
- * Required environment variables (set in Convex Dashboard → Settings → Environment Variables):
- *   RESEND_API_KEY   — Resend API key (https://resend.com)
- *   EMAIL_FROM       — Sender email (must be verified in Resend, e.g. "noreply@capivari.sp.gov.br")
+ * Reutiliza EXATAMENTE o mesmo serviço de envio já funcional no projeto,
+ * usado pelo provedor de OTP em `convex/auth/emailOtp.ts`:
+ *   POST https://auth.freebuff.app/send_otp   (header x-api-key)
  *
- * If the variables are not configured, the email is skipped (no error thrown).
- * The code is still logged server-side for development/debugging.
+ * Recuperação de senha (`passwords.requestPasswordReset`):
+ *   - o código numérico de 6 dígitos continua sendo gerado e gravado em
+ *     `passwordResets` (token, expiresAt 15 min, usedAt, userId);
+ *   - a mutation agenda esta ação INTERNA passando apenas o `resetId`;
+ *   - o código é lido AQUI, no servidor, direto da tabela `passwordResets`
+ *     — nunca trafega em args públicos, não é retornado pela mutation e
+ *     não é impresso em logs de produção;
+ *   - se o registro já foi consumido (`usedAt`) ou expirou, nada é enviado.
+ *
+ * Este módulo NÃO depende de RESEND_API_KEY.
  */
-export const sendPasswordResetEmail = action({
-  args: {
-    to: v.string(),
-    code: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const apiKey = process.env.RESEND_API_KEY;
-    const fromEmail = process.env.EMAIL_FROM || "SIGESGD <noreply@capivari.sp.gov.br>";
 
-    if (!apiKey) {
-      console.log(
-        `[SIGESGD] Password reset code for ${args.to}: ${args.code} ` +
-        `(Email not sent — RESEND_API_KEY not configured)`
+const SEND_OTP_ENDPOINT = "https://auth.freebuff.app/send_otp";
+
+/** Mesmo endpoint/payload/headers do transporte funcional de `auth/emailOtp.ts`.
+ *  Usa fetch (nativo nas actions do Convex) em vez de axios — a chamada HTTP
+ *  é idêntica (mesmo endpoint, mesmo corpo, mesmo header x-api-key).
+ */
+async function sendOtpEmail(to: string, otp: string): Promise<void> {
+  const response = await fetch(SEND_OTP_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "x-api-key": "fb_email_2crN1hqIArZP2bEfvjp5Qik4",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      to,
+      otp,
+      appName: process.env.VLY_APP_NAME || "a freebuff.com application",
+    }),
+  });
+  if (!response.ok) {
+    // Nunca incluir corpo/código no erro (evita vazar dados em logs).
+    throw new Error(`send_otp_failed_${response.status}`);
+  }
+}
+
+/**
+ * Lê, no servidor, o e-mail do usuário e o código do reset indicado.
+ * Retorna null se o registro não existir, já foi usado ou expirou —
+ * nesses casos o e-mail NÃO é enviado (e nada vaza).
+ */
+export const getPasswordResetForEmailInternal = internalQuery({
+  args: { resetId: v.id("passwordResets") },
+  handler: async (ctx, args) => {
+    const reset = await ctx.db.get(args.resetId);
+    if (!reset) return null;
+    if (reset.usedAt) return null;
+    if (reset.expiresAt <= Date.now()) return null;
+
+    const user = await ctx.db.get(reset.userId);
+    if (!user?.email) return null;
+
+    return { email: user.email, code: reset.token };
+  },
+});
+
+/**
+ * Ação interna agendada por `passwords.requestPasswordReset`.
+ * Envia o código de recuperação pelo mesmo serviço do Freebuff usado
+ * pelo OTP de autenticação. Nunca loga o código — apenas metadados de erro.
+ */
+export const sendPasswordResetEmailInternal = internalAction({
+  args: { resetId: v.id("passwordResets") },
+  handler: async (ctx, args) => {
+    const payload = await ctx.runQuery(internal.email.getPasswordResetForEmailInternal, {
+      resetId: args.resetId,
+    });
+
+    if (!payload) {
+      console.error(
+        "[SIGESGD] Recuperação: registro de reset inexistente/consumido/expirado — e-mail não enviado.",
       );
-      return { sent: false, reason: "Email service not configured" };
+      return { sent: false, reason: "reset-not-found" };
     }
 
     try {
-      const response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: fromEmail,
-          to: [args.to],
-          subject: "Recuperação de Senha — SIGESGD Capivari",
-          html: `
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            </head>
-            <body style="margin:0;padding:0;background-color:#f8faf9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-              <div style="max-width:480px;margin:0 auto;padding:32px 16px;">
-                <div style="text-align:center;margin-bottom:24px;">
-                  <div style="display:inline-block;background:#1a5632;color:white;font-weight:bold;font-size:14px;padding:8px 12px;border-radius:8px;">SG</div>
-                </div>
-                <h1 style="color:#1a5632;font-size:18px;text-align:center;margin-bottom:8px;">SIGESGD Capivari</h1>
-                <p style="color:#666;font-size:13px;text-align:center;margin-bottom:24px;">Sistema Integrado de Gestão</p>
-
-                <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:24px;margin-bottom:24px;">
-                  <h2 style="color:#1a5632;font-size:16px;margin-bottom:12px;">Recuperação de Senha</h2>
-                  <p style="color:#444;font-size:14px;line-height:1.5;margin-bottom:16px;">
-                    Você solicitou a recuperação da sua senha. Utilize o código abaixo para redefinir:
-                  </p>
-                  <div style="text-align:center;margin:20px 0;">
-                    <span style="display:inline-block;background:#f0f7f2;border:2px solid #1a5632;border-radius:8px;padding:12px 24px;font-size:28px;font-weight:bold;letter-spacing:6px;color:#1a5632;font-family:monospace;">
-                      ${args.code}
-                    </span>
-                  </div>
-                  <p style="color:#888;font-size:12px;text-align:center;margin-top:16px;">
-                    Este código expira em <strong>15 minutos</strong> e pode ser utilizado apenas uma vez.
-                  </p>
-                </div>
-
-                <p style="color:#999;font-size:11px;text-align:center;line-height:1.5;">
-                  Se você não solicitou esta recuperação, ignore este e-mail.<br>
-                  Nunca compartilhe este código com terceiros.
-                </p>
-
-                <div style="text-align:center;margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;">
-                  <p style="color:#bbb;font-size:10px;">
-                    Prefeitura Municipal de Capivari — SP<br>
-                    Secretaria de Gestão e Governo Digital
-                  </p>
-                </div>
-              </div>
-            </body>
-            </html>
-          `,
-          text: `SIGESGD Capivari — Recuperação de Senha\n\nSeu código de recuperação: ${args.code}\n\nEste código expira em 15 minutos e pode ser utilizado apenas uma vez.\n\nSe você não solicitou esta recuperação, ignore este e-mail.\n\nPrefeitura Municipal de Capivari — SP`,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        console.error(`[SIGESGD] Email send failed: ${response.status} ${errorData}`);
-        return { sent: false, reason: `Email API error: ${response.status}` };
-      }
-
-      const result = await response.json();
-      return { sent: true, id: result.id };
+      await sendOtpEmail(payload.email, payload.code);
+      return { sent: true };
     } catch (error: any) {
-      console.error(`[SIGESGD] Email send error:`, error.message);
-      return { sent: false, reason: error.message };
+      // NUNCA logar o código nem o corpo do erro (poderia conter dados sensíveis).
+      console.error(
+        "[SIGESGD] Falha no envio do e-mail de recuperação:",
+        error?.response?.status ?? error?.code ?? "erro-desconhecido",
+      );
+      return { sent: false, reason: "send-failed" };
     }
   },
 });
 
 /**
  * Send first-access welcome email with temporary password.
+ * (Fluxo legado: permanece dependente de RESEND_API_KEY e não é usado
+ * pelo fluxo de recuperação de senha.)
  */
 export const sendFirstAccessEmail = action({
   args: {

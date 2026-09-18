@@ -2,7 +2,8 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword, verifyPassword } from "./auth/passwords";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -552,7 +553,7 @@ export const requestPasswordReset = mutation({
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const now = Date.now();
 
-    await ctx.db.insert("passwordResets", {
+    const resetId: Id<"passwordResets"> = await ctx.db.insert("passwordResets", {
       userId: user._id,
       token: code,
       expiresAt: now + 15 * 60 * 1000, // 15 minutes
@@ -568,10 +569,13 @@ export const requestPasswordReset = mutation({
       timestamp: now,
     });
 
-    // Send email with the reset code via Resend (if configured)
-    ctx.scheduler.runAfter(0, api.email.sendPasswordResetEmail, {
-      to: email,
-      code,
+    // Send email with the reset code via the Freebuff email service (same
+    // transport as auth/emailOtp.ts). The scheduled INTERNAL action receives
+    // only the reset id and reads the code server-side — the code never
+    // crosses a public endpoint, is never returned to the client and is
+    // never written to production logs.
+    await ctx.scheduler.runAfter(0, internal.email.sendPasswordResetEmailInternal, {
+      resetId,
     });
 
     return {
