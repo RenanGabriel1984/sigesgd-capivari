@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -127,6 +127,18 @@ export default function Entries() {
   const [importDocStorageId, setImportDocStorageId] = useState("");
   const [importObservation, setImportObservation] = useState("");
   const nfeFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Reavalia o vínculo por CNPJ quando a lista de fornecedores termina de
+  // carregar: a importação pode rodar antes da query resolver (estado travado
+  // em "Fornecedor não cadastrado" mesmo com o cadastro existente).
+  useEffect(() => {
+    if (!nfe || !suppliers || nfeSupplierFound) return;
+    const match = findSupplierMatch(nfe, suppliers);
+    if (match.found && match.supplierId) {
+      setNfeSupplierId(match.supplierId);
+      setNfeSupplierFound(true);
+    }
+  }, [nfe, suppliers, nfeSupplierFound]);
 
   const viewEntry = entries?.find((e) => e._id === viewId);
   const editEntryData = entries?.find((e) => e._id === editEntryId);
