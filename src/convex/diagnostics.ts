@@ -1254,3 +1254,115 @@ export const passwordResetE2EInternal = internalAction({
     };
   },
 });
+
+/**
+ * Auditoria SOMENTE LEITURA de fornecedores para o fluxo de importação NF-e.
+ * Mostra cadastro, CNPJ bruto/normalizado, status e o resultado do matching
+ * por CNPJ contra o emitente da NF-e em teste. NÃO altera nenhum registro.
+ */
+export const supplierMatchAuditInternal = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<{
+    suppliers: Array<{
+      id: string; legalName: string; tradeName: string | null;
+      cnpjRaw: string | null; cnpjDigits: string | null; active: boolean;
+      matchByNfeCnpj: boolean;
+    }>;
+    total: number;
+    active: number;
+    nfeCnpjDigits: string;
+    nfeCnpjMasked: string;
+    matchedSupplierId: string | null;
+    matchedSupplierName: string | null;
+  }> => {
+    const NFE_CNPJ = "61457941000143";
+    const digits = (s: string) => (s ?? "").replace(/\D/g, "");
+    const mask = (d: string) =>
+      `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12, 14)}`;
+
+    const suppliers = await ctx.db.query("suppliers").collect();
+    const rows = suppliers.map((s) => {
+      const cnpjDigits = s.cnpj ? digits(s.cnpj) : null;
+      return {
+        id: s._id as string,
+        legalName: s.legalName,
+        tradeName: s.tradeName ?? null,
+        cnpjRaw: s.cnpj ?? null,
+        cnpjDigits,
+        active: s.active,
+        matchByNfeCnpj: cnpjDigits !== null && cnpjDigits === NFE_CNPJ,
+      };
+    });
+    const matched = rows.find((r) => r.matchByNfeCnpj);
+    return {
+      suppliers: rows,
+      total: rows.length,
+      active: rows.filter((r) => r.active).length,
+      nfeCnpjDigits: NFE_CNPJ,
+      nfeCnpjMasked: mask(NFE_CNPJ),
+      matchedSupplierId: matched?.id ?? null,
+      matchedSupplierName: matched?.legalName ?? null,
+    };
+  },
+});
+
+/**
+ * Rastreio SOMENTE LEITURA: auditLogs e entradas que mencionem fornecedores
+ * (Gomaq em especial) para apurar se/por que o cadastro oficial deixou de
+ * existir. NÃO altera nada.
+ */
+export const supplierHistoryAuditInternal = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<{
+    supplierAuditLogs: Array<{ id: string; action: string; details: string | null; timestamp: number }>;
+    entriesWithSupplier: Array<{ entryNumber: string; supplierId: string | null; originType: string | null; accessKey: string | null }>;
+    suppliersTotal: number;
+  }> => {
+    const logs = await ctx.db.query("auditLogs").collect();
+    const supplierLogs = logs
+      .filter((a) => a.entity === "suppliers" || (a.details ?? "").toLowerCase().includes("gomaq") || (a.details ?? "").toLowerCase().includes("fornecedor"))
+      .map((a) => ({ id: a._id as string, action: a.action, details: a.details ?? null, timestamp: a.timestamp }))
+      .sort((x, y) => x.timestamp - y.timestamp);
+
+    const entries = await ctx.db.query("entries").collect();
+    const rows = entries.map((e) => ({
+      entryNumber: e.entryNumber,
+      supplierId: (e.supplierId as string | null) ?? null,
+      originType: (e.originType as string | null) ?? null,
+      accessKey: (e.accessKey as string | null) ?? null,
+    }));
+
+    const suppliers = await ctx.db.query("suppliers").collect();
+    return { supplierAuditLogs: supplierLogs, entriesWithSupplier: rows, suppliersTotal: suppliers.length };
+  },
+});
+
+/** Linha do tempo SOMENTE LEITURA: logs de sistema/limpeza + contagem de fornecedores. */
+export const supplierTimelineAuditInternal = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<{
+    systemLogs: Array<{ action: string; entityId: string | null; details: string | null; timestamp: number }>;
+    supplierCreateLogs: Array<{ details: string | null; timestamp: number }>;
+    gomaqAnywhere: { suppliers: number; entriesMentioning: number };
+  }> => {
+    const logs = await ctx.db.query("auditLogs").collect();
+    const sys = logs
+      .filter((a) => a.entity === "system" || (a.details ?? "").toLowerCase().includes("limpeza"))
+      .map((a) => ({ action: a.action, entityId: (a.entityId as string | null) ?? null, details: a.details ?? null, timestamp: a.timestamp }))
+      .sort((x, y) => x.timestamp - y.timestamp);
+    const sup = logs
+      .filter((a) => a.entity === "suppliers")
+      .map((a) => ({ details: a.details ?? null, timestamp: a.timestamp }))
+      .sort((x, y) => x.timestamp - y.timestamp);
+    const suppliers = await ctx.db.query("suppliers").collect();
+    const entries = await ctx.db.query("entries").collect();
+    return {
+      systemLogs: sys,
+      supplierCreateLogs: sup,
+      gomaqAnywhere: {
+        suppliers: suppliers.filter((s) => ((s.legalName ?? "") + (s.tradeName ?? "") + (s.cnpj ?? "")).toLowerCase().includes("gomaq") || (s.cnpj ?? "").replace(/\D/g, "") === "61457941000143").length,
+        entriesMentioning: entries.filter((e) => ((e.entryNumber ?? "") + (e.accessKey ?? "") + (e.observation ?? "")).toLowerCase().includes("gomaq") || ((e.accessKey ?? "").replace(/\D/g, "").startsWith("3526") && false)).length,
+      },
+    };
+  },
+});
