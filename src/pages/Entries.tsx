@@ -19,7 +19,7 @@ import { FileUpload } from "@/components/FileUpload";
 import { toast } from "sonner";
 import {
   parseNfeXml, findSupplierMatch, findEntryByAccessKey, matchNfeProduct,
-  buildEntryDraftFromNfe, mapNfeUnit,
+  buildEntryDraftFromNfe, mapNfeUnit, formatCnpj,
   type NfeData, type NfeItem, type ProductMatchStatus,
 } from "@/lib/nfe";
 
@@ -120,6 +120,8 @@ export default function Entries() {
   const [nfeItems, setNfeItems] = useState<NfeReviewItem[]>([]);
   const [nfeSupplierId, setNfeSupplierId] = useState("");
   const [nfeSupplierFound, setNfeSupplierFound] = useState(true);
+  const [nfeSupplierSuggestion, setNfeSupplierSuggestion] = useState<{ id: string; name: string } | null>(null);
+  const nfeSupplier = nfeSupplierId ? suppliers?.find((s) => s._id === nfeSupplierId) : undefined;
   const [nfeContract, setNfeContract] = useState("");
   const [importLocationId, setImportLocationId] = useState("");
   const [importDocStorageId, setImportDocStorageId] = useState("");
@@ -350,7 +352,7 @@ export default function Entries() {
   // ─── Importação NF-e XML ───
   const resetImport = () => {
     setImportStep("file"); setImportLoading(false); setImportSaving(false); setImportError("");
-    setNfe(null); setNfeXmlFile(null); setNfeItems([]); setNfeSupplierId(""); setNfeSupplierFound(true);
+    setNfe(null); setNfeXmlFile(null); setNfeItems([]); setNfeSupplierId(""); setNfeSupplierFound(true); setNfeSupplierSuggestion(null);
     setNfeContract(""); setImportLocationId(""); setImportDocStorageId(""); setImportObservation("");
     setProductModalTarget(null);
   };
@@ -386,6 +388,11 @@ export default function Entries() {
       setNfe(parsed); setNfeXmlFile(file);
       setNfeSupplierId(supplierMatch.supplierId ?? "");
       setNfeSupplierFound(supplierMatch.found);
+      setNfeSupplierSuggestion(
+        supplierMatch.suggestedSupplierId && supplierMatch.suggestedSupplierName
+          ? { id: supplierMatch.suggestedSupplierId, name: supplierMatch.suggestedSupplierName }
+          : null
+      );
       setNfeContract(parsed.orderReference ?? "");
       setNfeItems(parsed.items.map((item) => {
         const m = matchNfeProduct(item, products ?? []);
@@ -668,7 +675,7 @@ export default function Entries() {
               <div><Label>Origem *</Label><Select value={cOriginType} onValueChange={setcOriginType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(ORIGIN_LABELS).map(([k, v]) => (<SelectItem key={k} value={k}>{v}</SelectItem>))}</SelectContent></Select></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><Label>Fornecedor</Label><div className="flex gap-1"><Select value={cSupplierId} onValueChange={setcSupplierId}><SelectTrigger className="mt-1 flex-1"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{suppliers?.map((s) => (<SelectItem key={s._id} value={s._id}>{s.legalName}</SelectItem>))}</SelectContent></Select><Button type="button" variant="outline" size="icon" className="mt-1 h-9 w-9 shrink-0" onClick={() => setSupplierModalOpen(true)} title="Novo fornecedor"><Plus className="h-4 w-4" /></Button></div></div>
+              <div><Label>Fornecedor</Label><div className="flex gap-1"><Select value={cSupplierId} onValueChange={setcSupplierId}><SelectTrigger className="mt-1 flex-1"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{suppliers?.map((s) => (<SelectItem key={s._id} value={s._id}>{s.cnpj ? `${s.legalName} — ${formatCnpj(s.cnpj)}` : s.legalName}</SelectItem>))}</SelectContent></Select><Button type="button" variant="outline" size="icon" className="mt-1 h-9 w-9 shrink-0" onClick={() => setSupplierModalOpen(true)} title="Novo fornecedor"><Plus className="h-4 w-4" /></Button></div></div>
               <div><Label>Nº Nota Fiscal</Label><Input value={cInvoiceNumber} onChange={(e) => setcInvoiceNumber(e.target.value)} placeholder="Opcional" className="mt-1" /></div>
             </div>
             <div className="grid grid-cols-3 gap-3">
@@ -761,9 +768,9 @@ export default function Entries() {
                 <div className="col-span-2">
                   <span className="text-muted-foreground">Fornecedor: </span>
                   {nfeSupplierFound && nfeSupplierId ? (
-                    <span className="font-medium">{suppliers?.find((s) => s._id === nfeSupplierId)?.legalName ?? nfe.emitterName}</span>
+                    <span className="font-medium text-emerald-700">Fornecedor identificado: {nfeSupplier?.legalName ?? nfe.emitterName}{nfeSupplier?.cnpj ? ` — CNPJ ${formatCnpj(nfeSupplier.cnpj)}` : ""}</span>
                   ) : (
-                    <span className="text-amber-700 font-medium">Fornecedor não cadastrado ({nfe.emitterName})</span>
+                    <span className="text-amber-700 font-medium">Fornecedor não cadastrado ({nfe.emitterName}{nfe.emitterCnpj ? ` — CNPJ ${formatCnpj(nfe.emitterCnpj)}` : ""})</span>
                   )}
                 </div>
                 <div><span className="text-muted-foreground">NF:</span> <span className="font-medium">{nfe.number}</span></div>
@@ -779,10 +786,11 @@ export default function Entries() {
                     <Plus className="h-3 w-3" /> Cadastrar fornecedor
                   </Button>
                 )}
+                {!nfeSupplierFound && nfeSupplierSuggestion && (
+                  <span className="text-xs text-muted-foreground">Nome similar cadastrado: {nfeSupplierSuggestion.name} — selecione no seletor se for o mesmo fornecedor</span>
+                )}
                 {!nfeSupplierFound && nfeSupplierId && <span className="text-xs text-emerald-700">✓ {suppliers?.find((s) => s._id === nfeSupplierId)?.legalName}</span>}
-                <Select value={nfeSupplierId} onValueChange={(v) => { setNfeSupplierId(v); setNfeSupplierFound(true); }}>
-                  <SelectTrigger className="h-7 w-52 text-xs"><SelectValue placeholder="Selecionar fornecedor" /></SelectTrigger>
-                  <SelectContent>{suppliers?.map((s) => (<SelectItem key={s._id} value={s._id}>{s.legalName}</SelectItem>))}</SelectContent>
+                <Select value={nfeSupplierId} onValueChange={(v) => { setNfeSupplierId(v); setNfeSupplierFound(true); }}><SelectTrigger className="h-7 w-52 text-xs"><SelectValue placeholder="Selecionar fornecedor" /></SelectTrigger><SelectContent>{suppliers?.map((s) => (<SelectItem key={s._id} value={s._id}>{s.cnpj ? `${s.legalName} — ${formatCnpj(s.cnpj)}` : s.legalName}</SelectItem>))}</SelectContent>
                 </Select>
                 <div className="flex items-center gap-1 ml-auto">
                   <span className="text-[10px]">Pedido/contrato:</span>

@@ -1366,3 +1366,54 @@ export const supplierTimelineAuditInternal = internalQuery({
     };
   },
 });
+
+/**
+ * Registra (uma única vez) o cadastro OFICIAL de fornecedor a partir dos
+ * dados fiscais conhecidos do emitente da NF-e 372043 — usado quando o
+ * cadastro oficial NÃO existe no deployment e a importação da NF-e não
+ * consegue vincular o emitente por CNPJ.
+ *
+ * IDEMPOTENTE e seguro:
+ *  • já existe fornecedor com o CNPJ (com ou sem máscara) → não cria nada;
+ *  • já existe cadastro com "GOMAQ" no nome → não cria nada (devolve o existente);
+ *  • nunca altera/apaga fornecedor existente (inclui o cadastro de teste);
+ *  • NÃO toca estoque, entradas, lotes, movimentações ou organizações.
+ */
+export const ensureOfficialSupplierInternal = internalMutation({
+  args: { confirm: v.string() },
+  handler: async (ctx, args): Promise<{
+    action: "created" | "already_exists" | "name_exists_without_cnpj_match";
+    supplierId: string;
+    legalName: string;
+  }> => {
+    if (args.confirm !== "CADASTRAR-GOMAQ") {
+      throw new Error("Confirmação inválida — informe o literal CADASTRAR-GOMAQ");
+    }
+    const CNPJ = "61457941000143"; // 61.457.941/0001-43
+    const LEGAL_NAME = "GOMAQ MAQUINAS PARA ESCRITORIO LTDA";
+    const digits = (s: string) => (s ?? "").replace(/\D/g, "");
+
+    const suppliers = await ctx.db.query("suppliers").collect();
+
+    const byCnpj = suppliers.find((s) => s.cnpj && digits(s.cnpj) === CNPJ);
+    if (byCnpj) return { action: "already_exists", supplierId: byCnpj._id, legalName: byCnpj.legalName };
+
+    const byName = suppliers.find((s) => (s.legalName ?? "").toUpperCase().includes("GOMAQ"));
+    if (byName) return { action: "name_exists_without_cnpj_match", supplierId: byName._id, legalName: byName.legalName };
+
+    const supplierId = await ctx.db.insert("suppliers", {
+      legalName: LEGAL_NAME,
+      cnpj: CNPJ,
+      active: true,
+      observation: "Cadastro oficial — dados fiscais do emitente da NF-e 372043 (CNPJ 61.457.941/0001-43).",
+    });
+    await ctx.db.insert("auditLogs", {
+      action: "create",
+      entity: "suppliers",
+      entityId: supplierId as string,
+      details: `Cadastro oficial "${LEGAL_NAME}" criado a partir dos dados fiscais da NF-e 372043 (CNPJ 61.457.941/0001-43)`,
+      timestamp: Date.now(),
+    });
+    return { action: "created", supplierId, legalName: LEGAL_NAME };
+  },
+});

@@ -282,36 +282,68 @@ export interface SupplierMatch {
   supplierId?: string;
   found: boolean;
   byCnpj: boolean;
+  /** Complemento visual: cadastro de nome muito similar mas com CNPJ divergente — NUNCA vira vínculo automático. */
+  suggestedSupplierId?: string;
+  suggestedSupplierName?: string;
+}
+
+/** Melhor candidato por razão social normalizada (score ≥ 0.9), se houver. */
+function bestNameCandidate(name: string, suppliers: SupplierForMatch[]): SupplierForMatch | undefined {
+  if (!name) return undefined;
+  let best: SupplierForMatch | undefined;
+  let bestScore = 0;
+  for (const s of suppliers) {
+    const score = similarity(normalizeText(s.legalName), name);
+    if (score > bestScore) { bestScore = score; best = s; }
+  }
+  return best && bestScore >= 0.9 ? best : undefined;
 }
 
 /**
  * Localiza o fornecedor existente a partir da NF.
- * 1º: CNPJ exato; 2º: razão social normalizada.
- * Nunca cria fornecedor — retorna null para criação contextual/manual.
+ * O CNPJ do emitente é o identificador PRINCIPAL — comparado em só dígitos,
+ * portanto aceita tanto com máscara (61.457.941/0001-43) quanto sem
+ * (61457941000143), independentemente de como estiver gravado no cadastro.
+ * A razão social entra apenas como fallback/complemento visual:
+ *  • cadastro sem CNPJ registrado + nome similar → fallback (não há contradição fiscal);
+ *  • cadastro com CNPJ DIVERGENTE → nunca vincula; devolve apenas sugestão visual.
+ * Nunca cria fornecedor — a UI oferece cadastro com os dados fiscais do XML.
  */
 export function findSupplierMatch(parsed: NfeData, suppliers: SupplierForMatch[]): SupplierMatch {
   const cnpj = parsed.emitterCnpj ? digitsOnly(parsed.emitterCnpj) : "";
-  if (cnpj) {
-    for (const s of suppliers) {
-      if (s.cnpj && digitsOnly(s.cnpj) === cnpj) {
-        return { supplierId: s._id, found: true, byCnpj: true };
-      }
-    }
-  }
   const name = normalizeText(parsed.emitterName ?? "");
-  if (name) {
-    let best: SupplierForMatch | undefined;
-    let bestScore = 0;
-    for (const s of suppliers) {
-      const score = similarity(normalizeText(s.legalName), name);
-      if (score > bestScore) { bestScore = score; best = s; }
+
+  if (cnpj) {
+    const hit = suppliers.find((s) => s.cnpj && digitsOnly(s.cnpj) === cnpj);
+    if (hit) return { supplierId: hit._id, found: true, byCnpj: true };
+
+    const candidate = bestNameCandidate(name, suppliers);
+    if (!candidate) return { found: false, byCnpj: false };
+    // Cadastro sem CNPJ: nada contradiz o vínculo → fallback por razão social.
+    if (!candidate.cnpj || !digitsOnly(candidate.cnpj)) {
+      return { supplierId: candidate._id, found: true, byCnpj: false };
     }
-    if (best && bestScore >= 0.9) {
-      return { supplierId: best._id, found: true, byCnpj: false };
-    }
+    // CNPJ divergente: apenas sugestão visual, vínculo fica para o usuário.
+    return {
+      found: false,
+      byCnpj: false,
+      suggestedSupplierId: candidate._id,
+      suggestedSupplierName: candidate.legalName,
+    };
   }
+
+  // XML sem CNPJ (caso raro): fallback por razão social normalizada.
+  const fallback = bestNameCandidate(name, suppliers);
+  if (fallback) return { supplierId: fallback._id, found: true, byCnpj: false };
   return { found: false, byCnpj: false };
 }
+
+/** Formata CNPJ de 14 dígitos como 00.000.000/0000-00; valores não padronizados voltam como estão. */
+export const formatCnpj = (raw?: string | null): string => {
+  const d = digitsOnly(raw ?? "");
+  if (d.length !== 14) return raw ?? "";
+  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12, 14)}`;
+};
 
 // ─── Correspondência de produtos ─────────────────────────────────────────────
 
