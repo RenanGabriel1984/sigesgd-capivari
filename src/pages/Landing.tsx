@@ -79,11 +79,11 @@ export default function Landing() {
       <header className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
           <Link to="/" className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-xs">
-              SG
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-[10px]">
+              SGGD
             </div>
             <div>
-              <p className="text-sm font-semibold leading-tight">SIGESGD</p>
+              <p className="text-[13px] font-semibold leading-tight">Gestão de Estoque SGGD</p>
               <p className="text-[10px] text-muted-foreground leading-tight hidden sm:block">Capivari</p>
             </div>
           </Link>
@@ -118,8 +118,8 @@ export default function Landing() {
               Plataforma de Gestão de Estoque
             </div>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1]">
-              SIGESGD{" "}
-              <span className="text-primary/70">Capivari</span>
+              Gestão de Estoque{" "}
+              <span className="text-primary/70">SGGD</span>
             </h1>
             <p className="mt-4 text-lg sm:text-xl text-muted-foreground max-w-2xl leading-relaxed">
               Sistema Integrado de Gestão da Secretaria de Gestão e Governo Digital —
@@ -302,7 +302,7 @@ export default function Landing() {
             </p>
             <Link to="/auth" className="mt-8 inline-block">
               <Button size="lg" className="gap-2">
-                Acessar o SIGESGD
+                Acessar o Sistema
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
@@ -312,15 +312,14 @@ export default function Landing() {
 
       {/* Footer */}
       <footer className="border-t border-border/60 py-8">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="mx-auto max-w-6xl px-4 sm:px-6 flex flex-col items-center gap-2">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-6 w-6 items-center justify-center rounded bg-primary text-primary-foreground font-bold text-[9px]">
-              SG
+            <div className="flex h-6 w-6 items-center justify-center rounded bg-primary text-primary-foreground font-bold text-[8px]">
+              SGGD
             </div>
-            <span className="text-sm font-medium">SIGESGD Capivari</span>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Plataforma de gestão de estoque para equipes que exigem precisão.
+          <p className="text-sm text-muted-foreground text-center">
+            Sistema de Ordem de Serviço SGGD - Secretaria de Gestão e Governo Digital © 2026
           </p>
         </div>
       </footer>

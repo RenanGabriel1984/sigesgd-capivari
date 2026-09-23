@@ -18,9 +18,9 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["/logo.svg"],
       manifest: {
-        name: "SIGESGD — Gestão de Estoque de TI",
-        short_name: "SIGESGD",
-        description: "Sistema de Gestão de Estoque e Ativos de TI de Capivari",
+        name: "Gestão de Estoque SGGD",
+        short_name: "Estoque SGGD",
+        description: "Sistema Integrado de Gestão da Secretaria de Gestão e Governo Digital — Capivari",
         start_url: "/",
         display: "standalone",
         background_color: "#ffffff",

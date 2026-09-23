@@ -1,6 +1,6 @@
 {
-  "name": "SIGESGD Capivari",
-  "short_name": "SIGESGD",
+  "name": "Gestão de Estoque SGGD",
+  "short_name": "Estoque SGGD",
   "description": "Sistema Integrado de Gestão da Secretaria de Gestão e Governo Digital — Capivari",
   "start_url": "/",
   "display": "standalone",

@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import {
   applyImplementationStockStamp,
+  generateExitNumber,
   hasInitialInventoryLot,
   IMPLEMENTATION_STOCK_DATE,
   isImplementationStockStamped,
@@ -563,6 +564,9 @@ export const quickExit = mutation({
       })
       .join(", ");
 
+    // Número sequencial da saída (SAI-ANO-SEQ) — usado no vínculo de devoluções
+    const exitNumber = await generateExitNumber(ctx);
+
     await ctx.db.insert("stockMovements", {
       productId: args.productId,
       type: "exit",
@@ -572,6 +576,7 @@ export const quickExit = mutation({
       previousReserved,
       newReserved: previousReserved,
       userId,
+      exitNumber,
       observation: [
         `Saída rápida — ${args.receiverName}`,
         args.reason ? `Motivo: ${args.reason}` : "",

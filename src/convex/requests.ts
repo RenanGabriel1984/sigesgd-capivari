@@ -2,6 +2,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { verifyPassword } from "./auth/passwords";
+import { generateExitNumber } from "./stockHelpers";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -410,11 +411,13 @@ export const deliver = mutation({
       const newPhysical = freshStock.physicalQuantity - input.quantityDelivered;
       const newReserved = freshStock.reservedQuantity - input.quantityDelivered;
       await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical, reservedQuantity: newReserved });
+      const exitNumber = await generateExitNumber(ctx);
       await ctx.db.insert("stockMovements", {
         productId: requestItem.productId, type: "exit", quantity: input.quantityDelivered,
         previousPhysical: freshStock.physicalQuantity, newPhysical,
         previousReserved: freshStock.reservedQuantity, newReserved,
-        userId, requestId: args.requestId, observation: "Entrega da solicitação", timestamp: now,
+        userId, requestId: args.requestId, exitNumber,
+        observation: "Entrega da solicitação", timestamp: now,
       });
       await ctx.db.patch(input.itemId, {
         quantityDelivered: input.quantityDelivered,

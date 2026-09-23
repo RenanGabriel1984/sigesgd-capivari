@@ -211,6 +211,36 @@ export function applyImplementationStockStamp(
 }
 
 /**
+ * SIGESGD — Numerador sequencial de SAÍDAS: SAI-ANO-SEQUENCIAL.
+ * Puro em relação ao formato (número derivado da lista existente).
+ * Nunca altera dados — apenas calcula.
+ */
+export function nextExitNumber(existingExitNumbers: string[], year: number): string {
+  const prefix = `SAI-${year}-`;
+  const maxNum = existingExitNumbers.reduce((max: number, value: string) => {
+    const match = (value ?? "").match(/^SAI-\d{4}-(\d+)$/);
+    if (match && value.startsWith(prefix)) {
+      const num = parseInt(match[1], 10);
+      return num > max ? num : max;
+    }
+    return max;
+  }, 0);
+  return `${prefix}${String(maxNum + 1).padStart(6, "0")}`;
+}
+
+/** Lê as saídas existentes e devolve o próximo número SAI-ANO-SEQ. */
+export async function generateExitNumber(ctx: any): Promise<string> {
+  const exits = await ctx.db
+    .query("stockMovements")
+    .withIndex("by_type", (q: any) => q.eq("type", "exit"))
+    .collect();
+  const numbers = exits
+    .map((m: any) => m.exitNumber as string | undefined)
+    .filter((n: string | undefined): n is string => !!n);
+  return nextExitNumber(numbers, new Date().getFullYear());
+}
+
+/**
  * Verifica se um produto já possui carga inicial confirmada.
  *
  * Uma carga inicial é caracterizada por um lote ATIVO vinculado a uma entrada

@@ -1,11 +1,13 @@
 import { useQuery } from "convex/react";
+import { useNavigate } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeftRight } from "lucide-react";
+import { ArrowLeftRight, RotateCcw } from "lucide-react";
 import { MOVEMENT_TYPE_LABELS, MOVEMENT_TYPE_COLORS, type MovementType } from "@/types/constants";
 
 function LoadingSkeleton() {
@@ -27,6 +29,10 @@ function LoadingSkeleton() {
 
 export default function Movements() {
   const movements = useQuery(api.stockMovements.list);
+  const navigate = useNavigate();
+
+  // Ação "Devolver" — abre o MESMO fluxo de devolução vinculado à saída original
+  const goReturn = (movementId: string) => navigate(`/returns?exit=${movementId}`);
 
   if (movements === undefined) return <LoadingSkeleton />;
 
@@ -50,7 +56,16 @@ export default function Movements() {
               <TableCell className="text-center font-mono text-xs text-muted-foreground">{m.previousPhysical}</TableCell>
               <TableCell className="text-center font-mono text-xs">{m.newPhysical}</TableCell>
               <TableCell className="text-sm">{m.user?.name ?? "—"}</TableCell>
-              <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate">{m.observation ?? "—"}</TableCell>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground max-w-[170px] truncate">{m.observation ?? "—"}</span>
+                  {m.type === "exit" && !m.canceled && (
+                    <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] gap-1 shrink-0" onClick={() => goReturn(m._id as string)}>
+                      <RotateCcw className="h-3 w-3" /> Devolver
+                    </Button>
+                  )}
+                </div>
+              </TableCell>
             </TableRow>))}
             {movements.length === 0 && (<TableRow><TableCell colSpan={8}><div className="empty-state py-12"><ArrowLeftRight className="empty-state-icon" /><p className="empty-state-title">Nenhuma movimentação registrada</p><p className="empty-state-desc">As movimentações aparecerão aqui após entradas, saídas e transferências</p></div></TableCell></TableRow>)}
           </TableBody>
@@ -83,9 +98,16 @@ export default function Movements() {
                     <p className="text-muted-foreground">Depois</p>
                   </div>
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-2">
-                  {new Date(m.timestamp).toLocaleString("pt-BR")} • {m.user?.name ?? "—"}
-                </p>
+                <div className="flex items-center justify-between mt-2 gap-2">
+                  <p className="text-[10px] text-muted-foreground">
+                    {new Date(m.timestamp).toLocaleString("pt-BR")} • {m.user?.name ?? "—"}
+                  </p>
+                  {m.type === "exit" && !m.canceled && (
+                    <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] gap-1 shrink-0" onClick={() => goReturn(m._id as string)}>
+                      <RotateCcw className="h-3 w-3" /> Devolver
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ))}

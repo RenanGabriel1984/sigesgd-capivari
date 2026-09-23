@@ -29,6 +29,7 @@ const Exit = lazy(() => import("./pages/Exit.tsx"));
 const Entries = lazy(() => import("./pages/Entries.tsx"));
 const Lots = lazy(() => import("./pages/Lots.tsx"));
 const StorageLocationsPage = lazy(() => import("./pages/StorageLocations.tsx"));
+const StockAreasPage = lazy(() => import("./pages/StockAreas.tsx"));
 const InventoryPage = lazy(() => import("./pages/Inventory.tsx"));
 const Requests = lazy(() => import("./pages/Requests.tsx"));
 const ReturnsPage = lazy(() => import("./pages/Returns.tsx"));
@@ -132,6 +133,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/entries" element={<RequireAuth><Entries /></RequireAuth>} />
               <Route path="/lots" element={<RequireAuth><Lots /></RequireAuth>} />
               <Route path="/storage-locations" element={<RequireAuth><StorageLocationsPage /></RequireAuth>} />
+              <Route path="/stock-areas" element={<RequireAuth><StockAreasPage /></RequireAuth>} />
               <Route path="/inventory" element={<RequireAuth><InventoryPage /></RequireAuth>} />
               <Route path="/requests" element={<RequireAuth><Requests /></RequireAuth>} />
               <Route path="/returns" element={<RequireAuth><ReturnsPage /></RequireAuth>} />

@@ -151,6 +151,34 @@ export const auditActionValidator = v.union(
   v.literal(AUDIT_ACTIONS.LICENSE_ASSIGN),
 );
 
+// ─── Material Type (entrada/lote) ────────────────────────────────────────────
+// Material de CONSUMO: toner, ribbon, cabo, conector, fita, pasta térmica...
+// Material PERMANENTE: bens duráveis patrimoniais (computador, monitor, switch...)
+export const MATERIAL_TYPES = {
+  CONSUMPTION: "consumption",
+  PERMANENT: "permanent",
+} as const;
+
+export const materialTypeValidator = v.union(
+  v.literal(MATERIAL_TYPES.CONSUMPTION),
+  v.literal(MATERIAL_TYPES.PERMANENT),
+);
+
+// ─── Return Condition (condição do material devolvido) ───────────────────────
+export const RETURN_CONDITIONS = {
+  UNUSED: "unused",
+  PARTIALLY_USED: "partially_used",
+  DEFECTIVE: "defective",
+  OTHER: "other",
+} as const;
+
+export const returnConditionValidator = v.union(
+  v.literal(RETURN_CONDITIONS.UNUSED),
+  v.literal(RETURN_CONDITIONS.PARTIALLY_USED),
+  v.literal(RETURN_CONDITIONS.DEFECTIVE),
+  v.literal(RETURN_CONDITIONS.OTHER),
+);
+
 // ─── Units of Measure ────────────────────────────────────────────────────────
 export const UNIT_OF_MEASURE_VALUES = [
   "un", "pc", "cx", "m", "rl", "pct", "po", "kt", "outro",
@@ -270,6 +298,10 @@ const schema = defineSchema(
       lotId: v.optional(v.string()),
       documentNumber: v.optional(v.string()),
       observation: v.optional(v.string()),
+      // ── Número sequencial da saída (SAI-ANO-SEQ) — novas saídas ──
+      exitNumber: v.optional(v.string()),
+      // ── Vínculo reverso: movimentação de DEVOLUÇÃO → saída original ──
+      exitMovementId: v.optional(v.id("stockMovements")),
       timestamp: v.number(),
       canceled: v.optional(v.boolean()),
       canceledAt: v.optional(v.number()),
@@ -370,6 +402,11 @@ const schema = defineSchema(
       status: v.union(
         v.literal("draft"), v.literal("confirmed"), v.literal("reversed")
       ),
+      // ── Classificação da entrada (histórica, preservada) ──
+      materialType: v.optional(materialTypeValidator),
+      // ── Área/Subestoque de destino (ESCOLHA do usuário; o fornecedor e a
+      // categoria NUNCA determinam a área automaticamente) ──
+      areaId: v.optional(v.id("stockAreas")),
       createdAt: v.number(),
       updatedAt: v.number(),
     }).index("by_status", ["status"])
@@ -420,6 +457,9 @@ const schema = defineSchema(
       supplierLotNumber: v.optional(v.string()),
       active: v.boolean(),
       observation: v.optional(v.string()),
+      // ── Classificação preservada historicamente no lote ──
+      materialType: v.optional(materialTypeValidator),
+      areaId: v.optional(v.id("stockAreas")),
     }).index("by_product", ["productId"])
       .index("by_entry", ["entryId"])
       .index("by_number", ["lotNumber"])
@@ -473,19 +513,56 @@ const schema = defineSchema(
     }).index("by_requestItem", ["requestItemId"])
       .index("by_lot", ["lotId"]),
 
-    // ── Returns (Devoluções) ──
+    // ── Returns (Devoluções) — SEMPRE vinculada a uma SAÍDA real ──
     returns: defineTable({
-      requestId: v.id("requests"),
-      requestItemId: v.id("requestItems"),
+      // Saída real que está sendo revertida (movimentação type "exit")
+      exitMovementId: v.optional(v.id("stockMovements")),
+      // Vínculos opcionais quando a saída veio de uma solicitação entregue
+      requestId: v.optional(v.id("requests")),
+      requestItemId: v.optional(v.id("requestItems")),
       productId: v.id("products"),
       lotId: v.optional(v.id("lots")),
       quantity: v.number(),
       reason: v.string(),
+      // Condição do material devolvido
+      condition: v.optional(returnConditionValidator),
+      // Local físico de destino da devolução (opcional)
+      locationId: v.optional(v.id("storageLocations")),
       returnedByUserId: v.id("users"),
-      receivedByUserId: v.id("users"),
+      receivedByUserId: v.optional(v.id("users")),
       observation: v.optional(v.string()),
       createdAt: v.number(),
     }).index("by_request", ["requestId"])
+      .index("by_product", ["productId"])
+      .index("by_exitMovement", ["exitMovementId"]),
+
+    // ── Stock Areas (Áreas/Subestoques) ──
+    // Conceito INDEPENDENTE de produto, categoria, fornecedor e local físico.
+    // Ex.: "Impressoras / Gomaq" — o fornecedor não define a área.
+    stockAreas: defineTable({
+      name: v.string(),
+      description: v.optional(v.string()),
+      active: v.boolean(),
+    }).index("by_active", ["active"])
+      .index("by_name", ["name"]),
+
+    // ── Entry Item Units (Unidades patrimoniais por item de entrada) ──
+    // Produto → Unidade patrimonial → Patrimônio/Serial.
+    // Só existe para entrada classificada como Material PERMANENTE.
+    entryItemUnits: defineTable({
+      entryId: v.id("entries"),
+      entryItemId: v.id("entryItems"),
+      productId: v.id("products"),
+      patrimonyNumber: v.optional(v.string()),
+      serialNumber: v.optional(v.string()),
+      manufacturer: v.optional(v.string()),
+      model: v.optional(v.string()),
+      locationId: v.optional(v.id("storageLocations")),
+      responsibleDestiny: v.optional(v.string()),
+      observation: v.optional(v.string()),
+      createdAt: v.number(),
+    }).index("by_entry", ["entryId"])
+      .index("by_entryItem", ["entryItemId"])
       .index("by_product", ["productId"]),
 
     // ── Stock by Location (Estoque por Local de Armazenamento) ──

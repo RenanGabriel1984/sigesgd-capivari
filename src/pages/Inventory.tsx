@@ -561,7 +561,7 @@ export default function Inventory() {
                   <div className="text-sm space-y-1">
                     <p className="font-medium text-foreground">O que é a implantação inicial?</p>
                     <p className="text-muted-foreground">
-                      Registra a quantidade física que <strong>já existe</strong> antes do SIGESGD começar a controlar o estoque.
+                      Registra a quantidade física que <strong>já existe</strong> antes do sistema começar a controlar o estoque.
                       Cada quantidade carregada gera lote rastreável, movimentação e auditoria — e não pode ser duplicada.
                       Depois da confirmação, o estoque só muda por <strong>entrada, saída, transferência ou inventário</strong>.
                     </p>

@@ -148,7 +148,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setFaLoading(true);
     try {
       await forceChangePassword({ newPassword: faNewPassword.trim() });
-      toast.success("Senha definida com sucesso! Bem-vindo ao SIGESGD.");
+      toast.success("Senha definida com sucesso! Bem-vindo ao sistema Gestão de Estoque SGGD.");
       setFirstAccessOpen(false);
       navigate(redirect);
     } catch (e: any) {
@@ -165,11 +165,11 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       {/* Header bar */}
       <header className="flex items-center justify-between px-4 sm:px-6 h-14 border-b border-border/40 bg-card/80 backdrop-blur-sm">
         <Link to="/" className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-xs ring-2 ring-[var(--capivari-gold)]/70">
-            SG
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-[10px] ring-2 ring-[var(--capivari-gold)]/70 shrink-0">
+            SGGD
           </div>
           <div>
-            <p className="text-sm font-bold leading-tight tracking-tight text-[var(--capivari-green)]">SIGESGD</p>
+            <p className="text-[13px] font-bold leading-tight tracking-tight text-[var(--capivari-green)]">Gestão de Estoque SGGD</p>
             <p className="text-[10px] text-muted-foreground leading-tight">Capivari — SP</p>
           </div>
         </Link>
@@ -179,10 +179,10 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
         <div className="w-full max-w-md">
           {/* Institutional header — brasão removido até o asset oficial ser fornecido */}
           <div className="text-center mb-8">
-            <div className="h-20 w-20 mx-auto mb-4 flex items-center justify-center rounded-2xl bg-[var(--capivari-green)] text-white font-bold text-2xl shadow-lg ring-2 ring-[var(--capivari-gold)]/70">
-              SG
+            <div className="h-20 w-20 mx-auto mb-4 flex items-center justify-center rounded-2xl bg-[var(--capivari-green)] text-white font-bold text-xl shadow-lg ring-2 ring-[var(--capivari-gold)]/70">
+              SGGD
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-[var(--capivari-green)]">SIGESGD Capivari</h1>
+            <h1 className="text-xl font-bold tracking-tight text-[var(--capivari-green)]">Gestão de Estoque SGGD</h1>
             <p className="text-sm text-muted-foreground mt-1">
               Sistema Integrado de Gestão
             </p>
@@ -282,7 +282,10 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           </Card>
 
           {/* Footer */}
-          <div className="mt-6 text-center">
+          <div className="mt-6 text-center space-y-1">
+            <p className="text-[10px] text-muted-foreground/70">
+              Sistema de Ordem de Serviço SGGD - Secretaria de Gestão e Governo Digital © 2026
+            </p>
             <p className="text-[10px] text-muted-foreground/50">
               Prefeitura Municipal de Capivari — SP
             </p>

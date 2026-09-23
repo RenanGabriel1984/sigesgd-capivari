@@ -26,6 +26,7 @@ import {
   Printer,
   Boxes,
   MapPin,
+  Layers,
   ClipboardCheck,
   Monitor,
   Key,
@@ -96,6 +97,7 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
     { label: "Lotes", href: "/lots", icon: Boxes, permission: "canManageStock" },
     { label: "Locais", href: "/storage-locations", icon: MapPin, permission: "canManageStorageLocations" },
+    { label: "Áreas / Subestoques", href: "/stock-areas", icon: Layers, permission: "canManageStorageLocations" },
     { label: "Organizações", href: "/organization", icon: Building2, permission: "canManageOrg" },
     { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },
     { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
@@ -280,19 +282,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div aria-hidden className="absolute bottom-0 left-4 right-4 h-px bg-[var(--capivari-gold)]/60" />
           {!collapsed && (
             <Link to="/dashboard" className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-xs shrink-0 ring-2 ring-[var(--capivari-gold)]/70">
-                SG
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-[10px] shrink-0 ring-2 ring-[var(--capivari-gold)]/70">
+                SGGD
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-semibold truncate leading-tight text-[var(--capivari-green)]">SIGESGD</p>
-                <p className="text-[10px] text-muted-foreground truncate leading-tight">Capivari — SP</p>
+                <p className="text-[13px] font-semibold leading-tight text-[var(--capivari-green)]">Gestão de Estoque SGGD</p>
+                <p className="text-[10px] text-muted-foreground leading-tight">Capivari — SP</p>
               </div>
             </Link>
           )}
           {collapsed && (
             <Link to="/dashboard" className="mx-auto">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-xs ring-2 ring-[var(--capivari-gold)]/70">
-                SG
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-[9px] ring-2 ring-[var(--capivari-gold)]/70">
+                SGGD
               </div>
             </Link>
           )}
@@ -367,11 +369,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {/* Cabeçalho sempre visível */}
               <div className="flex h-16 shrink-0 items-center justify-between border-b border-border/60 px-4">
                 <Link to="/dashboard" className="flex items-center gap-2.5">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-xs ring-2 ring-[var(--capivari-gold)]/70">
-                    SG
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-[10px] ring-2 ring-[var(--capivari-gold)]/70 shrink-0">
+                    SGGD
                   </div>
                   <div>
-                    <p className="text-sm font-semibold leading-tight text-[var(--capivari-green)]">SIGESGD</p>
+                    <p className="text-[13px] font-semibold leading-tight text-[var(--capivari-green)]">Gestão de Estoque SGGD</p>
                     <p className="text-[10px] text-muted-foreground leading-tight">Capivari — SP</p>
                   </div>
                 </Link>
@@ -452,10 +454,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {showInstallBanner && (
           <div className="flex items-center gap-3 bg-[var(--capivari-green)]/5 border-b border-[var(--capivari-green)]/20 px-4 py-2.5 shrink-0">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--capivari-green)] text-white font-bold text-[10px] shrink-0 ring-1 ring-[var(--capivari-gold)]/70">
-              SG
+              SGGD
             </div>
             <p className="text-sm text-foreground flex-1 min-w-0">
-              <span className="font-medium">Instalar o SIGESGD</span> na Tela Inicial para acesso rápido.
+              <span className="font-medium">Instalar Gestão de Estoque SGGD</span> na Tela Inicial para acesso rápido.
             </p>
             <Button size="sm" onClick={handleInstall} className="gap-1.5 shrink-0">
               <Download className="h-3.5 w-3.5" /> Instalar PWA
@@ -515,6 +517,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="flex-1 overflow-auto bg-background/50">
           <div className="h-full page-x-pad page-bot-pad py-4 lg:py-6">
             {children}
+            <footer className="mt-6 border-t border-border/50 pt-3 pb-1 text-center text-[10px] leading-relaxed text-muted-foreground/70">
+              Sistema de Ordem de Serviço SGGD - Secretaria de Gestão e Governo Digital © 2026
+            </footer>
           </div>
         </main>
       </div>

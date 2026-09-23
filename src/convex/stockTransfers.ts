@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { planTransfer } from "../lib/transfer-rules";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -99,18 +100,35 @@ export const create = mutation({
 
     const now = Date.now();
 
-    // Decrease source location
-    await ctx.db.patch(sourceStock._id, { quantity: sourceStock.quantity - args.quantity });
-
-    // Increase destination location (or create)
+    // Destino + lote (referências para o plano puro)
     const toStock = await ctx.db
       .query("stockByLocation")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
     const destStock = toStock.find((s: any) => s.locationId === args.toLocationId);
+    const destStockQuantity = destStock?.quantity ?? 0;
+    const lotDoc = args.lotId ? await ctx.db.get(args.lotId) : null;
 
+    // Plano puro: valida quantidades e monta registro + auditoria.
+    // A origem reduz, o destino aumenta e o lote/origem é PRESERVADO.
+    const plan = planTransfer({
+      productName: product.name,
+      quantity: args.quantity,
+      fromQuantity: sourceStock.quantity,
+      toQuantity: destStockQuantity,
+      fromLocationName: fromLocation.name,
+      toLocationName: toLocation.name,
+      lotId: args.lotId,
+      lotNumber: lotDoc?.lotNumber ?? null,
+      reason: args.observation ?? null,
+    });
+
+    // Decrease source location
+    await ctx.db.patch(sourceStock._id, { quantity: plan.fromQuantityAfter });
+
+    // Increase destination location (or create)
     if (destStock) {
-      await ctx.db.patch(destStock._id, { quantity: destStock.quantity + args.quantity });
+      await ctx.db.patch(destStock._id, { quantity: plan.toQuantityAfter });
     } else {
       await ctx.db.insert("stockByLocation", {
         productId: args.productId,
@@ -167,7 +185,7 @@ export const create = mutation({
       action: "transfer_stock",
       entity: "stockTransfers",
       entityId: transferId,
-      details: `Transferência de ${args.quantity} ${product.name}: ${fromLocation.name} → ${toLocation.name}`,
+      details: plan.auditDetail,
       timestamp: now,
     });
 

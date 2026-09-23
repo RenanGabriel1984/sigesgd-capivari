@@ -55,7 +55,7 @@ export default function Settings() {
     try {
       if (isForceChange) {
         await forceChangePassword({ newPassword });
-        toast.success("Senha alterada com sucesso! Bem-vindo ao SIGESGD.");
+        toast.success("Senha alterada com sucesso! Bem-vindo ao sistema Gestão de Estoque SGGD.");
         navigate(returnTo);
       } else {
         await changePassword({ currentPassword, newPassword });
@@ -158,7 +158,7 @@ export default function Settings() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2 text-sm text-muted-foreground">
-              <p><strong>SIGESGD Capivari</strong> — Sistema Integrado de Gestão</p>
+              <p><strong>Gestão de Estoque SGGD</strong> — Sistema Integrado de Gestão</p>
               <p>Secretaria de Gestão e Governo Digital — Prefeitura Municipal de Capivari</p>
               <p className="text-xs">Configurações adicionais serão disponibilizadas nas próximas versões do sistema.</p>
             </div>

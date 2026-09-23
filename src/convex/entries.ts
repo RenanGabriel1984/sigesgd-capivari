@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { validateEntryUnits } from "../lib/material-types";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -67,9 +68,11 @@ export const list = query({
       const itemsWithProduct = await Promise.all(items.map(async (item: any) => {
         const product = await ctx.db.get(item.productId);
         const location = item.locationId ? await ctx.db.get(item.locationId) : null;
-        return { ...item, product, location };
+        const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
+        return { ...item, product, location, units };
       }));
-      return { ...e, responsible, supplier, items: itemsWithProduct };
+      const area = e.areaId ? await ctx.db.get(e.areaId) : null;
+      return { ...e, responsible, supplier, area, items: itemsWithProduct };
     }));
   },
 });
@@ -86,10 +89,12 @@ export const get = query({
     const itemsWithProduct = await Promise.all(items.map(async (item: any) => {
       const product = await ctx.db.get(item.productId);
       const location = item.locationId ? await ctx.db.get(item.locationId) : null;
-      return { ...item, product, location };
+      const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
+      return { ...item, product, location, units };
     }));
     const lots = await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", entry._id)).collect();
-    return { ...entry, responsible, supplier, items: itemsWithProduct, lots };
+    const area = entry.areaId ? await ctx.db.get(entry.areaId) : null;
+    return { ...entry, responsible, supplier, area, items: itemsWithProduct, lots };
   },
 });
 
@@ -130,6 +135,11 @@ export const create = mutation({
     totalValue: v.optional(v.number()),
     xmlStorageId: v.optional(v.string()),
     importedFromXml: v.optional(v.boolean()),
+    // ── Classificação da entrada (histórica) ──
+    materialType: v.optional(v.union(v.literal("consumption"), v.literal("permanent"))),
+    // ── Área/Subestoque de destino — ESCOLHA do usuário (nunca derivada
+    // automaticamente do fornecedor nem da categoria) ──
+    areaId: v.optional(v.id("stockAreas")),
     items: v.array(v.object({
       productId: v.id("products"),
       quantity: v.number(),
@@ -176,6 +186,12 @@ export const create = mutation({
     const now = Date.now();
     const entryNumber = await generateEntryNumber(ctx);
 
+    // Área/Subestoque precisa existir (cadastro independente)
+    if (args.areaId) {
+      const area = await ctx.db.get(args.areaId);
+      if (!area) throw new Error("Área/Subestoque não encontrada");
+    }
+
     const entryId = await ctx.db.insert("entries", {
       entryNumber,
       receivedAt: args.receivedAt,
@@ -195,6 +211,8 @@ export const create = mutation({
       xmlStorageId: args.xmlStorageId || undefined,
       importedFromXml: args.importedFromXml || undefined,
       status: "draft",
+      materialType: args.materialType ?? "consumption",
+      areaId: args.areaId,
       createdAt: now,
       updatedAt: now,
     });
@@ -247,6 +265,35 @@ export const confirm = mutation({
     const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
     if (items.length === 0) throw new Error("Entrada não possui itens");
 
+    // ── Unidades patrimoniais (material permanente) ──
+    const entryUnits = await ctx.db
+      .query("entryItemUnits")
+      .withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId))
+      .collect();
+    if (entry.materialType === "permanent") {
+      for (const item of items) {
+        const product: any = await ctx.db.get(item.productId);
+        const itemUnits = entryUnits
+          .filter((u: any) => u.entryItemId === item._id)
+          .map((u: any) => ({
+            patrimonyNumber: u.patrimonyNumber,
+            serialNumber: u.serialNumber,
+          }));
+        const unitError = validateEntryUnits({
+          materialType: "permanent",
+          quantity: item.quantity,
+          units: itemUnits,
+          productName: product?.name,
+        });
+        if (unitError) throw new Error(unitError);
+      }
+    } else if (entryUnits.length > 0) {
+      throw new Error(
+        "Esta entrada é de material de consumo e não possui unidades patrimoniais. " +
+        "Remova as unidades ou classifique a entrada como material permanente."
+      );
+    }
+
     const now = Date.now();
     const confirmedItemDetails: string[] = [];
 
@@ -276,6 +323,8 @@ export const confirm = mutation({
         supplierLotNumber: item.supplierLotNumber || undefined,
         active: true,
         observation: item.observation,
+        materialType: entry.materialType,
+        areaId: entry.areaId,
       });
 
       // Update stock (increase physicalQuantity)
@@ -502,6 +551,8 @@ export const editDraft = mutation({
     processNumber: v.optional(v.string()),
     contractNumber: v.optional(v.string()),
     documentStorageId: v.optional(v.string()),
+    materialType: v.optional(v.union(v.literal("consumption"), v.literal("permanent"))),
+    areaId: v.optional(v.id("stockAreas")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
@@ -519,6 +570,24 @@ export const editDraft = mutation({
     if (args.processNumber !== undefined) updates.processNumber = args.processNumber;
     if (args.contractNumber !== undefined) updates.contractNumber = args.contractNumber;
     if (args.documentStorageId !== undefined) updates.documentStorageId = args.documentStorageId;
+    if (args.materialType !== undefined) {
+      updates.materialType = args.materialType;
+      // Material de consumo não guarda unidades patrimoniais
+      if (args.materialType !== "permanent") {
+        const existingUnits = await ctx.db
+          .query("entryItemUnits")
+          .withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId))
+          .collect();
+        for (const u of existingUnits) await ctx.db.delete(u._id);
+      }
+    }
+    if (args.areaId !== undefined) {
+      if (args.areaId) {
+        const area = await ctx.db.get(args.areaId);
+        if (!area) throw new Error("Área/Subestoque não encontrada");
+      }
+      updates.areaId = args.areaId;
+    }
 
     await ctx.db.patch(args.entryId, updates);
 
@@ -624,6 +693,94 @@ export const reverse = mutation({
       timestamp: now,
     });
 
+    return args.entryId;
+  },
+});
+
+/**
+ * Registra/ substitui as UNIDADES PATRIMONIAIS de uma entrada em rascunho.
+ *
+ * Só faz sentido para entrada classificada como Material PERMANENTE —
+ * material de consumo não exige patrimônio e não aceita unidades.
+ * Não altera estoque: só cadastro de unidades (patrimônio / série).
+ */
+export const setUnits = mutation({
+  args: {
+    entryId: v.id("entries"),
+    units: v.array(v.object({
+      entryItemId: v.id("entryItems"),
+      patrimonyNumber: v.optional(v.string()),
+      serialNumber: v.optional(v.string()),
+      manufacturer: v.optional(v.string()),
+      model: v.optional(v.string()),
+      locationId: v.optional(v.id("storageLocations")),
+      responsibleDestiny: v.optional(v.string()),
+      observation: v.optional(v.string()),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    const entry = await ctx.db.get(args.entryId);
+    if (!entry) throw new Error("Entrada não encontrada");
+    if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem registrar unidades patrimoniais");
+
+    if (args.units.length > 0 && entry.materialType !== "permanent") {
+      throw new Error(
+        "Unidades patrimoniais só existem para Material permanente. " +
+        "Classifique a entrada como material permanente primeiro."
+      );
+    }
+
+    // Todos os itens informados pertencem à entrada
+    const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
+    const itemIds = new Set(items.map((i: any) => i._id as string));
+    for (const u of args.units) {
+      if (!itemIds.has(u.entryItemId as string)) {
+        throw new Error("Item informado não pertence a esta entrada");
+      }
+    }
+
+    // Patrimônio não pode se repetir dentro da mesma entrada
+    const seen = new Set<string>();
+    for (const u of args.units) {
+      const p = (u.patrimonyNumber ?? "").trim();
+      if (!p) continue;
+      if (seen.has(p)) throw new Error(`Patrimônio duplicado na entrada: ${p}`);
+      seen.add(p);
+    }
+
+    // Substitui as unidades da entrada (rascunho)
+    const existing = await ctx.db
+      .query("entryItemUnits")
+      .withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId))
+      .collect();
+    for (const u of existing) await ctx.db.delete(u._id);
+
+    const itemById = new Map(items.map((i: any) => [i._id as string, i]));
+    const now = Date.now();
+    for (const u of args.units) {
+      const item: any = itemById.get(u.entryItemId as string);
+      await ctx.db.insert("entryItemUnits", {
+        entryId: args.entryId,
+        entryItemId: u.entryItemId,
+        productId: item.productId,
+        patrimonyNumber: u.patrimonyNumber?.trim() || undefined,
+        serialNumber: u.serialNumber?.trim() || undefined,
+        manufacturer: u.manufacturer?.trim() || undefined,
+        model: u.model?.trim() || undefined,
+        locationId: u.locationId,
+        responsibleDestiny: u.responsibleDestiny?.trim() || undefined,
+        observation: u.observation?.trim() || undefined,
+        createdAt: now,
+      });
+    }
+
+    await ctx.db.patch(args.entryId, { updatedAt: now });
+    await ctx.db.insert("auditLogs", {
+      userId, action: "update", entity: "entryItemUnits", entityId: args.entryId,
+      details: `Entrada ${entry.entryNumber}: ${args.units.length} unidade(s) patrimonial(is) registrada(s)`,
+      timestamp: now,
+    });
     return args.entryId;
   },
 });

@@ -15,6 +15,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Plus, ShoppingCart, CheckCircle, RotateCcw, Eye, Trash2, ExternalLink, Save, Pencil, FileUp, FileText, Loader2 } from "lucide-react";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
 import { IMPLEMENTATION_STOCK_DATE } from "@/convex/stockHelpers";
+import {
+  MATERIAL_TYPE_LABELS,
+  validateEntryUnits,
+  type MaterialType,
+  type PatrimonyUnitDraft,
+} from "@/lib/material-types";
+import { NO_AREA_LABEL } from "@/lib/stock-areas";
 import { FileUpload } from "@/components/FileUpload";
 import { toast } from "sonner";
 import {
@@ -47,6 +54,7 @@ export default function Entries() {
   const suppliers = useQuery(api.suppliers.listActive);
   const locations = useQuery(api.storageLocations.listActive);
   const categories = useQuery(api.categories.listActive);
+  const areas = useQuery(api.stockAreas.listActive);
   const createEntry = useMutation(api.entries.create);
   const confirmEntry = useMutation(api.entries.confirm);
   const reverseEntry = useMutation(api.entries.reverse);
@@ -54,6 +62,7 @@ export default function Entries() {
   const updateItemMutation = useMutation(api.entries.updateItem);
   const removeItemMutation = useMutation(api.entries.removeItem);
   const editDraftMutation = useMutation(api.entries.editDraft);
+  const setUnitsMutation = useMutation(api.entries.setUnits);
 
   const [tab, setTab] = useState("all");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -77,12 +86,20 @@ export default function Entries() {
   const [cObservation, setcObservation] = useState("");
   const [cDocStorageId, setcDocStorageId] = useState("");
   const [cItems, setCItems] = useState<EntryItemDraft[]>([{ ...EMPTY_ITEM }]);
+  // Classificação da entrada: tipo de material + área/subestoque
+  // (a área é ESCOLHA do usuário — fornecedor/categoria não a definem)
+  const [cMaterialType, setCMaterialType] = useState<MaterialType>("consumption");
+  const [cAreaId, setCAreaId] = useState("");
 
   // Edit draft state
   const [eDocStorageId, seteDocStorageId] = useState("");
   const [eObservation, seteObservation] = useState("");
   const [eItems, seteItems] = useState<EntryItemDraft[]>([]);
   const [eItemIds, seteItemIds] = useState<string[]>([]);
+  const [eMaterialType, setEMaterialType] = useState<MaterialType>("consumption");
+  const [eAreaId, setEAreaId] = useState("");
+  // Unidades patrimoniais por item (itemId → unidades)
+  const [eUnits, seteUnits] = useState<Record<string, PatrimonyUnitDraft[]>>({});
 
   // Quick-create product
   const [productModalOpen, setProductModalOpen] = useState(false);
@@ -126,6 +143,8 @@ export default function Entries() {
   const [importLocationId, setImportLocationId] = useState("");
   const [importDocStorageId, setImportDocStorageId] = useState("");
   const [importObservation, setImportObservation] = useState("");
+  const [nfeMaterialType, setNfeMaterialType] = useState<MaterialType>("consumption");
+  const [nfeAreaId, setNfeAreaId] = useState("");
   const nfeFileInputRef = useRef<HTMLInputElement>(null);
 
   // Reavalia o vínculo por CNPJ quando a lista de fornecedores termina de
@@ -156,13 +175,17 @@ export default function Entries() {
     setcOriginType("purchase"); setcSupplierId(""); setcInvoiceNumber(""); setcInvoiceDate("");
     setcPurchaseAuth(""); setcProcessNumber(""); setcContractNumber(""); setcObservation("");
     setcDocStorageId(""); setCItems([{ ...EMPTY_ITEM }]);
+    setCMaterialType("consumption"); setCAreaId("");
   };
 
   const openEditDialog = useCallback((entry: any) => {
     seteDocStorageId(entry.documentStorageId ?? "");
     seteObservation(entry.observation ?? "");
+    setEMaterialType((entry.materialType ?? "consumption") as MaterialType);
+    setEAreaId(entry.areaId ?? "");
     const itemIds: string[] = [];
     const itemsDraft: EntryItemDraft[] = [];
+    const unitsById: Record<string, PatrimonyUnitDraft[]> = {};
     for (const item of entry.items ?? []) {
       itemIds.push(item._id);
       itemsDraft.push({
@@ -172,9 +195,19 @@ export default function Entries() {
         locationId: item.locationId ?? "", observation: item.observation ?? "", photoStorageId: item.photoStorageId ?? "",
         supplierLotNumber: item.supplierLotNumber ?? "",
       });
+      unitsById[item._id] = (item.units ?? []).map((u: any) => ({
+        patrimonyNumber: u.patrimonyNumber ?? "",
+        serialNumber: u.serialNumber ?? "",
+        manufacturer: u.manufacturer ?? "",
+        model: u.model ?? "",
+        locationId: u.locationId ?? "",
+        responsibleDestiny: u.responsibleDestiny ?? "",
+        observation: u.observation ?? "",
+      }));
     }
     seteItemIds(itemIds);
     seteItems(itemsDraft);
+    seteUnits(unitsById);
     setEditEntryId(entry._id);
   }, []);
 
@@ -210,6 +243,8 @@ export default function Entries() {
         purchaseAuthorizationNumber: cPurchaseAuth || undefined, processNumber: cProcessNumber || undefined,
         contractNumber: cContractNumber || undefined, observation: cObservation || undefined,
         documentStorageId: cDocStorageId || undefined,
+        materialType: cMaterialType,
+        areaId: cAreaId ? (cAreaId as any) : undefined,
         items: validItems.map((i) => ({
           productId: i.productId as any, quantity: Number(i.quantity), unitOfMeasure: i.unitOfMeasure,
           unitCost: i.unitCost ? Number(i.unitCost) : undefined, brand: i.brand || undefined,
@@ -234,6 +269,8 @@ export default function Entries() {
         entryId: editEntryId as any,
         documentStorageId: eDocStorageId || undefined,
         observation: eObservation || undefined,
+        materialType: eMaterialType,
+        areaId: eAreaId ? (eAreaId as any) : undefined,
       });
       toast.success("Dados gerais salvos");
     } catch (e: any) { toast.error(e.message ?? "Erro ao salvar"); }
@@ -303,6 +340,46 @@ export default function Entries() {
     setConfirming(false);
   };
 
+  // ─── Unidades patrimoniais (material permanente) ───
+  const handleSaveUnits = async () => {
+    if (!editEntryId) return;
+    const payload: Array<Record<string, unknown>> = [];
+    for (let idx = 0; idx < eItemIds.length; idx++) {
+      const itemId = eItemIds[idx];
+      if (!itemId || itemId.startsWith("temp_")) continue;
+      const item = eItems[idx];
+      const units = eUnits[itemId] ?? [];
+      const product = products?.find((p) => p._id === item?.productId);
+      const err = validateEntryUnits({
+        materialType: eMaterialType,
+        quantity: Number(item?.quantity) || 0,
+        units,
+        productName: product?.name,
+      });
+      if (err) { toast.error(err); return; }
+      for (const u of units) {
+        payload.push({
+          entryItemId: itemId,
+          patrimonyNumber: u.patrimonyNumber || undefined,
+          serialNumber: u.serialNumber || undefined,
+          manufacturer: u.manufacturer || undefined,
+          model: u.model || undefined,
+          locationId: u.locationId ? u.locationId : undefined,
+          responsibleDestiny: u.responsibleDestiny || undefined,
+          observation: u.observation || undefined,
+        });
+      }
+    }
+    setSaving(true);
+    try {
+      await setUnitsMutation({ entryId: editEntryId as any, units: payload as any });
+      toast.success("Unidades patrimoniais salvas");
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao salvar unidades");
+    }
+    setSaving(false);
+  };
+
   // ─── Reverse ───
   const handleReverse = async () => {
     if (!reverseId || !reverseReason.trim()) { toast.error("Motivo é obrigatório"); return; }
@@ -366,6 +443,7 @@ export default function Entries() {
     setImportStep("file"); setImportLoading(false); setImportSaving(false); setImportError("");
     setNfe(null); setNfeXmlFile(null); setNfeItems([]); setNfeSupplierId(""); setNfeSupplierFound(true); setNfeSupplierSuggestion(null);
     setNfeContract(""); setImportLocationId(""); setImportDocStorageId(""); setImportObservation("");
+    setNfeMaterialType("consumption"); setNfeAreaId("");
     setProductModalTarget(null);
   };
 
@@ -459,6 +537,8 @@ export default function Entries() {
         documentStorageId: draft.documentStorageId,
         accessKey: draft.accessKey, totalValue: draft.totalValue,
         xmlStorageId: draft.xmlStorageId, importedFromXml: true,
+        materialType: nfeMaterialType,
+        areaId: nfeAreaId ? (nfeAreaId as any) : undefined,
         items: draft.items.map((i) => ({
           productId: i.productId as any, quantity: i.quantity, unitOfMeasure: i.unitOfMeasure,
           unitCost: i.unitCost, totalCost: i.totalCost, specification: i.specification,
@@ -618,6 +698,8 @@ export default function Entries() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div><span className="text-muted-foreground">Status:</span> <Badge className={`text-[10px] ${STATUS_COLORS[viewEntry.status]}`}>{STATUS_LABELS[viewEntry.status]}</Badge></div>
                 <div><span className="text-muted-foreground">Origem:</span> {ORIGIN_LABELS[viewEntry.originType]}</div>
+                <div><span className="text-muted-foreground">Tipo de material:</span> {MATERIAL_TYPE_LABELS[(viewEntry.materialType ?? "consumption") as MaterialType]}</div>
+                <div><span className="text-muted-foreground">Área/Subestoque:</span> {viewEntry.area?.name ?? NO_AREA_LABEL}</div>
                 <div><span className="text-muted-foreground">Recebido:</span> {new Date(viewEntry.receivedAt).toLocaleDateString("pt-BR")}</div>
                 <div><span className="text-muted-foreground">Responsável:</span> {viewEntry.responsible?.name ?? "—"}</div>
                 {viewEntry.supplier && <div><span className="text-muted-foreground">Fornecedor:</span> {viewEntry.supplier.legalName}</div>}
@@ -643,6 +725,48 @@ export default function Entries() {
                 </div>
               </div>
               {viewEntry.lots && viewEntry.lots.length > 0 && <div><h4 className="font-medium text-sm mb-2">Lotes Gerados</h4><div className="flex flex-wrap gap-2">{viewEntry.lots?.map((lot: any) => (<Badge key={lot._id} variant={lot.active ? "default" : "secondary"} className="text-[10px] font-mono">{lot.lotNumber} — {lot.quantityAvailable}/{lot.quantityReceived} disp.</Badge>))}</div></div>}
+              {viewEntry.items?.some((i: any) => (i.units?.length ?? 0) > 0) && (
+                <div>
+                  <h4 className="font-medium text-sm mb-2">Unidades patrimoniais</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Tipo de material *</Label>
+                  <Select value={nfeMaterialType} onValueChange={(v) => setNfeMaterialType(v as MaterialType)}>
+                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="consumption">{MATERIAL_TYPE_LABELS.consumption}</SelectItem>
+                      <SelectItem value="permanent">{MATERIAL_TYPE_LABELS.permanent}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Área/Subestoque</Label>
+                  <Select value={nfeAreaId} onValueChange={setNfeAreaId}>
+                    <SelectTrigger className="mt-1"><SelectValue placeholder={NO_AREA_LABEL} /></SelectTrigger>
+                    <SelectContent>{areas?.map((a) => (<SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>))}</SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    O fornecedor identificado NÃO define a área — confirme o destino antes de confirmar.
+                  </p>
+                </div>
+              </div>
+
+              <div className="border rounded-lg divide-y">
+                    {viewEntry.items.flatMap((item: any) =>
+                      (item.units ?? []).map((u: any) => (
+                        <div key={u._id} className="p-2 text-xs flex flex-wrap gap-x-4 gap-y-1">
+                          <span className="font-medium">{item.product?.name ?? "—"}</span>
+                          <span className="font-mono">Patrimônio: {u.patrimonyNumber ?? "—"}</span>
+                          <span className="font-mono">Série: {u.serialNumber ?? "—"}</span>
+                          {u.manufacturer && <span>Fabricante: {u.manufacturer}</span>}
+                          {u.model && <span>Modelo: {u.model}</span>}
+                          {u.responsibleDestiny && <span>Destino: {u.responsibleDestiny}</span>}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>
@@ -653,6 +777,29 @@ export default function Entries() {
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>Editar Entrada — Rascunho</DialogTitle></DialogHeader>
           <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Tipo de material *</Label>
+                <Select value={eMaterialType} onValueChange={(v) => setEMaterialType(v as MaterialType)}>
+                  <SelectTrigger className="mt-1 h-8"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="consumption">{MATERIAL_TYPE_LABELS.consumption}</SelectItem>
+                    <SelectItem value="permanent">{MATERIAL_TYPE_LABELS.permanent}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Área/Subestoque</Label>
+                <Select value={eAreaId} onValueChange={setEAreaId}>
+                  <SelectTrigger className="mt-1 h-8"><SelectValue placeholder={NO_AREA_LABEL} /></SelectTrigger>
+                  <SelectContent>
+                    {(areas ?? []).map((a) => (
+                      <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             <div className="border rounded-lg p-3 bg-muted/30">
               <Label className="text-xs font-medium">Documento da Entrada (NF / Imagem)</Label>
               <FileUpload storageId={eDocStorageId} onUpload={seteDocStorageId} onRemove={() => seteDocStorageId("")} accept="image/*,.pdf" label="Anexar NF ou documento da entrada" />
@@ -669,6 +816,85 @@ export default function Entries() {
               </div>
             </div>
             {eItems.map((_, idx) => (<EditItemCard key={eItemIds[idx] ?? idx} idx={idx} />))}
+
+            {/* ── Unidades patrimoniais (somente material permanente) ── */}
+            {eMaterialType === "permanent" && (
+              <div className="border-t pt-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-sm font-medium">Unidades patrimoniais</Label>
+                  <Button size="sm" variant="outline" onClick={handleSaveUnits} disabled={saving}>
+                    {saving ? "Salvando..." : "Salvar Unidades"}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Produto → Unidade patrimonial → Patrimônio/Serial. Informe uma unidade por unidade recebida.
+                </p>
+                {eItems.map((item, idx) => {
+                  const itemId = eItemIds[idx];
+                  if (!itemId || itemId.startsWith("temp_")) return null;
+                  const units = eUnits[itemId] ?? [];
+                  const qty = Number(item.quantity) || 0;
+                  const product = products?.find((p) => p._id === item.productId);
+                  const unitError = units.length > 0 || qty > 0
+                    ? validateEntryUnits({ materialType: "permanent", quantity: qty, units, productName: product?.name })
+                    : null;
+                  const setUnits = (next: PatrimonyUnitDraft[]) =>
+                    seteUnits((prev) => ({ ...prev, [itemId]: next }));
+                  return (
+                    <div key={itemId} className="border rounded-lg p-3 bg-background space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium">
+                          {product?.name ?? "Produto"} — quantidade: {qty} · unidades: {units.length}
+                        </p>
+                        <Button
+                          size="sm" variant="ghost" className="h-6 px-2 text-xs"
+                          onClick={() => setUnits([...units, { patrimonyNumber: "", serialNumber: "", manufacturer: "", model: "", locationId: "", responsibleDestiny: "", observation: "" }])}
+                          disabled={units.length >= qty}
+                        >
+                          <Plus className="h-3 w-3 mr-1" /> Unidade
+                        </Button>
+                      </div>
+                      {unitError && units.length !== qty && (
+                        <p className="text-[11px] text-amber-700">{unitError}</p>
+                      )}
+                      {units.map((u, uIdx) => (
+                        <div key={uIdx} className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end border-t pt-2">
+                          <div className="col-span-2 sm:col-span-1"><Label className="text-[10px]">Patrimônio *</Label>
+                            <Input value={u.patrimonyNumber ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, patrimonyNumber: e.target.value } : x))} className="h-7 text-xs" placeholder="Nº patrim." />
+                          </div>
+                          <div><Label className="text-[10px]">Série</Label>
+                            <Input value={u.serialNumber ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, serialNumber: e.target.value } : x))} className="h-7 text-xs" />
+                          </div>
+                          <div><Label className="text-[10px]">Fabricante</Label>
+                            <Input value={u.manufacturer ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, manufacturer: e.target.value } : x))} className="h-7 text-xs" />
+                          </div>
+                          <div><Label className="text-[10px]">Modelo</Label>
+                            <Input value={u.model ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, model: e.target.value } : x))} className="h-7 text-xs" />
+                          </div>
+                          <div className="col-span-2 sm:col-span-1 flex items-center gap-1">
+                            <div className="flex-1"><Label className="text-[10px]">Responsável/destino</Label>
+                              <Input value={u.responsibleDestiny ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, responsibleDestiny: e.target.value } : x))} className="h-7 text-xs" placeholder="Opcional" />
+                            </div>
+                            <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => setUnits(units.filter((_, i) => i !== uIdx))}>
+                              <Trash2 className="h-3 w-3 text-destructive" />
+                            </Button>
+                          </div>
+                          <div className="col-span-2 sm:col-span-6"><Label className="text-[10px]">Localização / observação</Label>
+                            <div className="flex gap-2">
+                              <Select value={u.locationId ?? ""} onValueChange={(v) => setUnits(units.map((x, i) => i === uIdx ? { ...x, locationId: v } : x))}>
+                                <SelectTrigger className="h-7 text-xs w-40"><SelectValue placeholder="Local (opcional)" /></SelectTrigger>
+                                <SelectContent>{(locations ?? []).map((l) => (<SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>))}</SelectContent>
+                              </Select>
+                              <Input value={u.observation ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, observation: e.target.value } : x))} className="h-7 text-xs flex-1" placeholder="Observação (opcional)" />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditEntryId(null)}>Fechar</Button>
@@ -696,6 +922,30 @@ export default function Entries() {
               <div><Label>Nº Processo</Label><Input value={cProcessNumber} onChange={(e) => setcProcessNumber(e.target.value)} placeholder="Opcional" className="mt-1" /></div>
             </div>
             <div><Label>Nº Contrato</Label><Input value={cContractNumber} onChange={(e) => setcContractNumber(e.target.value)} placeholder="Opcional" className="mt-1" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Tipo de material *</Label>
+                <Select value={cMaterialType} onValueChange={(v) => setCMaterialType(v as MaterialType)}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="consumption">{MATERIAL_TYPE_LABELS.consumption}</SelectItem>
+                    <SelectItem value="permanent">{MATERIAL_TYPE_LABELS.permanent}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Área/Subestoque</Label>
+                <Select value={cAreaId} onValueChange={setCAreaId}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder={NO_AREA_LABEL} /></SelectTrigger>
+                  <SelectContent>
+                    {(areas ?? []).map((a) => (
+                      <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground mt-1">Fornecedor e categoria não definem a área.</p>
+              </div>
+            </div>
             <div className="border rounded-lg p-3 bg-muted/30"><Label className="text-xs font-medium">Documento da Entrada (NF / Imagem)</Label><FileUpload storageId={cDocStorageId} onUpload={setcDocStorageId} onRemove={() => setcDocStorageId("")} accept="image/*,.pdf" label="Anexar NF ou documento" /></div>
             <div><Label>Observação</Label><Textarea value={cObservation} onChange={(e) => setcObservation(e.target.value)} rows={2} placeholder="Opcional" className="mt-1" /></div>
             <div className="border-t pt-4">
@@ -817,7 +1067,7 @@ export default function Entries() {
               </div>
 
               <div className="border rounded-lg overflow-x-auto">
-                <Table><TableHeader><TableRow><TableHead className="text-xs">#</TableHead><TableHead className="text-xs">Produto da NF</TableHead><TableHead className="text-xs text-center">Qtd</TableHead><TableHead className="text-xs">Unid.</TableHead><TableHead className="text-xs">Situação</TableHead><TableHead className="text-xs">Produto SIGESGD</TableHead></TableRow></TableHeader>
+                <Table><TableHeader><TableRow><TableHead className="text-xs">#</TableHead><TableHead className="text-xs">Produto da NF</TableHead><TableHead className="text-xs text-center">Qtd</TableHead><TableHead className="text-xs">Unid.</TableHead><TableHead className="text-xs">Situação</TableHead><TableHead className="text-xs">Produto no estoque</TableHead></TableRow></TableHeader>
                   <TableBody>{nfeItems.map((r, idx) => (
                     <TableRow key={idx} className={!r.productId ? "bg-rose-50/40" : ""}>
                       <TableCell className="text-xs text-muted-foreground">{r.item.lineNumber}</TableCell>
