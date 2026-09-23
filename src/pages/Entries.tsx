@@ -22,6 +22,7 @@ import {
   type PatrimonyUnitDraft,
 } from "@/lib/material-types";
 import { NO_AREA_LABEL } from "@/lib/stock-areas";
+import { NfeDestinationDialog } from "@/components/NfeDestinationDialog";
 import { FileUpload } from "@/components/FileUpload";
 import { toast } from "sonner";
 import {
@@ -55,6 +56,7 @@ export default function Entries() {
   const locations = useQuery(api.storageLocations.listActive);
   const categories = useQuery(api.categories.listActive);
   const areas = useQuery(api.stockAreas.listActive);
+  // Área/Subestoque é uma dimensão independente do fornecedor e da categoria.
   const createEntry = useMutation(api.entries.create);
   const confirmEntry = useMutation(api.entries.confirm);
   const reverseEntry = useMutation(api.entries.reverse);
@@ -140,12 +142,15 @@ export default function Entries() {
   const [nfeSupplierSuggestion, setNfeSupplierSuggestion] = useState<{ id: string; name: string } | null>(null);
   const nfeSupplier = nfeSupplierId ? suppliers?.find((s) => s._id === nfeSupplierId) : undefined;
   const [nfeContract, setNfeContract] = useState("");
-  const [importLocationId, setImportLocationId] = useState("");
+  const [importLocationId, setImportLocationId] = useState(""); // destino padrão da importação
   const [importDocStorageId, setImportDocStorageId] = useState("");
   const [importObservation, setImportObservation] = useState("");
   const [nfeMaterialType, setNfeMaterialType] = useState<MaterialType>("consumption");
   const [nfeAreaId, setNfeAreaId] = useState("");
   const nfeFileInputRef = useRef<HTMLInputElement>(null);
+  // Conferência do destino (tipo de material + área/subestoque) antes de registrar a entrada da NF-e
+  const [nfeDestOpen, setNfeDestOpen] = useState(false);
+  const nfeDestConfirmedRef = useRef(false);
 
   // Reavalia o vínculo por CNPJ quando a lista de fornecedores termina de
   // carregar: a importação pode rodar antes da query resolver (estado travado
@@ -444,6 +449,7 @@ export default function Entries() {
     setNfe(null); setNfeXmlFile(null); setNfeItems([]); setNfeSupplierId(""); setNfeSupplierFound(true); setNfeSupplierSuggestion(null);
     setNfeContract(""); setImportLocationId(""); setImportDocStorageId(""); setImportObservation("");
     setNfeMaterialType("consumption"); setNfeAreaId("");
+    nfeDestConfirmedRef.current = false; setNfeDestOpen(false);
     setProductModalTarget(null);
   };
 
@@ -495,8 +501,21 @@ export default function Entries() {
     } finally { setImportLoading(false); }
   };
 
+  // Confirma o destino escolhido pelo usuário na conferência da NF-e e
+  // prossegue com o registro da entrada (mesmo fluxo de handleConfirmImport).
+  const handleNfeDestConfirm = (materialType: MaterialType, areaId: string) => {
+    setNfeMaterialType(materialType);
+    setNfeAreaId(areaId);
+    nfeDestConfirmedRef.current = true;
+    setNfeDestOpen(false);
+    void handleConfirmImport();
+  };
+
   const handleConfirmImport = async () => {
     if (!nfe || !nfeXmlFile) return;
+    // O destino no estoque (tipo de material + área/subestoque) é escolha do
+    // usuário: o fornecedor identificado NÃO define a área automaticamente.
+    if (!nfeDestConfirmedRef.current) { setNfeDestOpen(true); return; }
     if (nfeItems.some((r) => !r.productId)) {
       toast.error("Todos os itens precisam de um produto associado. Cadastre os itens 🔴 antes de confirmar.");
       return;
@@ -639,6 +658,19 @@ export default function Entries() {
             <Button variant="outline" onClick={() => { resetImport(); setImportOpen(true); }} className="gap-2"><FileUp className="h-4 w-4" /> Importar NF-e XML</Button>
             <Button onClick={() => { resetCreateForm(); setCreateDialogOpen(true); }} className="gap-2"><Plus className="h-4 w-4" /> Nova Entrada</Button>
           </div>
+
+          <NfeDestinationDialog
+            open={nfeDestOpen}
+            onOpenChange={setNfeDestOpen}
+            areas={(areas ?? []).map((a) => ({ id: a._id as string, name: a.name }))}
+            supplierName={nfeSupplier?.legalName ?? nfe?.emitterName ?? null}
+            supplierCnpj={nfeSupplier?.cnpj ?? nfe?.emitterCnpj ?? null}
+            invoiceNumber={nfe?.number ?? null}
+            itemCount={nfeItems.length}
+            initialMaterialType={nfeMaterialType}
+            initialAreaId={nfeAreaId}
+            onConfirm={handleNfeDestConfirm}
+          />
         </div>
 
         <Tabs value={tab} onValueChange={setTab}><TabsList><TabsTrigger value="all">Todas</TabsTrigger><TabsTrigger value="draft">Rascunho</TabsTrigger><TabsTrigger value="confirmed">Confirmadas</TabsTrigger><TabsTrigger value="reversed">Estornadas</TabsTrigger></TabsList></Tabs>
@@ -729,29 +761,6 @@ export default function Entries() {
                 <div>
                   <h4 className="font-medium text-sm mb-2">Unidades patrimoniais</h4>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs">Tipo de material *</Label>
-                  <Select value={nfeMaterialType} onValueChange={(v) => setNfeMaterialType(v as MaterialType)}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="consumption">{MATERIAL_TYPE_LABELS.consumption}</SelectItem>
-                      <SelectItem value="permanent">{MATERIAL_TYPE_LABELS.permanent}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs">Área/Subestoque</Label>
-                  <Select value={nfeAreaId} onValueChange={setNfeAreaId}>
-                    <SelectTrigger className="mt-1"><SelectValue placeholder={NO_AREA_LABEL} /></SelectTrigger>
-                    <SelectContent>{areas?.map((a) => (<SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>))}</SelectContent>
-                  </Select>
-                  <p className="text-[10px] text-muted-foreground mt-1">
-                    O fornecedor identificado NÃO define a área — confirme o destino antes de confirmar.
-                  </p>
-                </div>
-              </div>
-
-              <div className="border rounded-lg divide-y">
                     {viewEntry.items.flatMap((item: any) =>
                       (item.units ?? []).map((u: any) => (
                         <div key={u._id} className="p-2 text-xs flex flex-wrap gap-x-4 gap-y-1">
@@ -936,7 +945,7 @@ export default function Entries() {
               <div>
                 <Label>Área/Subestoque</Label>
                 <Select value={cAreaId} onValueChange={setCAreaId}>
-                  <SelectTrigger className="mt-1"><SelectValue placeholder={NO_AREA_LABEL} /></SelectTrigger>
+                  <SelectTrigger className="mt-1" ><SelectValue placeholder={NO_AREA_LABEL} /></SelectTrigger>
                   <SelectContent>
                     {(areas ?? []).map((a) => (
                       <SelectItem key={a._id} value={a._id}>{a.name}</SelectItem>
