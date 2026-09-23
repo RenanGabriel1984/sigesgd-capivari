@@ -23,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowRightLeft, Plus } from "lucide-react";
+import { ArrowRightLeft, Plus, Loader2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
@@ -120,9 +120,17 @@ export default function StockTransfersPage() {
           </CardHeader>
           <CardContent>
             {!transfers ? (
-              <p className="text-muted-foreground">Carregando...</p>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Carregando transferências...
+              </div>
             ) : transfers.length === 0 ? (
-              <p className="text-muted-foreground">Nenhuma transferência registrada</p>
+              <div className="py-10 text-center">
+                <ArrowRightLeft className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                <p className="text-sm font-medium">Nenhuma transferência registrada</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  A transferência move material entre locais/áreas de forma auditável, preservando lote e histórico.
+                </p>
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
