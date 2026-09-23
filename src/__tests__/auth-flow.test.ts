@@ -1,5 +1,5 @@
 /**
- * SIGESGD CAPIVARI — Testes de Fluxo de Autenticação
+ * Gestão de Estoque SGGD CAPIVARI — Testes de Fluxo de Autenticação
  *
  * Valida: primeiro acesso, recuperação de senha, lockout, usuário inativo.
  */

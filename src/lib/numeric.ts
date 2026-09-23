@@ -1,5 +1,5 @@
 /**
- * Normalização numérica do SIGESGD.
+ * Normalização numérica do Gestão de Estoque SGGD.
  *
  * Por quê: o validador `v.number()` do Convex aceita Int64 (bigint) quando uma
  * função é invocada fora do browser (ex.: `convex run` com literais JSON), e o

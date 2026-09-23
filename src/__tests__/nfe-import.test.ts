@@ -1,5 +1,5 @@
 /**
- * SIGESGD CAPIVARI — IMPORTAÇÃO DE NF-e XML
+ * Gestão de Estoque SGGD CAPIVARI — IMPORTAÇÃO DE NF-e XML
  *
  * Regra fundamental: XML → interpretar → rascunho → conferência → confirmação.
  * A importação NUNCA altera estoque: somente entries.confirm efetiva

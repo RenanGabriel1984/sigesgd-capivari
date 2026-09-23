@@ -1,5 +1,5 @@
 /**
- * SIGESGD — Regras puras de CLASSIFICAÇÃO DE MATERIAL (entrada/lote).
+ * Gestão de Estoque SGGD — Regras puras de CLASSIFICAÇÃO DE MATERIAL (entrada/lote).
  *
  *   Material de CONSUMO   → toner, ribbon, cabo, conector, fita isolante,
  *                           pasta térmica... NÃO exige patrimônio.

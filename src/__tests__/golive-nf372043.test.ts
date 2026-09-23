@@ -1,5 +1,5 @@
 /**
- * SIGESGD CAPIVARI — ETAPA OPERACIONAL 2/3 + FINAL 3/3
+ * Gestão de Estoque SGGD CAPIVARI — ETAPA OPERACIONAL 2/3 + FINAL 3/3
  *
  * Validação de go-live: garantias estruturais da NF-e Gomaq 372043
  * (pipeline opsGoLive + importação XML pela UI) e do fluxo ponta a ponta

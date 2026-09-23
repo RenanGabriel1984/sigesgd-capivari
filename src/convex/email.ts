@@ -3,7 +3,7 @@ import { action, internalAction, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 
 /**
- * SIGESGD — Transporte de e-mail.
+ * Gestão de Estoque SGGD — Transporte de e-mail.
  *
  * Reutiliza EXATAMENTE o mesmo serviço de envio já funcional no projeto,
  * usado pelo provedor de OTP em `convex/auth/emailOtp.ts`:
@@ -80,7 +80,7 @@ export const sendPasswordResetEmailInternal = internalAction({
 
     if (!payload) {
       console.error(
-        "[SIGESGD] Recuperação: registro de reset inexistente/consumido/expirado — e-mail não enviado.",
+        "[Estoque SGGD] Recuperação: registro de reset inexistente/consumido/expirado — e-mail não enviado.",
       );
       return { sent: false, reason: "reset-not-found" };
     }
@@ -91,7 +91,7 @@ export const sendPasswordResetEmailInternal = internalAction({
     } catch (error: any) {
       // NUNCA logar o código nem o corpo do erro (poderia conter dados sensíveis).
       console.error(
-        "[SIGESGD] Falha no envio do e-mail de recuperação:",
+        "[Estoque SGGD] Falha no envio do e-mail de recuperação:",
         error?.response?.status ?? error?.code ?? "erro-desconhecido",
       );
       return { sent: false, reason: "send-failed" };
@@ -112,11 +112,11 @@ export const sendFirstAccessEmail = action({
   },
   handler: async (ctx, args) => {
     const apiKey = process.env.RESEND_API_KEY;
-    const fromEmail = process.env.EMAIL_FROM || "SIGESGD <noreply@capivari.sp.gov.br>";
+    const fromEmail = process.env.EMAIL_FROM || "Gestão de Estoque SGGD <noreply@capivari.sp.gov.br>";
 
     if (!apiKey) {
       console.log(
-        `[SIGESGD] First access for ${args.to}: temp password = ${args.temporaryPassword} ` +
+        `[Estoque SGGD] First access for ${args.to}: temp password = ${args.temporaryPassword} ` +
         `(Email not sent — RESEND_API_KEY not configured)`
       );
       return { sent: false, reason: "Email service not configured" };
@@ -132,7 +132,7 @@ export const sendFirstAccessEmail = action({
         body: JSON.stringify({
           from: fromEmail,
           to: [args.to],
-          subject: "Bem-vindo ao SIGESGD Capivari — Acesso Inicial",
+          subject: "Bem-vindo ao Gestão de Estoque SGGD — Acesso Inicial",
           html: `
             <!DOCTYPE html>
             <html>
@@ -146,7 +146,7 @@ export const sendFirstAccessEmail = action({
 
                 <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:24px;margin:24px 0;">
                   <p style="color:#444;font-size:14px;line-height:1.5;">
-                    Você foi cadastrado no <strong>SIGESGD Capivari</strong> — Sistema Integrado de Gestão da Secretaria de Gestão e Governo Digital.
+                    Você foi cadastrado no sistema <strong>Gestão de Estoque SGGD</strong> — Secretaria de Gestão e Governo Digital.
                   </p>
                   <p style="color:#444;font-size:14px;line-height:1.5;margin-top:12px;">
                     <strong>Senha temporária:</strong>
@@ -171,20 +171,20 @@ export const sendFirstAccessEmail = action({
             </body>
             </html>
           `,
-          text: `Bem-vindo ao SIGESGD Capivari!\n\nOlá ${args.name},\n\nVocê foi cadastrado no SIGESGD Capivari.\n\nSenha temporária: ${args.temporaryPassword}\n\nAo fazer login pela primeira vez, você será obrigado a criar uma nova senha pessoal.\n\nPrefeitura Municipal de Capivari — SP`,
+          text: `Bem-vindo ao Gestão de Estoque SGGD!\n\nOlá ${args.name},\n\nVocê foi cadastrado no sistema Gestão de Estoque SGGD.\n\nSenha temporária: ${args.temporaryPassword}\n\nAo fazer login pela primeira vez, você será obrigado a criar uma nova senha pessoal.\n\nPrefeitura Municipal de Capivari — SP`,
         }),
       });
 
       if (!response.ok) {
         const errorData = await response.text();
-        console.error(`[SIGESGD] Welcome email failed: ${response.status} ${errorData}`);
+        console.error(`[Estoque SGGD] Welcome email failed: ${response.status} ${errorData}`);
         return { sent: false, reason: `Email API error: ${response.status}` };
       }
 
       const result = await response.json();
       return { sent: true, id: result.id };
     } catch (error: any) {
-      console.error(`[SIGESGD] Welcome email error:`, error.message);
+      console.error(`[Estoque SGGD] Welcome email error:`, error.message);
       return { sent: false, reason: error.message };
     }
   },

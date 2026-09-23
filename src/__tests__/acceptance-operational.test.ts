@@ -1,5 +1,5 @@
 /**
- * SIGESGD — Testes de aceitação operacional (PROMPT de homologação final).
+ * Gestão de Estoque SGGD — Testes de aceitação operacional (PROMPT de homologação final).
  *
  * Cobrem os itens A–T do checklist de aceitação que podem ser verificados
  * estaticamente (código + config + snapshot exportado). As verificações de

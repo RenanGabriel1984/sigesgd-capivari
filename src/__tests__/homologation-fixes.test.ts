@@ -1,5 +1,5 @@
 /**
- * SIGESGD CAPIVARI — CORREÇÃO CRÍTICA: INVENTÁRIO + ORGANIZAÇÕES
+ * Gestão de Estoque SGGD CAPIVARI — CORREÇÃO CRÍTICA: INVENTÁRIO + ORGANIZAÇÕES
  *
  * Testes de regressão da intervenção:
  *  A) Inventário abre sem React #310 (nenhum hook após return condicional);

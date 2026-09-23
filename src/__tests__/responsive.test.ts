@@ -11,7 +11,7 @@ const INDEX_HTML = readFileSync(resolve(__dirname, "../../index.html"), "utf8");
 const ORGANIZATION = readFileSync(resolve(__dirname, "../pages/Organization.tsx"), "utf8");
 const INVENTORY = readFileSync(resolve(__dirname, "../pages/Inventory.tsx"), "utf8");
 
-describe("SIGESGD — Responsividade mobile (drawer, dashboard, diálogos)", () => {
+describe("Gestão de Estoque SGGD — Responsividade mobile (drawer, dashboard, diálogos)", () => {
   it("MV-01: menu contém TODAS as rotas de Administração (nada desaparece)", () => {
     for (const href of [
       "/products",

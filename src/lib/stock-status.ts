@@ -1,5 +1,5 @@
 /**
- * SIGESGD — Situação de Estoque
+ * Gestão de Estoque SGGD — Situação de Estoque
  *
  * Classificador único da situação operacional de cada produto, usado nas telas
  * de Produtos, Estoque e Detalhe do Produto.

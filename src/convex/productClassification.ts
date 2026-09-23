@@ -1,5 +1,5 @@
 /**
- * SIGESGD — Classificação oficial dos 53 produtos do estoque de implantação.
+ * Gestão de Estoque SGGD — Classificação oficial dos 53 produtos do estoque de implantação.
  *
  * Alteração EXCLUSIVAMENTE cadastral: cria/reativa as 7 categorias oficiais e
  * atualiza `products.categoryId`.

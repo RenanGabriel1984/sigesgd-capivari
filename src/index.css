@@ -1,4 +1,4 @@
-/* SIGESGD Capivari — Design System */
+/* Gestão de Estoque SGGD Capivari — Design System */
 @import "tailwindcss";
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));

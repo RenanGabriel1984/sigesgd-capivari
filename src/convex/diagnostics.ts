@@ -1,5 +1,5 @@
 /**
- * SIGESGD — Diagnóstico administrativo, reconciliação e limpeza controlada.
+ * Gestão de Estoque SGGD — Diagnóstico administrativo, reconciliação e limpeza controlada.
  *
  * Todas as funções aqui são PROTEGIDAS (admin) ou INTERNAL (canal CLI/dashboard
  * do deployment) e cumprem papel objetivo:
@@ -1415,5 +1415,90 @@ export const ensureOfficialSupplierInternal = internalMutation({
       timestamp: Date.now(),
     });
     return { action: "created", supplierId, legalName: LEGAL_NAME };
+  },
+});
+
+/**
+ * RODADA 4 — Auditoria ESTRUTURAL (SOMENTE LEITURA).
+ *
+ * Confere áreas/subestoques, locais físicos, contagens de integridade do
+ * estoque, saldos inválidos e vínculos de área em entradas/lotes.
+ * Nenhuma escrita: não cria, altera nem apaga registros.
+ */
+export const structureAuditInternal = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<{
+    areas: Array<{ id: string; name: string; active: boolean }>;
+    locations: Array<{ id: string; name: string; active: boolean }>;
+    counts: Record<string, number>;
+    totalPhysical: number;
+    totalReserved: number;
+    totalByLocation: number;
+    invalidStockRows: Array<{ id: string; physical: number; reserved: number }>;
+    entriesWithArea: number;
+    lotsWithArea: number;
+    suppliersWithEntries: Array<{ id: string; legalName: string; active: boolean; entries: number }>;
+  }> => {
+    const areas = await ctx.db.query("stockAreas").collect();
+    const locations = await ctx.db.query("storageLocations").collect();
+    const products = await ctx.db.query("products").collect();
+    const stock = await ctx.db.query("stock").collect();
+    const stockByLocation = await ctx.db.query("stockByLocation").collect();
+    const entries = await ctx.db.query("entries").collect();
+    const lots = await ctx.db.query("lots").collect();
+    const movements = await ctx.db.query("stockMovements").collect();
+    const transfers = await ctx.db.query("stockTransfers").collect();
+    const returns = await ctx.db.query("returns").collect();
+    const suppliers = await ctx.db.query("suppliers").collect();
+    const categories = await ctx.db.query("categories").collect();
+    const organizations = await ctx.db.query("organizations").collect();
+    const auditLogs = await ctx.db.query("auditLogs").collect();
+
+    const movementCountByType: Record<string, number> = {};
+    for (const m of movements) {
+      movementCountByType[m.type ?? "unknown"] = (movementCountByType[m.type ?? "unknown"] ?? 0) + 1;
+    }
+
+    const invalidStockRows = stock
+      .filter((s) => s.physicalQuantity < 0 || s.reservedQuantity < 0 || s.reservedQuantity > s.physicalQuantity)
+      .map((s) => ({ id: s._id as string, physical: s.physicalQuantity, reserved: s.reservedQuantity }));
+
+    const suppliersWithEntries = suppliers.map((s) => ({
+      id: s._id as string,
+      legalName: s.legalName,
+      active: s.active,
+      entries: entries.filter((e) => e.supplierId === s._id).length,
+    }));
+
+    return {
+      areas: areas.map((a) => ({ id: a._id as string, name: a.name, active: a.active })),
+      locations: locations.map((l) => ({ id: l._id as string, name: l.name, active: l.active })),
+      counts: {
+        products: products.length,
+        stockRows: stock.length,
+        entries: entries.length,
+        entriesDraft: entries.filter((e) => e.status === "draft").length,
+        entriesConfirmed: entries.filter((e) => e.status === "confirmed").length,
+        lots: lots.length,
+        movements: movements.length,
+        transfers: transfers.length,
+        returns: returns.length,
+        suppliers: suppliers.length,
+        suppliersActive: suppliers.filter((s) => s.active).length,
+        categories: categories.length,
+        organizations: organizations.length,
+        auditLogs: auditLogs.length,
+        ...Object.fromEntries(
+          Object.entries(movementCountByType).map(([k, v]) => [`movements_${k}`, v])
+        ),
+      },
+      totalPhysical: stock.reduce((acc, s) => acc + s.physicalQuantity, 0),
+      totalReserved: stock.reduce((acc, s) => acc + s.reservedQuantity, 0),
+      totalByLocation: stockByLocation.reduce((acc, s) => acc + s.quantity, 0),
+      invalidStockRows,
+      entriesWithArea: entries.filter((e) => e.areaId).length,
+      lotsWithArea: lots.filter((l) => l.areaId).length,
+      suppliersWithEntries,
+    };
   },
 });

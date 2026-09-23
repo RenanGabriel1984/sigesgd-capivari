@@ -9,7 +9,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
 
-// ── Deployment Convex oficial do SIGESGD ────────────────────────────────────
+// ── Deployment Convex oficial do Gestão de Estoque SGGD ────────────────────────────────────
 // A URL fica fixa no código de propósito: o ambiente de build da plataforma
 // pode injetar um VITE_CONVEX_URL desatualizado (outro deployment, sem a carga
 // oficial) e esse valor acabava embutido como literal morto no bundle

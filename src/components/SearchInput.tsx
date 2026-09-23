@@ -9,7 +9,7 @@ type Props = ComponentProps<typeof Input> & {
 };
 
 /**
- * Campo de pesquisa padronizado do SIGESGD.
+ * Campo de pesquisa padronizado do Gestão de Estoque SGGD.
  *
  * Comportamento no celular: a pesquisa acontece a cada tecla (state
  * controlado); o ENTER apenas PREVINE submit/recarregamento e DESFOCA o

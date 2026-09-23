@@ -33,6 +33,8 @@ import {
   RotateCcw,
   ArrowRightLeft,
   PackageMinus,
+  Network,
+  Phone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -79,11 +81,19 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests" },
     { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
   ]},
+  // ── Equipamentos ──────────────────────────────────────────────────────────
+  // Estrutura por CATEGORIA de equipamento. O fornecedor NUNCA faz parte do
+  // nome estrutural: uma nova licitação troca a empresa sem alterar o menu.
+  // "Impressoras" abre a Gestão de Suprimentos de Impressão (tela antes
+  // chamada "Impressoras / Gomaq"); o fornecedor de cada entrada continua
+  // sendo dado cadastral/histórico.
   { title: "Equipamentos", items: [
-    { label: "Impressoras / Gomaq", href: "/gomaq", icon: Printer, permission: "canManageGomaQ" },
-    { label: "Equipamentos", href: "/assets", icon: Monitor, permission: "canManageAssets" },
+    { label: "Impressoras", href: "/gomaq", icon: Printer, permission: "canManageGomaQ", permission2: "canManageAssets" },
+    { label: "Computadores", href: "/assets?categoria=computadores", icon: Monitor, permission: "canManageAssets" },
+    { label: "Redes", href: "/assets?categoria=redes", icon: Network, permission: "canManageAssets" },
+    { label: "Telefonia", href: "/assets?categoria=telefonia", icon: Phone, permission: "canManageAssets" },
+    { label: "Todos os equipamentos", href: "/assets", icon: Boxes, permission: "canManageAssets" },
     { label: "Licenças", href: "/licenses", icon: Key, permission: "canManageLicenses" },
-    { label: "Impressoras", href: "/printers", icon: Printer, permission: "canManageProducts" },
   ]},
   { title: "Consultas", items: [
     { label: "Relatórios", href: "/reports", icon: BarChart3, permission: "canViewMovements" },
@@ -174,7 +184,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     // Don't show if already running in standalone mode
     if (window.matchMedia("(display-mode: standalone)").matches) return;
     // Don't show if user previously dismissed
-    if (localStorage.getItem("sigesgd-pwa-dismissed") === "1") return;
+    if (localStorage.getItem("estoque-sggd-pwa-dismissed") === "1") return;
 
     const handler = (e: Event) => {
       e.preventDefault();
@@ -197,7 +207,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const handleDismissInstall = () => {
     setShowInstallBanner(false);
-    localStorage.setItem("sigesgd-pwa-dismissed", "1");
+    localStorage.setItem("estoque-sggd-pwa-dismissed", "1");
   };
 
   const pendingCount = useQuery(api.requests.pendingCount);
@@ -213,7 +223,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
     // Na primeira abertura, todas as seções começam abertas.
     try {
-      const saved = sessionStorage.getItem("sigesgd-sidebar-sections");
+      const saved = sessionStorage.getItem("estoque-sggd-sidebar-sections");
       if (saved) return JSON.parse(saved) as Record<string, boolean>;
     } catch {
       /* sessionStorage indisponível — segue com padrão */
@@ -224,7 +234,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setOpenSections((prev) => {
       const next = { ...prev, [title]: !prev[title] };
       try {
-        sessionStorage.setItem("sigesgd-sidebar-sections", JSON.stringify(next));
+        sessionStorage.setItem("estoque-sggd-sidebar-sections", JSON.stringify(next));
       } catch {
         /* ignore */
       }

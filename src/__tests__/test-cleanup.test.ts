@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 const DIAG = readFileSync(resolve(__dirname, "../convex/diagnostics.ts"), "utf8");
 
-describe("SIGESGD — Limpeza de dados de teste (SSD) e categorias", () => {
+describe("Gestão de Estoque SGGD — Limpeza de dados de teste (SSD) e categorias", () => {
   it("LC-01: limpeza exige confirmação literal CLEANUP-SSD-TESTE", () => {
     expect(DIAG).toContain('args.confirm !== "CLEANUP-SSD-TESTE"');
   });

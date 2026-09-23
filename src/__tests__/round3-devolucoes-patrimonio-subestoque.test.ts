@@ -1,5 +1,5 @@
 /**
- * SIGESGD CAPIVARI — RODADA 3
+ * Gestão de Estoque SGGD CAPIVARI — RODADA 3
  * DEVOLUÇÕES · PATRIMÔNIO · SUBESTOQUES · TRANSFERÊNCIAS · NF-e (destino)
  *
  * Estes testes exercitam as REGRAS PURAS implementadas em:
@@ -36,7 +36,7 @@ import {
 
 import {
   NO_AREA_LABEL,
-  IMPRESSORAS_GOMAQ_AREA,
+  AREA_IMPRESSORAS,
   resolveStockAreaChoice,
   suggestAreaByCategory,
 } from "@/lib/stock-areas";
@@ -177,7 +177,7 @@ describe("Transferência de estoque", () => {
     productName: "Toner AltaLink Ciano",
     quantity: 1,
     fromLocationName: "Armário TI 02",
-    toLocationName: IMPRESSORAS_GOMAQ_AREA,
+    toLocationName: AREA_IMPRESSORAS,
     lotId: "lot_nf_372043",
     lotNumber: "NF 372043",
     reason: "Reorganização de estoque",
@@ -324,14 +324,15 @@ describe("Área/Subestoque", () => {
   });
 
   it("fornecedores diferentes podem entregar na MESMA área", () => {
-    const area = IMPRESSORAS_GOMAQ_AREA;
+    const area = AREA_IMPRESSORAS;
     expect(
-      resolveStockAreaChoice({ userSelectedAreaId: "area_impressoras", supplierId: "supplier_gomaq" })
+      resolveStockAreaChoice({ userSelectedAreaId: "area_impressoras", supplierId: "supplier_atual" })
     ).toBe("area_impressoras");
     expect(
-      resolveStockAreaChoice({ userSelectedAreaId: "area_impressoras", supplierId: "supplier_outro" })
+      resolveStockAreaChoice({ userSelectedAreaId: "area_impressoras", supplierId: "supplier_novo" })
     ).toBe("area_impressoras");
-    expect(area).toBe("Impressoras / Gomaq");
+    // O nome da área NÃO carrega fornecedor: trocar de empresa não muda a estrutura.
+    expect(area).toBe("Impressoras");
     expect(NO_AREA_LABEL).toBe("Sem área (estoque geral)");
   });
 });

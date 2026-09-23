@@ -125,6 +125,22 @@ export function NfeDestinationDialog({
             </p>
           </div>
 
+          <div className="rounded-lg border p-3 space-y-1.5">
+            <p className="text-xs font-medium">Documentos da NF-e</p>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">XML da NF-e (fonte estruturada dos itens)</span>
+              <span className="font-medium text-primary">Importado</span>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">DANFE PDF (comprovação visual)</span>
+              <span className="text-muted-foreground">anexe em Documentos da NF-e, no passo de localização</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              O XML permanece como fonte dos itens e o PDF fica vinculado à MESMA entrada — os dois documentos
+              andam juntos, sem duplicar arquivos nem criar uma segunda entrada.
+            </p>
+          </div>
+
           <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
             Destino selecionado: <span className="font-medium text-foreground break-words">{areaName}</span>
             {" · "}

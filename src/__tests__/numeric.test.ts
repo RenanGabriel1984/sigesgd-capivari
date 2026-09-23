@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { isInt64, normalizeNumericPatch, toNumber } from "../lib/numeric";
 
-describe("SIGESGD — Normalização numérica (Int64 → number)", () => {
+describe("Gestão de Estoque SGGD — Normalização numérica (Int64 → number)", () => {
   it("NU-01: detecta bigint", () => {
     expect(isInt64(10n)).toBe(true);
     expect(isInt64(10)).toBe(false);

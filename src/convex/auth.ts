@@ -1,4 +1,4 @@
-// Auth providers for SIGESGD Capivari.
+// Auth providers for Gestão de Estoque SGGD (Capivari).
 // This file configures authentication providers for the application.
 // Existing: email OTP (for recovery/fallback), Anonymous (guest).
 // Added: credentials (email + password) for primary authentication.

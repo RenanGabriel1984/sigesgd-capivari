@@ -35,7 +35,7 @@ const ORIGIN_LABELS: Record<string, string> = {
   purchase: "Compra", donation: "Doação", transfer: "Transferência",
   return: "Devolução",
   // A carga inicial representa o estoque físico existente na data de
-  // implantação do SIGESGD (15/09/2026).
+  // implantação do Gestão de Estoque SGGD (15/09/2026).
   initial_inventory: `Estoque de implantação (${IMPLEMENTATION_STOCK_DATE})`,
   other: "Outro",
 };
@@ -745,8 +745,23 @@ export default function Entries() {
                 {viewEntry.contractNumber && <div><span className="text-muted-foreground">Contrato:</span> {viewEntry.contractNumber}</div>}
               </div>
               {viewEntry.observation && <div className="text-sm"><span className="text-muted-foreground">Observação:</span> {viewEntry.observation}</div>}
-              {viewEntry.documentStorageId && <div className="text-sm"><FileUpload storageId={viewEntry.documentStorageId} onUpload={() => {}} size="sm" label="Documento da entrada" disabled /></div>}
-              {viewEntry.xmlStorageId && <div className="text-sm"><FileUpload storageId={viewEntry.xmlStorageId} onUpload={() => {}} size="sm" label="XML original da NF-e" disabled /></div>}
+              {(viewEntry.documentStorageId || viewEntry.xmlStorageId) && (
+                <div className="rounded-lg border p-3 space-y-2">
+                  <h4 className="font-medium text-sm">Documentos da NF-e</h4>
+                  {viewEntry.xmlStorageId && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-muted-foreground">XML da NF-e</span>
+                      <FileUpload storageId={viewEntry.xmlStorageId} onUpload={() => {}} size="sm" label="XML original da NF-e" disabled />
+                    </div>
+                  )}
+                  {viewEntry.documentStorageId && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-muted-foreground">DANFE PDF / documento da entrada</span>
+                      <FileUpload storageId={viewEntry.documentStorageId} onUpload={() => {}} size="sm" label="DANFE PDF" disabled />
+                    </div>
+                  )}
+                </div>
+              )}
               <div>
                 <h4 className="font-medium text-sm mb-2">Itens da Entrada</h4>
                 <div className="border rounded-lg overflow-hidden">

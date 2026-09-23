@@ -687,7 +687,7 @@ export const cleanupTestData = mutation({
 });
 
 /**
- * SIGESGD — ESTOQUE DE IMPLANTAÇÃO: validação de integridade (somente leitura).
+ * Gestão de Estoque SGGD — ESTOQUE DE IMPLANTAÇÃO: validação de integridade (somente leitura).
  *
  * A carga inicial (originType "initial_inventory") representa o estoque físico
  * existente na data de implantação. Esta query NÃO altera nada: apenas confere

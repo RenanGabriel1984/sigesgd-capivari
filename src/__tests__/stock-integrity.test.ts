@@ -1,5 +1,5 @@
 /**
- * SIGESGD CAPIVARI — FASE 3: Testes Automatizados
+ * Gestão de Estoque SGGD CAPIVARI — FASE 3: Testes Automatizados
  * 
  * Estes testes validam as regras críticas de estoque, entradas e inventário.
  * Utilizam vitest com mocks do Convex context para testar a lógica de negócio.

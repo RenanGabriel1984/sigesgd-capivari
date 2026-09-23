@@ -1,4 +1,4 @@
-# SIGESGD — Validação de Regras Críticas de Estoque
+# Gestão de Estoque SGGD — Validação de Regras Críticas de Estoque
 ## Fase 0.6 — Testes Automatizados
 
 **Data:** 01/09/2026

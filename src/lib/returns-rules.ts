@@ -1,5 +1,5 @@
 /**
- * SIGESGD — Regras puras de DEVOLUÇÃO vinculada à SAÍDA real.
+ * Gestão de Estoque SGGD — Regras puras de DEVOLUÇÃO vinculada à SAÍDA real.
  *
  * Nenhum estoque é alterado aqui: estas funções apenas calculam/validam.
  * O efeito real (repor saldo, movimentação e auditoria) acontece em

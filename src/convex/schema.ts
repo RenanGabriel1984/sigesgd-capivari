@@ -640,11 +640,13 @@ const schema = defineSchema(
     assets: defineTable({
       patrimonyNumber: v.optional(v.string()),
       serialNumber: v.optional(v.string()),
+      // Inclui "phone" (categoria Telefonia). Ampliação ADITIVA: registros
+      // existentes continuam válidos; nenhuma migração de dados é necessária.
       assetType: v.union(
         v.literal("desktop"), v.literal("notebook"), v.literal("monitor"),
         v.literal("server"), v.literal("printer"), v.literal("switch"),
         v.literal("router"), v.literal("access_point"), v.literal("ups"),
-        v.literal("storage"), v.literal("other")
+        v.literal("storage"), v.literal("phone"), v.literal("other")
       ),
       manufacturer: v.optional(v.string()),
       model: v.optional(v.string()),

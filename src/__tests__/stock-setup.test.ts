@@ -1,5 +1,5 @@
 /**
- * SIGESGD CAPIVARI — FASE 8: Testes de Carga Inicial e Saída
+ * Gestão de Estoque SGGD CAPIVARI — FASE 8: Testes de Carga Inicial e Saída
  *
  * Valida rastreabilidade por lote na carga inicial e consumo FIFO na saída.
  */

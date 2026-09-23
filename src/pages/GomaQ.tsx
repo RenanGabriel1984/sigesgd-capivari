@@ -24,9 +24,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { AlertTriangle, ArrowRightLeft, Package, Truck, FileSpreadsheet, ShoppingCart } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Package, Truck, FileSpreadsheet, ShoppingCart, Printer } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { useNavigate } from "react-router";
 
 function GomaQSkeleton() {
   return (
@@ -51,6 +52,7 @@ function GomaQSkeleton() {
 }
 
 export default function GomaQPage() {
+  const navigate = useNavigate();
   const [tab, setTab] = useState("dashboard");
   const stats = useQuery(api.gomaQ.awaitingCollectionCount);
   const lastCol = useQuery(api.gomaQ.lastCollection);
@@ -66,11 +68,22 @@ export default function GomaQPage() {
   return (
     <AppShell>
       <div className="space-y-6 max-w-7xl mx-auto">
-        <div>
-          <h1 className="text-2xl tracking-tight font-bold">Gomaq — Gestão de Suprimentos</h1>
-          <p className="text-sm text-muted-foreground">
-            Controle de recebimento, troca, carcaças vazias e pedido mensal
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+              Equipamentos · Impressoras
+            </p>
+            <h1 className="text-2xl tracking-tight font-bold">
+              Gestão de Suprimentos de Impressão
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Recebimento, troca de suprimentos, carcaças vazias e pedido mensal. O fornecedor de
+              cada coleta é dado cadastral/histórico — a estrutura da Secretaria não depende dele.
+            </p>
+          </div>
+          <Button variant="outline" className="gap-2 shrink-0" onClick={() => navigate("/printers")}>
+            <Printer className="h-4 w-4" /> Parque de impressoras
+          </Button>
         </div>
 
         {/* Quick Stats — Operational First */}

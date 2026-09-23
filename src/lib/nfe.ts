@@ -1,11 +1,11 @@
 /**
- * SIGESGD CAPIVARI — Importação de NF-e XML
+ * Gestão de Estoque SGGD CAPIVARI — Importação de NF-e XML
  *
  * Núcleo puro e testável da funcionalidade de importação de NF-e:
  *  - parseNfeXml: valida e extrai os dados estruturados do XML da NF-e;
  *  - mapNfeUnit: mapeia a unidade da NF (UN, PC, CX, KIT...) para as unidades do sistema;
  *  - findSupplierMatch: localiza o fornecedor existente (CNPJ ou razão social);
- *  - matchNfeProduct: classifica a correspondência produto da NF ↔ produto SIGESGD;
+ *  - matchNfeProduct: classifica a correspondência produto da NF ↔ produto Gestão de Estoque SGGD;
  *  - buildEntryDraftFromNfe: monta o rascunho da entrada (NUNCA altera estoque).
  *
  * REGRA FUNDAMENTAL: importar XML NÃO é entrada. Somente a confirmação

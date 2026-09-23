@@ -13,7 +13,7 @@ function classificationBlock(): string {
   return SRC.slice(start, end);
 }
 
-describe("SIGESGD — Classificação oficial dos 53 produtos", () => {
+describe("Gestão de Estoque SGGD — Classificação oficial dos 53 produtos", () => {
   it("CL-01: mapeia exatamente 53 produtos, sem duplicidade", () => {
     const ids = [...classificationBlock().matchAll(/productId: "([^"]+)"/g)].map((m) => m[1]);
     expect(ids).toHaveLength(53);

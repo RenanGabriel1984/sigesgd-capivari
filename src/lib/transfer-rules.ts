@@ -1,5 +1,5 @@
 /**
- * SIGESGD — Regras puras de TRANSFERÊNCIA de estoque.
+ * Gestão de Estoque SGGD — Regras puras de TRANSFERÊNCIA de estoque.
  *
  * A transferência reduz a origem, aumenta o destino, PRESERVA o lote/origem
  * no registro, cria movimentação TRANSFERÊNCIA e registra auditoria.

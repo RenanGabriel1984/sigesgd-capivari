@@ -96,7 +96,7 @@ export const seedOrganizations = mutation({
       },
       {
         name: "Secretaria de Gestão e Governo Digital",
-        observation: "Gestão administrativa, tecnologia da informação e governo digital — SIGESGD",
+        observation: "Gestão administrativa, tecnologia da informação e governo digital — Gestão de Estoque SGGD",
       },
       {
         name: "Secretaria de Governo",

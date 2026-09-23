@@ -1,5 +1,5 @@
 /**
- * SIGESGD CAPIVARI — Operações de Go-Live (ETAPA 2/3)
+ * Gestão de Estoque SGGD CAPIVARI — Operações de Go-Live (ETAPA 2/3)
  *
  * Ponte operacional ÚNICA para registrar a primeira entrada real (NF-e Gomaq
  * 372043) no deployment atual, quando a importação pela UI não pôde ser usada.
@@ -54,10 +54,10 @@ const GOMAQ_ITEMS: Array<{
 ];
 
 /**
- * SIGESGD — ESTOQUE DE IMPLANTAÇÃO (data 15/09/2026)
+ * Gestão de Estoque SGGD — ESTOQUE DE IMPLANTAÇÃO (data 15/09/2026)
  *
  * Carimba as entradas de carga inicial (originType "initial_inventory") como
- * ESTOQUE DE IMPLANTAÇÃO do SIGESGD.
+ * ESTOQUE DE IMPLANTAÇÃO do sistema Gestão de Estoque SGGD.
  *
  * SOMENTE METADADOS: grava a data de implantação na observação da entrada e
  * um registro de auditoria. NÃO altera quantidades, lotes, saldos por

@@ -2,7 +2,7 @@ import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 
 /**
- * SIGESGD — Auxiliares internos do teste E2E de recuperação de senha.
+ * Gestão de Estoque SGGD — Auxiliares internos do teste E2E de recuperação de senha.
  *
  * Módulo separado de `diagnostics.ts` de propósito: funções internas do
  * MESMO módulo referenciadas via `internal.<módulo>.*` criam ciclo de

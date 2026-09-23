@@ -15,17 +15,18 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Plus, Monitor, Laptop, Server, Printer, Wifi, HardDrive, HelpCircle, Search } from "lucide-react";
+import { Plus, Monitor, Laptop, Server, Printer, Wifi, HardDrive, HelpCircle, Search, Phone } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
+import {
+  EQUIPMENT_CATEGORIES,
+  EQUIPMENT_TYPE_LABELS,
+  findEquipmentCategory,
+  matchesEquipmentCategory,
+} from "@/lib/equipment-categories";
 
-const ASSET_TYPE_LABELS: Record<string, string> = {
-  desktop: "Desktop", notebook: "Notebook", monitor: "Monitor",
-  server: "Servidor", printer: "Impressora", switch: "Switch",
-  router: "Roteador", access_point: "Access Point", ups: "UPS",
-  storage: "Armazenamento", other: "Outro",
-};
+const ASSET_TYPE_LABELS: Record<string, string> = EQUIPMENT_TYPE_LABELS;
 
 const ASSET_STATUS_LABELS: Record<string, string> = {
   active: "Ativo", maintenance: "Manutenção", inactive: "Inativo",
@@ -46,6 +47,7 @@ function getTypeIcon(type: string) {
     case "printer": return Printer;
     case "switch": case "router": case "access_point": return Wifi;
     case "storage": return HardDrive;
+    case "phone": return Phone;
     default: return HelpCircle;
   }
 }
@@ -70,6 +72,8 @@ function AssetsSkeleton() {
 }
 
 export default function AssetsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const category = findEquipmentCategory(searchParams.get("categoria"));
   const [tab, setTab] = useState("list");
   const [showNew, setShowNew] = useState(false);
   const [filters, setFilters] = useState({ status: "", assetType: "", search: "" });
@@ -90,13 +94,20 @@ export default function AssetsPage() {
 
   if (assets === undefined) return <AssetsSkeleton />;
 
-  const filteredAssets = assets?.filter((a) =>
+  // A categoria de equipamento (Impressoras/Computadores/Redes/Telefonia) é
+  // apenas um recorte da lista — nenhuma regra de fornecedor ou de destino de
+  // estoque é derivada dela.
+  const byCategory = category
+    ? (assets ?? []).filter((a) => matchesEquipmentCategory(a.assetType, category))
+    : (assets ?? []);
+
+  const filteredAssets = byCategory.filter((a) =>
     !filters.search ||
     a.patrimonyNumber?.toLowerCase().includes(filters.search.toLowerCase()) ||
     a.serialNumber?.toLowerCase().includes(filters.search.toLowerCase()) ||
     a.manufacturer?.toLowerCase().includes(filters.search.toLowerCase()) ||
     a.model?.toLowerCase().includes(filters.search.toLowerCase())
-  ) ?? [];
+  );
 
   const orgsList = organizations?.orgs ?? [];
 
@@ -129,14 +140,46 @@ export default function AssetsPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Equipamentos</h1>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {category ? category.label : "Equipamentos"}
+            </h1>
             <p className="text-sm text-muted-foreground">
-              Controle patrimonial e manutenção — {filteredAssets.length} equipamento(s)
+              {category ? `${category.description} — ` : "Controle patrimonial e manutenção — "}
+              {filteredAssets.length} equipamento(s)
             </p>
           </div>
           <Button onClick={() => setShowNew(true)} className="gap-2">
             <Plus className="h-4 w-4" /> Novo Equipamento
           </Button>
+        </div>
+
+        {/* Categorias de equipamento — recorte da mesma lista, sem duplicar telas */}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setSearchParams({})}
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+              !category
+                ? "border-primary/40 bg-primary/10 text-primary"
+                : "border-border text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            Todos
+          </button>
+          {EQUIPMENT_CATEGORIES.map((c) => (
+            <button
+              key={c.slug}
+              type="button"
+              onClick={() => setSearchParams({ categoria: c.slug })}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                category?.slug === c.slug
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
         </div>
 
         {/* Filters */}
@@ -177,14 +220,18 @@ export default function AssetsPage() {
               <div className="empty-state">
                 <Monitor className="empty-state-icon" />
                 <p className="empty-state-title">
-                  {filters.search || filters.status || filters.assetType
+                  {filters.search || filters.status || filters.assetType || category
                     ? "Nenhum equipamento encontrado"
                     : "Nenhum equipamento cadastrado"}
                 </p>
                 <p className="empty-state-desc">
-                  {filters.search || filters.status || filters.assetType
-                    ? "Tente alterar os filtros de busca"
-                    : "Cadastre o primeiro equipamento para iniciar o controle patrimonial"}
+                  {filters.search
+                    ? `Nenhum resultado para "${filters.search}"${category ? ` em ${category.label}` : ""}. Tente outro termo ou limpe a busca.`
+                    : category
+                      ? `Nenhum equipamento em ${category.label}${filters.status || filters.assetType ? " com os filtros atuais" : ""}.`
+                      : filters.status || filters.assetType
+                        ? "Tente alterar os filtros aplicados."
+                        : "Cadastre o primeiro equipamento para iniciar o controle patrimonial."}
                 </p>
               </div>
             </CardContent>

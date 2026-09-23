@@ -1,5 +1,5 @@
 /**
- * SIGESGD CAPIVARI — CONSOLIDAÇÃO DO ESTOQUE
+ * Gestão de Estoque SGGD CAPIVARI — CONSOLIDAÇÃO DO ESTOQUE
  *
  * Valida a regra fundamental:
  *   Produto cadastrado ≠ produto em estoque.

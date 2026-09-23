@@ -172,10 +172,14 @@ export default function PrintersPage() {
       <div className="space-y-6 max-w-7xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Impressoras</h1>
+            <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+              Equipamentos · Impressoras
+            </p>
+            <h1 className="text-2xl font-bold tracking-tight">Parque de Impressoras</h1>
             <p className="text-sm text-muted-foreground">
               {activeCount} ativa(s)
               {inactiveCount > 0 && `, ${inactiveCount} inativa(s)`}
+              {" — suprimentos e trocas ficam em Gestão de Suprimentos de Impressão"}
             </p>
           </div>
           <Button onClick={openCreate} className="gap-2">

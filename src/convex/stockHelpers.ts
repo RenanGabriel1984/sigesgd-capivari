@@ -1,5 +1,5 @@
 /**
- * SIGESGD — Helpers puros de estoque (sem dependência do runtime Convex)
+ * Gestão de Estoque SGGD — Helpers puros de estoque (sem dependência do runtime Convex)
  *
  * Mantidos fora dos arquivos de função para permitir testes unitários
  * e reutilização entre backend e frontend.
@@ -172,29 +172,46 @@ export function tonerKitObservation(input: {
 }
 
 /**
- * SIGESGD — Estoque de Implantação (data 15/09/2026)
+ * Gestão de Estoque SGGD — Estoque de Implantação (data 15/09/2026)
  *
  * A carga inicial (entrada ENT-2026-000001, originType "initial_inventory",
  * 53 itens) representa o estoque físico EXISTENTE na data de implantação.
- * A partir da implantação o SIGESGD opera normalmente sobre esse estoque:
+ * A partir da implantação o Gestão de Estoque SGGD opera normalmente sobre esse estoque:
  * saídas consomem os lotes normalmente e novos recebimentos entram como
  * Entrada de Material. O carimbo é APENAS de metadados/auditoria — nunca
  * altera quantidades, lotes, saldos ou movimentações.
  */
 export const IMPLEMENTATION_STOCK_DATE = "15/09/2026";
 
-/** Marcador canônico gravado na observação da entrada de implantação. */
+/**
+ * Marcador canônico gravado na observação da entrada de implantação.
+ *
+ * ATENÇÃO: este texto é HISTÓRICO — já está gravado nas entradas reais de
+ * carga inicial (ENT-2026-000001). Renomear o aplicativo NÃO reescreve dados
+ * já registrados: o marco permanece para preservar a rastreabilidade.
+ */
 export const IMPLEMENTATION_STOCK_STAMP =
   `ESTOQUE DE IMPLANTAÇÃO DO SIGESGD — data de implantação ${IMPLEMENTATION_STOCK_DATE} ` +
   `(estoque físico existente na implantação; saídas e entradas posteriores operam normalmente sobre este saldo)`;
 
 /**
+ * Variante atual do marco — permite reconhecer a carga inicial pelo nome
+ * vigente do sistema, sem perder a compatibilidade com o texto histórico.
+ */
+export const IMPLEMENTATION_STOCK_STAMP_ALT =
+  `ESTOQUE DE IMPLANTAÇÃO DO Gestão de Estoque SGGD`;
+
+/**
  * Verifica se um texto já contém o marcador de implantação.
  * Usado para idempotência: aplicar o carimbo duas vezes não duplica.
+ * Aceita o marco histórico e a variante com o nome atual.
  */
 export function isImplementationStockStamped(observation?: string | null): boolean {
   if (!observation) return false;
-  return observation.includes("ESTOQUE DE IMPLANTAÇÃO DO SIGESGD");
+  return (
+    observation.includes("ESTOQUE DE IMPLANTAÇÃO DO SIGESGD") ||
+    observation.includes(IMPLEMENTATION_STOCK_STAMP_ALT)
+  );
 }
 
 /**
@@ -211,7 +228,7 @@ export function applyImplementationStockStamp(
 }
 
 /**
- * SIGESGD — Numerador sequencial de SAÍDAS: SAI-ANO-SEQUENCIAL.
+ * Gestão de Estoque SGGD — Numerador sequencial de SAÍDAS: SAI-ANO-SEQUENCIAL.
  * Puro em relação ao formato (número derivado da lista existente).
  * Nunca altera dados — apenas calcula.
  */
