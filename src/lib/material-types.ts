@@ -25,13 +25,40 @@ export function isPermanent(materialType?: MaterialType | null): boolean {
   return materialType === "permanent";
 }
 
+export const PATRIMONY_STATUS_VALUES = [
+  "in_stock", "in_use", "maintenance", "idle", "transferred",
+  "disposal_pending", "unserviceable", "disposed",
+] as const;
+export type PatrimonyStatus = (typeof PATRIMONY_STATUS_VALUES)[number];
+export const PATRIMONY_STATUS_LABELS: Record<PatrimonyStatus, string> = {
+  in_stock: "Em estoque",
+  in_use: "Em uso",
+  maintenance: "Em manutenção",
+  idle: "Ocioso",
+  transferred: "Transferido",
+  disposal_pending: "Em processo de baixa",
+  unserviceable: "Inservível",
+  disposed: "Baixado",
+};
+
 export interface PatrimonyUnitDraft {
   patrimonyNumber?: string;
   serialNumber?: string;
   manufacturer?: string;
   model?: string;
+  acquisitionDate?: string;
+  incorporationDate?: string;
+  acquisitionValue?: string;
+  accountingValue?: string;
+  residualValue?: string;
+  accumulatedDepreciation?: string;
+  netBookValue?: string;
   locationId?: string;
+  secretariaId?: string;
+  departamentoId?: string;
+  unidadeId?: string;
   responsibleDestiny?: string;
+  patrimonyStatus?: PatrimonyStatus;
   observation?: string;
 }
 

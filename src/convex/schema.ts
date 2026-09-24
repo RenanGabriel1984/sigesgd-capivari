@@ -164,6 +164,30 @@ export const materialTypeValidator = v.union(
   v.literal(MATERIAL_TYPES.PERMANENT),
 );
 
+// Situações patrimoniais preparadas para fluxo administrativo posterior.
+// A remoção/alienação permanece com o setor responsável.
+export const PATRIMONY_STATUSES = {
+  IN_STOCK: "in_stock",
+  IN_USE: "in_use",
+  MAINTENANCE: "maintenance",
+  IDLE: "idle",
+  TRANSFERRED: "transferred",
+  DISPOSAL_PENDING: "disposal_pending",
+  UNSERVICEABLE: "unserviceable",
+  DISPOSED: "disposed",
+} as const;
+
+export const patrimonyStatusValidator = v.union(
+  v.literal(PATRIMONY_STATUSES.IN_STOCK),
+  v.literal(PATRIMONY_STATUSES.IN_USE),
+  v.literal(PATRIMONY_STATUSES.MAINTENANCE),
+  v.literal(PATRIMONY_STATUSES.IDLE),
+  v.literal(PATRIMONY_STATUSES.TRANSFERRED),
+  v.literal(PATRIMONY_STATUSES.DISPOSAL_PENDING),
+  v.literal(PATRIMONY_STATUSES.UNSERVICEABLE),
+  v.literal(PATRIMONY_STATUSES.DISPOSED),
+);
+
 // ─── Return Condition (condição do material devolvido) ───────────────────────
 export const RETURN_CONDITIONS = {
   UNUSED: "unused",
@@ -243,6 +267,8 @@ const schema = defineSchema(
       categoryId: v.id("categories"),
       unitOfMeasure: v.string(),
       internalCode: v.optional(v.string()),
+      // GTIN/EAN do cadastro; código interno e EAN são camadas independentes.
+      ean: v.optional(v.string()),
       manufacturer: v.optional(v.string()),
       model: v.optional(v.string()),
       brand: v.optional(v.string()),
@@ -259,6 +285,7 @@ const schema = defineSchema(
     }).index("by_category", ["categoryId"])
       .index("by_active", ["active"])
       .index("by_code", ["internalCode"])
+      .index("by_ean", ["ean"])
       .index("by_name", ["name"]),
 
     // ── Stock (per product) ──
@@ -281,6 +308,20 @@ const schema = defineSchema(
       observation: v.optional(v.string()),
     }).index("by_active", ["active"])
       .index("by_cnpj", ["cnpj"]),
+
+    // ── NFe Product Aliases (memória de correspondência) ──
+    // Aprendida somente após associação explícita do usuário; não altera estoque.
+    nfeProductAliases: defineTable({
+      supplierId: v.optional(v.id("suppliers")),
+      supplierCode: v.optional(v.string()),
+      normalizedDescription: v.string(),
+      productId: v.id("products"),
+      createdBy: v.id("users"),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_supplier", ["supplierId"])
+      .index("by_supplier_code", ["supplierId", "supplierCode"])
+      .index("by_product", ["productId"]),
 
     // ── Stock Movements ──
     stockMovements: defineTable({
@@ -435,6 +476,10 @@ const schema = defineSchema(
       ncm: v.optional(v.string()),
       cfop: v.optional(v.string()),
       ean: v.optional(v.string()),
+      // Rastreabilidade da associação feita na conferência da NF-e.
+      matchSource: v.optional(v.string()),
+      matchScore: v.optional(v.number()),
+      associationType: v.optional(v.string()),
     }).index("by_entry", ["entryId"])
       .index("by_product", ["productId"]),
 
@@ -557,8 +602,19 @@ const schema = defineSchema(
       serialNumber: v.optional(v.string()),
       manufacturer: v.optional(v.string()),
       model: v.optional(v.string()),
+      acquisitionDate: v.optional(v.string()),
+      incorporationDate: v.optional(v.string()),
+      acquisitionValue: v.optional(v.number()),
+      accountingValue: v.optional(v.number()),
+      residualValue: v.optional(v.number()),
+      accumulatedDepreciation: v.optional(v.number()),
+      netBookValue: v.optional(v.number()),
       locationId: v.optional(v.id("storageLocations")),
+      secretariaId: v.optional(v.id("organizations")),
+      departamentoId: v.optional(v.id("organizations")),
+      unidadeId: v.optional(v.id("organizations")),
       responsibleDestiny: v.optional(v.string()),
+      patrimonyStatus: v.optional(patrimonyStatusValidator),
       observation: v.optional(v.string()),
       createdAt: v.number(),
     }).index("by_entry", ["entryId"])

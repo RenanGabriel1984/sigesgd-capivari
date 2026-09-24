@@ -158,6 +158,9 @@ export const create = mutation({
       ncm: v.optional(v.string()),
       cfop: v.optional(v.string()),
       ean: v.optional(v.string()),
+      matchSource: v.optional(v.string()),
+      matchScore: v.optional(v.number()),
+      associationType: v.optional(v.string()),
     })),
   },
   handler: async (ctx, args) => {
@@ -236,6 +239,9 @@ export const create = mutation({
         ncm: item.ncm || undefined,
         cfop: item.cfop || undefined,
         ean: item.ean || undefined,
+        matchSource: item.matchSource,
+        matchScore: item.matchScore,
+        associationType: item.associationType,
       });
     }
 
@@ -406,6 +412,9 @@ export const addItem = mutation({
     ncm: v.optional(v.string()),
     cfop: v.optional(v.string()),
     ean: v.optional(v.string()),
+    matchSource: v.optional(v.string()),
+    matchScore: v.optional(v.number()),
+    associationType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
@@ -437,6 +446,9 @@ export const addItem = mutation({
       ncm: args.ncm || undefined,
       cfop: args.cfop || undefined,
       ean: args.ean || undefined,
+      matchSource: args.matchSource,
+      matchScore: args.matchScore,
+      associationType: args.associationType,
     });
 
     await ctx.db.patch(args.entryId, { updatedAt: Date.now() });
@@ -465,6 +477,9 @@ export const updateItem = mutation({
     photoStorageId: v.optional(v.string()),
     supplierLotNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
+    matchSource: v.optional(v.string()),
+    matchScore: v.optional(v.number()),
+    associationType: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
@@ -499,6 +514,9 @@ export const updateItem = mutation({
     if (args.photoStorageId !== undefined) updates.photoStorageId = args.photoStorageId;
     if (args.supplierLotNumber !== undefined) updates.supplierLotNumber = args.supplierLotNumber;
     if (args.observation !== undefined) updates.observation = args.observation;
+    if (args.matchSource !== undefined) updates.matchSource = args.matchSource;
+    if (args.matchScore !== undefined) updates.matchScore = args.matchScore;
+    if (args.associationType !== undefined) updates.associationType = args.associationType;
 
     await ctx.db.patch(args.itemId, updates);
     await ctx.db.patch(item.entryId, { updatedAt: Date.now() });
@@ -713,8 +731,22 @@ export const setUnits = mutation({
       serialNumber: v.optional(v.string()),
       manufacturer: v.optional(v.string()),
       model: v.optional(v.string()),
+      acquisitionDate: v.optional(v.string()),
+      incorporationDate: v.optional(v.string()),
+      acquisitionValue: v.optional(v.number()),
+      accountingValue: v.optional(v.number()),
+      residualValue: v.optional(v.number()),
+      accumulatedDepreciation: v.optional(v.number()),
+      netBookValue: v.optional(v.number()),
       locationId: v.optional(v.id("storageLocations")),
+      secretariaId: v.optional(v.id("organizations")),
+      departamentoId: v.optional(v.id("organizations")),
+      unidadeId: v.optional(v.id("organizations")),
       responsibleDestiny: v.optional(v.string()),
+      patrimonyStatus: v.optional(v.union(
+        v.literal("in_stock"), v.literal("in_use"), v.literal("maintenance"), v.literal("idle"),
+        v.literal("transferred"), v.literal("disposal_pending"), v.literal("unserviceable"), v.literal("disposed")
+      )),
       observation: v.optional(v.string()),
     })),
   },
@@ -768,8 +800,19 @@ export const setUnits = mutation({
         serialNumber: u.serialNumber?.trim() || undefined,
         manufacturer: u.manufacturer?.trim() || undefined,
         model: u.model?.trim() || undefined,
+        acquisitionDate: u.acquisitionDate?.trim() || undefined,
+        incorporationDate: u.incorporationDate?.trim() || undefined,
+        acquisitionValue: u.acquisitionValue,
+        accountingValue: u.accountingValue,
+        residualValue: u.residualValue,
+        accumulatedDepreciation: u.accumulatedDepreciation,
+        netBookValue: u.netBookValue,
         locationId: u.locationId,
+        secretariaId: u.secretariaId,
+        departamentoId: u.departamentoId,
+        unidadeId: u.unidadeId,
         responsibleDestiny: u.responsibleDestiny?.trim() || undefined,
+        patrimonyStatus: u.patrimonyStatus,
         observation: u.observation?.trim() || undefined,
         createdAt: now,
       });

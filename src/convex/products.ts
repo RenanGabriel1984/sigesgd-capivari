@@ -145,6 +145,7 @@ export const create = mutation({
   args: {
     name: v.string(), description: v.optional(v.string()), categoryId: v.id("categories"),
     unitOfMeasure: v.string(), internalCode: v.optional(v.string()),
+    ean: v.optional(v.string()),
     manufacturer: v.optional(v.string()), model: v.optional(v.string()),
     brand: v.optional(v.string()), specification: v.optional(v.string()),
     minimumStock: v.number(), idealStock: v.number(), maximumStock: v.number(),
@@ -158,6 +159,9 @@ export const create = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const { initialStock, locationId, ...productArgs } = args;
     if (!args.name.trim()) throw new Error("Nome do item é obrigatório");
+    if (args.ean && !/^\d{8,14}$/.test(args.ean.replace(/\D/g, ""))) {
+      throw new Error("EAN/GTIN inválido: use de 8 a 14 dígitos");
+    }
 
     // Validate category exists
     const category = await ctx.db.get(args.categoryId);
@@ -198,6 +202,7 @@ export const create = mutation({
     const id = await ctx.db.insert("products", {
       ...productArgs,
       name: args.name.trim(),
+      ean: args.ean?.replace(/\D/g, "") || undefined,
       // Auto-generate sequential internal code if not provided
       internalCode: productArgs.internalCode?.trim() || await generateInternalCode(ctx),
       observation: kitObservation ?? productArgs.observation,

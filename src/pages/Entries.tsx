@@ -17,18 +17,28 @@ import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
 import { IMPLEMENTATION_STOCK_DATE } from "@/convex/stockHelpers";
 import {
   MATERIAL_TYPE_LABELS,
+  PATRIMONY_STATUS_LABELS,
+  PATRIMONY_STATUS_VALUES,
   validateEntryUnits,
   type MaterialType,
+  type PatrimonyStatus,
   type PatrimonyUnitDraft,
 } from "@/lib/material-types";
 import { NO_AREA_LABEL } from "@/lib/stock-areas";
 import { NfeDestinationDialog } from "@/components/NfeDestinationDialog";
 import { FileUpload } from "@/components/FileUpload";
+import { EntryDetailsDialog } from "@/components/EntryDetailsDialog";
+import { PatrimonyUnitsEditor } from "@/components/PatrimonyUnitsEditor";
+import { NewEntryItemsEditor } from "@/components/NewEntryItemsEditor";
+import { EditEntryItemCard } from "@/components/EditEntryItemCard";
+import { NfeReviewTable } from "@/components/NfeReviewTable";
 import { toast } from "sonner";
 import {
   parseNfeXml, findSupplierMatch, findEntryByAccessKey, matchNfeProduct,
-  buildEntryDraftFromNfe, mapNfeUnit, formatCnpj,
-  type NfeData, type NfeItem, type ProductMatchStatus,
+  buildEntryDraftFromNfe, mapNfeUnit, formatCnpj, canContinueNfeReview,
+  extractNfeProductHints,
+  type NfeData, type NfeItem, type ProductMatchStatus, type ProductMatchSource,
+  type ProductAssociationType,
 } from "@/lib/nfe";
 
 const ORIGIN_LABELS: Record<string, string> = {
@@ -48,6 +58,11 @@ type EntryItemDraft = {
   photoStorageId: string; supplierLotNumber: string;
 };
 const EMPTY_ITEM: EntryItemDraft = { productId: "", quantity: "1", unitOfMeasure: "un", unitCost: "", brand: "", model: "", specification: "", locationId: "", observation: "", photoStorageId: "", supplierLotNumber: "" };
+const optionalNumber = (value?: string): number | undefined => {
+  if (value == null || value.trim() === "") return undefined;
+  const parsed = Number(value);
+  return isFinite(parsed) ? parsed : undefined;
+};
 
 export default function Entries() {
   const entries = useQuery(api.entries.list);
@@ -56,6 +71,8 @@ export default function Entries() {
   const locations = useQuery(api.storageLocations.listActive);
   const categories = useQuery(api.categories.listActive);
   const areas = useQuery(api.stockAreas.listActive);
+  const organizations = useQuery(api.organizations.listActive);
+  const nfeAliases = useQuery(api.nfeProductAliases.list);
   // Área/Subestoque é uma dimensão independente do fornecedor e da categoria.
   const createEntry = useMutation(api.entries.create);
   const confirmEntry = useMutation(api.entries.confirm);
@@ -65,6 +82,7 @@ export default function Entries() {
   const removeItemMutation = useMutation(api.entries.removeItem);
   const editDraftMutation = useMutation(api.entries.editDraft);
   const setUnitsMutation = useMutation(api.entries.setUnits);
+  const rememberNfeAlias = useMutation(api.nfeProductAliases.upsert);
 
   const [tab, setTab] = useState("all");
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -110,6 +128,8 @@ export default function Entries() {
   const [npUnit, setNpUnit] = useState("un");
   const [npBrand, setNpBrand] = useState("");
   const [npModel, setNpModel] = useState("");
+  const [npEan, setNpEan] = useState("");
+  const [npSpecification, setNpSpecification] = useState("");
   const [npInternalCode, setNpInternalCode] = useState("");
   // null = diálogo manual (preenche item do formulário); número = preenche item da NF importada
   const [productModalTarget, setProductModalTarget] = useState<number | null>(null);
@@ -128,7 +148,17 @@ export default function Entries() {
   const createCategory = useMutation(api.categories.create);
 
   // ─── Importação NF-e XML ───
-  type NfeReviewItem = { item: NfeItem; productId: string; matchStatus: ProductMatchStatus; locationId: string; supplierLot: string };
+  type NfeReviewItem = {
+    item: NfeItem;
+    productId: string;
+    matchStatus: ProductMatchStatus;
+    matchScore: number;
+    matchSource?: ProductMatchSource;
+    matchReason?: string;
+    associationType: ProductAssociationType;
+    locationId: string;
+    supplierLot: string;
+  };
   const [importOpen, setImportOpen] = useState(false);
   const [importStep, setImportStep] = useState<"file" | "review" | "location">("file");
   const [importLoading, setImportLoading] = useState(false);
@@ -163,6 +193,25 @@ export default function Entries() {
       setNfeSupplierFound(true);
     }
   }, [nfe, suppliers, nfeSupplierFound]);
+
+  // A importação pode começar antes de produtos/aliases terminarem de carregar.
+  // Reavalia somente itens ainda automáticos; seleção manual/criada é preservada.
+  useEffect(() => {
+    if (!nfe || !products || !nfeAliases) return;
+    setNfeItems((current) => current.map((review) => {
+      if (review.associationType !== "automatic") return review;
+      const match = matchNfeProduct(review.item, products, { supplierId: nfeSupplierId || undefined, aliases: nfeAliases });
+      return {
+        ...review,
+        productId: match.productId ?? "",
+        matchStatus: match.status,
+        matchScore: match.score,
+        matchSource: match.source,
+        matchReason: match.reason,
+        associationType: "automatic",
+      };
+    }));
+  }, [nfe, products, nfeAliases, nfeSupplierId]);
 
   const viewEntry = entries?.find((e) => e._id === viewId);
   const editEntryData = entries?.find((e) => e._id === editEntryId);
@@ -205,8 +254,19 @@ export default function Entries() {
         serialNumber: u.serialNumber ?? "",
         manufacturer: u.manufacturer ?? "",
         model: u.model ?? "",
+        acquisitionDate: u.acquisitionDate ?? "",
+        incorporationDate: u.incorporationDate ?? "",
+        acquisitionValue: u.acquisitionValue != null ? String(u.acquisitionValue) : "",
+        accountingValue: u.accountingValue != null ? String(u.accountingValue) : "",
+        residualValue: u.residualValue != null ? String(u.residualValue) : "",
+        accumulatedDepreciation: u.accumulatedDepreciation != null ? String(u.accumulatedDepreciation) : "",
+        netBookValue: u.netBookValue != null ? String(u.netBookValue) : "",
         locationId: u.locationId ?? "",
+        secretariaId: u.secretariaId ?? "",
+        departamentoId: u.departamentoId ?? "",
+        unidadeId: u.unidadeId ?? "",
         responsibleDestiny: u.responsibleDestiny ?? "",
+        patrimonyStatus: u.patrimonyStatus ?? "in_stock",
         observation: u.observation ?? "",
       }));
     }
@@ -369,8 +429,19 @@ export default function Entries() {
           serialNumber: u.serialNumber || undefined,
           manufacturer: u.manufacturer || undefined,
           model: u.model || undefined,
-          locationId: u.locationId ? u.locationId : undefined,
+          acquisitionDate: u.acquisitionDate || undefined,
+          incorporationDate: u.incorporationDate || undefined,
+          acquisitionValue: optionalNumber(u.acquisitionValue),
+          accountingValue: optionalNumber(u.accountingValue),
+          residualValue: optionalNumber(u.residualValue),
+          accumulatedDepreciation: optionalNumber(u.accumulatedDepreciation),
+          netBookValue: optionalNumber(u.netBookValue),
+          locationId: u.locationId || undefined,
+          secretariaId: u.secretariaId || undefined,
+          departamentoId: u.departamentoId || undefined,
+          unidadeId: u.unidadeId || undefined,
           responsibleDestiny: u.responsibleDestiny || undefined,
+          patrimonyStatus: u.patrimonyStatus,
           observation: u.observation || undefined,
         });
       }
@@ -422,6 +493,18 @@ export default function Entries() {
     } catch (e: any) { toast.error(e.message ?? "Erro ao criar categoria"); }
   };
 
+  const rememberNfeAssociation = (review: NfeReviewItem, productId: string) => {
+    if (!nfe) return;
+    void rememberNfeAlias({
+      supplierId: (nfeSupplierId || undefined) as any,
+      supplierCode: nfeSupplierId ? review.item.code || undefined : undefined,
+      description: review.item.description,
+      productId: productId as any,
+    }).catch(() => {
+      toast.warning("Associação válida, mas não foi possível memorizá-la para futuras NF-e.");
+    });
+  };
+
   // ─── Quick create product ───
   const handleQuickCreateProduct = async () => {
     if (!npName.trim()) { toast.error("Nome é obrigatório"); return; }
@@ -430,15 +513,25 @@ export default function Entries() {
       const newId = await createProduct({
         name: npName.trim(), categoryId: npCatId as any, unitOfMeasure: npUnit,
         brand: npBrand || undefined, model: npModel || undefined,
+        ean: npEan || undefined,
+        specification: npSpecification || undefined,
         internalCode: npInternalCode.trim() || undefined,
         minimumStock: 0, idealStock: 0, maximumStock: 0,
       });
       if (productModalTarget !== null) {
-        const n = [...nfeItems]; n[productModalTarget].productId = newId as string; n[productModalTarget].matchStatus = "found"; setNfeItems(n);
+        const n = [...nfeItems];
+        n[productModalTarget].productId = newId as string;
+        n[productModalTarget].matchStatus = "found";
+        n[productModalTarget].matchScore = 100;
+        n[productModalTarget].matchSource = "new_product";
+        n[productModalTarget].matchReason = "Produto criado após confirmação explícita";
+        n[productModalTarget].associationType = "created";
+        setNfeItems(n);
+        rememberNfeAssociation(n[productModalTarget], newId as string);
       } else {
         const n = [...cItems]; n[cItems.length - 1].productId = newId as string; setCItems(n);
       }
-      setProductModalOpen(false); setNpName(""); setNpCatId(""); setNpUnit("un"); setNpBrand(""); setNpModel(""); setNpInternalCode(""); setProductModalTarget(null);
+      setProductModalOpen(false); setNpName(""); setNpCatId(""); setNpUnit("un"); setNpBrand(""); setNpModel(""); setNpEan(""); setNpSpecification(""); setNpInternalCode(""); setProductModalTarget(null);
       toast.success("Item criado e selecionado");
     } catch (e: any) { toast.error(e.message ?? "Erro ao criar item"); }
   };
@@ -491,8 +584,21 @@ export default function Entries() {
       );
       setNfeContract(parsed.orderReference ?? "");
       setNfeItems(parsed.items.map((item) => {
-        const m = matchNfeProduct(item, products ?? []);
-        return { item, productId: m.productId ?? "", matchStatus: m.status, locationId: "", supplierLot: "" };
+        const m = matchNfeProduct(item, products ?? [], {
+          supplierId: supplierMatch.supplierId,
+          aliases: nfeAliases ?? [],
+        });
+        return {
+          item,
+          productId: m.productId ?? "",
+          matchStatus: m.status,
+          matchScore: m.score,
+          matchSource: m.source,
+          matchReason: m.reason,
+          associationType: "automatic",
+          locationId: "",
+          supplierLot: "",
+        };
       }));
       setImportStep("review");
       toast.success("NF-e lida com sucesso. Confira os itens antes de confirmar.");
@@ -538,7 +644,12 @@ export default function Entries() {
 
       // 2) Monta o rascunho (NÃO altera estoque — só rascunho)
       const draft = buildEntryDraftFromNfe(nfe, nfeItems.map((r) => ({
-        productId: r.productId, locationId: r.locationId || undefined, supplierLotNumber: r.supplierLot || undefined,
+        productId: r.productId,
+        locationId: r.locationId || undefined,
+        supplierLotNumber: r.supplierLot || undefined,
+        matchSource: r.matchSource,
+        matchScore: r.matchScore,
+        associationType: r.associationType,
       })), {
         supplierId: nfeSupplierId || undefined,
         contractNumber: nfeContract || undefined,
@@ -564,6 +675,7 @@ export default function Entries() {
           locationId: i.locationId ? (i.locationId as any) : undefined,
           supplierLotNumber: i.supplierLotNumber,
           supplierCode: i.supplierCode, ncm: i.ncm, cfop: i.cfop, ean: i.ean,
+          matchSource: i.matchSource, matchScore: i.matchScore, associationType: i.associationType,
         })),
       });
 
@@ -581,12 +693,32 @@ export default function Entries() {
     setImportSaving(false);
   };
 
+  const handleManualNfeSelect = (index: number, productId: string) => {
+    const next = [...nfeItems];
+    next[index] = { ...next[index], productId, matchStatus: "found", matchScore: 100, matchSource: "manual", matchReason: "Produto selecionado manualmente", associationType: "manual" };
+    setNfeItems(next);
+    rememberNfeAssociation(next[index], productId);
+  };
+
+  const handleConfirmNfeSuggestion = (index: number) => {
+    const next = [...nfeItems];
+    next[index] = { ...next[index], matchStatus: "found", matchReason: `${next[index].matchReason ?? "Possível correspondência"} — confirmada pelo usuário` };
+    setNfeItems(next);
+    rememberNfeAssociation(next[index], next[index].productId);
+  };
+
   const openProductModalForImport = (idx: number) => {
     const review = nfeItems[idx];
     if (!review) return;
     setNpName(review.item.description.slice(0, 90));
     setNpInternalCode(review.item.code);
-    setNpBrand(""); setNpModel(""); setNpCatId(""); setNpUnit(mapNfeUnitSafe(review.item.unit));
+    const hints = extractNfeProductHints(review.item);
+    setNpBrand(hints.brand ?? "");
+    setNpModel(hints.model ?? "");
+    setNpEan(hints.ean ?? "");
+    setNpSpecification(`Descrição fiscal: ${review.item.description}`);
+    setNpCatId(categories?.length === 1 ? categories[0]._id : "");
+    setNpUnit(mapNfeUnitSafe(review.item.unit));
     setProductModalTarget(idx);
     setProductModalOpen(true);
   };
@@ -596,57 +728,15 @@ export default function Entries() {
     return mapped === "outro" ? "un" : mapped;
   };
 
-  // ─── Badge de situação de correspondência (NF-e) ───
-  const renderMatchBadge = (s: ProductMatchStatus) => {
-    if (s === "found") return <Badge className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">🟢 Produto encontrado</Badge>;
-    if (s === "possible") return <Badge className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">🟡 Possível — confirmar</Badge>;
-    return <Badge className="text-[10px] bg-rose-50 text-rose-700 border-rose-200">🔴 Não encontrado</Badge>;
-  };
-
-  // ─── Item card for edit mode ───
-  const EditItemCard = ({ idx }: { idx: number }) => {
-    const item = eItems[idx];
-    if (!item) return null;
-    const handleRemove = async () => {
-      if (eItems.length <= 1) { toast.error("A entrada deve ter pelo menos um item"); return; }
-      const itemId = eItemIds[idx];
-      if (itemId && !itemId.startsWith("temp_")) {
-        try { await removeItemMutation({ itemId: itemId as any }); } catch (e: any) { toast.error(e.message); return; }
-      }
-      seteItems(eItems.filter((_, i) => i !== idx));
-      seteItemIds(eItemIds.filter((_, i) => i !== idx));
-      toast.success("Item removido");
-    };
-    return (
-      <div className="border rounded-lg p-3 mb-2 space-y-2 bg-muted/30">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground">Item {idx + 1}</span>
-          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleRemove}>
-            <Trash2 className="h-3 w-3 text-destructive" />
-          </Button>
-        </div>
-        <div className="grid grid-cols-4 gap-2">
-          <div className="col-span-2">
-            <Label className="text-xs">Produto *</Label>
-            <Select value={item.productId} onValueChange={(v) => updateEItem(idx, "productId", v)}>
-              <SelectTrigger className="mt-1 h-8"><SelectValue placeholder="Selecionar" /></SelectTrigger>
-              <SelectContent>{products?.map((p) => (<SelectItem key={p._id} value={p._id}>{p.name} {p.brand ? `(${p.brand})` : ""}</SelectItem>))}</SelectContent>
-            </Select>
-          </div>
-          <div><Label className="text-xs">Qtd *</Label><Input type="number" min="1" value={item.quantity} onChange={(e) => updateEItem(idx, "quantity", e.target.value)} className="mt-1 h-8" /></div>
-          <div><Label className="text-xs">UM</Label><Select value={item.unitOfMeasure} onValueChange={(v) => updateEItem(idx, "unitOfMeasure", v)}><SelectTrigger className="mt-1 h-8"><SelectValue /></SelectTrigger><SelectContent>{UNITS_OF_MEASURE.map((u) => (<SelectItem key={u} value={u}>{UNIT_LABELS[u] ?? u}</SelectItem>))}</SelectContent></Select></div>
-        </div>
-        <div className="grid grid-cols-4 gap-2">
-          <div><Label className="text-xs">Marca</Label><Input value={item.brand} onChange={(e) => updateEItem(idx, "brand", e.target.value)} className="mt-1 h-8" /></div>
-          <div><Label className="text-xs">Modelo</Label><Input value={item.model} onChange={(e) => updateEItem(idx, "model", e.target.value)} className="mt-1 h-8" /></div>
-          <div><Label className="text-xs">Custo Unit.</Label><Input type="number" step="0.01" min="0" value={item.unitCost} onChange={(e) => updateEItem(idx, "unitCost", e.target.value)} placeholder="R$" className="mt-1 h-8" /></div>
-          <div><Label className="text-xs">Local</Label><Select value={item.locationId} onValueChange={(v) => updateEItem(idx, "locationId", v)}><SelectTrigger className="mt-1 h-8"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{locations?.map((l) => (<SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>))}</SelectContent></Select></div>
-        </div>
-        <div><Label className="text-xs">Especificação</Label><Input value={item.specification} onChange={(e) => updateEItem(idx, "specification", e.target.value)} className="mt-1 h-8" placeholder="Opcional" /></div>
-        <div><Label className="text-xs">Observação</Label><Input value={item.observation} onChange={(e) => updateEItem(idx, "observation", e.target.value)} className="mt-1 h-8" placeholder="Opcional" /></div>
-        <div><Label className="text-xs">Foto do Item</Label><FileUpload storageId={item.photoStorageId} onUpload={(sid) => updateEItem(idx, "photoStorageId", sid)} onRemove={() => updateEItem(idx, "photoStorageId", "")} size="sm" label="Foto do item recebido" /></div>
-      </div>
-    );
+  const handleRemoveEditItem = async (index: number) => {
+    if (eItems.length <= 1) { toast.error("A entrada deve ter pelo menos um item"); return; }
+    const itemId = eItemIds[index];
+    if (itemId && !itemId.startsWith("temp_")) {
+      try { await removeItemMutation({ itemId: itemId as any }); } catch (error: any) { toast.error(error.message); return; }
+    }
+    seteItems(eItems.filter((_, i) => i !== index));
+    seteItemIds(eItemIds.filter((_, i) => i !== index));
+    toast.success("Item removido");
   };
 
   return (
@@ -721,80 +811,13 @@ export default function Entries() {
         )}
       </div>
 
-      {/* ═══ View Detail Dialog ═══ */}
-      <Dialog open={!!viewId} onOpenChange={() => setViewId(null)}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>{viewEntry?.entryNumber ?? "Entrada"}</DialogTitle></DialogHeader>
-          {viewEntry && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                <div><span className="text-muted-foreground">Status:</span> <Badge className={`text-[10px] ${STATUS_COLORS[viewEntry.status]}`}>{STATUS_LABELS[viewEntry.status]}</Badge></div>
-                <div><span className="text-muted-foreground">Origem:</span> {ORIGIN_LABELS[viewEntry.originType]}</div>
-                <div><span className="text-muted-foreground">Tipo de material:</span> {MATERIAL_TYPE_LABELS[(viewEntry.materialType ?? "consumption") as MaterialType]}</div>
-                <div><span className="text-muted-foreground">Área/Subestoque:</span> {viewEntry.area?.name ?? NO_AREA_LABEL}</div>
-                <div><span className="text-muted-foreground">Recebido:</span> {new Date(viewEntry.receivedAt).toLocaleDateString("pt-BR")}</div>
-                <div><span className="text-muted-foreground">Responsável:</span> {viewEntry.responsible?.name ?? "—"}</div>
-                {viewEntry.supplier && <div><span className="text-muted-foreground">Fornecedor:</span> {viewEntry.supplier.legalName}</div>}
-                {viewEntry.invoiceNumber && <div><span className="text-muted-foreground">NF:</span> {viewEntry.invoiceNumber}</div>}
-                {viewEntry.invoiceDate && <div><span className="text-muted-foreground">Data NF:</span> {viewEntry.invoiceDate}</div>}
-                {viewEntry.series && <div><span className="text-muted-foreground">Série:</span> {viewEntry.series}</div>}
-                {viewEntry.totalValue != null && <div><span className="text-muted-foreground">Valor total NF:</span> R$ {viewEntry.totalValue.toFixed(2)}</div>}
-                {viewEntry.accessKey && <div className="col-span-2"><span className="text-muted-foreground">Chave de acesso:</span> <span className="font-mono text-xs break-all">{viewEntry.accessKey}</span></div>}
-                {viewEntry.purchaseAuthorizationNumber && <div><span className="text-muted-foreground">AF:</span> {viewEntry.purchaseAuthorizationNumber}</div>}
-                {viewEntry.processNumber && <div><span className="text-muted-foreground">Processo:</span> {viewEntry.processNumber}</div>}
-                {viewEntry.contractNumber && <div><span className="text-muted-foreground">Contrato:</span> {viewEntry.contractNumber}</div>}
-              </div>
-              {viewEntry.observation && <div className="text-sm"><span className="text-muted-foreground">Observação:</span> {viewEntry.observation}</div>}
-              {(viewEntry.documentStorageId || viewEntry.xmlStorageId) && (
-                <div className="rounded-lg border p-3 space-y-2">
-                  <h4 className="font-medium text-sm">Documentos da NF-e</h4>
-                  {viewEntry.xmlStorageId && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-muted-foreground">XML da NF-e</span>
-                      <FileUpload storageId={viewEntry.xmlStorageId} onUpload={() => {}} size="sm" label="XML original da NF-e" disabled />
-                    </div>
-                  )}
-                  {viewEntry.documentStorageId && (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-muted-foreground">DANFE PDF / documento da entrada</span>
-                      <FileUpload storageId={viewEntry.documentStorageId} onUpload={() => {}} size="sm" label="DANFE PDF" disabled />
-                    </div>
-                  )}
-                </div>
-              )}
-              <div>
-                <h4 className="font-medium text-sm mb-2">Itens da Entrada</h4>
-                <div className="border rounded-lg overflow-hidden">
-                  <Table><TableHeader><TableRow><TableHead className="text-xs">Produto</TableHead><TableHead className="text-xs text-center">Qtd</TableHead><TableHead className="text-xs">UM</TableHead><TableHead className="text-xs">Marca/Modelo</TableHead><TableHead className="text-xs">Custo</TableHead><TableHead className="text-xs">Local</TableHead><TableHead className="text-xs">Foto</TableHead></TableRow></TableHeader>
-                    <TableBody>{viewEntry.items?.map((item: any) => (
-                      <TableRow key={item._id}><TableCell className="text-sm font-medium">{item.product?.name ?? "—"}</TableCell><TableCell className="text-center font-mono">{item.quantity}</TableCell><TableCell className="text-xs">{item.unitOfMeasure}</TableCell><TableCell className="text-xs text-muted-foreground">{item.brand ?? "—"} {item.model ? `/ ${item.model}` : ""}</TableCell><TableCell className="text-xs">{item.unitCost != null ? `R$ ${item.unitCost.toFixed(2)}` : "—"}</TableCell><TableCell className="text-xs text-muted-foreground">{item.location?.name ?? "—"}</TableCell><TableCell>{item.photoStorageId ? <FileUpload storageId={item.photoStorageId} onUpload={() => {}} size="sm" disabled /> : "—"}</TableCell></TableRow>
-                    ))}</TableBody></Table>
-                </div>
-              </div>
-              {viewEntry.lots && viewEntry.lots.length > 0 && <div><h4 className="font-medium text-sm mb-2">Lotes Gerados</h4><div className="flex flex-wrap gap-2">{viewEntry.lots?.map((lot: any) => (<Badge key={lot._id} variant={lot.active ? "default" : "secondary"} className="text-[10px] font-mono">{lot.lotNumber} — {lot.quantityAvailable}/{lot.quantityReceived} disp.</Badge>))}</div></div>}
-              {viewEntry.items?.some((i: any) => (i.units?.length ?? 0) > 0) && (
-                <div>
-                  <h4 className="font-medium text-sm mb-2">Unidades patrimoniais</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {viewEntry.items.flatMap((item: any) =>
-                      (item.units ?? []).map((u: any) => (
-                        <div key={u._id} className="p-2 text-xs flex flex-wrap gap-x-4 gap-y-1">
-                          <span className="font-medium">{item.product?.name ?? "—"}</span>
-                          <span className="font-mono">Patrimônio: {u.patrimonyNumber ?? "—"}</span>
-                          <span className="font-mono">Série: {u.serialNumber ?? "—"}</span>
-                          {u.manufacturer && <span>Fabricante: {u.manufacturer}</span>}
-                          {u.model && <span>Modelo: {u.model}</span>}
-                          {u.responsibleDestiny && <span>Destino: {u.responsibleDestiny}</span>}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <EntryDetailsDialog
+        entry={viewEntry}
+        statusLabels={STATUS_LABELS}
+        statusColors={STATUS_COLORS}
+        originLabels={ORIGIN_LABELS}
+        onClose={() => setViewId(null)}
+      />
 
       {/* ═══ Edit Draft Dialog ═══ */}
       <Dialog open={!!editEntryId} onOpenChange={(open) => { if (!open) setEditEntryId(null); }}>
@@ -839,85 +862,20 @@ export default function Entries() {
                 <Button size="sm" className="gap-1" onClick={handleSaveAllItems} disabled={saving}><Save className="h-3 w-3" /> {saving ? "Salvando..." : "Salvar Todos os Itens"}</Button>
               </div>
             </div>
-            {eItems.map((_, idx) => (<EditItemCard key={eItemIds[idx] ?? idx} idx={idx} />))}
+            {eItems.map((item, index) => <EditEntryItemCard key={eItemIds[index] ?? index} index={index} item={item} products={products ?? []} locations={locations ?? []} onUpdate={updateEItem} onRemove={handleRemoveEditItem} />)}
 
-            {/* ── Unidades patrimoniais (somente material permanente) ── */}
             {eMaterialType === "permanent" && (
-              <div className="border-t pt-3 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <Label className="text-sm font-medium">Unidades patrimoniais</Label>
-                  <Button size="sm" variant="outline" onClick={handleSaveUnits} disabled={saving}>
-                    {saving ? "Salvando..." : "Salvar Unidades"}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Produto → Unidade patrimonial → Patrimônio/Serial. Informe uma unidade por unidade recebida.
-                </p>
-                {eItems.map((item, idx) => {
-                  const itemId = eItemIds[idx];
-                  if (!itemId || itemId.startsWith("temp_")) return null;
-                  const units = eUnits[itemId] ?? [];
-                  const qty = Number(item.quantity) || 0;
-                  const product = products?.find((p) => p._id === item.productId);
-                  const unitError = units.length > 0 || qty > 0
-                    ? validateEntryUnits({ materialType: "permanent", quantity: qty, units, productName: product?.name })
-                    : null;
-                  const setUnits = (next: PatrimonyUnitDraft[]) =>
-                    seteUnits((prev) => ({ ...prev, [itemId]: next }));
-                  return (
-                    <div key={itemId} className="border rounded-lg p-3 bg-background space-y-2">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-medium">
-                          {product?.name ?? "Produto"} — quantidade: {qty} · unidades: {units.length}
-                        </p>
-                        <Button
-                          size="sm" variant="ghost" className="h-6 px-2 text-xs"
-                          onClick={() => setUnits([...units, { patrimonyNumber: "", serialNumber: "", manufacturer: "", model: "", locationId: "", responsibleDestiny: "", observation: "" }])}
-                          disabled={units.length >= qty}
-                        >
-                          <Plus className="h-3 w-3 mr-1" /> Unidade
-                        </Button>
-                      </div>
-                      {unitError && units.length !== qty && (
-                        <p className="text-[11px] text-amber-700">{unitError}</p>
-                      )}
-                      {units.map((u, uIdx) => (
-                        <div key={uIdx} className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end border-t pt-2">
-                          <div className="col-span-2 sm:col-span-1"><Label className="text-[10px]">Patrimônio *</Label>
-                            <Input value={u.patrimonyNumber ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, patrimonyNumber: e.target.value } : x))} className="h-7 text-xs" placeholder="Nº patrim." />
-                          </div>
-                          <div><Label className="text-[10px]">Série</Label>
-                            <Input value={u.serialNumber ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, serialNumber: e.target.value } : x))} className="h-7 text-xs" />
-                          </div>
-                          <div><Label className="text-[10px]">Fabricante</Label>
-                            <Input value={u.manufacturer ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, manufacturer: e.target.value } : x))} className="h-7 text-xs" />
-                          </div>
-                          <div><Label className="text-[10px]">Modelo</Label>
-                            <Input value={u.model ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, model: e.target.value } : x))} className="h-7 text-xs" />
-                          </div>
-                          <div className="col-span-2 sm:col-span-1 flex items-center gap-1">
-                            <div className="flex-1"><Label className="text-[10px]">Responsável/destino</Label>
-                              <Input value={u.responsibleDestiny ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, responsibleDestiny: e.target.value } : x))} className="h-7 text-xs" placeholder="Opcional" />
-                            </div>
-                            <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" onClick={() => setUnits(units.filter((_, i) => i !== uIdx))}>
-                              <Trash2 className="h-3 w-3 text-destructive" />
-                            </Button>
-                          </div>
-                          <div className="col-span-2 sm:col-span-6"><Label className="text-[10px]">Localização / observação</Label>
-                            <div className="flex gap-2">
-                              <Select value={u.locationId ?? ""} onValueChange={(v) => setUnits(units.map((x, i) => i === uIdx ? { ...x, locationId: v } : x))}>
-                                <SelectTrigger className="h-7 text-xs w-40"><SelectValue placeholder="Local (opcional)" /></SelectTrigger>
-                                <SelectContent>{(locations ?? []).map((l) => (<SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>))}</SelectContent>
-                              </Select>
-                              <Input value={u.observation ?? ""} onChange={(e) => setUnits(units.map((x, i) => i === uIdx ? { ...x, observation: e.target.value } : x))} className="h-7 text-xs flex-1" placeholder="Observação (opcional)" />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
+              <PatrimonyUnitsEditor
+                items={eItems}
+                itemIds={eItemIds}
+                unitsByItem={eUnits}
+                products={products ?? []}
+                locations={locations ?? []}
+                organizations={organizations ?? []}
+                saving={saving}
+                onChange={(itemId, next) => seteUnits((prev) => ({ ...prev, [itemId]: next }))}
+                onSave={handleSaveUnits}
+              />
             )}
           </div>
           <DialogFooter>
@@ -972,31 +930,15 @@ export default function Entries() {
             </div>
             <div className="border rounded-lg p-3 bg-muted/30"><Label className="text-xs font-medium">Documento da Entrada (NF / Imagem)</Label><FileUpload storageId={cDocStorageId} onUpload={setcDocStorageId} onRemove={() => setcDocStorageId("")} accept="image/*,.pdf" label="Anexar NF ou documento" /></div>
             <div><Label>Observação</Label><Textarea value={cObservation} onChange={(e) => setcObservation(e.target.value)} rows={2} placeholder="Opcional" className="mt-1" /></div>
-            <div className="border-t pt-4">
-              <div className="flex items-center justify-between mb-2"><Label className="text-sm font-medium">Itens da Entrada *</Label><Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs gap-1 text-primary" onClick={() => setProductModalOpen(true)}><ExternalLink className="h-3 w-3" /> Novo Item</Button></div>
-              {cItems.map((item, idx) => (
-                <div key={idx} className="border rounded-lg p-3 mb-2 space-y-2 bg-muted/30">
-                  <div className="flex items-center justify-between"><span className="text-xs font-medium text-muted-foreground">Item {idx + 1}</span>{cItems.length > 1 && <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setCItems(cItems.filter((_, i) => i !== idx))}><Trash2 className="h-3 w-3 text-destructive" /></Button>}</div>
-                  <div className="grid grid-cols-4 gap-2">
-                    <div className="col-span-2"><Label className="text-xs">Produto *</Label><Select value={item.productId} onValueChange={(v) => updateCItem(idx, "productId", v)}><SelectTrigger className="mt-1 h-8"><SelectValue placeholder="Selecionar" /></SelectTrigger><SelectContent>{products?.map((p) => (<SelectItem key={p._id} value={p._id}>{p.name} {p.brand ? `(${p.brand})` : ""}</SelectItem>))}</SelectContent></Select></div>
-                    <div><Label className="text-xs">Quantidade *</Label><Input type="number" min="1" value={item.quantity} onChange={(e) => updateCItem(idx, "quantity", e.target.value)} className="mt-1 h-8" /></div>
-                    <div><Label className="text-xs">Unidade</Label><Select value={item.unitOfMeasure} onValueChange={(v) => updateCItem(idx, "unitOfMeasure", v)}><SelectTrigger className="mt-1 h-8"><SelectValue /></SelectTrigger><SelectContent>{UNITS_OF_MEASURE.map((u) => (<SelectItem key={u} value={u}>{UNIT_LABELS[u] ?? u}</SelectItem>))}</SelectContent></Select></div>
-                  </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    <div><Label className="text-xs">Marca</Label><Input value={item.brand} onChange={(e) => updateCItem(idx, "brand", e.target.value)} className="mt-1 h-8" /></div>
-                    <div><Label className="text-xs">Modelo</Label><Input value={item.model} onChange={(e) => updateCItem(idx, "model", e.target.value)} className="mt-1 h-8" /></div>
-                    <div><Label className="text-xs">Custo Unit.</Label><Input type="number" step="0.01" min="0" value={item.unitCost} onChange={(e) => updateCItem(idx, "unitCost", e.target.value)} placeholder="R$" className="mt-1 h-8" /></div>
-                    <div><Label className="text-xs">Local</Label><Select value={item.locationId} onValueChange={(v) => updateCItem(idx, "locationId", v)}><SelectTrigger className="mt-1 h-8"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{locations?.map((l) => (<SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>))}</SelectContent></Select></div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div><Label className="text-xs">Lote do Fornecedor</Label><Input value={item.supplierLotNumber} onChange={(e) => updateCItem(idx, "supplierLotNumber", e.target.value)} placeholder="Lote impresso na embalagem (opcional)" className="mt-1 h-8" /></div>
-                    <div><Label className="text-xs">Especificação</Label><Input value={item.specification} onChange={(e) => updateCItem(idx, "specification", e.target.value)} placeholder="Opcional" className="mt-1 h-8" /></div>
-                  </div>
-                  <div><Label className="text-xs">Foto do Item</Label><FileUpload storageId={item.photoStorageId} onUpload={(sid) => updateCItem(idx, "photoStorageId", sid)} onRemove={() => updateCItem(idx, "photoStorageId", "")} size="sm" label="Foto do item recebido" /></div>
-                </div>
-              ))}
-              <Button variant="outline" size="sm" className="gap-1 mt-2" onClick={() => setCItems([...cItems, { ...EMPTY_ITEM }])}><Plus className="h-3 w-3" /> Adicionar Item</Button>
-            </div>
+            <NewEntryItemsEditor
+              items={cItems}
+              products={products ?? []}
+              locations={locations ?? []}
+              onUpdateItem={updateCItem}
+              onAddItem={() => setCItems([...cItems, { ...EMPTY_ITEM }])}
+              onRemoveItem={(index) => setCItems(cItems.filter((_, i) => i !== index))}
+              onNewProduct={() => setProductModalOpen(true)}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setCreateDialogOpen(false); resetCreateForm(); }}>Cancelar</Button>
@@ -1084,13 +1026,26 @@ export default function Entries() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2 text-xs">
-                <Badge className="text-[10px] bg-emerald-50 text-emerald-700">🟢 {nfeItems.filter((r) => r.matchStatus === "found").length} encontrados</Badge>
+              <NfeReviewTable
+                items={nfeItems}
+                products={products ?? []}
+                onManualSelect={handleManualNfeSelect}
+                onConfirmSuggestion={handleConfirmNfeSuggestion}
+                onNewProduct={openProductModalForImport}
+                onBack={() => { setImportStep("file"); setImportError(""); }}
+                onContinue={() => {
+                  if (!canContinueNfeReview(nfeItems)) { toast.error("Associe todos os itens e confirme explicitamente as correspondências possíveis antes de continuar."); return; }
+                  setImportStep("location");
+                }}
+              />
+              <div className="hidden">PLACEHOLDER</div>
+              <div className="hidden flex-wrap gap-2 text-xs">
+                <Badge className="text-[10px] bg-emerald-50 text-emerald-700">🟢 {nfeItems.filter((r) => r.matchStatus === "found" && r.associationType === "automatic").length} encontrados</Badge>
                 <Badge className="text-[10px] bg-amber-50 text-amber-700">🟡 {nfeItems.filter((r) => r.matchStatus === "possible").length} possíveis</Badge>
-                <Badge className="text-[10px] bg-rose-50 text-rose-700">🔴 {nfeItems.filter((r) => r.matchStatus === "not_found").length} não encontrados</Badge>
+                <Badge className="text-[10px] bg-rose-50 text-rose-700">🔴 {nfeItems.filter((r) => !r.productId || r.matchStatus === "not_found").length} não encontrados</Badge>
               </div>
 
-              <div className="border rounded-lg overflow-x-auto">
+              <div className="hidden border rounded-lg overflow-x-auto">
                 <Table><TableHeader><TableRow><TableHead className="text-xs">#</TableHead><TableHead className="text-xs">Produto da NF</TableHead><TableHead className="text-xs text-center">Qtd</TableHead><TableHead className="text-xs">Unid.</TableHead><TableHead className="text-xs">Situação</TableHead><TableHead className="text-xs">Produto no estoque</TableHead></TableRow></TableHeader>
                   <TableBody>{nfeItems.map((r, idx) => (
                     <TableRow key={idx} className={!r.productId ? "bg-rose-50/40" : ""}>
@@ -1101,8 +1056,8 @@ export default function Entries() {
                       </TableCell>
                       <TableCell className="text-center font-mono text-sm">{r.item.quantity}</TableCell>
                       <TableCell className="text-xs">{r.item.unit}</TableCell>
-                      <TableCell>{renderMatchBadge(r.matchStatus)}</TableCell>
-                      <TableCell className="min-w-[180px]">
+                      <TableCell><Badge variant="secondary">Revisado</Badge></TableCell>
+                      <TableCell className="min-w-[220px]">
                         <div className="flex items-center gap-1">
                           {/* Categoria do material mapeado (regra: fornecedor ≠ categoria) */}
                           {r.productId && (

@@ -58,10 +58,31 @@ export type ProductForMatch = {
   _id: string;
   name: string;
   internalCode?: string | null;
+  ean?: string | null;
   brand?: string | null;
   model?: string | null;
   specification?: string | null;
 };
+
+export type ProductAliasForMatch = {
+  _id: string;
+  supplierId?: string | null;
+  supplierCode?: string | null;
+  normalizedDescription: string;
+  productId: string;
+};
+
+export type ProductMatchSource =
+  | "ean"
+  | "supplier_alias"
+  | "internal_code"
+  | "brand_model"
+  | "normalized_description"
+  | "approximate"
+  | "manual"
+  | "new_product";
+
+export type ProductAssociationType = "automatic" | "manual" | "created";
 
 export type SupplierForMatch = {
   _id: string;
@@ -74,8 +95,10 @@ export type ProductMatchStatus = "found" | "possible" | "not_found";
 export interface ProductMatch {
   productId?: string;
   status: ProductMatchStatus;
-  /** 0–100; >=100 encontrado, >=40 possível */
+  /** 0–100. Aproximações são sempre "possible" e exigem confirmação. */
   score: number;
+  source?: ProductMatchSource;
+  reason?: string;
 }
 
 export interface NfeDraftItem {
@@ -91,6 +114,9 @@ export interface NfeDraftItem {
   ncm?: string;
   cfop?: string;
   ean?: string;
+  matchSource?: ProductMatchSource;
+  matchScore?: number;
+  associationType?: ProductAssociationType;
 }
 
 export interface NfeDraft {
@@ -125,9 +151,41 @@ export function findEntryByAccessKey(
 const normalizeAccents = (s: string): string =>
   s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-/** Normaliza para comparação: minúsculas, sem acentos, só alfanuméricos */
-export const normalizeText = (s: string): string =>
-  normalizeAccents((s ?? "").toLowerCase()).replace(/[^a-z0-9]+/g, " ").trim();
+/**
+ * Normaliza texto fiscal para comparação sem apagar identificadores.
+ * Abreviações são equivalentes, mas modelo, capacidade, cor e códigos
+ * continuam presentes (ex.: "CX-735" e "CX735" convergem para "cx735").
+ */
+export const normalizeText = (s: string): string => {
+  let value = normalizeAccents((s ?? "").toLowerCase());
+  value = value
+    .replace(/\bcart(?:\.|\s+)/g, "cartucho ")
+    .replace(/\bcartuchos?\b/g, "cartucho")
+    .replace(/\bp\s*\/\s*/g, " para ")
+    .replace(/\bcaixa\s+c\b/g, "caixa")
+    .replace(/\bunid(?:ade)?\b/g, "un")
+    .replace(/\baltalink\b/g, "alta link")
+    .replace(/\bbobina\s+termica\b/g, "papel termico")
+    .replace(/([a-z]+)\s+termica\b/g, "$1 termico")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+  // Junta apenas prefixos inequívocos de modelo_partículo: CX-735, TN-34925BR...
+  const parts = value.split(/\s+/).filter(Boolean);
+  const joined: string[] = [];
+  const splitModelPrefixes = new Set(["cx", "tn", "006r", "mfc", "mfcl", "c81", "c82"]);
+  for (let i = 0; i < parts.length; i++) {
+    const current = parts[i];
+    const next = parts[i + 1];
+    if (next && splitModelPrefixes.has(current) && /^[a-z]*\d[a-z0-9-]*$/.test(next)) {
+      joined.push(current + next);
+      i++;
+    } else {
+      joined.push(current);
+    }
+  }
+  return joined.join(" ");
+};
 
 export const digitsOnly = (s: string): string => (s ?? "").replace(/\D/g, "");
 
@@ -351,7 +409,6 @@ function tokenize(s: string): string[] {
   return normalizeText(s).split(" ").filter((t) => t.length > 1);
 }
 
-/** Similaridade de Jaccard entre conjuntos de tokens */
 function tokenOverlap(a: string[], b: string[]): number {
   if (a.length === 0 || b.length === 0) return 0;
   const setA = new Set(a);
@@ -362,7 +419,7 @@ function tokenOverlap(a: string[], b: string[]): number {
   return inter / union.size;
 }
 
-/** Similaridade de bigramas para nomes curtos ("TONER" vs "TONER PRETO") */
+/** Similaridade de bigramas; não decide sozinha uma associação automática. */
 function similarity(a: string, b: string): number {
   const normA = normalizeText(a);
   const normB = normalizeText(b);
@@ -376,71 +433,216 @@ function similarity(a: string, b: string): number {
   const ba = bigrams(normA);
   const bb = bigrams(normB);
   const inter = ba.filter((g) => bb.includes(g)).length;
-  return (2 * inter) / (ba.length + bb.length);
+  return ba.length + bb.length === 0 ? 0 : (2 * inter) / (ba.length + bb.length);
+}
+
+const COLOR_TERMS = new Set(["preto", "branco", "amarelo", "ciano", "magenta", "vermelho", "azul", "verde"]);
+const BRAND_TERMS = new Set(["brother", "lexmark", "xerox", "hp", "hewlett", "packard", "canon", "ricoh", "konica", "minolta", "samsung", "epson"]);
+const SEMANTIC_STOP_WORDS = new Set([
+  "cartucho", "cartucho", "caixa", "kit", "para", "p", "com", "original", "cor",
+  "de", "da", "do", "das", "dos", "un", "unidade", "produto", "item",
+]);
+const DISTINCTIVE_FAMILIES: string[][] = [["sigma"], ["alta", "link"]];
+
+function tokensOf(text: string): Set<string> {
+  return new Set(tokenize(text));
+}
+
+function extractColors(text: string): Set<string> {
+  return new Set(tokenize(text).filter((token) => COLOR_TERMS.has(token)));
+}
+
+function extractBrands(text: string): Set<string> {
+  return new Set(tokenize(text).filter((token) => BRAND_TERMS.has(token)));
+}
+
+/** Códigos de modelo/fabricante com letras e números; capacidades e medidas não entram. */
+function extractModelTokens(text: string): Set<string> {
+  return new Set(tokenize(text).filter((token) => {
+    if (!/^[a-z]*\d[a-z0-9]*$/.test(token) || token.length < 4) return false;
+    if (/^\d+x\d+/.test(token)) return false; // dimensão, ex.: 86x54
+    if (/^\d{1,3}k$/.test(token)) return false; // capacidade fiscal, ex.: 28k
+    return true;
+  }));
+}
+
+function extractFamilies(text: string): Set<string> {
+  const tokens = new Set(tokenize(text));
+  const families = new Set<string>();
+  for (const family of DISTINCTIVE_FAMILIES) {
+    if (family.every((token) => tokens.has(token))) families.add(family.join(" "));
+  }
+  return families;
+}
+
+function intersects(a: Set<string>, b: Set<string>): boolean {
+  return [...a].some((value) => b.has(value));
+}
+
+function semanticCore(text: string): Set<string> {
+  return new Set(tokenize(text).filter((token) => !SEMANTIC_STOP_WORDS.has(token)));
+}
+
+/** Equivalências semânticas conservativeas; não genérica por categoria. */
+function hasSafeMaterialEquivalence(a: Set<string>, b: Set<string>): boolean {
+  const pvcCard = a.has("cartao") && a.has("pvc") && b.has("cartao") && b.has("pvc");
+  const thermalPaper = a.has("papel") && a.has("termico") && b.has("papel") && b.has("termico");
+  return pvcCard || thermalPaper;
+}
+
+function isReliableGtin(value?: string | null): boolean {
+  const digits = digitsOnly(value ?? "");
+  return [8, 12, 13, 14].includes(digits.length) && !/^0+$/.test(digits);
+}
+
+function normalizedCode(value?: string | null): string {
+  return normalizeText(value ?? "").replace(/\s+/g, "");
 }
 
 /**
- * Classifica a correspondência do item da NF com produtos cadastrados.
+ * Correspondência em camadas, da mais forte para a mais frágil:
+ * EAN/GTIN → memória do fornecedor → código → marca/modelo/família →
+ * núcleo semântico → descrição normalizada → aproximação.
  *
- * Prioridade:
- *  1. código interno (cProd armazenado em internalCode) — encontrado;
- *  2. combinação forte marca + modelo + especificação — encontrado;
- *  3. similaridade de descrição — possível (confirmar);
- *  4. nada — não encontrado.
- *
- * Descrições genéricas ("TONER" vs outro "TONER" de modelo diferente)
- * NUNCA são tratadas como iguais sem confirmação.
+ * Aproximações NUNCA retornam `found`. Modelos e cores conflitantes
+ * eliminam o candidato, evitando que qualquer toner preto compatível com
+ * outro modelo seja escolhido.
  */
-export function matchNfeProduct(item: NfeItem, products: ProductForMatch[]): ProductMatch {
-  const code = normalizeText(item.code);
-  // 1. Código interno do fornecedor previamente armazenado
+export function matchNfeProduct(
+  item: NfeItem,
+  products: ProductForMatch[],
+  options: { supplierId?: string | null; aliases?: ProductAliasForMatch[] } = {}
+): ProductMatch {
+  const activeIds = new Set(products.map((product) => product._id));
+  const itemEan = digitsOnly(item.ean ?? "");
+  if (isReliableGtin(item.ean)) {
+    const eanHit = products.find((product) => isReliableGtin(product.ean) && digitsOnly(product.ean ?? "") === itemEan);
+    if (eanHit) return { productId: eanHit._id, status: "found", score: 100, source: "ean", reason: "GTIN/EAN idêntico" };
+  }
+
+  const code = normalizedCode(item.code);
+  const description = normalizeText(item.description);
+  const aliases = options.aliases ?? [];
+  const alias = aliases.find((candidate) => {
+    if (!activeIds.has(candidate.productId)) return false;
+    const sameSupplier = !candidate.supplierId || candidate.supplierId === options.supplierId;
+    if (!sameSupplier) return false;
+    if (code && candidate.supplierCode) return normalizedCode(candidate.supplierCode) === code;
+    return candidate.normalizedDescription === description;
+  });
+  if (alias) {
+    return { productId: alias.productId, status: "found", score: 100, source: "supplier_alias", reason: "Associação memorizada do fornecedor" };
+  }
+
   if (code) {
-    for (const p of products) {
-      if (p.internalCode && normalizeText(p.internalCode) === code) {
-        return { productId: p._id, status: "found", score: 100 };
-      }
-    }
+    const codeHit = products.find((product) => product.internalCode && normalizedCode(product.internalCode) === code);
+    if (codeHit) return { productId: codeHit._id, status: "found", score: 100, source: "internal_code", reason: "Código do produto idêntico" };
   }
 
-  const descTokens = tokenize(item.description);
-  const descNorm = normalizeText(item.description);
+  const itemColors = extractColors(item.description);
+  const itemBrands = extractBrands(item.description);
+  const itemModels = extractModelTokens(item.description);
+  const itemFamilies = extractFamilies(item.description);
+  const itemCore = semanticCore(item.description);
+  const candidates: ProductMatch[] = [];
 
-  let best: ProductMatch = { status: "not_found", score: 0 };
+  for (const product of products) {
+    const productText = [product.brand, product.name, product.model, product.specification].filter(Boolean).join(" ");
+    const productColors = extractColors(productText);
+    const productBrands = extractBrands(productText);
+    const productModels = extractModelTokens(productText);
+    const productFamilies = extractFamilies(productText);
+    const productCore = semanticCore(productText);
+    const productName = normalizeText(product.name);
 
-  for (const p of products) {
-    const pNameNorm = normalizeText(p.name);
-    const nameSim = similarity(pNameNorm, descNorm);
+    // Guardas explícitas: incompatibilidades de marca/modelo/cor eliminam o candidato.
+    if (itemModels.size > 0 && productModels.size > 0 && !intersects(itemModels, productModels)) continue;
+    if (itemBrands.size > 0 && productBrands.size > 0 && !intersects(itemBrands, productBrands)) continue;
+    if (itemColors.size > 0 && productColors.size > 0 && !intersects(itemColors, productColors)) continue;
 
-    // Marca/modelo explícitos do produto presentes na descrição da NF
-    let brandHit = 0;
-    if (p.brand && normalizeText(p.brand)) {
-      brandHit = descNorm.includes(normalizeText(p.brand)) ? 1 : 0;
-    }
-    let modelHit = 0;
-    if (p.model && normalizeText(p.model)) {
-      modelHit = descNorm.includes(normalizeText(p.model)) ? 1 : 0;
-    }
-    let specHit = 0;
-    if (p.specification && normalizeText(p.specification)) {
-      specHit = descNorm.includes(normalizeText(p.specification)) ? 1 : 0;
-    }
+    // Ribbon Sigma não pode cair em um produto genérico "Ribbon".
+    if (itemFamilies.has("sigma") && !productFamilies.has("sigma")) continue;
 
+    const modelHit = intersects(itemModels, productModels);
+    const familyHit = intersects(itemFamilies, productFamilies);
+    const brandHit = product.brand ? itemBrands.has(normalizeText(product.brand)) : false;
+    const nameSim = similarity(productName, description);
+    const overlap = tokenOverlap(tokenize(item.description), tokenize(product.name));
     let score = 0;
-    if (nameSim >= 0.95) score = Math.max(score, 100); // descrição essencialmente igual → encontrado
-    if (nameSim >= 0.8) score = Math.max(score, 70);
-    const overlap = tokenOverlap(descTokens, tokenize(p.name));
-    if (overlap >= 0.7) score = Math.max(score, 55 + Math.round(overlap * 20));
+    let source: ProductMatchSource = "approximate";
+    let reason = "Aproximação — requer confirmação";
 
-    // Combinação forte: marca + modelo (ou especificação) casam na descrição
-    const strongCombo = brandHit && (modelHit || specHit);
-    if (strongCombo) score = Math.max(score, 85);
-
-    if (score > best.score) {
-      best = { productId: p._id, score, status: score >= 100 ? "found" : score >= 40 ? "possible" : "not_found" };
+    if (productName === description) {
+      score = 100;
+      source = "normalized_description";
+      reason = "Descrição normalizada idêntica";
+    } else if (modelHit) {
+      const colorsAreSafe = itemColors.size === 0 || productColors.size === 0 || intersects(itemColors, productColors);
+      score = colorsAreSafe && itemColors.size > 0 ? 96 : 82;
+      source = "brand_model";
+      reason = colorsAreSafe ? "Modelo e cor compatíveis" : "Modelo compatível; cor não está cadastrada";
+    } else if (familyHit) {
+      const colorsAreSafe = itemColors.size === 0 || productColors.size === 0 || intersects(itemColors, productColors);
+      score = colorsAreSafe ? 94 : 76;
+      source = "brand_model";
+      reason = colorsAreSafe ? "Família de produto e cor compatíveis" : "Família compatível; cor não está cadastrada";
+    } else if (brandHit && productModels.size > 0) {
+      score = 92;
+      source = "brand_model";
+      reason = "Marca e modelo compatíveis";
+    } else if (hasSafeMaterialEquivalence(itemCore, productCore)) {
+      // equivalências como cartão PVC↔cartão para crachá e bobina térmica↔papel térmico
+      score = 93;
+      source = "normalized_description";
+      reason = "Descrição fiscal e cadastro referem-se ao mesmo material";
+    } else if (nameSim >= 0.8 || overlap >= 0.65) {
+      score = Math.max(65, Math.round(Math.max(nameSim, overlap) * 80));
+    } else {
+      continue;
     }
+
+    const status: ProductMatchStatus = score >= 90 ? "found" : "possible";
+    if (status === "possible" && score >= 90) score = 85;
+    candidates.push({ productId: product._id, status, score, source, reason });
   }
 
-  return best;
+  if (candidates.length === 0) return { status: "not_found", score: 0, reason: "Nenhum produto seguro ou suficientemente parecido" };
+  candidates.sort((a, b) => b.score - a.score);
+  const top = candidates[0];
+  if (candidates.length > 1 && candidates[1].score === top.score && top.status === "found") {
+    return { ...top, status: "possible", score: Math.min(top.score - 1, 85), source: "approximate", reason: "Mais de um produto com a mesma pontuação — confirme" };
+  }
+  return top;
+}
+
+export interface NfeReviewAssociation {
+  productId?: string;
+  matchStatus: ProductMatchStatus;
+  associationType?: ProductAssociationType;
+}
+
+/** Regra pura testável para o avanço na conferência da NF-e. */
+export function canContinueNfeReview(items: NfeReviewAssociation[]): boolean {
+  return items.length > 0 && items.every((item) => Boolean(item.productId) && item.matchStatus === "found");
+}
+
+export interface NfeProductHints {
+  brand?: string;
+  model?: string;
+  ean?: string;
+  unitOfMeasure: string;
+}
+
+/** Sugestões para o formulário controlado; não executa cadastro. */
+export function extractNfeProductHints(item: NfeItem): NfeProductHints {
+  const brand = [...extractBrands(item.description)][0];
+  const model = [...extractModelTokens(item.description)].sort((a, b) => b.length - a.length)[0];
+  return {
+    brand: brand ? brand.toUpperCase() : undefined,
+    model: model ? model.toUpperCase() : undefined,
+    ean: isReliableGtin(item.ean) ? item.ean : undefined,
+    unitOfMeasure: mapNfeUnit(item.unit),
+  };
 }
 
 // ─── Montagem do rascunho ────────────────────────────────────────────────────
@@ -452,7 +654,14 @@ export function matchNfeProduct(item: NfeItem, products: ProductForMatch[]): Pro
  */
 export function buildEntryDraftFromNfe(
   parsed: NfeData,
-  mapped: { productId: string; locationId?: string; supplierLotNumber?: string }[],
+  mapped: {
+    productId: string;
+    locationId?: string;
+    supplierLotNumber?: string;
+    matchSource?: ProductMatchSource;
+    matchScore?: number;
+    associationType?: ProductAssociationType;
+  }[],
   opts: {
     supplierId?: string;
     contractNumber?: string;
@@ -491,6 +700,9 @@ export function buildEntryDraftFromNfe(
       ncm: item.ncm,
       cfop: item.cfop,
       ean: item.ean,
+      matchSource: m.matchSource,
+      matchScore: m.matchScore,
+      associationType: m.associationType ?? "automatic",
     };
   });
 
