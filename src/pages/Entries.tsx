@@ -36,7 +36,7 @@ import { toast } from "sonner";
 import {
   parseNfeXml, findSupplierMatch, findEntryByAccessKey, matchNfeProduct,
   buildEntryDraftFromNfe, mapNfeUnit, formatCnpj, canContinueNfeReview,
-  extractNfeProductHints,
+  extractNfeProductHints, reconcileNfeReviewMatches,
   type NfeData, type NfeItem, type ProductMatchStatus, type ProductMatchSource,
   type ProductAssociationType,
 } from "@/lib/nfe";
@@ -194,22 +194,14 @@ export default function Entries() {
     }
   }, [nfe, suppliers, nfeSupplierFound]);
 
-  // A importação pode começar antes de produtos/aliases terminarem de carregar.
-  // Reavalia somente itens ainda automáticos; seleção manual/criada é preservada.
+  // A importação pode começar antes do catálogo terminar de carregar. Aliases são
+  // opcionais: uma query indefinida não pode manter os itens presos em not_found.
+  // O reconciliador também preserva associations já encontradas/manuais/criadas.
   useEffect(() => {
-    if (!nfe || !products || !nfeAliases) return;
-    setNfeItems((current) => current.map((review) => {
-      if (review.associationType !== "automatic") return review;
-      const match = matchNfeProduct(review.item, products, { supplierId: nfeSupplierId || undefined, aliases: nfeAliases });
-      return {
-        ...review,
-        productId: match.productId ?? "",
-        matchStatus: match.status,
-        matchScore: match.score,
-        matchSource: match.source,
-        matchReason: match.reason,
-        associationType: "automatic",
-      };
+    if (!nfe || !products) return;
+    setNfeItems((current) => reconcileNfeReviewMatches(current, products, {
+      supplierId: nfeSupplierId || undefined,
+      aliases: nfeAliases ?? [],
     }));
   }, [nfe, products, nfeAliases, nfeSupplierId]);
 
@@ -583,22 +575,18 @@ export default function Entries() {
           : null
       );
       setNfeContract(parsed.orderReference ?? "");
-      setNfeItems(parsed.items.map((item) => {
-        const m = matchNfeProduct(item, products ?? [], {
-          supplierId: supplierMatch.supplierId,
-          aliases: nfeAliases ?? [],
-        });
-        return {
-          item,
-          productId: m.productId ?? "",
-          matchStatus: m.status,
-          matchScore: m.score,
-          matchSource: m.source,
-          matchReason: m.reason,
-          associationType: "automatic",
-          locationId: "",
-          supplierLot: "",
-        };
+      const initialItems: NfeReviewItem[] = parsed.items.map((item) => ({
+        item,
+        productId: "",
+        matchStatus: "not_found",
+        matchScore: 0,
+        associationType: "automatic",
+        locationId: "",
+        supplierLot: "",
+      }));
+      setNfeItems(reconcileNfeReviewMatches(initialItems, products ?? [], {
+        supplierId: supplierMatch.supplierId,
+        aliases: nfeAliases ?? [],
       }));
       setImportStep("review");
       toast.success("NF-e lida com sucesso. Confira os itens antes de confirmar.");

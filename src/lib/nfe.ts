@@ -621,6 +621,36 @@ export interface NfeReviewAssociation {
   associationType?: ProductAssociationType;
 }
 
+/**
+ * Reaplica o matching aos itens ainda sem uma associação definitiva.
+ *
+ * O catálogo e os aliases são dados reativos: uma associação automática já
+ * encontrada não pode desaparecer em um rerender, e uma seleção manual/criada
+ * nunca pode ser sobrescrita. Itens ainda não encontrados continuam elegíveis
+ * para reaproveitar quando uma consulta que estava indefinida terminar de
+ * carregar.
+ */
+export function reconcileNfeReviewMatches<
+  T extends NfeReviewAssociation & { item: NfeItem },
+>(reviews: T[], products: ProductForMatch[], options: { supplierId?: string | null; aliases?: ProductAliasForMatch[] } = {}): T[] {
+  return reviews.map((review) => {
+    const protectedAssociation = review.associationType && review.associationType !== "automatic";
+    const foundAlready = Boolean(review.productId) && review.matchStatus === "found";
+    if (protectedAssociation || foundAlready) return review;
+
+    const match = matchNfeProduct(review.item, products, options);
+    return {
+      ...review,
+      productId: match.productId ?? "",
+      matchStatus: match.status,
+      matchScore: match.score,
+      matchSource: match.source,
+      matchReason: match.reason,
+      associationType: "automatic",
+    };
+  });
+}
+
 /** Regra pura testável para o avanço na conferência da NF-e. */
 export function canContinueNfeReview(items: NfeReviewAssociation[]): boolean {
   return items.length > 0 && items.every((item) => Boolean(item.productId) && item.matchStatus === "found");
