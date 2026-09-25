@@ -937,10 +937,10 @@ export default function Entries() {
 
       {/* ═══ Import NF-e XML Dialog ═══ */}
       <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) resetImport(); }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Importar NF-e XML</DialogTitle></DialogHeader>
+        <DialogContent className="flex h-[90vh] w-[95vw] max-w-[95vw] flex-col gap-3 overflow-hidden p-4 sm:p-6">
+          <DialogHeader className="shrink-0 pr-8"><DialogTitle>Importar NF-e XML</DialogTitle></DialogHeader>
 
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
             <span className={importStep === "file" ? "font-semibold text-primary" : ""}>1. Arquivo</span><span>→</span>
             <span className={importStep === "review" ? "font-semibold text-primary" : ""}>2. Conferir itens</span><span>→</span>
             <span className={importStep === "location" ? "font-semibold text-primary" : ""}>3. Localização e confirmação</span>
@@ -974,7 +974,7 @@ export default function Entries() {
           )}
 
           {importStep === "review" && nfe && (
-            <div className="space-y-4 py-2">
+            <div className="flex min-h-0 flex-1 flex-col space-y-3 overflow-hidden py-1">
               <div className="rounded-lg border bg-emerald-50/60 p-3 flex items-center gap-2">
                 <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
                 <p className="text-sm font-medium text-emerald-800">NF encontrada — confira os dados e a associação dos itens</p>

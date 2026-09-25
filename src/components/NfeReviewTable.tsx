@@ -23,15 +23,15 @@ export function NfeReviewTable({ items, products, onManualSelect, onConfirmSugge
     if (review.matchStatus === "possible") return <Badge className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">🟡 Possível correspondência — confirmar</Badge>;
     return <Badge className="text-[10px] bg-rose-50 text-rose-700 border-rose-200">🔴 Não encontrado</Badge>;
   };
-  return <>
-    <div className="flex flex-wrap gap-2 text-xs">
+  return <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex shrink-0 flex-wrap gap-2 text-xs">
       <Badge className="text-[10px] bg-emerald-50 text-emerald-700">🟢 {items.filter((item) => item.matchStatus === "found" && item.associationType === "automatic").length} encontrados</Badge>
       <Badge className="text-[10px] bg-amber-50 text-amber-700">🟡 {items.filter((item) => item.matchStatus === "possible").length} possíveis</Badge>
       <Badge className="text-[10px] bg-rose-50 text-rose-700">🔴 {items.filter((item) => !item.productId || item.matchStatus === "not_found").length} não encontrados</Badge>
       {items.some((item) => item.associationType !== "automatic") && <Badge className="text-[10px] bg-violet-50 text-violet-700">{items.filter((item) => item.associationType !== "automatic").length} revisados manualmente</Badge>}
     </div>
-    <div className="border rounded-lg overflow-x-auto">
-      <Table><TableHeader><TableRow><TableHead className="text-xs">#</TableHead><TableHead className="text-xs">Produto da NF</TableHead><TableHead className="text-xs text-center">Qtd</TableHead><TableHead className="text-xs">Unid.</TableHead><TableHead className="text-xs">Situação</TableHead><TableHead className="text-xs">Produto no estoque</TableHead></TableRow></TableHeader>
+    <div className="mt-3 min-h-0 flex-1 overflow-auto rounded-lg border">
+      <Table className="min-w-[760px]"><TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm"><TableRow><TableHead className="text-xs">#</TableHead><TableHead className="text-xs">Produto da NF</TableHead><TableHead className="text-xs text-center">Qtd</TableHead><TableHead className="text-xs">Unid.</TableHead><TableHead className="text-xs">Situação</TableHead><TableHead className="text-xs">Produto no estoque</TableHead></TableRow></TableHeader>
         <TableBody>{items.map((review, index) => <TableRow key={index} className={!review.productId ? "bg-rose-50/40" : ""}>
           <TableCell className="text-xs text-muted-foreground">{review.item.lineNumber}</TableCell>
           <TableCell className="text-xs max-w-[220px]"><p className="font-medium leading-tight">{review.item.description}</p><p className="text-[10px] text-muted-foreground font-mono">{review.item.code}{review.item.ncm ? ` · NCM ${review.item.ncm}` : ""}{review.item.cfop ? ` · CFOP ${review.item.cfop}` : ""}</p></TableCell>
@@ -45,7 +45,7 @@ export function NfeReviewTable({ items, products, onManualSelect, onConfirmSugge
           </div>{review.matchStatus === "possible" && review.productId && <Button size="sm" variant="outline" className="mt-1 h-6 w-full text-[10px]" onClick={() => onConfirmSuggestion(index)}>Confirmar correspondência</Button>}</TableCell>
         </TableRow>)}</TableBody>
       </Table>
-      <div className="flex items-center justify-between gap-3 pt-2"><Button variant="outline" onClick={onBack}>Voltar</Button><div className="text-right"><Button disabled={!canContinueNfeReview(items)} onClick={onContinue}>Continuar → Localização</Button><p className="text-[9px] text-muted-foreground mt-1">Desabilitado enquanto houver item sem produto ou sugestão possível não confirmada.</p></div></div>
     </div>
-  </>;
+    <div className="flex shrink-0 items-center justify-between gap-3 pt-2"><Button variant="outline" onClick={onBack}>Voltar</Button><div className="text-right"><Button disabled={!canContinueNfeReview(items)} onClick={onContinue}>Continuar → Localização</Button><p className="text-[9px] text-muted-foreground mt-1">Desabilitado enquanto houver item sem produto ou sugestão possível não confirmada.</p></div></div>
+  </div>;
 }
