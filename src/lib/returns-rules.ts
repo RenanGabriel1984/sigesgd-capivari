@@ -139,3 +139,77 @@ export function formatExitLabel(exit: {
 }): string {
   return exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
 }
+
+// ─── LOTE DE ORIGEM DA DEVOLUÇÃO (atomicidade) ─────────────────────────────────
+
+/**
+ * DEVOLUÇÃO ATÔMICA: o lote de origem é obrigatório.
+ *
+ * ─── O PROBLEMA ───────────────────────────────────────────────────────────────
+ *
+ * A devolução restaurava o saldo global (`stock.physicalQuantity`) SEMPRE, mas
+ * só restaurava `lots.quantityAvailable` quando `lotId` vinha informado. Como a
+ * "saída rápida" não gravava `stockMovements.lotId`, a devolução resolvia:
+ *
+ *     stock:                    14 → 15   (restaurado)
+ *     lots.quantityAvailable:   14 → 14   (NÃO restaurado)
+ *
+ * Um estado parcial, permanente e silenciosamente inconsistente — foi a origem
+ * da divergência 3337 x 3338 (lote LOT-2026-000001, Cooler Intel).
+ *
+ * ─── A REGRA ──────────────────────────────────────────────────────────────────
+ *
+ * Se a saída consumiu lote, a devolução PRECISA devolver ao mesmo lote. Sem
+ * lote resolvível, a operação é REJEITADA por inteiro: nada é gravado. Não há
+ * FIFO silencioso e não há caminho que restaure apenas metade do estoque.
+ * Falhar completamente é preferível a deixar o estoque inconsistente.
+ */
+
+/** Motivo pelo qual a devolução não pode prosseguir (ou `null` se pode). */
+export interface UnresolvableLotReason {
+  /** A saída não consumiu nenhum lote (ex.: material sem rastreio de lote). */
+  exitDidNotConsumeLot: boolean;
+  /** A saída consumiu lote(s), mas o vínculo não pôde ser resolvido. */
+  lotIdMissing: boolean;
+}
+
+/**
+ * Determina se a devolução pode prosseguir.
+ *
+ * Retorna `null` quando a devolução está apta, ou o motivo da recusa quando
+ * o lote de origem é obrigatório mas não foi resolvido.
+ *
+ * @param exitLotId Lote de origem resolvido da saída (structured lotId).
+ * @param requiresLot Se o produto desta devolução exige rastreio por lote.
+ */
+export function resolveReturnLotGuard(input: {
+  exitLotId?: string | null;
+  requiresLot: boolean;
+}): UnresolvableLotReason | null {
+  if (!input.requiresLot) return null;
+  if (input.exitLotId) return null;
+  return { exitDidNotConsumeLot: false, lotIdMissing: true };
+}
+
+/** Mensagem de erro (pt-BR) para uma devolução sem lote resolvível. */
+export function buildUnresolvableLotMessage(input: {
+  productName: string;
+  exitLabel: string;
+  reason: UnresolvableLotReason;
+}): string {
+  const base =
+    `Não foi possível devolver "${input.productName}": o lote de origem da saída ` +
+    `${input.exitLabel} não pôde ser identificado.`;
+  if (input.reason.exitDidNotConsumeLot) {
+    return (
+      base +
+      ` A devolução exige rastreio por lote e a saída não registra lote consumido. ` +
+      `Nenhum estoque foi alterado — a operação foi cancelada integralmente.`
+    );
+  }
+  return (
+    base +
+    ` Identifique o lote antes de devolver. ` +
+    `Nenhum estoque foi alterado — a operação foi cancelada integralmente.`
+  );
+}

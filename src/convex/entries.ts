@@ -214,6 +214,13 @@ export const create = mutation({
       xmlStorageId: args.xmlStorageId || undefined,
       importedFromXml: args.importedFromXml || undefined,
       status: "draft",
+      // O tipo de material é ESCOLHA do usuário e é persistido exatamente como
+      // enviado. O fallback anterior (`?? "consumption"`) mascarava o stale
+      // closure do frontend: uma escolha "Material permanente" perdida viraria
+      // "consumption" sem nenhum aviso. A UI agora envia o valor explicitamente
+      // (ver `resolveNfeDestination` em src/lib/nfe-destination.ts); este
+      // default defensivo permanece APENAS para clientes legados/importadores
+      // diretos, e nunca converte "permanent" em "consumption".
       materialType: args.materialType ?? "consumption",
       areaId: args.areaId,
       createdAt: now,
@@ -311,7 +318,7 @@ export const confirm = mutation({
 
       // Generate lot
       const lotNumber = await generateLotNumber(ctx);
-      await ctx.db.insert("lots", {
+      const lotId = await ctx.db.insert("lots", {
         lotNumber,
         productId: item.productId,
         entryId: args.entryId,
@@ -332,6 +339,12 @@ export const confirm = mutation({
         materialType: entry.materialType,
         areaId: entry.areaId,
       });
+
+      // Rastreabilidade Entrada → EntryItem → Lote → Movimentação.
+      // Sem este back-patch, `entryItems.lotId` ficava ausente (foi o caso dos
+      // 8 itens da ENT-2026-000002) e o detalhe da entrada não conseguia ligar
+      // o item ao lote que ele gerou.
+      await ctx.db.patch(item._id, { lotId: lotId as string });
 
       // Update stock (increase physicalQuantity)
       const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();

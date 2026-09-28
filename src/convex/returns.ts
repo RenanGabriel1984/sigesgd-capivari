@@ -8,6 +8,8 @@ import {
   applyReturnToStock,
   applyReturnToLocation,
   buildReturnAuditDetail,
+  resolveReturnLotGuard,
+  buildUnresolvableLotMessage,
   type ReturnCondition,
 } from "../lib/returns-rules";
 
@@ -159,11 +161,45 @@ export const create = mutation({
     });
     if (error) throw new Error(error);
 
-    // Lote, quando identificado, precisa pertencer ao produto
-    if (args.lotId) {
-      const lot = await ctx.db.get(args.lotId);
-      if (!lot) throw new Error("Lote não encontrado");
-      if (lot.productId !== exit.productId) throw new Error("Lote não corresponde ao produto da saída");
+    // ── Lote de origem da devolução (ATOMICIDADE) ─────────────────────────────
+    // A devolução DEVE devolver ao mesmo lote que a saída consumiu. Sem isso o
+    // saldo global era restaurado e o `quantityAvailable` do lote não — o estado
+    // parcial que gerou a divergência 3337 x 3338.
+    //
+    // Precedência: lote informado na devolução → `stockMovements.lotId` da
+    // saída. A validação acontece ANTES de qualquer escrita, para que uma
+    // recusa não deixe estado parcial.
+    const exitLotId = (exit as any).lotId ?? null;
+    const productLots = await ctx.db
+      .query("lots")
+      .withIndex("by_product", (q) => q.eq("productId", exit.productId))
+      .collect();
+    // Material rastreado por lote: existe lote ativo do produto. Sem lote ativo,
+    // a devolução opera apenas sobre o saldo global (comportamento histórico
+    // de itens sem rastreio, preservado deliberadamente).
+    const requiresLot =
+      args.lotId != null || exitLotId != null || productLots.some((l: any) => l.active);
+
+    let resolvedLotId = args.lotId ?? (exitLotId as any);
+    if (resolvedLotId && typeof resolvedLotId === "string" && !resolvedLotId.startsWith("LOT-")) {
+      // `stockMovements.lotId` guarda o ID do lote; se por algum motivo
+      // histórico guardou apenas o número, não é um ID utilizável.
+      resolvedLotId = null as any;
+    }
+
+    const lotGuard = resolveReturnLotGuard({ exitLotId: resolvedLotId ?? null, requiresLot });
+    if (lotGuard) {
+      const exitLabelForError = exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
+      throw new Error(
+        buildUnresolvableLotMessage({ productName: product.name, exitLabel: exitLabelForError, reason: lotGuard }),
+      );
+    }
+
+    // Lote, quando identificado, precisa existir e pertencer ao produto
+    const resolvedLot: any = resolvedLotId ? await ctx.db.get(resolvedLotId) : null;
+    if (resolvedLotId && !resolvedLot) throw new Error("Lote de origem da saída não encontrado");
+    if (resolvedLot && resolvedLot.productId !== exit.productId) {
+      throw new Error("Lote não corresponde ao produto da saída");
     }
 
     if (args.receivedByUserId) {
@@ -179,7 +215,7 @@ export const create = mutation({
       exitMovementId: exit._id,
       requestId: exit.requestId,
       productId: exit.productId,
-      lotId: args.lotId,
+      lotId: resolvedLotId ?? undefined,
       quantity: args.quantity,
       reason,
       condition,
@@ -220,14 +256,14 @@ export const create = mutation({
       }
     }
 
-    // 4) Repor disponibilidade do lote (quando identificado)
-    if (args.lotId) {
-      const lot = await ctx.db.get(args.lotId);
-      if (lot) {
-        await ctx.db.patch(lot._id, {
-          quantityAvailable: lot.quantityAvailable + args.quantity,
-        });
-      }
+    // 4) Repor disponibilidade do lote (OBRIGATÓRIO quando rastreado)
+    //    A validação do passo anterior (guard) já garantiu que, quando o
+    //    material exige lote, existe um lote resolvível. Aqui o lote e o
+    //    saldo global SEMPRE sobem juntos — nunca um sem o outro.
+    if (resolvedLot) {
+      await ctx.db.patch(resolvedLot._id, {
+        quantityAvailable: resolvedLot.quantityAvailable + args.quantity,
+      });
     }
 
     // 5) Movimentação de DEVOLUÇÃO vinculada à saída original
@@ -244,7 +280,7 @@ export const create = mutation({
       userId,
       requestId: exit.requestId,
       exitMovementId: exit._id,
-      lotId: args.lotId ? (await ctx.db.get(args.lotId))?.lotNumber : undefined,
+      lotId: resolvedLot ? resolvedLot.lotNumber : undefined,
       observation:
         `Devolução da saída ${exitLabel} — ${reason}` +
         (args.observation ? ` | ${args.observation}` : ""),

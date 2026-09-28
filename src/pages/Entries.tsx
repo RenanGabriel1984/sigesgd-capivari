@@ -25,6 +25,12 @@ import {
   type PatrimonyUnitDraft,
 } from "@/lib/material-types";
 import { NO_AREA_LABEL } from "@/lib/stock-areas";
+import {
+  resolveNfeDestination,
+  toEntryDestinationPayload,
+  NFE_DESTINATION_REQUIRED_MESSAGE,
+  type NfeDestination,
+} from "@/lib/nfe-destination";
 import { NfeDestinationDialog } from "@/components/NfeDestinationDialog";
 import { FileUpload } from "@/components/FileUpload";
 import { EntryDetailsDialog } from "@/components/EntryDetailsDialog";
@@ -593,23 +599,58 @@ export default function Entries() {
     } catch (e: any) {
       setImportError(e.message ?? "Não foi possível ler a NF-e");
     } finally { setImportLoading(false); }
-  };
-
-  // Confirma o destino escolhido pelo usuário na conferência da NF-e e
-  // prossegue com o registro da entrada (mesmo fluxo de handleConfirmImport).
+  };    // Confirma o destino escolhido pelo usuário na conferência da NF-e e
+    // prossegue com o registro da entrada.
+    // O destino viaja por ARGUMENTO (ver correção do stale closure abaixo).
   const handleNfeDestConfirm = (materialType: MaterialType, areaId: string) => {
+    // CORREÇÃO (stale closure): o destino viaja por ARGUMENTO, nunca por
+    // setState. Antes, `setNfeAreaId()` era seguido de `handleConfirmImport()`
+    // no mesmo tick: a closure ainda lia o estado anterior ("") e o backend
+    // recebia `areaId: undefined` — o que perdeu a área "Impressoras" na
+    // NF 372043. O `setState` abaixo existe apenas para reidratar o modal em
+    // uma reabertura; a mutation usa exclusivamente o parâmetro.
     setNfeMaterialType(materialType);
     setNfeAreaId(areaId);
     nfeDestConfirmedRef.current = true;
     setNfeDestOpen(false);
-    void handleConfirmImport();
+    void handleConfirmImport({ materialType, areaId });
   };
 
-  const handleConfirmImport = async () => {
+  /**
+   * Registra a entrada da NF-e.
+   *
+   * `arg` aceita OU o destino confirmado pelo usuário (chamado por
+   * `handleNfeDestConfirm`, é o caminho que importa) OU o evento de clique do
+   * botão "Confirmar entrada" (reabertura do modal, quando o destino já está
+   * no estado). Isso mantém o `onClick` direto na UI sem wrapper e, sobretudo,
+   * garante que um `MouseEvent` nunca seja interpretado como destino.
+   */
+  const handleConfirmImport = async (
+    arg?: { materialType: MaterialType; areaId: string } | React.SyntheticEvent,
+  ) => {
     if (!nfe || !nfeXmlFile) return;
+    // Só um objeto com `materialType` é um override válido; um SyntheticEvent
+    // do onClick é descartado e o destino vem do estado já confirmado.
+    const override =
+      arg && typeof arg === "object" && "materialType" in arg
+        ? (arg as { materialType: MaterialType; areaId: string })
+        : undefined;
     // O destino no estoque (tipo de material + área/subestoque) é escolha do
     // usuário: o fornecedor identificado NÃO define a área automaticamente.
-    if (!nfeDestConfirmedRef.current) { setNfeDestOpen(true); return; }
+    if (!nfeDestConfirmedRef.current && !override) { setNfeDestOpen(true); return; }
+    // Resolve o destino pelo override explícito (preferido) ou pelo estado já
+    // confirmado. Não há default: destino nunca é inventado.
+    let destination: NfeDestination;
+    try {
+      destination = resolveNfeDestination({
+        override: override ?? null,
+        state: { materialType: nfeMaterialType, areaId: nfeAreaId },
+      });
+    } catch (e: any) {
+      toast.error(e.message ?? NFE_DESTINATION_REQUIRED_MESSAGE);
+      setNfeDestOpen(true);
+      return;
+    }
     if (nfeItems.some((r) => !r.productId)) {
       toast.error("Todos os itens precisam de um produto associado. Cadastre os itens 🔴 antes de confirmar.");
       return;
@@ -620,6 +661,8 @@ export default function Entries() {
     }
     const dup = findEntryByAccessKey(entries ?? [], nfe.accessKey);
     if (dup) { toast.error(`Esta NF-e já foi registrada (entrada ${dup.entryNumber}).`); return; }
+    // Payload de destino derivado do destino JÁ RESOLVIDO (fonte única).
+    const destinationPayload = toEntryDestinationPayload(destination);
     setImportSaving(true);
     try {
       // 1) Preserva o XML original no armazenamento
@@ -655,8 +698,10 @@ export default function Entries() {
         documentStorageId: draft.documentStorageId,
         accessKey: draft.accessKey, totalValue: draft.totalValue,
         xmlStorageId: draft.xmlStorageId, importedFromXml: true,
-        materialType: nfeMaterialType,
-        areaId: nfeAreaId ? (nfeAreaId as any) : undefined,
+        // Destino resolvido (override > estado). Enviado SEMPRE explicitamente:
+        // a escolha "Material permanente" nunca pode virar "consumption".
+        materialType: destinationPayload.materialType,
+        areaId: destinationPayload.areaId ? (destinationPayload.areaId as any) : undefined,
         items: draft.items.map((i) => ({
           productId: i.productId as any, quantity: i.quantity, unitOfMeasure: i.unitOfMeasure,
           unitCost: i.unitCost, totalCost: i.totalCost, specification: i.specification,

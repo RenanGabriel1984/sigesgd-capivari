@@ -16,6 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Pencil, Package, ArrowUpRight, AlertTriangle, Printer, X, Info } from "lucide-react";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
 import { getStockSituation, STOCK_SITUATION_LABELS, STOCK_SITUATION_BADGE_CLASSES } from "@/lib/stock-status";
+import { formatStockQuantity, computeAvailableStock } from "@/lib/stock-presentation";
 import type { ProductView } from "@/lib/product-types";
 import { toast } from "sonner";
 
@@ -242,7 +243,7 @@ export default function Products() {
             {filtered?.map((p) => {
               const stock = p.stock?.physicalQuantity ?? 0;
               const reserved = p.stock?.reservedQuantity ?? 0;
-              const available = stock - reserved;
+              const available = computeAvailableStock(stock, reserved);
               const situation = getStockSituation(stock, p.minimumStock, p.idealStock);
               const isLow = situation === "critical" || situation === "below_min";
               const stockPct = p.maximumStock > 0 ? Math.min(100, (stock / p.maximumStock) * 100) : 0;
@@ -278,30 +279,43 @@ export default function Products() {
                         </Badge>
                         {p.hasSerial && <Badge variant="outline" className="text-[10px]">S/N</Badge>}
                       </div>
-                      <div className="grid grid-cols-3 gap-2 text-center mb-3">
-                        <div>
-                          <p className="text-sm font-bold font-mono">{stock}</p>
-                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Atual</p>
+                      {/* SALDO — Atual / Reservado / Disponível.
+                          "Reservado" mostra "—" quando não há reserva: um "0"
+                          ao lado de "Mínimo/Ideal/Máximo 0" era lido como
+                          estoque zerado e reservado. Nenhuma lógica alterada. */}
+                      <div className="mb-3">
+                        <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Saldo</p>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div>
+                            <p className="text-sm font-bold font-mono">{formatStockQuantity(stock)}</p>
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Atual</p>
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold font-mono text-amber-600">{formatStockQuantity(reserved, { zeroAsEmpty: true })}</p>
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Reservado</p>
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold font-mono">{formatStockQuantity(available)}</p>
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Disponível</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-bold font-mono text-amber-600">{reserved}</p>
-                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Reservado</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold font-mono">{available}</p>
-                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Disponível</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-mono">{p.minimumStock}</p>
-                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Mínimo</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-mono">{p.idealStock}</p>
-                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Ideal</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-mono">{p.maximumStock}</p>
-                          <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Máximo</p>
+                      </div>
+                      {/* PARÂMETROS — Mínimo / Ideal / Máximo (configuração) */}
+                      <div className="mb-3">
+                        <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Parâmetros</p>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div>
+                            <p className="text-sm font-mono">{p.minimumStock}</p>
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Mínimo</p>
+                          </div>
+                          <div>
+                            <p className="text-sm font-mono">{p.idealStock}</p>
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Ideal</p>
+                          </div>
+                          <div>
+                            <p className="text-sm font-mono">{p.maximumStock}</p>
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Máximo</p>
+                          </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 text-[10px] text-muted-foreground">

@@ -1,4 +1,9 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
+import {
+  resolveConsumedLotId,
+  formatConsumedLots,
+  type LotConsumption,
+} from "../lib/stock-consumption";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import {
@@ -557,12 +562,14 @@ export const quickExit = mutation({
     }
 
     // ── 4. Create stock movement ──
-    const lotInfo = consumedLots
-      .map((c) => {
-        const lot = lots.find((l) => l._id === c.lotId);
-        return lot ? `${lot.lotNumber}(${c.quantity})` : `?(${c.quantity})`;
-      })
-      .join(", ");
+    // CORREÇÃO: o lote consumido passa a ser gravado no campo ESTRUTURADO
+    // `lotId`. Antes ele existia apenas dentro do texto da observation, o que
+    // impedia a devolução de restaurar o `quantityAvailable` do lote e gerava
+    // a divergência 3337 x 3338. A observation é mantida para compatibilidade.
+    const consumedLotId = resolveConsumedLotId(consumedLots as LotConsumption[]);
+    const lotInfo = formatConsumedLots(consumedLots, (id) =>
+      lots.find((l) => l._id === id)?.lotNumber,
+    );
 
     // Número sequencial da saída (SAI-ANO-SEQ) — usado no vínculo de devoluções
     const exitNumber = await generateExitNumber(ctx);
@@ -577,6 +584,7 @@ export const quickExit = mutation({
       newReserved: previousReserved,
       userId,
       exitNumber,
+      lotId: consumedLotId ?? undefined,
       observation: [
         `Saída rápida — ${args.receiverName}`,
         args.reason ? `Motivo: ${args.reason}` : "",
