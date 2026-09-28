@@ -192,3 +192,269 @@ export function buildLotAvailabilityAuditDetail(input: {
     `movimentação de estoque foi criada — apenas a reconciliação do saldo do lote.`
   );
 }
+
+/* ===========================================================================
+ * RODADA DE RASTREABILIDADE HISTÓRICA — SOMENTE VÍNCULOS
+ * ===========================================================================
+ *
+ * Terceira correção histórica autorizada: completar a cadeia
+ * Entrada → EntryItem → Lote → Movimento para a NF 372043 e para o Cooler.
+ *
+ * Regra inegociável desta rodada: NENHUMA quantidade de estoque é alterada.
+ * São gravados apenas campos de REFERÊNCIA (areaId da entrada, lotId de
+ * entryItems e stockMovements). Cada função abaixo valida pré-condições ANTES
+ * de autorizar a escrita e é idempotente: vínculo já correto = no-op.
+ */
+
+/** Fornecedor obrigatório da NF 372043 (suppliers.legalName). */
+export const GOMAQ_SUPPLIER_LEGAL_NAME = "GOMAQ MAQUINAS PARA ESCRITORIO LTDA";
+
+/** Entrada e NF alvo da correção de rastreabilidade. */
+export const TRACEABILITY_ENTRY_NUMBER = "ENT-2026-000002";
+export const TRACEABILITY_INVOICE_NUMBER = "372043";
+
+/**
+ * Mapeamento OBRIGATÓRIO entryItem → lote da NF 372043 (produto → lotNumber).
+ * Validado contra o banco na rodada de diagnóstico: cada lote 54..61 pertence
+ * à ENT-2026-000002 e tem exatamente o productId abaixo.
+ */
+export const NF372043_EXPECTED_LOTS: ReadonlyArray<{
+  lotNumber: string;
+  productId: string;
+}> = [
+  { lotNumber: "LOT-2026-000054", productId: "kd7fjr7m20vp7p285vn02nqv9h8f3xs4" }, // Toner CX735 — Preto
+  { lotNumber: "LOT-2026-000055", productId: "kd7a1824vydkd3jrpqz2vy3q6tga9k4v" }, // Toner CX735 — Amarelo
+  { lotNumber: "LOT-2026-000056", productId: "kd70ck3e4c396bnsy529k04wkx8f25qh" }, // Toner CX735 — Ciano
+  { lotNumber: "LOT-2026-000057", productId: "kd75fnwnxdcwyvjejt14wkae718f3xah" }, // Ribbon Color YMCKT SIGMA
+  { lotNumber: "LOT-2026-000058", productId: "kd73hh4taw6qmfkefmdn9aw2x2d4dths" }, // Toner AltaLink — Ciano
+  { lotNumber: "LOT-2026-000059", productId: "kd79tf11zqbdtvg8sr8cq86zbtcbvs3f" }, // Cartão PVC
+  { lotNumber: "LOT-2026-000060", productId: "kd75k6hz4gj7szvar4d44nxnwp9a52qa" }, // Papel térmico
+  { lotNumber: "LOT-2026-000061", productId: "kd7dd58stasmw3rvrsz3c0cn6h8f3vza" }, // Toner MFC-L6902DW
+];
+
+/* ─── A) Área da ENT-2026-000002 ─────────────────────────────────────────── */
+
+/** Estado mínimo da entrada para a correção de área da entrada. */
+export interface EntryAreaState {
+  entryNumber: string;
+  invoiceNumber: string;
+  supplierLegalName?: string | null;
+  status: string;
+  areaId?: string | null;
+}
+
+/**
+ * Decide a correção do `areaId` da PRÓPRIA entrada ENT-2026-000002.
+ *
+ * Pré-condições: entrada correta, NF correta, fornecedor Gomaq, status
+ * confirmed e área atualmente ausente. Idempotente: área já igual ao alvo →
+ * no-op. Qualquer pré-condição violada → aborta SEM escrever.
+ */
+export function decideEntryAreaRepair(input: {
+  entry: EntryAreaState;
+  targetAreaId: string;
+}): RepairDecision {
+  const e = input.entry;
+  if (e.entryNumber !== TRACEABILITY_ENTRY_NUMBER)
+    return no("Entrada " + e.entryNumber + " não é " + TRACEABILITY_ENTRY_NUMBER + ".");
+  if (e.invoiceNumber !== TRACEABILITY_INVOICE_NUMBER)
+    return no("NF " + e.invoiceNumber + " não é " + TRACEABILITY_INVOICE_NUMBER + ".");
+  if (!(e.supplierLegalName ?? "").toUpperCase().includes("GOMAQ"))
+    return no("Fornecedor não é Gomaq (" + (e.supplierLegalName ?? "—") + ").");
+  if (e.status !== "confirmed") return no("Status não é confirmed (" + e.status + ").");
+  if (e.areaId === input.targetAreaId)
+    return no("areaId da entrada já é Impressoras — nada a corrigir (idempotente).");
+  if (e.areaId != null)
+    return no("areaId da entrada mudou inesperadamente (" + e.areaId + ") — correção interrompida.");
+  return yes("areaId da entrada: ausente → Impressoras.");
+}
+
+/* ─── B) lotId dos 8 entryItems da NF 372043 ────────────────────────────── */
+
+export interface EntryItemLinkState {
+  entryItemId: string;
+  entryId: string;
+  productId: string;
+  quantity: number;
+  lotId?: string | null;
+}
+
+export interface LotLinkState {
+  lotId: string;
+  lotNumber: string;
+  entryId: string;
+  productId: string;
+  quantityReceived: number;
+}
+
+export interface EntryItemLinkDecision {
+  decision: RepairDecision;
+  /** Lote que DEVE ser vinculado, quando a correção se aplica. */
+  targetLotId?: string;
+}
+
+/**
+ * Decide o vínculo entryItem → lote para UM item da NF 372043.
+ *
+ * Pré-condições por item: item pertence à ENT-2026-000002; lote pertence à
+ * mesma entrada; productId idêntico; quantity do item igual ao
+ * quantityReceived do lote; lotId atualmente ausente. Idempotente: já ligado
+ * ao lote esperado → no-op. Já ligado a OUTRO lote → aborta (estado mudou).
+ */
+export function decideEntryItemLotLink(input: {
+  item: EntryItemLinkState;
+  lot: LotLinkState;
+  entryId: string;
+}): EntryItemLinkDecision {
+  const { item, lot, entryId } = input;
+  if (item.entryId !== entryId)
+    return { decision: no("EntryItem não pertence à entrada alvo.") };
+  if (lot.entryId !== entryId)
+    return { decision: no("Lote " + lot.lotNumber + " não pertence à entrada alvo.") };
+  if (item.productId !== lot.productId)
+    return {
+      decision: no(
+        "Produto do entryItem difere do produto do lote " + lot.lotNumber + "."
+      ),
+    };
+  if (item.quantity !== lot.quantityReceived)
+    return {
+      decision: no(
+        "Quantidade do entryItem (" + item.quantity + ") difere do lote " +
+        lot.lotNumber + " (" + lot.quantityReceived + ")."
+      ),
+    };
+  if (item.lotId === lot.lotId)
+    return { decision: no("lotId já vinculado ao lote esperado — nada a fazer (idempotente)."), targetLotId: lot.lotId };
+  if (item.lotId != null)
+    return { decision: no("EntryItem já aponta para outro lote (" + item.lotId + ") — correção interrompida.") };
+  return { decision: yes("lotId: ausente → " + lot.lotNumber + "."), targetLotId: lot.lotId };
+}
+
+/* ─── C/D) lotId dos dois movimentos históricos do Cooler ───────────────── */
+
+export interface MovementLinkState {
+  movementId: string;
+  type: string;
+  quantity: number;
+  productId: string;
+  lotId?: string | null;
+}
+
+/**
+ * Decide o vínculo movimento → lote para UM movimento histórico do Cooler.
+ *
+ * Pré-condições: movimento do produto Cooler; tipo esperado (exit/return);
+ * quantidade 1 (a saída histórica consumiu 1 do lote e a devolução restaurou
+ * 1); lotId atualmente ausente. Idempotente: já ligado ao lote esperado →
+ * no-op. Qualquer divergência → aborta SEM escrever.
+ */
+export function decideMovementLotLink(input: {
+  movement: MovementLinkState;
+  coolerProductId: string;
+  coolerLotId: string;
+  expectedType: "exit" | "return";
+}): RepairDecision {
+  const m = input.movement;
+  if (m.productId !== input.coolerProductId)
+    return no("Movimento não pertence ao produto Cooler.");
+  if (m.type !== input.expectedType)
+    return no("Movimento é " + m.type + ", esperado " + input.expectedType + ".");
+  if (m.quantity !== 1)
+    return no("Quantidade do movimento é " + m.quantity + ", esperado 1 — correção interrompida.");
+  if (m.lotId === input.coolerLotId)
+    return no("lotId já vinculado ao lote esperado — nada a fazer (idempotente).");
+  if (m.lotId != null)
+    return no("Movimento já aponta para outro lote (" + m.lotId + ") — correção interrompida.");
+  return yes("lotId: ausente → LOT-2026-000001.");
+}
+
+/* ─── Proteção absoluta: zero alteração de saldo ────────────────────────── */
+
+/** Totais que DEVEM permanecer idênticos antes e depois da rodada. */
+export interface StockTotals {
+  physical: number;
+  reserved: number;
+  available: number;
+  stockByLocation: number;
+  lotsQuantityReceived: number;
+  lotsQuantityAvailable: number;
+}
+
+/**
+ * Compara os totais ANTES x DEPOIS da rodada de rastreabilidade.
+ * Qualquer diferença = VIOLAÇÃO da regra "zero alteração de quantidade".
+ */
+export function assertNoQuantityChange(before: StockTotals, after: StockTotals): RepairDecision {
+  const diffs: string[] = [];
+  const cmp = (label: string, b: number, a: number) => {
+    if (b !== a) diffs.push(label + " " + b + " → " + a);
+  };
+  cmp("physical", before.physical, after.physical);
+  cmp("reserved", before.reserved, after.reserved);
+  cmp("available", before.available, after.available);
+  cmp("stockByLocation", before.stockByLocation, after.stockByLocation);
+  cmp("soma quantityReceived", before.lotsQuantityReceived, after.lotsQuantityReceived);
+  cmp("soma quantityAvailable", before.lotsQuantityAvailable, after.lotsQuantityAvailable);
+  if (diffs.length > 0)
+    return no("VIOLAÇÃO de saldo detectada: " + diffs.join("; ") + ".");
+  return yes("Nenhuma quantidade de estoque foi alterada.");
+}
+
+/* ─── Textos de auditoria da rodada de rastreabilidade ──────────────────── */
+
+const TRACEABILITY_SUFFIX =
+  "Correção histórica de rastreabilidade. Nenhuma quantidade de estoque foi alterada.";
+
+/** Auditoria A) areaId da ENT-2026-000002: ausente → Impressoras. */
+export function buildEntryAreaTraceAuditDetail(input: {
+  entryNumber: string;
+  invoiceNumber: string;
+  areaName: string;
+}): string {
+  return (
+    `Correção histórica de rastreabilidade — entrada ${input.entryNumber} (NF ${input.invoiceNumber}): ` +
+    `areaId da ENTRADA ausente → "${input.areaName}". A área era conhecida do usuário na confirmação ` +
+    `da NF-e, mas o stale closure do frontend a perdeu antes da gravação. ` +
+    `Os lotes já haviam sido realocados na rodada anterior; agora a entrada também aponta para a área. ` +
+    `${TRACEABILITY_SUFFIX}`
+  );
+}
+
+/** Auditoria B) os 8 entryItems da NF 372043 recebem lotId. */
+export function buildEntryItemLotsTraceAuditDetail(input: {
+  entryNumber: string;
+  invoiceNumber: string;
+  links: Array<{ lotNumber: string; entryItemId: string }>;
+}): string {
+  const list = input.links.map((l) => l.lotNumber).join(", ");
+  return (
+    `Correção histórica de rastreabilidade — entrada ${input.entryNumber} (NF ${input.invoiceNumber}): ` +
+    `${input.links.length} entryItem(s) receberam lotId (antes ausente) apontando para os lotes ` +
+    `${list}. Completa a cadeia Entrada → EntryItem → Lote. ${TRACEABILITY_SUFFIX}`
+  );
+}
+
+/** Auditoria C/D) um movimento histórico do Cooler recebe lotId. */
+export function buildMovementTraceAuditDetail(input: {
+  productName: string;
+  movementId: string;
+  movementType: string;
+  lotNumber: string;
+}): string {
+  return (
+    `Correção histórica de rastreabilidade — movimento ${input.movementId} (${input.movementType}, ` +
+    `${input.productName}): lotId ausente → ${input.lotNumber}. O movimento consumiu/restaurou ` +
+    `saldo deste lote na época, mas a saída rápida da época não gravava o vínculo estruturado. ` +
+    `Tipo, quantidade, saldo e demais campos permanecem intactos. ${TRACEABILITY_SUFFIX}`
+  );
+}
+
+/* ─── Helpers ────────────────────────────────────────────────────────────── */
+
+function yes(reason: string): RepairDecision {
+  return { shouldApply: true, reason };
+}
+function no(reason: string): RepairDecision {
+  return { shouldApply: false, reason };
+}
