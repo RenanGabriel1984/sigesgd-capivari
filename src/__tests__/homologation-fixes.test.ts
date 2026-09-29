@@ -255,8 +255,10 @@ describe("Entrega autenticada e autoaprovação", () => {
   });
 
   it("técnico não pode aprovar a própria solicitação", () => {
-    expect(reqSrc).toMatch(/Não é possível aprovar sua própria solicitação/);
-    expect(reqSrc).toMatch(/Técnicos não podem aprovar solicitações/);
+    // RBAC definitivo: o bloqueio de autoaprovação é INCONDICIONAL (nem admin
+    // aprova a própria) e o papel é validado pela matriz central.
+    expect(reqSrc).toMatch(/requireRequestAction\(ctx, "requests\.approve"/);
+    expect(reqSrc).toMatch(/roleHasPermission\(role, "requests\.approve"\)/);
   });
 });
 
