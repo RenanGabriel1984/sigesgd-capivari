@@ -1,24 +1,17 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requirePermission } from "./rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  return { userId, user };
+  // RBAC central: organizações visíveis a quem pode consultá-las.
+  return requirePermission(ctx, "organizations.view");
 }
 
 async function requireAdmin(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  if (user.role !== "admin") throw new Error("Apenas administradores podem gerenciar a estrutura organizacional");
-  return { userId, user };
+  // RBAC central: gerenciamento da estrutura organizacional.
+  return requirePermission(ctx, "organizations.manage", { entity: "organizations" });
 }
 
 export const list = query({

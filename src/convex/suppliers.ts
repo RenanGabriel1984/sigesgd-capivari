@@ -1,24 +1,17 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requirePermission } from "./rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  return { userId, user };
+  // RBAC central: fornecedores exigem permissão de visualização.
+  return requirePermission(ctx, "suppliers.view");
 }
 
 async function requireStockManagerOrAdmin(ctx: any) {
-  const { userId, user } = await requireUser(ctx);
-  const role = (user.role ?? "technician") as UserRole;
-  if (role !== "admin" && role !== "stock_manager") {
-    throw new Error("Apenas administradores e responsáveis pelo estoque podem gerenciar fornecedores");
-  }
-  return { userId, user };
+  // RBAC central: gerenciamento de fornecedores.
+  return requirePermission(ctx, "suppliers.manage", { entity: "suppliers" });
 }
 
 export const list = query({

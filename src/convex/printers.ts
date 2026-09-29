@@ -1,24 +1,17 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requirePermission } from "./rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado");
-  return { userId, user };
+  // RBAC central: impressoras visíveis a quem consulta (incl. técnico).
+  return requirePermission(ctx, "printers.view");
 }
 
 async function requireManagerOrAdmin(ctx: any) {
-  const { userId, user } = await requireUser(ctx);
-  const role = (user.role ?? "technician") as UserRole;
-  if (role !== "admin" && role !== "stock_manager") {
-    throw new Error("Apenas administradores e responsáveis pelo estoque podem gerenciar impressoras");
-  }
-  return { userId, user };
+  // RBAC central: gerenciamento de impressoras.
+  return requirePermission(ctx, "printers.manage", { entity: "printers" });
 }
 
 // ─── Printers ────────────────────────────────────────────────────────────────

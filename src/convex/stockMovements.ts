@@ -5,20 +5,13 @@ import { v } from "convex/values";
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  return { userId, user };
+  // RBAC central: histórico/movimentações visíveis a quem consulta estoque.
+  return requirePermission(ctx, "movements.view");
 }
 
 async function requireStockManagerOrAdmin(ctx: any) {
-  const { userId, user } = await requireUser(ctx);
-  const role = (user.role ?? "technician") as UserRole;
-  if (role !== "admin" && role !== "stock_manager") {
-    throw new Error("Apenas administradores e responsáveis pelo estoque podem movimentar estoque");
-  }
-  return { userId, user };
+  // RBAC central: movimentação direta de estoque.
+  return requirePermission(ctx, "stock.mutate", { entity: "stockMovements" });
 }
 
 export const list = query({

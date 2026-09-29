@@ -1,25 +1,18 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { validateEntryUnits } from "../lib/material-types";
+import { requirePermission } from "./rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  return { userId, user };
+  // RBAC central: entradas exigem sessão com visão de estoque.
+  return requirePermission(ctx, "stock.view");
 }
 
 async function requireStockManagerOrAdmin(ctx: any) {
-  const { userId, user } = await requireUser(ctx);
-  const role = (user.role ?? "technician") as UserRole;
-  if (role !== "admin" && role !== "stock_manager") {
-    throw new Error("Apenas administradores e responsáveis pelo estoque podem gerenciar entradas");
-  }
-  return { userId, user };
+  // RBAC central: operação de entradas (criar/confirmar/editar/estornar).
+  return requirePermission(ctx, "entries.create", { entity: "entries" });
 }
 
 /** Generate sequential entry number: ENT-ANO-SEQUENCIAL */

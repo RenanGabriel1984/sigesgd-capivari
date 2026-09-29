@@ -2,15 +2,14 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
+import { requirePermission } from "./rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  return { userId, user };
+  // Compatibilidade: wrapper fino sobre a camada central src/lib/rbac.ts
+  const auth = await requirePermission(ctx, "users.view");
+  return auth;
 }
 
 async function requireAdmin(ctx: any) {

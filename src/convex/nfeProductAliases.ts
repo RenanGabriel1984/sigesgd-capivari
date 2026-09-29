@@ -1,22 +1,18 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { normalizeText } from "../lib/nfe";
+import { requirePermission } from "./rbac";
 
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  return userId;
+  // RBAC central: leitura de aliases exige visão de entradas (importação NF-e).
+  const auth = await requirePermission(ctx, "entries.view");
+  return auth.userId;
 }
 
 async function requireManagerOrAdmin(ctx: any) {
-  const userId = await requireUser(ctx);
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  if (user.role !== "admin" && user.role !== "stock_manager") {
-    throw new Error("Apenas administradores e responsáveis pelo estoque podem gerenciar correspondências de NF-e");
-  }
-  return userId;
+  // RBAC central: gestão de aliases de NF-e.
+  const auth = await requirePermission(ctx, "entries.import_nfe", { entity: "nfeProductAliases" });
+  return auth.userId;
 }
 
 /** Memória de correspondência aprendida por associação explícita. */

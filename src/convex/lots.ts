@@ -1,13 +1,10 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { requirePermission } from "./rbac";
 
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  return { userId, user };
+  // RBAC central: consulta de lotes (visão de estoque).
+  return requirePermission(ctx, "lots.view");
 }
 
 export const list = query({

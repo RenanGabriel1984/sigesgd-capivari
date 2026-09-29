@@ -110,6 +110,7 @@ export const AUDIT_ACTIONS = {
   ASSET_PART_REMOVE: "asset_part_remove",
   LICENSE_CREATE: "license_create",
   LICENSE_ASSIGN: "license_assign",
+  PERMISSION_DENIED: "permission_denied",
 } as const;
 
 export const auditActionValidator = v.union(
@@ -149,6 +150,7 @@ export const auditActionValidator = v.union(
   v.literal(AUDIT_ACTIONS.ASSET_PART_REMOVE),
   v.literal(AUDIT_ACTIONS.LICENSE_CREATE),
   v.literal(AUDIT_ACTIONS.LICENSE_ASSIGN),
+  v.literal(AUDIT_ACTIONS.PERMISSION_DENIED),
 );
 
 // ─── Material Type (entrada/lote) ────────────────────────────────────────────

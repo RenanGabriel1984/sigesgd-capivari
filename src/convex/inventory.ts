@@ -1,24 +1,17 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requirePermission } from "./rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  return { userId, user };
+  // RBAC central: consultas de inventário.
+  return requirePermission(ctx, "stock.view");
 }
 
 async function requireStockManagerOrAdmin(ctx: any) {
-  const { userId, user } = await requireUser(ctx);
-  const role = (user.role ?? "technician") as UserRole;
-  if (role !== "admin" && role !== "stock_manager") {
-    throw new Error("Apenas administradores e responsáveis pelo estoque podem gerenciar inventários");
-  }
-  return { userId, user };
+  // RBAC central: operações de inventário (abrir, contar, fechar).
+  return requirePermission(ctx, "inventory.manage", { entity: "inventories" });
 }
 
 /** Generate sequential inventory number: INV-ANO-SEQUENCIAL */
