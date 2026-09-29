@@ -268,6 +268,8 @@ export function readPackagingConversion(p: PackagingConfig): PackagingConversion
   const { baseUnit, packagingUnit, conversionFactor } = p;
   if (!baseUnit || !packagingUnit || conversionFactor == null) return null;
   if (!Number.isFinite(conversionFactor) || conversionFactor <= 0) return null;
+  // Embalagem igual à unidade-base não é conversão (1 = 1).
+  if (baseUnit === packagingUnit) return null;
   return { baseUnit, packagingUnit, factor: conversionFactor };
 }
 

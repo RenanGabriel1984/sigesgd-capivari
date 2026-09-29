@@ -13,7 +13,7 @@
  * (revertendo a mutation) se qualquer total mudar.
  */
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { query, mutation, internalMutation } from "./_generated/server";
+import { query, mutation, internalMutation, internalQuery } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
@@ -837,6 +837,78 @@ export const withdrawFamily = mutation({
 });
 
 /* ═══ Integridade global (consulta read-only) ═══════════════════════════════ */
+
+/**
+ * SIMULAÇÃO read-only da retirada por família: valida a composição real e o
+ * plano de operação (take_pack/open_pack) SEM alterar nenhum saldo.
+ */
+export const previewFamilyWithdrawal = query({
+  args: {
+    productId: v.id("products"),
+    quantity: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await requirePermission(ctx, "stock.view");
+    return previewFamilyWithdrawalImpl(ctx, args);
+  },
+});
+
+/** Variante INTERNAL (CLI, sem sessão) da MESMA simulação read-only. */
+export const previewFamilyWithdrawalInternal = internalQuery({
+  args: {
+    productId: v.id("products"),
+    quantity: v.number(),
+  },
+  handler: async (ctx, args) => previewFamilyWithdrawalImpl(ctx, args),
+});
+
+async function previewFamilyWithdrawalImpl(ctx: any, args: { productId: string; quantity: number }) {
+    const quantity = Number(args.quantity);
+    const product = await ctx.db.get(args.productId);
+    if (!product) throw new Error("Produto não encontrado");
+    if (product.categoryId !== SUPPLY_CATEGORY_ID) {
+      throw new Error('Produto não pertence à categoria "Suprimentos de Impressão".');
+    }
+    const conv = readPackagingConversion(product);
+    if (!conv) throw new Error("Produto sem conversão de embalagem configurada.");
+
+    const all = (await ctx.db.query("products").collect()) as Array<{
+      _id: string; name: string; brand?: string | null; categoryId: string;
+      unitOfMeasure: string; baseUnit?: string | null; packagingUnit?: string | null; conversionFactor?: number | null;
+    }>;
+    const familyKey = deriveFamilyKey(product.name, product.brand ?? null);
+    const members = all.filter(
+      (p) => p.categoryId === SUPPLY_CATEGORY_ID && deriveFamilyKey(p.name, p.brand ?? null) === familyKey,
+    );
+    const closedMember = members.find((p) => !!readPackagingConversion(p));
+    const looseMember = members.find((p) => !readPackagingConversion(p));
+
+    const stockOf = async (productId: string) =>
+      ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId)).first();
+    const closedStock = closedMember ? await stockOf(closedMember._id) : null;
+    const looseStock = looseMember ? await stockOf(looseMember._id) : null;
+    const closedAvailable = (closedStock?.physicalQuantity ?? 0) - (closedStock?.reservedQuantity ?? 0);
+    const looseAvailable = (looseStock?.physicalQuantity ?? 0) - (looseStock?.reservedQuantity ?? 0);
+    const familyAvailable = closedAvailable * conv.factor + looseAvailable;
+    const plan = quantity > 0 && quantity <= familyAvailable
+      ? planPackOperation(quantity, { closedPacks: closedAvailable, looseUnits: looseAvailable, factor: conv.factor })
+      : null;
+
+    return {
+      familyKey,
+      productName: product.name,
+      conversion: conv,
+      composition: {
+        closedPacks: closedAvailable,
+        looseUnits: looseAvailable,
+        factor: conv.factor,
+        familyAvailable,
+      },
+      quantity,
+      plan,
+      balanceAfter: quantity > 0 && quantity <= familyAvailable ? familyAvailable - quantity : null,
+    };
+}
 
 /** Compara os 4 livros-razão globais com os invariantes esperados. */
 export const getGlobalIntegrity = query({

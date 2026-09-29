@@ -363,6 +363,9 @@ describe("estrutura do painel (espec da tela)", () => {
     expect(panel).toContain("{status}");
   });
   it("coluna de toner destaca modelo — cor", () => {
-    expect(panel).toContain("displayLabel.split");
+    // A linha agora vem da família (unidade-base) e mantém o destaque
+    // modelo — cor via tonerDisplayLabel.
+    expect(panel).toContain("tonerDisplayLabel(f.familyName)");
+    expect(panel).toContain("tonerLabel.split");
   });
 });
