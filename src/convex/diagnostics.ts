@@ -38,6 +38,7 @@
  * A CLASSIFICAÇÃO OFICIAL DOS 53 PRODUTOS vive em `convex/productClassification.ts`
  * (módulo separado, igualmente internal-only).
  */
+import { requirePermission } from "./rbac";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
@@ -48,13 +49,8 @@ import { verifyPassword } from "./auth/passwords";
 const OFFICIAL_ENTRY_NUMBER = "ENT-2026-000001";
 
 async function requireAdmin(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  if (user.role !== "admin" && user.role !== "stock_manager")
-    throw new Error("Apenas administradores podem executar diagnóstico de estoque");
-  return { userId, user };
+  // RBAC central: diagnóstico é operação de gestão do estoque.
+  return requirePermission(ctx, "settings.manage", { entity: "diagnostics" });
 }
 
 export const environmentCheck = query({

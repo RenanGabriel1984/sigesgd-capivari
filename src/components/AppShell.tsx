@@ -70,6 +70,13 @@ interface NavSection {
 }
 
 // Navegação organizada por TAREFAS (não pela estrutura técnica do banco).
+// Permissões derivadas da matriz central src/lib/rbac.ts. Visibilidade por
+// perfil (spec RBAC):
+//   técnico  → Início, Estoque, Solicitações (criar/minhas)
+//   diretor  → + Requisições (aprovar), Relatórios, Histórico
+//   gestor   → + Entrada, Saída, Inventário, Produtos, Categorias,
+//              Fornecedores, Lotes, Locais, Áreas, Equipamentos
+//   admin/secretary → sistema completo (MESMO conjunto central)
 const NAV_SECTIONS: NavSection[] = [
   { items: [
     { label: "Início", href: "/dashboard", icon: LayoutDashboard, permission: "canViewMovements", permission2: "canCreateRequests" },
@@ -78,7 +85,7 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Estoque", href: "/stock", icon: Warehouse, permission: "canViewMovements", permission2: "canCreateRequests" },
     { label: "Entrada de material", href: "/entries", icon: ShoppingCart, permission: "canCreateEntries" },
     { label: "Dar saída", href: "/exit", icon: PackageMinus, permission: "canCreateEntries" },
-    { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests" },
+    { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests", permission2: "canApproveRequests" },
     { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
   ]},
   // ── Equipamentos ──────────────────────────────────────────────────────────
@@ -111,7 +118,7 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Organizações", href: "/organization", icon: Building2, permission: "canManageOrg" },
     { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },
     { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
-    { label: "Configurações", href: "/settings", icon: Settings, permission: "canManageUsers" },
+    { label: "Configurações", href: "/settings", icon: Settings, permission: "canViewRequests" },
   ]},
 ];
 

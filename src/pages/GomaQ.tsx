@@ -225,7 +225,7 @@ function ExchangesTab() {
   const exchanges = useQuery(api.gomaQ.listExchanges, {});
   const products = useQuery(api.products.listActive);
   const printers = useQuery(api.printers.listActive);
-  const users = useQuery(api.users.listUsers);
+  const users = useQuery(api.users.listUserOptions);
   const createExchange = useMutation(api.gomaQ.createExchange);
 
   const [showNew, setShowNew] = useState(false);
@@ -350,7 +350,7 @@ function ExchangesTab() {
               <Label>Recebedor</Label>
               <select className="w-full border rounded-md p-2 text-sm" value={form.receivedByUserId} onChange={(e) => setForm({ ...form, receivedByUserId: e.target.value })}>
                 <option value="">Selecione...</option>
-                {users?.map((u) => <option key={u._id} value={u._id}>{u.name ?? u.email}</option>)}
+                {users?.map((u) => <option key={u._id} value={u._id}>{u.name ?? "Usuário"}</option>)}
               </select>
             </div>
             <div>

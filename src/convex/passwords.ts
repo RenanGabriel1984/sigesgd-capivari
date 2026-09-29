@@ -1,4 +1,5 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { requirePermission } from "./rbac";
 import { mutation, query, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword, verifyPassword } from "./auth/passwords";
@@ -8,6 +9,8 @@ import type { Id } from "./_generated/dataModel";
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
 async function requireUser(ctx: any) {
+  // RBAC central: qualquer usuário autenticado gerencia a PRÓPRIA senha
+  // (troca obrigatória no 1º login). Ops. administrativas usam requireAdmin.
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error("Não autenticado");
   const user = await ctx.db.get(userId);
@@ -16,9 +19,8 @@ async function requireUser(ctx: any) {
 }
 
 async function requireAdmin(ctx: any) {
-  const { userId, user } = await requireUser(ctx);
-  if (user.role !== "admin") throw new Error("Apenas administradores podem executar esta operação");
-  return { userId, user };
+  // RBAC central: operações administrativas de senha = gestão de usuários.
+  return requirePermission(ctx, "users.manage", { entity: "passwords" });
 }
 
 /** Create password for a user (admin only). */

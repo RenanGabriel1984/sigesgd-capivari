@@ -42,7 +42,7 @@ export default function Exit() {
   const { user } = useAuth();
   const products = useQuery(api.products.listActive);
   const locSummary = useQuery(api.stockSetup.productLocationSummary);
-  const users = useQuery(api.users.listUsers);
+  const users = useQuery(api.users.listUserOptions);
   const quickExit = useMutation(api.stockSetup.quickExit);
 
   const [step, setStep] = useState(0);

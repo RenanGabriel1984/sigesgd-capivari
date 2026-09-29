@@ -1,16 +1,10 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requirePermission } from "./rbac";
 
-/** Require admin user. */
+/** Require admin user (RBAC central). */
 async function requireAdmin(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado");
-  if (user.role !== "admin")
-    throw new Error("Apenas administradores podem executar esta operação");
-  return { userId, user };
+  return requirePermission(ctx, "settings.manage", { entity: "seeds" });
 }
 
 /**

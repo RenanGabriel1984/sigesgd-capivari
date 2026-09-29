@@ -1,6 +1,7 @@
 import '@vly-ai/integrations';
 import { Toaster } from "@/components/ui/sonner";
 import { RequireAuth } from "@/components/RequireAuth";
+import { RequirePermission } from "@/components/RequirePermission";
 import { VlyToolbar } from "../vly-toolbar-readonly.tsx";
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
 import { ConvexReactClient } from "convex/react";
@@ -123,33 +124,33 @@ createRoot(document.getElementById("root")!).render(
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/auth" element={<AuthPage redirectAfterAuth="/dashboard" />} />
-              {/* Protected routes */}
-              <Route path="/dashboard" element={<RequireAuth><Dashboard /></RequireAuth>} />
-              <Route path="/stock" element={<RequireAuth><Stock /></RequireAuth>} />
-              <Route path="/exit" element={<RequireAuth><Exit /></RequireAuth>} />
-              <Route path="/products" element={<RequireAuth><Products /></RequireAuth>} />
-              <Route path="/products/:id" element={<RequireAuth><ProductDetail /></RequireAuth>} />
-              <Route path="/categories" element={<RequireAuth><Categories /></RequireAuth>} />
-              <Route path="/entries" element={<RequireAuth><Entries /></RequireAuth>} />
-              <Route path="/lots" element={<RequireAuth><Lots /></RequireAuth>} />
-              <Route path="/storage-locations" element={<RequireAuth><StorageLocationsPage /></RequireAuth>} />
-              <Route path="/stock-areas" element={<RequireAuth><StockAreasPage /></RequireAuth>} />
-              <Route path="/inventory" element={<RequireAuth><InventoryPage /></RequireAuth>} />
-              <Route path="/requests" element={<RequireAuth><Requests /></RequireAuth>} />
-              <Route path="/returns" element={<RequireAuth><ReturnsPage /></RequireAuth>} />
-              <Route path="/transfers" element={<RequireAuth><StockTransfersPage /></RequireAuth>} />
-              <Route path="/gomaq" element={<RequireAuth><GomaQPage /></RequireAuth>} />
-              <Route path="/assets" element={<RequireAuth><AssetsPage /></RequireAuth>} />
-              <Route path="/assets/:id" element={<RequireAuth><AssetDetailPage /></RequireAuth>} />
-              <Route path="/licenses" element={<RequireAuth><LicensesPage /></RequireAuth>} />
-              <Route path="/movements" element={<RequireAuth><Movements /></RequireAuth>} />
-              <Route path="/organization" element={<RequireAuth><Organization /></RequireAuth>} />
-              <Route path="/users" element={<RequireAuth><UsersPage /></RequireAuth>} />
-              <Route path="/suppliers" element={<RequireAuth><Suppliers /></RequireAuth>} />
-              <Route path="/printers" element={<RequireAuth><PrintersPage /></RequireAuth>} />
-              <Route path="/reports" element={<RequireAuth><Reports /></RequireAuth>} />
-              <Route path="/audit" element={<RequireAuth><Audit /></RequireAuth>} />
-              <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+              {/* Protected routes: autenticação (RequireAuth) + permissão (RequirePermission) */}
+              <Route path="/dashboard" element={<RequireAuth><RequirePermission><Dashboard /></RequirePermission></RequireAuth>} />
+              <Route path="/stock" element={<RequireAuth><RequirePermission><Stock /></RequirePermission></RequireAuth>} />
+              <Route path="/exit" element={<RequireAuth><RequirePermission><Exit /></RequirePermission></RequireAuth>} />
+              <Route path="/products" element={<RequireAuth><RequirePermission><Products /></RequirePermission></RequireAuth>} />
+              <Route path="/products/:id" element={<RequireAuth><RequirePermission><ProductDetail /></RequirePermission></RequireAuth>} />
+              <Route path="/categories" element={<RequireAuth><RequirePermission><Categories /></RequirePermission></RequireAuth>} />
+              <Route path="/entries" element={<RequireAuth><RequirePermission><Entries /></RequirePermission></RequireAuth>} />
+              <Route path="/lots" element={<RequireAuth><RequirePermission><Lots /></RequirePermission></RequireAuth>} />
+              <Route path="/storage-locations" element={<RequireAuth><RequirePermission><StorageLocationsPage /></RequirePermission></RequireAuth>} />
+              <Route path="/stock-areas" element={<RequireAuth><RequirePermission><StockAreasPage /></RequirePermission></RequireAuth>} />
+              <Route path="/inventory" element={<RequireAuth><RequirePermission><InventoryPage /></RequirePermission></RequireAuth>} />
+              <Route path="/requests" element={<RequireAuth><RequirePermission><Requests /></RequirePermission></RequireAuth>} />
+              <Route path="/returns" element={<RequireAuth><RequirePermission><ReturnsPage /></RequirePermission></RequireAuth>} />
+              <Route path="/transfers" element={<RequireAuth><RequirePermission><StockTransfersPage /></RequirePermission></RequireAuth>} />
+              <Route path="/gomaq" element={<RequireAuth><RequirePermission><GomaQPage /></RequirePermission></RequireAuth>} />
+              <Route path="/assets" element={<RequireAuth><RequirePermission><AssetsPage /></RequirePermission></RequireAuth>} />
+              <Route path="/assets/:id" element={<RequireAuth><RequirePermission><AssetDetailPage /></RequirePermission></RequireAuth>} />
+              <Route path="/licenses" element={<RequireAuth><RequirePermission><LicensesPage /></RequirePermission></RequireAuth>} />
+              <Route path="/movements" element={<RequireAuth><RequirePermission><Movements /></RequirePermission></RequireAuth>} />
+              <Route path="/organization" element={<RequireAuth><RequirePermission><Organization /></RequirePermission></RequireAuth>} />
+              <Route path="/users" element={<RequireAuth><RequirePermission><UsersPage /></RequirePermission></RequireAuth>} />
+              <Route path="/suppliers" element={<RequireAuth><RequirePermission><Suppliers /></RequirePermission></RequireAuth>} />
+              <Route path="/printers" element={<RequireAuth><RequirePermission><PrintersPage /></RequirePermission></RequireAuth>} />
+              <Route path="/reports" element={<RequireAuth><RequirePermission><Reports /></RequirePermission></RequireAuth>} />
+              <Route path="/audit" element={<RequireAuth><RequirePermission><Audit /></RequirePermission></RequireAuth>} />
+              <Route path="/settings" element={<RequireAuth><RequirePermission><Settings /></RequirePermission></RequireAuth>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>

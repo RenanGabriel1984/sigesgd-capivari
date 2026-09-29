@@ -57,7 +57,7 @@ export default function AssetDetailPage() {
   const [assignOrgId, setAssignOrgId] = useState("");
   const [assignObs, setAssignObs] = useState("");
 
-  const users = useQuery(api.users.listUsers);
+  const users = useQuery(api.users.listUserOptions);
   const orgs = useQuery(api.organizations.listActive);
 
   if (!asset) return <AppShell><div className="flex items-center justify-center min-h-screen"><p className="text-muted-foreground">Carregando...</p></div></AppShell>;
@@ -258,7 +258,7 @@ export default function AssetDetailPage() {
                 <Label>Responsável</Label>
                 <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={assignUserId} onChange={(e) => setAssignUserId(e.target.value)}>
                   <option value="">Nenhum</option>
-                  {(users ?? []).filter((u: any) => u.active !== false).map((u: any) => <option key={u._id} value={u._id}>{u.name ?? u.email}</option>)}
+                  {(users ?? []).filter((u: any) => u.active !== false).map((u: any) => <option key={u._id} value={u._id}>{u.name ?? "Usuário"}</option>)}
                 </select>
               </div>
               <div>

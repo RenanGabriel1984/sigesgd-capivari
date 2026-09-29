@@ -1,26 +1,22 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { verifyPassword } from "./auth/passwords";
 import { generateExitNumber } from "./stockHelpers";
+import { requirePermission, requireRequestAction } from "./rbac";
+import { roleHasPermission, type AppRole } from "../lib/rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
-const ROLES_WITH_FULL_VISIBILITY: UserRole[] = [
-  "admin", "stock_manager", "director", "secretary",
-];
-
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  return { userId, user };
+  // RBAC central: requisições são visíveis a quem pode consultá-las; a query
+  // de lista abaixo já restringe o escopo para o solicitante (técnico).
+  return requirePermission(ctx, "requests.view");
 }
 
 function hasFullVisibility(role: UserRole | undefined): boolean {
-  if (!role) return false;
-  return ROLES_WITH_FULL_VISIBILITY.includes(role);
+  // RBAC central: visão completa = possui requests.approve OU requests.deliver
+  // (admin, secretary, stock_manager, director); técnico vê apenas as próprias.
+  return roleHasPermission(role as AppRole, "requests.approve");
 }
 
 async function enrichRequest(ctx: any, r: any) {
@@ -99,7 +95,8 @@ export const create = mutation({
     })),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireUser(ctx);
+    // RBAC central: criar requisição exige requests.create (technician incluído).
+    const { userId } = await requirePermission(ctx, "requests.create", { entity: "requests" });
 
     // Validate required fields
     const reason = args.reason?.trim() ?? "";
@@ -204,14 +201,19 @@ export const approve = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { userId, user } = await requireUser(ctx);
-    const role = (user.role ?? "technician") as UserRole;
-    if (role === "technician") throw new Error("Técnicos não podem aprovar solicitações");
+    const { userId, user, role } = await requireUser(ctx);
+    if (!roleHasPermission(role, "requests.approve")) {
+      throw new Error("ACESSO NEGADO: seu perfil não possui a permissão " +
+        "de aprovação de requisições.");
+    }
 
     // Read request — must still be pending (prevents double-approval)
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Solicitação não encontrada");
-    if (request.requesterId === userId && role !== "admin") throw new Error("Não é possível aprovar sua própria solicitação");
+    // REGRA OBRIGATÓRIA: o solicitante NUNCA aprova a própria requisição (nem admin).
+    await requireRequestAction(ctx, "requests.approve", request.requesterId, {
+      entity: "requests", entityId: args.requestId,
+    });
     if (request.status !== "pending") throw new Error("Solicitação não está pendente. Verifique se já foi aprovada, rejeitada ou cancelada.");
 
     // ─── PHASE 1: Validate ALL items and calculate total reservation per product ───
@@ -309,12 +311,17 @@ export const approve = mutation({
 export const reject = mutation({
   args: { requestId: v.id("requests"), observation: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const { userId, user } = await requireUser(ctx);
-    const role = (user.role ?? "technician") as UserRole;
-    if (role === "technician") throw new Error("Técnicos não podem rejeitar solicitações");
+    const { userId, user, role } = await requireUser(ctx);
+    if (!roleHasPermission(role, "requests.reject")) {
+      throw new Error("ACESSO NEGADO: seu perfil não possui a permissão " +
+        "de rejeição de requisições.");
+    }
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Solicitação não encontrada");
-    if (request.requesterId === userId && role !== "admin") throw new Error("Não é possível rejeitar sua própria solicitação");
+    // REGRA OBRIGATÓRIA: o solicitante NUNCA rejeita a própria requisição (nem admin).
+    await requireRequestAction(ctx, "requests.reject", request.requesterId, {
+      entity: "requests", entityId: args.requestId,
+    });
     if (request.status !== "pending") throw new Error("Solicitação não está pendente");
     const reason = (args.observation ?? "").trim();
     if (!reason) throw new Error("O motivo da rejeição é obrigatório");
@@ -339,6 +346,9 @@ export const deliver = mutation({
   },
   handler: async (ctx, args) => {
     const { userId, user } = await requireUser(ctx);
+    // RBAC central: entrega exige requests.deliver (admin, secretary,
+    // stock_manager).
+    await requirePermission(ctx, "requests.deliver", { entity: "requests", entityId: args.requestId });
 
     // Verify password for electronic signature
     const passwordRecord = await ctx.db

@@ -1,6 +1,6 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { requirePermission } from "./rbac";
 import {
   validateReturnQuantity,
   returnedQuantityForExit,
@@ -16,11 +16,13 @@ import {
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  return { userId, user };
+  // RBAC central: consulta de devoluções.
+  return requirePermission(ctx, "returns.view");
+}
+
+/** RBAC central: registrar devolução (opera estoque). */
+async function requireReturnCreate(ctx: any) {
+  return requirePermission(ctx, "returns.create", { entity: "returns" });
 }
 
 /**
@@ -135,9 +137,7 @@ export const create = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { userId, user } = await requireUser(ctx);
-    const role = (user.role ?? "technician") as UserRole;
-    if (role === "technician") throw new Error("Técnicos não podem processar devoluções");
+    const { userId, user } = await requireReturnCreate(ctx);
 
     const reason = args.reason.trim();
     if (!reason) throw new Error("O motivo da devolução é obrigatório");

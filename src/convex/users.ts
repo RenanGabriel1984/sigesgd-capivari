@@ -73,8 +73,10 @@ export const getUserById = query({
 export const listUsers = query({
   args: {},
   handler: async (ctx) => {
-    // Proteção: exige sessão autenticada (evita exposição pública de PII)
-    await requireUser(ctx);
+    // RBAC central: a listagem completa (com PII) exige users.manage
+    // (admin/secretary). Consumidores operacionais que só precisam de
+    // nome/ID para pickers usam `listUserOptions`.
+    await requirePermission(ctx, "users.manage", { entity: "users" });
     const users = await ctx.db.query("users").collect();
     return Promise.all(
       users.map(async (u: any) => {
@@ -82,6 +84,21 @@ export const listUsers = query({
         return { ...u, organization: org };
       })
     );
+  },
+});
+
+/**
+ * Opções mínimas de usuário (id, nome, papel, ativo) para pickers operacionais
+ * (ex.: "quem recebeu" na entrega de requisições). Sem e-mail ou dados adicionais.
+ */
+export const listUserOptions = query({
+  args: {},
+  handler: async (ctx) => {
+    await requirePermission(ctx, "requests.view");
+    const users = await ctx.db.query("users").collect();
+    return users
+      .filter((u: any) => u.active !== false && !!u.role)
+      .map((u: any) => ({ _id: u._id as string, name: (u.name ?? null) as string | null, role: (u.role ?? null) as string | null, active: (u.active ?? true) as boolean }));
   },
 });
 

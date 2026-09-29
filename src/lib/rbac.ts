@@ -184,6 +184,9 @@ const TECHNICIAN_ACCESS: readonly AppPermission[] = [
   "requests.create",
   // Info de impressoras para solicitar suprimentos de impressão
   "printers.view",
+  // Estrutura organizacional para informar secretaria/departamento/unidade
+  // na requisição (consulta; sem administração).
+  "organizations.view",
   // Acesso às configurações de conta (troca de senha obrigatória no 1º login)
   "settings.view",
 ];

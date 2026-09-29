@@ -1,4 +1,4 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { requirePermission } from "./rbac";
 import {
   resolveConsumedLotId,
   formatConsumedLots,
@@ -16,20 +16,13 @@ import {
 } from "./stockHelpers";
 
 async function requireUser(ctx: any) {
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado");
-  return { userId, user };
+  // RBAC central: resumos de implantação/localização exigem visão de estoque.
+  return requirePermission(ctx, "stock.view");
 }
 
 async function requireAdmin(ctx: any) {
-  const { userId, user } = await requireUser(ctx);
-  if (user.role !== "admin" && user.role !== "stock_manager")
-    throw new Error(
-      "Apenas administradores ou gerentes de estoque podem executar esta operação"
-    );
-  return { userId, user };
+  // RBAC central: carga inicial, importação de planilha e saída rápida.
+  return requirePermission(ctx, "stock.mutate", { entity: "stockSetup" });
 }
 
 /**

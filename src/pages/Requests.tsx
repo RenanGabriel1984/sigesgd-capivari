@@ -99,7 +99,7 @@ export default function Requests() {
   const [signatureStep, setSignatureStep] = useState<"items" | "signature">("items");
   const [reverseLogistics, setReverseLogistics] = useState(false);
   const [receivedByUserId, setReceivedByUserId] = useState("");
-  const allUsers = useQuery(api.users.listUsers);
+  const allUsers = useQuery(api.users.listUserOptions);
 
   // ─── Delivery term dialog ───
   const [termDialog, setTermDialog] = useState<any>(null);

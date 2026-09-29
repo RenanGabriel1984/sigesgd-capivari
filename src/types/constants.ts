@@ -139,125 +139,68 @@ export const UNIT_LABELS: Record<string, string> = {
 };
 
 // ─── Permissions by Role ─────────────────────────────────────────────────────
-export const PERMISSIONS = {
-  admin: {
-    canManageUsers: true,
-    canManageOrg: true,
-    canManageCategories: true,
-    canManageProducts: true,
-    canManageStock: true,
-    canManageSuppliers: true,
-    canCreateEntries: true,
-    canApproveRequests: true,
-    canRejectRequests: true,
-    canDeliver: true,
-    canViewMovements: true,
-    canViewAuditLogs: true,
-    canManageSettings: true,
-    canCreateRequests: true,
-    canManageInventory: true,
-    canManageStorageLocations: true,
-    canTransferStock: true,
-    canReturnStock: true,
-    canManageGomaQ: true,
-    canManageAssets: true,
-    canManageLicenses: true,
-  },
-  stock_manager: {
-    canManageUsers: false,
-    canManageOrg: false,
-    canManageCategories: true,
-    canManageProducts: true,
-    canManageStock: true,
-    canManageSuppliers: true,
-    canCreateEntries: true,
-    canApproveRequests: true,
-    canRejectRequests: true,
-    canDeliver: true,
-    canViewMovements: true,
-    canViewAuditLogs: false,
-    canManageSettings: true,
-    canCreateRequests: false,
-    canManageInventory: true,
-    canManageStorageLocations: true,
-    canTransferStock: true,
-    canReturnStock: true,
-    canManageGomaQ: true,
-    canManageAssets: true,
-    canManageLicenses: true,
-  },
-  director: {
-    canManageUsers: false,
-    canManageOrg: false,
-    canManageCategories: false,
-    canManageProducts: false,
-    canManageStock: false,
-    canManageSuppliers: false,
-    canCreateEntries: false,
-    canApproveRequests: true,
-    canRejectRequests: true,
-    canDeliver: true,
-    canViewMovements: true,
-    canViewAuditLogs: false,
-    canManageSettings: true,
-    canCreateRequests: false,
-    canManageInventory: false,
-    canManageStorageLocations: false,
-    canTransferStock: false,
-    canReturnStock: false,
-    canManageGomaQ: false,
-    canManageAssets: true,
-    canManageLicenses: false,
-  },
-  secretary: {
-    canManageUsers: false,
-    canManageOrg: false,
-    canManageCategories: false,
-    canManageProducts: false,
-    canManageStock: false,
-    canManageSuppliers: false,
-    canCreateEntries: false,
-    canApproveRequests: true,
-    canRejectRequests: false,
-    canDeliver: false,
-    canViewMovements: true,
-    canViewAuditLogs: false,
-    canManageSettings: true,
-    canCreateRequests: false,
-    canManageInventory: false,
-    canManageStorageLocations: false,
-    canTransferStock: false,
-    canReturnStock: false,
-    canManageGomaQ: false,
-    canManageAssets: false,
-    canManageLicenses: false,
-  },
-  technician: {
-    canManageUsers: false,
-    canManageOrg: false,
-    canManageCategories: false,
-    canManageProducts: false,
-    canManageStock: false,
-    canManageSuppliers: false,
-    canCreateEntries: false,
-    canApproveRequests: false,
-    canRejectRequests: false,
-    canDeliver: false,
-    canViewMovements: false,
-    canViewAuditLogs: false,
-    canManageSettings: true,
-    canCreateRequests: true,
-    canManageInventory: false,
-    canManageStorageLocations: false,
-    canTransferStock: false,
-    canReturnStock: false,
-    canManageGomaQ: false,
-    canManageAssets: false,
-    canManageLicenses: false,
-  },
-} as const;
+//
+// FONTE ÚNICA DE VERDADE: a matriz vive em `src/lib/rbac.ts`. Os flags abaixo
+// (usados por menus/botões) são DERIVADOS dela — admin e secretary apontam
+// para o MESMO conjunto central, sem duplicação de regras.
 
-export type Permissions = typeof PERMISSIONS[keyof typeof PERMISSIONS];
+import {
+  ROLE_PERMISSIONS,
+  roleHasPermission,
+  type AppPermission,
+  type AppRole,
+} from "@/lib/rbac";
+
+/** Mapa flag de UI → permissão central. */
+const PERMISSION_FLAGS = {
+  canViewDashboard: "dashboard.view",
+  canViewStock: "stock.view",
+  canViewMovements: "movements.view",
+  canViewAuditLogs: "audit.view",
+  canViewRequests: "requests.view",
+
+  canManageUsers: "users.manage",
+  canManageOrg: "organizations.manage",
+  canManageCategories: "categories.manage",
+  canManageProducts: "products.manage",
+  canManageStock: "lots.manage",
+  canManageSuppliers: "suppliers.manage",
+  canManageSettings: "settings.manage",
+  canManageInventory: "inventory.manage",
+  canManageStorageLocations: "locations.manage",
+  canManageGomaQ: "gomaq.manage",
+  canManageAssets: "equipment.manage",
+  canManageLicenses: "licenses.manage",
+
+  canCreateEntries: "entries.create",
+  canApproveRequests: "requests.approve",
+  canRejectRequests: "requests.reject",
+  canDeliver: "requests.deliver",
+  canCreateRequests: "requests.create",
+  canTransferStock: "transfers.create",
+  canReturnStock: "returns.create",
+} as const satisfies Record<string, AppPermission>;
+
+export type Permissions = { [F in keyof typeof PERMISSION_FLAGS]: boolean };
+
+function derivePermissions(role: AppRole): Permissions {
+  const out = {} as { -readonly [F in keyof Permissions]: boolean };
+  for (const [flag, permission] of Object.entries(PERMISSION_FLAGS) as Array<[
+    keyof typeof PERMISSION_FLAGS,
+    AppPermission
+  ]>) {
+    out[flag] = roleHasPermission(role, permission);
+  }
+  return out;
+}
+
+export const PERMISSIONS: Record<AppRole, Permissions> = {
+  admin: derivePermissions("admin"),
+  secretary: derivePermissions("secretary"), // MESMO conjunto de admin (matriz central)
+  stock_manager: derivePermissions("stock_manager"),
+  director: derivePermissions("director"),
+  technician: derivePermissions("technician"),
+};
 
 export function getPermissions(role: UserRole | undefined): Permissions {
   if (!role) return PERMISSIONS.technician;
