@@ -239,3 +239,237 @@ export function validateWithdrawal(quantity: number, available: number): Withdra
   }
   return { ok: true, balanceAfter: available - quantity };
 }
+
+/* ─── Conversão de embalagem e unidade-base (configurável; nunca inferida) ──── */
+
+/**
+ * Metadados de conversão de embalagem de um produto (schema products):
+ * baseUnit/packagingUnit/conversionFactor — TODOS opcionais.
+ * Conversão só existe quando explicitamente configurada; nada é inferido
+ * do texto do nome (papel térmico 90 rolos NÃO vira 2.700 unidades).
+ */
+export interface PackagingConfig {
+  baseUnit?: string | null;
+  packagingUnit?: string | null;
+  conversionFactor?: number | null;
+}
+
+export interface PackagingConversion {
+  baseUnit: string;
+  packagingUnit: string;
+  factor: number;
+}
+
+/**
+ * Lê a conversão configurada. Retorna null quando incompleta/inválida
+ * (factor <= 0, não inteiro positivo configurável, ou campos ausentes).
+ */
+export function readPackagingConversion(p: PackagingConfig): PackagingConversion | null {
+  const { baseUnit, packagingUnit, conversionFactor } = p;
+  if (!baseUnit || !packagingUnit || conversionFactor == null) return null;
+  if (!Number.isFinite(conversionFactor) || conversionFactor <= 0) return null;
+  return { baseUnit, packagingUnit, factor: conversionFactor };
+}
+
+/**
+ * Operação logicamente possível com a composição atual (caixas fechadas + avulsas).
+ * - "open_pack": abre `packs` caixas FECHADAS para unidades avulsas (integral).
+ * - "take_pack": retira `packs` caixas FECHADAS (nunca desmonta).
+ * - null: composição insuficiente.
+ * NÃO inventa estado físico: a abertura exige caixa fechada disponível.
+ */
+export type PackOperation = "open_pack" | "take_pack";
+
+export interface PackOperationPlan {
+  operation: PackOperation;
+  packs: number;
+}
+
+/**
+ * Decide a operação para `units` unidades-base dada a composição física.
+ * Regra operacional: sai primeiro das unidades avulsas; abrir caixa é evento
+ * EXPLICITO e integral (uma caixa aberta deixa de ser fechada).
+ */
+export function planPackOperation(
+  units: number,
+  composition: { closedPacks: number; looseUnits: number; factor: number },
+): PackOperationPlan | null {
+  const { closedPacks, looseUnits, factor } = composition;
+  if (!Number.isFinite(units) || units <= 0) return null;
+  if (units <= looseUnits) return { operation: "take_pack", packs: 0 }; // só avulsas
+  const fromOpenable = units - looseUnits;
+  const packsNeeded = Math.ceil(fromOpenable / factor);
+  if (packsNeeded > closedPacks) return null;
+  if (fromOpenable % factor === 0) return { operation: "take_pack", packs: fromOpenable / factor };
+  return { operation: "open_pack", packs: packsNeeded };
+}
+
+/* ─── Agrupamento por família física (mesmo produto em apresentações distintas) */
+
+/**
+ * Chave canônica de família: marca + nome sem o sufixo de apresentação
+ * "— caixa fechada" / "— unidade avulsa" / "— caixa" / "— unidade".
+ * Produtos sem sufixo agrupam por si mesmos (família de 1).
+ */
+export function deriveFamilyKey(productName: string, brand?: string | null): string {
+  const base = productName
+    .replace(/\s*[—\-–]\s*(caixa\s*fechada|unidade\s*avulsa|caixa|unidade)\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return `${brand ?? ""}::${base.toLowerCase()}`;
+}
+
+export interface SupplyFamilyInput {
+  productId: string;
+  productName: string;
+  brand: string | null;
+  model: string | null;
+  unitOfMeasure: string;
+  currentStock: number;
+  minimumStock: number;
+  idealStock: number;
+  inArea: number;
+  /** Conversão explicitamente configurada (null = sem conversão). */
+  packaging: PackagingConversion | null;
+}
+
+/** Um membro físico da família (registro ORIGINAL preservado). */
+export interface FamilyMember {
+  productId: string;
+  productName: string;
+  unitOfMeasure: string;
+  currentStock: number;
+  inArea: number;
+  packaging: PackagingConversion | null;
+  /** Quantidade expressa em unidades-base (sem conversão = quantidade própria). */
+  baseUnits: number;
+}
+
+export interface SupplyFamily {
+  /** Chave canônica da família. */
+  familyKey: string;
+  /** Nome comum (sem sufixo de apresentação) — rótulo exibido. */
+  familyName: string;
+  brand: string | null;
+  type: SupplyType;
+  model: string | null;
+  /** Unidade operacional (base). */
+  baseUnit: string;
+  /** Estoque total da família em unidades-base. */
+  baseStock: number;
+  /** Estoque fisicamente na área Impressoras (unidades-base). */
+  baseStockInArea: number;
+  /** Detalhamento legível da composição física, ex.: "13 caixas fechadas + 18 un. avulsas". */
+  compositionLabel: string;
+  /** Registros originais — NUNCA descartados (rastreabilidade). */
+  members: FamilyMember[];
+  /** Parâmetros em unidades-base quando todos os membros configurados; senão null. */
+  minimumStock: number | null;
+  idealStock: number | null;
+  status: StockStatus;
+  /** Membro de retirada preferencial (com conversão; senão único membro com saldo). */
+  withdrawMemberId: string | null;
+  suggestedReorder: number | null;
+  parametersDefined: boolean;
+}
+
+/** Rótulo da composição física, ex.: "13 caixas fechadas + 18 un. avulsas". */
+export function compositionLabelFor(members: FamilyMember[]): string {
+  const parts: string[] = [];
+  for (const m of members) {
+    if (m.currentStock <= 0) continue;
+    if (m.packaging) {
+      const plural = m.currentStock > 1 ? "s" : "";
+      parts.push(`${m.currentStock} ${m.packaging.packagingUnit}${plural} fechada${plural}`);
+    } else {
+      const plural = m.currentStock > 1 ? "s" : "a";
+      parts.push(`${m.currentStock} ${m.unitOfMeasure}. avulsa${plural}`);
+    }
+  }
+  return parts.join(" + ") || "—";
+}
+
+/**
+ * Agrupa linhas de suprimento em famílias físicas. Sem conversão configurada
+ * o comportamento é idêntico ao anterior (família de 1, unidade de estoque).
+ */
+export function buildSupplyFamilies(inputs: SupplyFamilyInput[]): SupplyFamily[] {
+  const groups = new Map<string, SupplyFamilyInput[]>();
+  for (const input of inputs) {
+    const key = deriveFamilyKey(input.productName, input.brand);
+    const list = groups.get(key) ?? [];
+    list.push(input);
+    groups.set(key, list);
+  }
+
+  const families: SupplyFamily[] = [];
+  for (const [familyKey, membersInput] of groups) {
+    const first = membersInput[0];
+    const members: FamilyMember[] = membersInput.map((m) => ({
+      productId: m.productId,
+      productName: m.productName,
+      unitOfMeasure: m.unitOfMeasure,
+      currentStock: m.currentStock,
+      inArea: m.inArea,
+      packaging: m.packaging,
+      baseUnits: m.packaging ? m.currentStock * m.packaging.factor : m.currentStock,
+    }));
+    const baseStock = members.reduce((s, m) => s + m.baseUnits, 0);
+    const baseStockInArea = members.reduce((s, m) => s + (m.packaging ? m.inArea * m.packaging.factor : m.inArea), 0);
+    const baseUnit = members.find((m) => m.packaging)?.packaging?.baseUnit ?? first.unitOfMeasure;
+    const mins = membersInput.map((m) => m.minimumStock);
+    const ideals = membersInput.map((m) => m.idealStock);
+    const allConfigured = mins.every((v) => v > 0) && ideals.every((v) => v > 0);
+    const minimumStock = allConfigured ? mins.reduce((a, b) => a + b, 0) : null;
+    const idealStock = allConfigured ? ideals.reduce((a, b) => a + b, 0) : null;
+    const parametersDefined = minimumStock != null && idealStock != null && minimumStock > 0;
+    const withdrawMember =
+      members.find((m) => m.packaging && m.currentStock > 0) ??
+      members.find((m) => m.currentStock > 0) ??
+      members[0];
+    const status = stockStatus(baseStock, minimumStock);
+    families.push({
+      familyKey,
+      familyName: first.productName.replace(/\s*[—\-–]\s*(caixa\s*fechada|unidade\s*avulsa|caixa|unidade)\s*$/i, "").trim(),
+      brand: first.brand,
+      type: classifySupplyType(first.productName),
+      model: first.model,
+      baseUnit,
+      baseStock,
+      baseStockInArea,
+      compositionLabel: compositionLabelFor(members),
+      members,
+      minimumStock,
+      idealStock,
+      status,
+      withdrawMemberId: withdrawMember.productId,
+      suggestedReorder: parametersDefined ? Math.max(0, idealStock! - baseStock) : null,
+      parametersDefined,
+    });
+  }
+  return families.sort(
+    (a, b) =>
+      a.type.localeCompare(b.type) ||
+      a.familyName.localeCompare(b.familyName) ||
+      a.familyKey.localeCompare(b.familyKey),
+  );
+}
+
+/* ─── Normalização de listas (contrato defensivo; nunca cast cego) ─────────── */
+
+/**
+ * Normaliza o retorno de consultas que podem chegar como array direto ou como
+ * objeto paginado/estruturado (ex.: { orgs, byParent }) para um ARRAY plano.
+ * Lança erro em tipo inesperado — nunca assume array por cast.
+ */
+export function normalizeOrgList<T>(data: unknown): T[] {
+  if (data == null) return [];
+  if (Array.isArray(data)) return data as T[];
+  if (typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+    if (Array.isArray(obj.orgs)) return obj.orgs as T[];
+  }
+  throw new Error(
+    `formato inesperado de organizações (${typeof data}) — esperado array ou { orgs }`,
+  );
+}

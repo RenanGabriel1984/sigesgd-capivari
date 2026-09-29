@@ -11,12 +11,13 @@
  * RBAC: consulta exige stock.view; retirada exige stock.mutate no backend
  * (o botão é ocultado sem a permissão; a autorização REAL é no servidor).
  */
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { toast } from "sonner";
 import {
   Printer, PackageMinus, Download, Settings2, Loader2, Search,
   RefreshCcw, Truck, ShoppingCart, ArrowLeftRight,
+  ChevronDown, ChevronRight, ShieldCheck,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -41,19 +42,54 @@ import type { UserRole } from "@/types/constants";
 import {
   computeCardTotals,
   validateWithdrawal,
+  normalizeOrgList,
+  planPackOperation,
+  extractColor,
+  tonerDisplayLabel,
   type SupplyRow,
   type StockStatus,
+  type PackagingConversion,
 } from "@/lib/print-supplies";
 
 const SUPPLY_CATEGORY_ID = "k57fk85xwpj3b3xj9dc31jwqpd8dgk3a";
 
 type DashboardData = {
   rows: Array<SupplyRow & { inArea?: number }>;
+  families: SupplyFamilyView[];
   totals: ReturnType<typeof computeCardTotals>;
   areaQuantity: number;
 };
 
 type OrgDoc = { _id: string; name: string; parentId?: string | null };
+
+type FamilyMemberView = {
+  productId: string;
+  productName: string;
+  unitOfMeasure: string;
+  currentStock: number;
+  inArea: number;
+  baseUnits: number;
+  packaging: PackagingConversion | null;
+};
+
+type SupplyFamilyView = {
+  familyKey: string;
+  familyName: string;
+  brand: string | null;
+  type: string;
+  model: string | null;
+  baseUnit: string;
+  baseStock: number;
+  baseStockInArea: number;
+  compositionLabel: string;
+  members: FamilyMemberView[];
+  minimumStock: number | null;
+  idealStock: number | null;
+  status: StockStatus;
+  withdrawMemberId: string | null;
+  suggestedReorder: number | null;
+  parametersDefined: boolean;
+};
 
 function StatusBadge({ status }: { status: StockStatus }) {
   return (
@@ -86,24 +122,34 @@ function EstoqueTab() {
   const permissions = getPermissions((user?.role ?? "technician") as UserRole);
 
   const dashboard = useQuery(api.printSupplies.getSupplyDashboard) as DashboardData | undefined;
-  const rows = dashboard?.rows ?? [];
+  const families = dashboard?.families ?? [];
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("todos");
-  const [withdrawFor, setWithdrawFor] = useState<SupplyRow | null>(null);
+  const [withdrawFor, setWithdrawFor] = useState<SupplyFamilyView | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const filtered = useMemo(() => {
-    return rows.filter((r) => {
-      if (typeFilter !== "todos" && r.type !== typeFilter) return false;
+    return families.filter((f) => {
+      if (typeFilter !== "todos" && f.type !== typeFilter) return false;
       if (!search.trim()) return true;
       const q = search.toLowerCase();
       return (
-        r.productName.toLowerCase().includes(q) ||
-        (r.brand ?? "").toLowerCase().includes(q) ||
-        (r.model ?? "").toLowerCase().includes(q)
+        f.familyName.toLowerCase().includes(q) ||
+        (f.brand ?? "").toLowerCase().includes(q) ||
+        (f.model ?? "").toLowerCase().includes(q) ||
+        f.members.some((m) => m.productName.toLowerCase().includes(q))
       );
     });
-  }, [rows, search, typeFilter]);
+  }, [families, search, typeFilter]);
 
   const totals = dashboard?.totals ?? computeCardTotals([]);
   const types = ["Toner", "Cartão", "Ribbon", "Papel", "Etiqueta", "Outros"];
@@ -160,43 +206,92 @@ function EstoqueTab() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((r) => (
-              <TableRow key={r.productId}>
-                <TableCell className="font-medium">{r.type}</TableCell>
-                <TableCell>
-                  {r.type === "Toner" ? (
-                    <span>
-                      <span className="font-medium">{r.displayLabel.split(" — ")[0]}</span>
-                      {" — "}
-                      <span className="text-muted-foreground">{r.displayLabel.split(" — ")[1]}</span>
-                    </span>
-                  ) : (
-                    r.productName
-                  )}
-                </TableCell>
-                <TableCell className="text-muted-foreground">{r.brand ?? "—"}</TableCell>
-                <TableCell className="text-muted-foreground">{r.model ?? "—"}</TableCell>
-                <TableCell className="text-muted-foreground">{r.color ?? "—"}</TableCell>
-                <TableCell className="text-muted-foreground">{r.unitOfMeasure}</TableCell>
-                <TableCell className="text-right font-semibold tabular-nums">{r.currentStock}</TableCell>
-                <TableCell className="text-right tabular-nums text-muted-foreground">
-                  {r.minimumStock != null && r.minimumStock > 0 ? r.minimumStock : "—"}
-                </TableCell>
-                <TableCell className="text-right tabular-nums text-muted-foreground">
-                  {r.idealStock != null && r.idealStock > 0 ? r.idealStock : "—"}
-                </TableCell>
-                <TableCell><StatusBadge status={r.status} /></TableCell>
-                <TableCell className="text-right">
-                  {permissions.canCreateEntries ? (
-                    <Button variant="outline" size="sm" onClick={() => setWithdrawFor(r)}>
-                      Retirar
-                    </Button>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
+            {filtered.map((f) => {
+              const multi = f.members.length > 1;
+              const open = expanded.has(f.familyKey);
+              const tonerLabel = f.type === "Toner" ? tonerDisplayLabel(f.familyName) : null;
+              return (
+                <Fragment key={f.familyKey}>
+                  <TableRow
+                    className={multi ? "cursor-pointer" : undefined}
+                    onClick={multi ? () => toggleExpanded(f.familyKey) : undefined}
+                  >
+                    <TableCell className="font-medium">{f.type}</TableCell>
+                    <TableCell>
+                      <span className="inline-flex items-start gap-1.5">
+                        {multi &&
+                          (open ? (
+                            <ChevronDown className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                          ) : (
+                            <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                          ))}
+                        <span>
+                          {tonerLabel ? (
+                            <span>
+                              <span className="font-medium">{tonerLabel.split(" — ")[0]}</span>
+                              {" — "}
+                              <span className="text-muted-foreground">{tonerLabel.split(" — ").slice(1).join(" — ")}</span>
+                            </span>
+                          ) : (
+                            <span className="font-medium">{f.familyName}</span>
+                          )}
+                          {multi && (
+                            <span className="block text-xs text-muted-foreground">{f.compositionLabel}</span>
+                          )}
+                        </span>
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{f.brand ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{f.model ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{extractColor(f.familyName) ?? "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{f.baseUnit}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums">{f.baseStock}</TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {f.minimumStock != null && f.minimumStock > 0 ? f.minimumStock : "—"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
+                      {f.idealStock != null && f.idealStock > 0 ? f.idealStock : "—"}
+                    </TableCell>
+                    <TableCell><StatusBadge status={f.status} /></TableCell>
+                    <TableCell className="text-right">
+                      {permissions.canCreateEntries ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setWithdrawFor(f);
+                          }}
+                        >
+                          Retirar
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  {multi &&
+                    open &&
+                    f.members.map((m) => (
+                      <TableRow key={m.productId} className="bg-muted/30 text-sm">
+                        <TableCell />
+                        <TableCell className="pl-7 text-muted-foreground">{m.productName}</TableCell>
+                        <TableCell colSpan={3} className="text-xs text-muted-foreground">
+                          {m.packaging
+                            ? `Conversão: 1 ${m.packaging.packagingUnit} = ${m.packaging.factor} ${m.packaging.baseUnit}`
+                            : "Registro original — unidade de estoque"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">{m.unitOfMeasure}</TableCell>
+                        <TableCell className="text-right tabular-nums">{m.currentStock}</TableCell>
+                        <TableCell colSpan={2} />
+                        <TableCell colSpan={2} className="text-right text-xs text-muted-foreground">
+                          {m.inArea} na área Impressoras
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                </Fragment>
+              );
+            })}
             {filtered.length === 0 && (
               <TableRow>
                 <TableCell colSpan={11} className="py-8 text-center text-sm text-muted-foreground">
@@ -209,7 +304,7 @@ function EstoqueTab() {
       </div>
 
       {withdrawFor && (
-        <WithdrawDialog row={withdrawFor} open={!!withdrawFor} onClose={() => setWithdrawFor(null)} />
+        <WithdrawDialog family={withdrawFor} open={!!withdrawFor} onClose={() => setWithdrawFor(null)} />
       )}
     </div>
   );
@@ -217,9 +312,10 @@ function EstoqueTab() {
 
 /* ═══ Retirada rápida ═══════════════════════════════════════════════════════ */
 
-function WithdrawDialog({ row, open, onClose }: { row: SupplyRow; open: boolean; onClose: () => void }) {
-  const orgs = useQuery(api.organizations.list) as OrgDoc[] | undefined;
+function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; open: boolean; onClose: () => void }) {
+  const orgsQuery = useQuery(api.organizations.list);
   const withdraw = useMutation(api.printSupplies.withdraw);
+  const withdrawFamily = useMutation(api.printSupplies.withdrawFamily);
 
   const [quantity, setQuantity] = useState("1");
   const [secretariaId, setSecretariaId] = useState("");
@@ -230,28 +326,73 @@ function WithdrawDialog({ row, open, onClose }: { row: SupplyRow; open: boolean;
   const [observation, setObservation] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Contrato defensivo: `organizations.list` retorna { orgs, byParent } —
+  // normalizado SEMPRE para array plano (nunca cast cego); erro em formato
+  // inesperado. Garante que todo `.filter()` do modal receba um array.
+  let orgs: OrgDoc[];
+  try {
+    orgs = normalizeOrgList<OrgDoc>(orgsQuery);
+  } catch (e) {
+    orgs = [];
+    toast.error(e instanceof Error ? e.message : "Formato inesperado de organizações");
+  }
+
+  const packager = family.members.find((m) => m.packaging) ?? null;
+  const inBaseUnits = !!packager?.packaging;
+  const conv = packager?.packaging ?? null;
   const qty = Number(quantity) || 0;
-  const check = useMemo(() => validateWithdrawal(qty, row.currentStock), [qty, row.currentStock]);
-  const secretarias = (orgs ?? []).filter((o) => !o.parentId);
+  const check = useMemo(() => validateWithdrawal(qty, family.baseStock), [qty, family.baseStock]);
+  const plan = useMemo(
+    () =>
+      conv
+        ? planPackOperation(qty, {
+            closedPacks: packager?.currentStock ?? 0,
+            looseUnits: family.baseStock - (packager?.currentStock ?? 0) * conv.factor,
+            factor: conv.factor,
+          })
+        : null,
+    [conv, qty, packager, family.baseStock],
+  );
+  const planLabel = (() => {
+    if (!conv || !plan || !check.ok) return null;
+    if (plan.operation === "open_pack") {
+      const loose = family.baseStock - (packager?.currentStock ?? 0) * conv.factor;
+      return `Sai das ${loose} un. avulsas e abre ${plan.packs} ${conv.packagingUnit}${plan.packs > 1 ? "s" : ""} fechada${plan.packs > 1 ? "s" : ""} (abertura integral registrada).`;
+    }
+    if (plan.packs > 0) {
+      const avulsas = qty - plan.packs * conv.factor;
+      return `Retira ${plan.packs} ${conv.packagingUnit}${plan.packs > 1 ? "s" : ""} fechada${plan.packs > 1 ? "s" : ""}${avulsas > 0 ? ` + ${avulsas} un. avulsas` : ""}.`;
+    }
+    return `Retira ${qty} un. avulsa${qty > 1 ? "s" : ""}.`;
+  })();
+
+  const orgList = orgs ?? [];
+  const secretarias = orgList.filter((o) => !o.parentId);
+  const departamentos = secretariaId ? orgList.filter((o) => o.parentId === secretariaId) : [];
+  const unidades = departamentoId ? orgList.filter((o) => o.parentId === departamentoId) : [];
 
   const submit = async () => {
     if (!check.ok) {
       toast.error(check.reason ?? "Quantidade inválida");
       return;
     }
+    const destino = {
+      secretariaId: (secretariaId || undefined) as Id<"organizations"> | undefined,
+      departamentoId: (departamentoId || undefined) as Id<"organizations"> | undefined,
+      unidadeId: (unidadeId || undefined) as Id<"organizations"> | undefined,
+      reason: reason || undefined,
+      osNumber: osNumber || undefined,
+      observation: observation || undefined,
+    };
     setSaving(true);
     try {
-      await withdraw({
-        productId: row.productId as Id<"products">,
-        quantity: qty,
-        secretariaId: (secretariaId || undefined) as Id<"organizations"> | undefined,
-        departamentoId: (departamentoId || undefined) as Id<"organizations"> | undefined,
-        unidadeId: (unidadeId || undefined) as Id<"organizations"> | undefined,
-        reason: reason || undefined,
-        osNumber: osNumber || undefined,
-        observation: observation || undefined,
-      });
-      toast.success(`Retirada registrada: ${qty} ${row.unitOfMeasure} — ${row.displayLabel}`);
+      if (inBaseUnits && conv && packager) {
+        await withdrawFamily({ productId: packager.productId as Id<"products">, quantity: qty, ...destino });
+      } else {
+        const single = family.members[0];
+        await withdraw({ productId: single.productId as Id<"products">, quantity: qty, ...destino });
+      }
+      toast.success(`Retirada registrada: ${qty} ${inBaseUnits && conv ? conv.baseUnit : family.baseUnit} — ${family.familyName}`);
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha na retirada");
@@ -266,18 +407,19 @@ function WithdrawDialog({ row, open, onClose }: { row: SupplyRow; open: boolean;
         <DialogHeader>
           <DialogTitle>Retirar suprimento</DialogTitle>
           <DialogDescription>
-            {row.displayLabel} · unidade: {row.unitOfMeasure}
+            {family.familyName}
+            {family.brand ? ` — ${family.brand}` : ""} · unidade operacional: {family.baseUnit}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-3 py-2">
           <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/40 p-3 text-center text-sm">
             <div>
-              <p className="text-xs text-muted-foreground">Estoque atual</p>
-              <p className="font-semibold tabular-nums">{row.currentStock}</p>
+              <p className="text-xs text-muted-foreground">Estoque ({family.baseUnit})</p>
+              <p className="font-semibold tabular-nums">{family.baseStock}</p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Solicitado</p>
+              <p className="text-xs text-muted-foreground">Solicitado ({family.baseUnit})</p>
               <p className={`font-semibold tabular-nums ${!check.ok ? "text-destructive" : ""}`}>{qty}</p>
             </div>
             <div>
@@ -286,10 +428,25 @@ function WithdrawDialog({ row, open, onClose }: { row: SupplyRow; open: boolean;
             </div>
           </div>
 
+          {inBaseUnits && conv && (
+            <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">
+              <p className="flex items-start gap-1.5 font-medium">
+                <ShieldCheck className="mt-0.5 size-3.5 shrink-0" />
+                Composição: {family.compositionLabel} · 1 {conv.packagingUnit} = {conv.factor} {conv.baseUnit}
+              </p>
+              {planLabel && <p className="mt-1 text-blue-800 dark:text-blue-300">{planLabel}</p>}
+            </div>
+          )}
+          {!inBaseUnits && (
+            <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+              Unidade de estoque: {family.members[0]?.unitOfMeasure} (sem conversão configurada)
+            </div>
+          )}
+
           <div>
-            <Label>Quantidade *</Label>
+            <Label>Quantidade em {family.baseUnit} *</Label>
             <Input
-              type="number" min={1} max={row.currentStock} value={quantity}
+              type="number" min={1} max={family.baseStock} value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
               aria-invalid={!check.ok}
             />
@@ -313,7 +470,7 @@ function WithdrawDialog({ row, open, onClose }: { row: SupplyRow; open: boolean;
               <Select value={departamentoId} onValueChange={(v) => { setDepartamentoId(v); setUnidadeId(""); }} disabled={!secretariaId}>
                 <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                 <SelectContent>
-                  {(orgs ?? []).filter((o) => o.parentId === secretariaId).map((o) => (
+                  {departamentos.map((o) => (
                     <SelectItem key={o._id} value={o._id}>{o.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -324,7 +481,7 @@ function WithdrawDialog({ row, open, onClose }: { row: SupplyRow; open: boolean;
               <Select value={unidadeId} onValueChange={setUnidadeId} disabled={!departamentoId}>
                 <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                 <SelectContent>
-                  {(orgs ?? []).filter((o) => o.parentId === departamentoId).map((o) => (
+                  {unidades.map((o) => (
                     <SelectItem key={o._id} value={o._id}>{o.name}</SelectItem>
                   ))}
                 </SelectContent>

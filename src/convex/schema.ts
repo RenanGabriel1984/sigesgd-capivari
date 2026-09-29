@@ -284,6 +284,14 @@ const schema = defineSchema(
       // Prepared for future lot/serial tracking
       hasSerial: v.optional(v.boolean()),
       standardOrderQuantity: v.optional(v.number()),
+      // ── Conversão de embalagem (configurável; NUNCA inferida automaticamente) ──
+      // baseUnit: unidade da visão operacional (ex.: "un").
+      // packagingUnit: unidade de apresentação/embalagem (ex.: "caixa").
+      // conversionFactor: 1 embalagem = N unidades-base (ex.: 50).
+      // Ausentes → o produto NÃO tem conversão (unidade de estoque = unitOfMeasure).
+      baseUnit: v.optional(v.string()),
+      packagingUnit: v.optional(v.string()),
+      conversionFactor: v.optional(v.number()),
     }).index("by_category", ["categoryId"])
       .index("by_active", ["active"])
       .index("by_code", ["internalCode"])
