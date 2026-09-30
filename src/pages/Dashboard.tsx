@@ -1,4 +1,5 @@
 import { useAuth } from "@/hooks/use-auth";
+import { cn } from "@/lib/utils";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -20,10 +21,75 @@ import {
   Wrench,
   Key,
   ClipboardCheck,
+  SlidersHorizontal,
 } from "lucide-react";
 import { getPermissions, ROLE_LABELS } from "@/types/constants";
 import type { UserRole } from "@/types/constants";
-import { useEffect, lazy, Suspense } from "react";
+import { useEffect, lazy, Suspense, useMemo } from "react";
+import {
+  REPLENISHMENT_ALERT_NOTICE,
+  replenishmentAlertHref,
+  type ReplenishmentAlertRow,
+} from "@/lib/replenishment";
+
+/** Visão de planejamento usada nos cards e na listagem de alerta. */
+type ReplenishmentData = {
+  rows: ReplenishmentAlertRow[];
+  counters: {
+    necessary: number;
+    suggested: number;
+    participating: number;
+    belowMinimumWithoutPlanning: number;
+    notParametrized: number;
+  };
+};
+
+/** Quantidade de linhas exibidas na listagem de alerta do Dashboard. */
+const ALERT_LIST_LIMIT = 15;
+
+const CARD_TONES: Record<string, string> = {
+  rose: "bg-rose-50 text-rose-600",
+  amber: "bg-amber-50 text-amber-600",
+  emerald: "bg-emerald-50 text-emerald-600",
+  slate: "bg-slate-100 text-slate-600",
+};
+
+/**
+ * Card de contagem do planejamento de reposição. O clique leva à visão FILTRADA
+ * da parametrização — o card apenas navega, não altera nenhum dado.
+ */
+function ReplenishmentCard({
+  label,
+  value,
+  tone,
+  hint,
+  href,
+}: {
+  label: string;
+  value: number;
+  tone: "rose" | "amber" | "emerald" | "slate";
+  hint: string;
+  href: string;
+}) {
+  return (
+    <Link to={href} className="group block">
+      <Card className="h-full border-border/50 transition-colors group-hover:border-primary/50 group-hover:bg-primary/[0.03]">
+        <CardContent className="p-4">
+          <div className="flex items-center gap-3">
+            <div className={cn("flex h-10 w-10 items-center justify-center rounded-xl", CARD_TONES[tone])}>
+              <SlidersHorizontal className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-2xl font-bold tabular-nums">{value}</p>
+              <p className="text-xs text-muted-foreground">{label}</p>
+            </div>
+          </div>
+          <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">{hint}</p>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
 
 const fadeIn = {
   initial: { opacity: 0, y: 12 },
@@ -84,6 +150,23 @@ export default function Dashboard() {
 
   const s = stats;
   const loading = s === undefined;
+
+  // ─── Planejamento de reposição (§3) ──────────────────────────────────────
+  // O opt-in "Participa do planejamento de reposição" decide o que entra nos
+  // alertas: produtos NÃO parametrizados e produtos com o opt-in desligado nunca
+  // são contados. A query é somente leitura — nenhum saldo é tocado.
+  const canViewPlanning = permissions.canViewStockParameters;
+  const planning = useQuery(
+    api.stockIntelligence.replenishment,
+    canViewPlanning ? {} : "skip"
+  ) as ReplenishmentData | undefined;
+
+  const planningRows = useMemo<ReplenishmentAlertRow[]>(
+    () => (planning?.rows ?? []).filter((r) => r.planningLevel !== null),
+    [planning]
+  );
+  const necessaryCount = planning?.counters.necessary ?? 0;
+  const suggestedCount = planning?.counters.suggested ?? 0;
 
   return (
     <AppShell>
@@ -322,6 +405,131 @@ export default function Dashboard() {
           </motion.div>
         </div>
 
+        {/* ─── PLANEJAMENTO DE REPOSIÇÃO (§3) ─── */}
+        {canViewPlanning && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold text-muted-foreground">Planejamento de reposição</h2>
+              <p className="text-[11px] text-muted-foreground">{REPLENISHMENT_ALERT_NOTICE}</p>
+            </div>
+
+            <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+              <ReplenishmentCard
+                label="Reposição necessária"
+                value={necessaryCount}
+                tone="rose"
+                hint="Mínimo configurado, planejamento ativo e estoque disponível ≤ mínimo"
+                href={replenishmentAlertHref("necessary")}
+              />
+              <ReplenishmentCard
+                label="Reposição sugerida"
+                value={suggestedCount}
+                tone="amber"
+                hint="Mínimo e ideal configurados, planejamento ativo e estoque entre os dois"
+                href={replenishmentAlertHref("suggested")}
+              />
+              <ReplenishmentCard
+                label="No planejamento"
+                value={planning?.counters.participating ?? 0}
+                tone="emerald"
+                hint="Produtos com “Participa do planejamento de reposição” ativado"
+                href={replenishmentAlertHref("all")}
+              />
+              <ReplenishmentCard
+                label="Abaixo do mínimo sem planejamento"
+                value={planning?.counters.belowMinimumWithoutPlanning ?? 0}
+                tone="slate"
+                hint="Visíveis na parametrização, mas fora dos alertas"
+                href={replenishmentAlertHref("without_planning")}
+              />
+            </div>
+
+            <Card className="border-border/50">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <SlidersHorizontal className="h-4 w-4 text-primary" />
+                  Alertas de reposição
+                  {planning !== undefined && planningRows.length > 0 && (
+                    <Badge variant="outline" className="ml-1 text-[10px]">{planningRows.length}</Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {planning === undefined ? (
+                  <p className="text-sm text-muted-foreground py-6 text-center">Carregando…</p>
+                ) : planningRows.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-6 text-center">
+                    Nenhum produto no planejamento de reposição. Ative “Participa do planejamento de
+                    reposição” em {"/stock-parameters"} para começar a acompanhar.
+                  </p>
+                ) : (
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[720px] text-sm">
+                        <thead>
+                          <tr className="border-b text-left text-[10px] uppercase tracking-wide text-muted-foreground">
+                            <th className="py-2 pr-3 font-medium">Produto</th>
+                            <th className="py-2 pr-3 font-medium">Categoria</th>
+                            <th className="py-2 pr-3 font-medium">Área</th>
+                            <th className="py-2 pr-3 text-right font-medium">Estoque atual</th>
+                            <th className="py-2 pr-3 text-right font-medium">Mínimo</th>
+                            <th className="py-2 pr-3 text-right font-medium">Ideal</th>
+                            <th className="py-2 pr-3 text-right font-medium">Necessidade p/ o ideal</th>
+                            <th className="py-2 font-medium">Situação</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {planningRows.slice(0, ALERT_LIST_LIMIT).map((r) => (
+                            <tr key={r.productId} className="hover:bg-muted/40">
+                              <td className="py-2 pr-3">
+                                <Link to={`/products/${r.productId}`} className="font-medium hover:underline">
+                                  {r.productName}
+                                </Link>
+                              </td>
+                              <td className="py-2 pr-3 text-xs text-muted-foreground">{r.categoryName ?? "—"}</td>
+                              <td className="py-2 pr-3 text-xs text-muted-foreground">{r.areaName ?? "—"}</td>
+                              <td className="py-2 pr-3 text-right tabular-nums">
+                                {r.availableStock} {r.baseUnit}
+                              </td>
+                              <td className="py-2 pr-3 text-right tabular-nums">{r.minimumStock ?? "—"}</td>
+                              <td className="py-2 pr-3 text-right tabular-nums">{r.idealStock ?? "—"}</td>
+                              <td className="py-2 pr-3 text-right tabular-nums">{r.needToIdeal}</td>
+                              <td className="py-2">
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[10px] ${
+                                    r.planningLevel === "necessary"
+                                      ? "border-rose-200 bg-rose-50 text-rose-700"
+                                      : "border-amber-200 bg-amber-50 text-amber-700"
+                                  }`}
+                                >
+                                  {r.planningLabel}
+                                </Badge>
+                                <span className="ml-1.5 text-[10px] text-muted-foreground">{r.situationLabel}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] text-muted-foreground">
+                        A necessidade para atingir o ideal é <code className="font-mono">max(ideal − disponível, 0)</code> —
+                        informativa. Nenhuma compra, entrada ou solicitação é criada automaticamente.
+                      </p>
+                      {planningRows.length > ALERT_LIST_LIMIT && (
+                        <Button asChild variant="outline" size="sm">
+                          <Link to={replenishmentAlertHref("all")}>Ver todos ({planningRows.length})</Link>
+                        </Button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
         {/* ─── Charts Row ─── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Consumption by Secretaria */}
@@ -353,7 +561,7 @@ export default function Dashboard() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2 text-amber-700">
                   <TrendingDown className="h-4 w-4" />
-                  Alertas de Reposição Urgente
+                  Saldos baixos no catálogo (independe do planejamento)
                   {!loading && s!.urgentAlerts.length > 0 && (
                     <Badge variant="destructive" className="ml-1 text-[10px]">{s!.urgentAlerts.length}</Badge>
                   )}
@@ -363,7 +571,7 @@ export default function Dashboard() {
                 {loading ? (
                   <p className="text-sm text-muted-foreground py-8 text-center">Carregando…</p>
                 ) : s!.urgentAlerts.length === 0 ? (
-                  <p className="text-sm text-muted-foreground py-8 text-center">Nenhum alerta de estoque</p>
+                  <p className="text-sm text-muted-foreground py-8 text-center">Nenhum saldo baixo no catálogo</p>
                 ) : (
                   <div className="space-y-2 max-h-[220px] overflow-y-auto">
                     {s!.urgentAlerts.slice(0, 10).map((a: any) => (

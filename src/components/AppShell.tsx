@@ -125,15 +125,19 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Devoluções", href: "/returns", icon: RotateCcw, permission: "canReturnStock" },
     { label: "Transferências", href: "/transfers", icon: ArrowRightLeft, permission: "canTransferStock" },
   ]},
-  { title: "Administração", items: [
+  { title: "Configuração de Estoque", items: [
     { label: "Produtos", href: "/products", icon: Package, permission: "canManageProducts" },
-    { label: "Parametrização de Estoque", href: "/stock-parameters", icon: SlidersHorizontal, permission: "canViewStockParameters" },
-    { label: "Parametrização de Embalagens", href: "/packaging-parameters", icon: Package, permission: "canViewPackagingParameters" },
+    // Rótulos curtos de propósito: o menu lateral NÃO trunca nomes (§13). O
+    // título completo continua no cabeçalho da página.
+    { label: "Parâmetros de estoque", href: "/stock-parameters", icon: SlidersHorizontal, permission: "canViewStockParameters" },
+    { label: "Embalagens", href: "/packaging-parameters", icon: Package, permission: "canViewPackagingParameters" },
     { label: "Categorias", href: "/categories", icon: Tags, permission: "canManageCategories" },
     { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
     { label: "Lotes", href: "/lots", icon: Boxes, permission: "canManageStock" },
     { label: "Locais", href: "/storage-locations", icon: MapPin, permission: "canManageStorageLocations" },
     { label: "Áreas / Subestoques", href: "/stock-areas", icon: Layers, permission: "canManageStorageLocations" },
+  ]},
+  { title: "Administração", items: [
     { label: "Organizações", href: "/organization", icon: Building2, permission: "canManageOrg" },
     { label: "Usuários", href: "/users", icon: Users, permission: "canManageUsers" },
     { label: "Auditoria", href: "/audit", icon: Shield, permission: "canViewAuditLogs" },
@@ -166,7 +170,13 @@ const SidebarLink = memo(function SidebarLink({
       )}
     >
       <item.icon className={cn("h-4.5 w-4.5 shrink-0", isActive ? "text-primary" : "text-muted-foreground/70")} />
-      <span className="flex-1 truncate">{item.label}</span>
+      {/* Sem `truncate`: nome do menu nunca é escondido (§13). O `title` é
+          apenas complementar (acessibilidade/tooltip), não a forma única de
+          ler o nome. `break-words` + sidebar mais larga suportam telas
+          pequenas; abaixo de lg o menu vira drawer de tela cheia. */}
+      <span className="flex-1 min-w-0 text-balance leading-snug break-words" title={item.label}>
+        {item.label}
+      </span>
       {item.href === "/requests" && pendingCount !== undefined && pendingCount > 0 && (
         <Badge variant="destructive" className="h-5 min-w-5 text-[10px] px-1.5">
           {pendingCount}
@@ -310,7 +320,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         className={cn(
           "hidden lg:flex flex-col border-r border-border/60 bg-card transition-[width] duration-200 ease-out",
           "h-dvh supports-[height:100dvh]:h-dvh",
-          collapsed ? "w-16" : "w-64"
+          collapsed ? "w-16" : "w-72"
         )}
       >
         {/* Logo */}

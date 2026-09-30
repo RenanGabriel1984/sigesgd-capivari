@@ -272,9 +272,10 @@ export type ParameterField = keyof ParameterDraft;
 export const PARAMETER_FIELD_LABELS: Record<ParameterField, string> = {
   minimumStock: "Estoque mínimo",
   idealStock: "Estoque ideal",
-  monthlyConsumptionTarget: "Consumo mensal",
-  replenishmentEnabled: "Reposição",
-  replenishmentNote: "Observação da reposição",
+  // Legado: mantido no cadastro, nunca exigido e nunca substitui o consumo real.
+  monthlyConsumptionTarget: "Consumo mensal (referência legada)",
+  replenishmentEnabled: "Participa do planejamento de reposição",
+  replenishmentNote: "Observação de reposição",
 };
 
 /** Uma alteração efetiva de um produto. */
@@ -326,20 +327,33 @@ export function draftFromParameters(p: ReplenishmentParameters): ParameterDraft 
 
 /**
  * Rascunho a partir do texto digitado na tabela.
- * `enabled` é o switch "Reposição" da linha; a nota vem do textarea.
+ * `enabled` é o switch "Participa do planejamento de reposição" da linha.
+ *
+ * O consumo mensal NÃO é mais digitado (§4 da rodada de inteligência): o campo
+ * `monthly` é OPCIONAL e, quando ausente, o valor JÁ CADASTRADO (informado em
+ * `current`) é preservado. Assim a edição da linha nunca apaga nem inventa um
+ * consumo — o consumo real é calculado pelas saídas registradas.
  */
-export function draftFromInputs(input: {
-  minimum: string;
-  ideal: string;
-  monthly: string;
-  enabled: boolean;
-  note: string;
-}): ParameterDraft {
+export function draftFromInputs(
+  input: {
+    minimum: string;
+    ideal: string;
+    enabled: boolean;
+    note: string;
+    /** Só existe para compatibilidade/reabertura; a UI não oferece o campo. */
+    monthly?: string;
+  },
+  current?: Pick<ReplenishmentParameters, "monthlyConsumptionTarget"> | null
+): ParameterDraft {
   const note = input.note.trim();
+  const monthly =
+    input.monthly !== undefined
+      ? parseParameterInput(input.monthly)
+      : current?.monthlyConsumptionTarget ?? null;
   return {
     minimumStock: parseParameterInput(input.minimum),
     idealStock: parseParameterInput(input.ideal),
-    monthlyConsumptionTarget: parseParameterInput(input.monthly),
+    monthlyConsumptionTarget: monthly,
     replenishmentEnabled: input.enabled,
     replenishmentNote: note.length > 0 ? note : null,
   };
@@ -351,9 +365,8 @@ export function validateParameters(draft: ParameterDraft): string | null {
   if (min !== null && ideal !== null && ideal < min) {
     return "Estoque ideal menor que o estoque mínimo — confirme os valores.";
   }
-  if (monthly !== null && monthly === 0) {
-    return "Consumo mensal 0 significa produto sem consumo no período.";
-  }
+  // `monthly` é legado: não é exigido na tela e não representa consumo real.
+  void monthly;
   return null;
 }
 

@@ -408,17 +408,24 @@ describe("PARAM — Filtros e contadores da tela", () => {
 });
 
 describe("PARAM — Tela e dados reais", () => {
-  it("PARAM-03b: a tela edita mínimo/ideal/consumo direto na tabela", () => {
+  it("PARAM-03b: a tela edita mínimo/ideal/opt-in de planejamento direto na tabela", () => {
     expect(page).toContain("Parametrização de Estoque");
-    // Os três campos editáveis ficam na própria tabela.
+    // Campos editáveis: mínimo, ideal e o opt-in do planejamento.
     expect(page).toContain('aria-label="Estoque mínimo"');
     expect(page).toContain('aria-label="Estoque ideal"');
-    expect(page).toContain('aria-label="Consumo mensal"');
+    expect(page).toContain('aria-label={REPLENISHMENT_PLANNING_LABEL}');
     expect(page).toContain("Salvar alterações");
-    // Colunas exigidas.
-    for (const header of ["Produto", "Categoria", "Área", "Estoque disponível", "Mínimo", "Ideal", "Consumo mensal", "Reposição", "Status"]) {
-      expect(page).toContain(`<TableHead className="text-xs${header === "Estoque disponível" ? " text-right" : header === "Mínimo" || header === "Ideal" || header === "Consumo mensal" || header === "Reposição" ? " text-center" : ""}">${header}</TableHead>`);
+    // Colunas exigidas na aba de parâmetros.
+    for (const header of ["Produto", "Categoria", "Área", "Mínimo", "Ideal", "Situação"]) {
+      expect(page).toContain(header);
     }
+    // §4: o consumo mensal NÃO é mais digitado — a coluna mostra o consumo REAL
+    // calculado pelas saídas.
+    expect(page).not.toContain('aria-label="Consumo mensal"');
+    expect(page).toContain("Consumo (30d)");
+    expect(page).toContain("Consumo real");
+    expect(page).toContain('value="consumo"');
+    expect(page).toContain("Sem histórico suficiente");
   });
 
   it("PARAM-09b: a tela NÃO carrega uma carga automática de parâmetros", () => {
@@ -443,6 +450,8 @@ describe("PARAM — Tela e dados reais", () => {
   it("PARAM-10b: validação mínima/ideal é informativa, não bloqueante", () => {
     expect(validateParameters(params({ minimumStock: 5, idealStock: 2 }))).toContain("ideal menor");
     expect(validateParameters(params({ minimumStock: 2, idealStock: 5 }))).toBeNull();
-    expect(validateParameters(params({ monthlyConsumptionTarget: 0 }))).toContain("Consumo mensal 0");
+    // Consumo mensal virou campo legado: não é exigido e nunca é validado como
+    // "parâmetro de reposição" (o consumo real vem das saídas registradas).
+    expect(validateParameters(params({ monthlyConsumptionTarget: 0 }))).toBeNull();
   });
 });

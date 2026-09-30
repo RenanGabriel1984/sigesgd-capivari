@@ -42,7 +42,59 @@ export const PACKAGING_UNITS = [
 export type PackagingUnit = (typeof PACKAGING_UNITS)[number];
 
 export const BASE_UNITS = PACKAGING_UNITS;
-export const PACKAGING_UNITS_OPTIONS = PACKAGING_UNITS;
+
+/**
+ * APRESENTAÇÕES/EMBALAGENS FÍSICAS cadastráveis.
+ *
+ * São camada AUXILIAR: o saldo continua na unidade-base. "spray", "pote",
+ * "frasco", "pack", "cartucho" e "blister" NUNCA são exigidos como
+ * unidade-base — são a embalagem física do item.
+ */
+export const PACKAGING_PRESENTATION_UNITS = [
+  "caixa",
+  "pacote",
+  "saco",
+  "kit",
+  "pack",
+  "spray",
+  "frasco",
+  "pote",
+  "cartucho",
+  "blister",
+  "rolo",
+] as const;
+
+export type PackagingPresentationUnit = (typeof PACKAGING_PRESENTATION_UNITS)[number];
+
+/**
+ * Apresentações que não podem ser a UNIDADE-BASE do produto.
+ * "kit" fica de fora de propósito: "Jogo de chaves" tem `kit` como unidade-base
+ * real, enquanto "Pilha AAA" usa `kit` como embalagem (1 kit = 2 pilhas).
+ */
+export const PACKAGING_UNITS_THAT_ARE_ONLY_PRESENTATION = [
+  "caixa",
+  "pacote",
+  "saco",
+  "pack",
+  "spray",
+  "frasco",
+  "pote",
+  "cartucho",
+  "blister",
+] as const;
+
+/** Opções oferecidas no formulário de embalagem (base + apresentações). */
+export const PACKAGING_UNITS_OPTIONS: string[] = [
+  ...PACKAGING_UNITS,
+  ...PACKAGING_PRESENTATION_UNITS.filter((u) => !(PACKAGING_UNITS as readonly string[]).includes(u)),
+];
+
+/** A unidade é uma embalagem física (não pode ser exigida como base)? */
+export function isPhysicalPresentationUnit(unit: string | null | undefined): boolean {
+  if (!unit) return false;
+  const normalized = unit.trim().toLowerCase();
+  return (PACKAGING_UNITS_THAT_ARE_ONLY_PRESENTATION as readonly string[]).includes(normalized);
+}
 
 /** Valor mostrado quando o campo não está parametrizado (nunca "0"). */
 export const EMPTY_PACKAGING_FIELD = "—";
@@ -125,6 +177,8 @@ export const PACKAGING_ERRORS = {
   factorNotInteger: "O fator de conversão deve ser um número inteiro (sem decimais).",
   factorTooSmall: "O fator de conversão deve ser no mínimo 1.",
   sameUnits: "A unidade de embalagem deve ser diferente da unidade base.",
+  baseUnitIsPresentation:
+    "Esta é uma apresentação/embalagem física (não pode ser a unidade-base). Escolha a unidade que conta o item — por exemplo “un” — e mantenha a embalagem no campo de apresentação.",
 } as const;
 
 /**
@@ -173,6 +227,7 @@ export function validatePackagingConfig(input: {
 
   // 2) unidades
   if (!baseUnit) errors.push(PACKAGING_ERRORS.baseUnitRequired);
+  if (isPhysicalPresentationUnit(baseUnit)) errors.push(PACKAGING_ERRORS.baseUnitIsPresentation);
   if (factor !== null && factor > 1 && !packagingUnit) {
     errors.push(PACKAGING_ERRORS.packagingUnitRequired);
   }
