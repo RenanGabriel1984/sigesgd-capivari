@@ -32,6 +32,7 @@ const Lots = lazy(() => import("./pages/Lots.tsx"));
 const StorageLocationsPage = lazy(() => import("./pages/StorageLocations.tsx"));
 const StockAreasPage = lazy(() => import("./pages/StockAreas.tsx"));
 const StockParametersPage = lazy(() => import("./pages/StockParameters.tsx"));
+const PackagingParametersPage = lazy(() => import("./pages/PackagingParameters.tsx"));
 const InventoryPage = lazy(() => import("./pages/Inventory.tsx"));
 const Requests = lazy(() => import("./pages/Requests.tsx"));
 const ReturnsPage = lazy(() => import("./pages/Returns.tsx"));
@@ -137,6 +138,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/storage-locations" element={<RequireAuth><RequirePermission><StorageLocationsPage /></RequirePermission></RequireAuth>} />
               <Route path="/stock-areas" element={<RequireAuth><RequirePermission><StockAreasPage /></RequirePermission></RequireAuth>} />
               <Route path="/stock-parameters" element={<RequireAuth><RequirePermission><StockParametersPage /></RequirePermission></RequireAuth>} />
+              <Route path="/packaging-parameters" element={<RequireAuth><RequirePermission><PackagingParametersPage /></RequirePermission></RequireAuth>} />
               <Route path="/inventory" element={<RequireAuth><RequirePermission><InventoryPage /></RequirePermission></RequireAuth>} />
               <Route path="/requests" element={<RequireAuth><RequirePermission><Requests /></RequirePermission></RequireAuth>} />
               <Route path="/returns" element={<RequireAuth><RequirePermission><ReturnsPage /></RequirePermission></RequireAuth>} />

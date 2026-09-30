@@ -86,6 +86,10 @@ export const APP_PERMISSIONS = [
   "stock_parameters.view",
   "stock_parameters.manage",
 
+  // Parametrização de unidades e embalagens (cadastro; NUNCA converte estoque)
+  "packaging_parameters.view",
+  "packaging_parameters.manage",
+
   // Solicitação mensal de suprimentos (documento de planejamento)
   "supply_requests.view",
   "supply_requests.manage",
@@ -140,6 +144,9 @@ const STOCK_MANAGER_ACCESS: readonly AppPermission[] = [
   // Parametrização de reposição (editar/salvar parâmetros)
   "stock_parameters.view",
   "stock_parameters.manage",
+  // Parametrização de embalagens (cadastral; altera só a unidade de apresentação)
+  "packaging_parameters.view",
+  "packaging_parameters.manage",
   // Solicitação mensal de suprimentos
   "supply_requests.view",
   "supply_requests.manage",
@@ -184,6 +191,7 @@ const DIRECTOR_ACCESS: readonly AppPermission[] = [
   // Diretor CONSULTA a parametrização e a solicitação mensal, mas NÃO altera
   // parâmetros nem cria/gera documentos (decisão é de quem opera o estoque).
   "stock_parameters.view",
+  "packaging_parameters.view",
   "supply_requests.view",
   "requests.view",
   "requests.approve",
@@ -264,6 +272,7 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
   "/dashboard": "dashboard.view",
   "/stock": "stock.view",
   "/stock-parameters": "stock_parameters.view",
+  "/packaging-parameters": "packaging_parameters.view",
   "/exit": "exits.create",
   "/products": "products.view",
   "/categories": "categories.view",

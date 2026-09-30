@@ -116,6 +116,12 @@ export const AUDIT_ACTIONS = {
    * `stockMovements`, e jamais altera quantidade física ou lote.
    */
   STOCK_PARAMETER_UPDATE: "stock_parameter_update",
+  /**
+   * Alteração da EMBALAGEM (unidade base / unidade de embalagem / fator).
+   * Também NÃO é movimentação de estoque: vai para `auditLogs`, nunca para
+   * `stockMovements`, e jamais altera quantidade, lote ou NF-e.
+   */
+  PRODUCT_PACKAGING_UPDATE: "product_packaging_update",
   PERMISSION_DENIED: "permission_denied",
 } as const;
 
@@ -157,6 +163,7 @@ export const auditActionValidator = v.union(
   v.literal(AUDIT_ACTIONS.LICENSE_CREATE),
   v.literal(AUDIT_ACTIONS.LICENSE_ASSIGN),
   v.literal(AUDIT_ACTIONS.STOCK_PARAMETER_UPDATE),
+  v.literal(AUDIT_ACTIONS.PRODUCT_PACKAGING_UPDATE),
   v.literal(AUDIT_ACTIONS.PERMISSION_DENIED),
 );
 

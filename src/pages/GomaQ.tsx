@@ -50,10 +50,35 @@ import {
   buildLowStockWarning,
   buildWithdrawalConfirmation,
   canConfirmWithdrawal,
+  familyPacksApproximation,
   type SupplyRow,
   type StockStatus,
   type PackagingConversion,
 } from "@/lib/print-supplies";
+import { formatApproximatePacks } from "@/lib/packaging-parameters";
+
+/**
+ * Camada auxiliar de apresentação (§14): a unidade base permanece principal e
+ * o estoque NUNCA é convertido — apenas exibimos o equivalente aproximado
+ * "≈ N caixas" ao lado de "180 rolos" quando a família tem embalagem configurada.
+ */
+type PacksApproximationSource = {
+  baseStock: number;
+  members: { packaging: PackagingConversion | null }[];
+};
+function PacksApproximation({ family }: { family: PacksApproximationSource }) {
+  const approximation = familyPacksApproximation({
+    baseStock: family.baseStock,
+    members: family.members,
+  });
+  const label = formatApproximatePacks(approximation?.packaging ?? null, family.baseStock);
+  if (!approximation || !label) return null;
+  return (
+    <span className="block text-xs font-normal normal-case text-muted-foreground">
+      {label}
+    </span>
+  );
+}
 
 const SUPPLY_CATEGORY_ID = "k57fk85xwpj3b3xj9dc31jwqpd8dgk3a";
 
@@ -250,7 +275,10 @@ function EstoqueTab() {
                     <TableCell className="text-muted-foreground">{f.model ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{extractColor(f.familyName) ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{f.baseUnit}</TableCell>
-                    <TableCell className="text-right font-semibold tabular-nums">{f.baseStock}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums">
+                      {f.baseStock}
+                      <PacksApproximation family={f} />
+                    </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
                       {f.minimumStock != null && f.minimumStock > 0 ? f.minimumStock : "—"}
                     </TableCell>
@@ -485,7 +513,10 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
           <div className="grid grid-cols-3 gap-2 rounded-lg border p-3 text-center text-sm">
             <div>
               <p className="text-xs text-muted-foreground">Estoque disponível</p>
-              <p className="font-semibold tabular-nums">{family.baseStock}</p>
+              <p className="font-semibold tabular-nums">
+                {family.baseStock}
+                <PacksApproximation family={family} />
+              </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Quantidade solicitada</p>
@@ -947,7 +978,10 @@ function PlanejamentoReposicaoTab() {
               return (
                 <TableRow key={f.familyKey}>
                   <TableCell className="font-medium">{f.familyName}</TableCell>
-                  <TableCell className="text-right tabular-nums">{f.baseStock}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {f.baseStock}
+                    <PacksApproximation family={f} />
+                  </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {f.minimumStock != null ? f.minimumStock : "—"}
                   </TableCell>

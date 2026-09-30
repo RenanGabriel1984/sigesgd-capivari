@@ -76,6 +76,13 @@ export const list = query({
         physicalStock: stockByProduct.get(p._id)?.physicalQuantity ?? 0,
         reservedStock: stockByProduct.get(p._id)?.reservedQuantity ?? 0,
         parameters: readReplenishmentParameters(p),
+        // Embalagem (somente leitura): usada para exibir o equivalente.
+        // Os parâmetros continuam gravados/lidos na UNIDADE BASE.
+        packaging: {
+          baseUnit: p.baseUnit ?? null,
+          packagingUnit: p.packagingUnit ?? null,
+          conversionFactor: p.conversionFactor ?? null,
+        },
       })
     );
 

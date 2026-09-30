@@ -20,7 +20,17 @@
  *
  * A sugestão NUNCA cria pedido, entrada, saída ou reserva. Ela é um número
  * mostrado na tela para o operador decidir.
+ *
+ * ─── EMBALAGEM (camada auxiliar) ────────────────────────────────────────────
+ * Quando o produto tem embalagem configurada (1 caixa = 30 rolos), a tela
+ * mostra o equivalente do saldo ao lado ("≈ 6 caixas"). Os parâmetros de
+ * mínimo/ideal/consumo NUNCA são convertidos: a unidade oficial do estoque e
+ * dos parâmetros é sempre a UNIDADE BASE.
  */
+import {
+  describeEquivalent,
+  type PackagingConfig,
+} from "./packaging-parameters";
 
 /* ─── Semântica dos parâmetros ─────────────────────────────────────────────── */
 
@@ -195,6 +205,11 @@ export interface StockParameterRowInput {
   /** Saldo RESERVADO real. */
   reservedStock: number;
   parameters: ReplenishmentParameters;
+  /**
+   * Embalagem configurada (somente leitura). Os parâmetros de reposição
+   * NUNCA são convertidos: a unidade oficial continua sendo a unidade base.
+   */
+  packaging?: PackagingConfig | null;
 }
 
 export interface StockParameterRow extends StockParameterRowInput {
@@ -205,12 +220,17 @@ export interface StockParameterRow extends StockParameterRowInput {
   statusLabel: string;
   suggestedQuantity: number;
   need: EstimatedNeed;
+  /** Unidade base efetiva (baseUnit configurada ou a do produto). */
+  baseUnit: string;
+  /** Texto auxiliar "≈ 6 caixas" (null quando não há embalagem). */
+  equivalentLabel: string | null;
 }
 
 /** Monta a linha completa da tabela a partir dos saldos reais. */
 export function buildStockParameterRow(input: StockParameterRowInput): StockParameterRow {
   const availableStock = Math.max(input.physicalStock - input.reservedStock, 0);
   const status = replenishmentStatus(availableStock, input.parameters);
+  const baseUnit = input.packaging?.baseUnit?.trim() || input.unitOfMeasure;
   return {
     ...input,
     availableStock,
@@ -219,6 +239,9 @@ export function buildStockParameterRow(input: StockParameterRowInput): StockPara
     statusLabel: REPLENISHMENT_STATUS_LONG[status],
     suggestedQuantity: suggestedReplenishmentQuantity(availableStock, input.parameters),
     need: estimatedMonthlyNeed(input.parameters),
+    baseUnit,
+    // SOMENTE apresentação: os parâmetros continuam na unidade base.
+    equivalentLabel: describeEquivalent(availableStock, input.packaging, baseUnit),
   };
 }
 

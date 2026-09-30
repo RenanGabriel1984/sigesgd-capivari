@@ -172,6 +172,9 @@ const PERMISSION_FLAGS = {
   // Parametrização de reposição (parâmetros; não movimenta estoque)
   canViewStockParameters: "stock_parameters.view",
   canManageStockParameters: "stock_parameters.manage",
+  // Parametrização de embalagens (cadastral; não converte estoque)
+  canViewPackagingParameters: "packaging_parameters.view",
+  canManagePackagingParameters: "packaging_parameters.manage",
   // Solicitação mensal de suprimentos (documento de planejamento)
   canViewSupplyRequests: "supply_requests.view",
   canManageSupplyRequests: "supply_requests.manage",

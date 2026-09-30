@@ -502,8 +502,7 @@ export interface SupplyFamily {
 }
 
 /** Rótulo da composição física, ex.: "13 caixas fechadas + 18 un. avulsas". */
-export function compositionLabelFor(members: FamilyMember[]): string {
-  const parts: string[] = [];
+export function compositionLabelFor(members: FamilyMember[]): string {  const parts: string[] = [];
   for (const m of members) {
     if (m.currentStock <= 0) continue;
     if (m.packaging) {
@@ -515,6 +514,25 @@ export function compositionLabelFor(members: FamilyMember[]): string {
     }
   }
   return parts.join(" + ") || "—";
+}
+
+/**
+ * APROXIMAÇÃO em embalagens do saldo da família (exibição auxiliar).
+ *
+ * O saldo da família é sempre na UNIDADE BASE (668 un ≠ 13 caixas: continua
+ * 668 un). Esta função apenas devolve quantas embalagens isso equivaleria,
+ * para mostrar "≈ 13 caixas" ao lado — nunca substitui o número da base e
+ * nunca altera saldo, lote ou histórico.
+ */
+export function familyPacksApproximation(input: {
+  baseStock: number;
+  members: { packaging: PackagingConversion | null }[];
+}): { packs: number; remainder: number; packaging: PackagingConversion } | null {
+  const packaging = input.members.find((m) => m.packaging)?.packaging ?? null;
+  if (!packaging) return null;
+  const total = Math.max(input.baseStock, 0);
+  const packs = Math.floor(total / packaging.factor);
+  return { packs, remainder: total - packs * packaging.factor, packaging };
 }
 
 /**

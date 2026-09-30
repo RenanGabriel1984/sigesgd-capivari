@@ -128,6 +128,7 @@ const NAV_SECTIONS: NavSection[] = [
   { title: "Administração", items: [
     { label: "Produtos", href: "/products", icon: Package, permission: "canManageProducts" },
     { label: "Parametrização de Estoque", href: "/stock-parameters", icon: SlidersHorizontal, permission: "canViewStockParameters" },
+    { label: "Parametrização de Embalagens", href: "/packaging-parameters", icon: Package, permission: "canViewPackagingParameters" },
     { label: "Categorias", href: "/categories", icon: Tags, permission: "canManageCategories" },
     { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
     { label: "Lotes", href: "/lots", icon: Boxes, permission: "canManageStock" },

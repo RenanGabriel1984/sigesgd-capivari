@@ -252,7 +252,10 @@ describe("PRINT-UOM-03 — o estoque principal mostra 668 un", () => {
 
   it("a coluna 'Atual' da tabela renderiza o total da família em unidade-base", () => {
     expect(panel).toContain("f.baseUnit");
-    expect(panel).toContain("tabular-nums\">{f.baseStock}");
+    // O saldo em unidades-base é o valor principal; a embalagem entra apenas
+    // como camada auxiliar ("≈ N caixas") abaixo dele.
+    expect(panel).toContain("{f.baseStock}");
+    expect(panel).toContain("PacksApproximation");
   });
 });
 

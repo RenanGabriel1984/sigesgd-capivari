@@ -190,7 +190,8 @@ export default function StockParameters() {
           <p>
             Campo em branco significa <strong>não parametrizado</strong> — que é diferente de zero.
             Salvar grava apenas parâmetros e gera auditoria; <strong>nunca</strong> cria lote,
-            entrada, saída, movimentação ou reserva.
+            entrada, saída, movimentação ou reserva. Mínimo, ideal e consumo mensal são sempre
+            na <strong>unidade base</strong> — a embalagem é apenas apresentação.
           </p>
         </div>
 
@@ -268,10 +269,16 @@ export default function StockParameters() {
                         <TableCell className="text-xs text-muted-foreground">{row.categoryName ?? "—"}</TableCell>
                         <TableCell className="text-xs text-muted-foreground">{row.areaName ?? "—"}</TableCell>
                         <TableCell className="text-right font-semibold tabular-nums">
-                          {row.availableStock}
+                          {row.availableStock} {row.baseUnit}
                           {row.suggestedQuantity > 0 && (
                             <span className="ml-1 text-[10px] font-normal text-muted-foreground">
                               (sug. {row.suggestedQuantity})
+                            </span>
+                          )}
+                          {/* Embalagem: camada auxiliar, NUNCA substitui a base. */}
+                          {row.equivalentLabel && (
+                            <span className="ml-1 text-[10px] font-normal text-muted-foreground">
+                              {row.equivalentLabel}
                             </span>
                           )}
                         </TableCell>
