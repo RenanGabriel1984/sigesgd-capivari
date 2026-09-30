@@ -84,6 +84,65 @@ export const EQUIPMENT_TYPE_LABELS: Record<string, string> = {
   other: "Outro",
 };
 
+/* ─── Parâmetro de URL da categoria ───────────────────────────────────────── */
+
+/** Chave canônica lida/escrita por /assets (mantém os links já publicados). */
+export const EQUIPMENT_CATEGORY_PARAM = "categoria";
+
+/** Chave alternativa aceita na leitura (links antigos / especificação externa). */
+export const EQUIPMENT_CATEGORY_PARAM_ALIAS = "category";
+
+/** Todas as chaves reconhecidas como "categoria de equipamento". */
+export const EQUIPMENT_CATEGORY_PARAM_KEYS = [
+  EQUIPMENT_CATEGORY_PARAM,
+  EQUIPMENT_CATEGORY_PARAM_ALIAS,
+] as const;
+
+/** Qualquer objeto compatível com a leitura de query string (`URLSearchParams`). */
+export interface CategoryParamsReader {
+  get(key: string): string | null;
+}
+
+/**
+ * Lê o slug da categoria da URL sem validar e sem silenciar a escolha.
+ * Retorna `null` quando NENHUMA chave está presente — a ausência de parâmetro
+ * significa a visão independente "Todos os equipamentos", nunca um fallback.
+ */
+export function readEquipmentCategorySlug(params: CategoryParamsReader | null | undefined): string | null {
+  if (!params) return null;
+  for (const key of EQUIPMENT_CATEGORY_PARAM_KEYS) {
+    const raw = params.get(key);
+    if (raw == null) continue;
+    const slug = raw.trim().toLowerCase();
+    if (slug) return slug;
+  }
+  return null;
+}
+
+/**
+ * Categoria efetivamente selecionada na URL.
+ *
+ * Um slug INVÁLIDO ("/assets?categoria=licencas") resolve para `null` — a tela
+ * volta ao recorte de todos os assets sem apagar o parâmetro da URL.
+ */
+export function resolveEquipmentCategory(
+  params: CategoryParamsReader | null | undefined
+): EquipmentCategory | null {
+  return findEquipmentCategory(readEquipmentCategorySlug(params));
+}
+
+/** Query string da categoria, preservando os demais parâmetros existentes. */
+export function equipmentCategoryHref(
+  slug: string | null,
+  current?: URLSearchParams
+): string {
+  const params = new URLSearchParams(current?.toString() ?? "");
+  for (const key of EQUIPMENT_CATEGORY_PARAM_KEYS) params.delete(key);
+  if (slug) params.set(EQUIPMENT_CATEGORY_PARAM, slug);
+  const query = params.toString();
+  return query ? `/assets?${query}` : "/assets";
+}
+
 /** Resolve a categoria pelo slug da URL. Retorna null quando ausente/inválido. */
 export function findEquipmentCategory(slug?: string | null): EquipmentCategory | null {
   if (!slug) return null;
@@ -288,8 +347,11 @@ export function buildRelatedStockProducts(
 
 /* ─── Cópia dos estados vazios (explicativa, nunca "erro de estoque") ──────── */
 
+/** Título da visão independente que mostra todos os assets. */
+export const ALL_EQUIPMENTS_TITLE = "Todos os equipamentos";
+
 /** Exibida quando /assets (Todos os equipamentos) não tem nenhum asset. */
-export const NO_ASSETS_TITLE = "Nenhum equipamento cadastrado";
+export const NO_ASSETS_TITLE = "Nenhum equipamento cadastrado.";
 
 /** Explicita que produto de estoque não entra automaticamente em equipment. */
 export const NO_ASSETS_DESCRIPTION =
@@ -305,12 +367,22 @@ export const EMPTY_CATEGORY_TITLE = "Nenhum equipamento cadastrado nesta categor
 
 /** Explicação de que a categoria está vazia por falta de cadastro patrimonial. */
 export function emptyCategoryDescription(category: EquipmentCategory): string {
-  return `Nenhum ativo foi cadastrado em ${category.label} ainda. Cadastre o equipamento com patrimônio e série para que ele passe a aparecer aqui.`;
+  return EMPTY_CATEGORY_DESCRIPTION;
 }
 
-/** Cabeçalho do bloco de produtos de estoque relacionados. */
+/**
+ * Complemento fixo exigido para toda categoria vazia: o motivo de não haver
+ * equipamentos NÃO é falta de produto no estoque.
+ */
+export const EMPTY_CATEGORY_DESCRIPTION =
+  "Os produtos de estoque não aparecem automaticamente como equipamentos. Cadastre o equipamento individualmente quando aplicável.";
+
+/** Cabeçalho exato do bloco de produtos de estoque relacionados. */
+export const RELATED_STOCK_SECTION_TITLE = "Produtos relacionados no estoque";
+
+/** Cabeçalho do bloco de produtos de estoque relacionados, com a categoria. */
 export function relatedStockTitle(categoryLabel: string): string {
-  return `Há produtos de estoque relacionados a esta categoria (${categoryLabel}).`;
+  return `${RELATED_STOCK_SECTION_TITLE} (${categoryLabel})`;
 }
 
 /** Explica que são PRODUTOS, não equipamentos — evita confusão. */

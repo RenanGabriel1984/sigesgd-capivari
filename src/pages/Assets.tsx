@@ -22,8 +22,10 @@ import { useNavigate, useSearchParams } from "react-router";
 import {
   EQUIPMENT_CATEGORIES,
   EQUIPMENT_TYPE_LABELS,
-  findEquipmentCategory,
+  resolveEquipmentCategory,
+  equipmentCategoryHref,
   matchesEquipmentCategory,
+  ALL_EQUIPMENTS_TITLE,
   NO_ASSETS_TITLE,
   NO_ASSETS_DESCRIPTION,
   EMPTY_CATEGORY_TITLE,
@@ -32,6 +34,7 @@ import {
   RELATED_STOCK_HINT,
   RELATED_STOCK_ACTION,
   stockHrefForEquipmentCategory,
+  type EquipmentCategory,
 } from "@/lib/equipment-categories";
 import type { RelatedStockProduct } from "@/lib/equipment-categories";
 
@@ -70,14 +73,70 @@ function getTypeIcon(type: string) {
  *                            equipamento e por isso não é listado aqui como
  *                            equipamento.
  */
+/**
+ * Bloco "Produtos relacionados no estoque" — PONTE entre as duas estruturas.
+ *
+ * Não cria asset, não move saldo, não duplica estoque: apenas lista os
+ * produtos REAIS relacionados e oferece o atalho "Ver estoque".
+ * Renderizado no estado vazio da categoria E abaixo da lista quando a
+ * categoria já tem equipamentos.
+ */
+function RelatedStockSection({
+  category,
+  relatedStock,
+}: {
+  category: EquipmentCategory;
+  relatedStock: RelatedStockProduct[] | undefined;
+}) {
+  const navigate = useNavigate();
+  if (!relatedStock || relatedStock.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-dashed p-4">
+      <div className="flex items-start gap-2">
+        <Warehouse className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">{relatedStockTitle(category.label)}</p>
+          <p className="text-xs text-muted-foreground">{RELATED_STOCK_HINT}</p>
+
+          <ul className="mt-3 divide-y">
+            {relatedStock.map((p) => (
+              <li key={p.productId} className="flex items-center justify-between gap-3 py-1.5">
+                <span className="min-w-0 truncate text-sm">{p.productName}</span>
+                <span className="shrink-0 tabular-nums text-sm text-muted-foreground">
+                  {p.availableQuantity} {p.unitOfMeasure}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-3 gap-1.5"
+            onClick={() => navigate(stockHrefForEquipmentCategory(category))}
+          >
+            <Warehouse className="size-3.5" />
+            {RELATED_STOCK_ACTION}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Estado vazio EXPLICATIVO de uma categoria de equipamento.
+ *
+ * A categoria selecionada PERMANECE na tela: não há redirecionamento para
+ * "Todos os equipamentos" nem preenchimento do grid com produtos de estoque.
+ */
 function EmptyCategoryCard({
   category,
   relatedStock,
 }: {
-  category: ReturnType<typeof findEquipmentCategory> | null;
+  category: EquipmentCategory | null;
   relatedStock: RelatedStockProduct[] | undefined;
 }) {
-  const navigate = useNavigate();
   return (
     <Card className="border-border/50">
       <CardContent className="py-10">
@@ -91,40 +150,9 @@ function EmptyCategoryCard({
           </p>
         </div>
 
-        {relatedStock && relatedStock.length > 0 && (
-          <div className="mt-6 rounded-lg border border-dashed p-4">
-            <div className="flex items-start gap-2">
-              <Warehouse className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">
-                  {relatedStockTitle(category?.label ?? "Equipamentos")}
-                </p>
-                <p className="text-xs text-muted-foreground">{RELATED_STOCK_HINT}</p>
-
-                <ul className="mt-3 divide-y">
-                  {relatedStock.map((p) => (
-                    <li key={p.productId} className="flex items-center justify-between gap-3 py-1.5">
-                      <span className="min-w-0 truncate text-sm">{p.productName}</span>
-                      <span className="shrink-0 tabular-nums text-sm text-muted-foreground">
-                        {p.availableQuantity} {p.unitOfMeasure}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-
-                {category && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-3 gap-1.5"
-                    onClick={() => navigate(stockHrefForEquipmentCategory(category))}
-                  >
-                    <Warehouse className="size-3.5" />
-                    {RELATED_STOCK_ACTION}
-                  </Button>
-                )}
-              </div>
-            </div>
+        {category && (
+          <div className="mt-6">
+            <RelatedStockSection category={category} relatedStock={relatedStock} />
           </div>
         )}
       </CardContent>
@@ -153,7 +181,9 @@ function AssetsSkeleton() {
 
 export default function AssetsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const category = findEquipmentCategory(searchParams.get("categoria"));
+  // A categoria vive NA URL: cada uma tem o próprio recorte e permanece na tela
+  // mesmo quando não existe nenhum asset cadastrado.
+  const category = resolveEquipmentCategory(searchParams);
   const [tab, setTab] = useState("list");
   const [showNew, setShowNew] = useState(false);
   const [filters, setFilters] = useState({ status: "", assetType: "", search: "" });
@@ -173,11 +203,30 @@ export default function AssetsPage() {
   const navigate = useNavigate();
 
   // Produtos de estoque relacionados à categoria — somente leitura e somente
-  // quando a categoria está vazia (evita carregar dados sem uso).
+  // quando HÁ categoria selecionada (evita carregar dados sem uso).
   const relatedStock = useQuery(
     api.assets.relatedStockByCategory,
     category ? { category: category.slug } : "skip"
   ) as RelatedStockProduct[] | undefined;
+
+  /**
+   * Seleciona uma categoria SEM descartar a outras parâmetros da URL e sem
+   * limpar a categoria atual quando a mesma opção é escolhida de novo — é o
+   * que mantinha a tela "caindo" para Todos.
+   */
+  const selectCategory = (slug: string | null) => {
+    const next = new URLSearchParams(searchParams);
+    const href = equipmentCategoryHref(slug, next);
+    setSearchParams(new URLSearchParams(href.split("?")[1] ?? ""));
+    // Filtro de tipo incompatível com a nova categoria é zerado: sem isso a
+    // lista pareceria vazia por um filtro herdado de outra categoria.
+    if (slug) {
+      const types = EQUIPMENT_CATEGORIES.find((c) => c.slug === slug)?.types ?? [];
+      if (filters.assetType && !types.includes(filters.assetType)) {
+        setFilters((f) => ({ ...f, assetType: "" }));
+      }
+    }
+  };
 
   if (assets === undefined) return <AssetsSkeleton />;
 
@@ -228,7 +277,7 @@ export default function AssetsPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
-              {category ? category.label : "Equipamentos"}
+              {category ? category.label : ALL_EQUIPMENTS_TITLE}
             </h1>
             <p className="text-sm text-muted-foreground">
               {category ? `${category.description} — ` : "Controle patrimonial e manutenção — "}
@@ -240,24 +289,25 @@ export default function AssetsPage() {
           </Button>
         </div>
 
-        {/* Categorias de equipamento — recorte da mesma lista, sem duplicar telas */}
+        {/* Categorias de equipamento — recorte da mesma lista, sem duplicar telas.
+            Cada categoria tem o próprio estado na URL (?categoria=<slug>). */}
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => setSearchParams({})}
+            onClick={() => selectCategory(null)}
             className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
               !category
                 ? "border-primary/40 bg-primary/10 text-primary"
                 : "border-border text-muted-foreground hover:bg-muted"
             }`}
           >
-            Todos
+            {ALL_EQUIPMENTS_TITLE}
           </button>
           {EQUIPMENT_CATEGORIES.map((c) => (
             <button
               key={c.slug}
               type="button"
-              onClick={() => setSearchParams({ categoria: c.slug })}
+              onClick={() => selectCategory(c.slug)}
               className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                 category?.slug === c.slug
                   ? "border-primary/40 bg-primary/10 text-primary"
@@ -409,6 +459,10 @@ export default function AssetsPage() {
                 );
               })}
             </div>
+
+            {/* Ponte para o estoque: os produtos relacionados NUNCA entram no
+                grid de equipamentos, nem quando a categoria já tem assets. */}
+            {category && <RelatedStockSection category={category} relatedStock={relatedStock} />}
           </>
         )}
 

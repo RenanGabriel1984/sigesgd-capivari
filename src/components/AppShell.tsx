@@ -42,6 +42,8 @@ import { Badge } from "@/components/ui/badge";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { getPermissions, ROLE_LABELS } from "@/types/constants";
+import { isNavItemActive } from "@/lib/nav-active";
+import { ALL_EQUIPMENTS_TITLE, EQUIPMENT_CATEGORY_PARAM_KEYS } from "@/lib/equipment-categories";
 import type { UserRole } from "@/types/constants";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useIsDesktop } from "@/hooks/use-mobile";
@@ -62,6 +64,12 @@ interface NavItem {
   permission: keyof ReturnType<typeof getPermissions>;
   /** Permissão alternativa (ex.: técnico pode consultar estoque) */
   permission2?: keyof ReturnType<typeof getPermissions>;
+  /**
+   * Parâmetros de URL que, quando presentes, indicam uma VISÃO FILHA e portanto
+   * desativam este item (ex.: "/assets" perde o destaque para
+   * "/assets?categoria=redes"). Ver src/lib/nav-active.ts.
+   */
+  exclusiveParams?: string[];
   badge?: number;
 }
 
@@ -100,7 +108,15 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Computadores", href: "/assets?categoria=computadores", icon: Monitor, permission: "canManageAssets" },
     { label: "Redes", href: "/assets?categoria=redes", icon: Network, permission: "canManageAssets" },
     { label: "Telefonia", href: "/assets?categoria=telefonia", icon: Phone, permission: "canManageAssets" },
-    { label: "Todos os equipamentos", href: "/assets", icon: Boxes, permission: "canManageAssets" },
+    {
+      label: ALL_EQUIPMENTS_TITLE,
+      href: "/assets",
+      icon: Boxes,
+      permission: "canManageAssets",
+      // Visão INDEPENDENTE: só fica ativa sem ?categoria= na URL. Nunca é
+      // fallback de uma categoria vazia.
+      exclusiveParams: [...EQUIPMENT_CATEGORY_PARAM_KEYS],
+    },
     { label: "Licenças", href: "/licenses", icon: Key, permission: "canManageLicenses" },
   ]},
   { title: "Consultas", items: [
@@ -336,7 +352,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <SidebarLink
                     key={item.href}
                     item={item}
-                    isActive={location.pathname === item.href || (item.href !== "/dashboard" && location.pathname.startsWith(item.href))}
+                    isActive={isNavItemActive(
+                      { pathname: location.pathname, search: location.search },
+                      item
+                    )}
                     pendingCount={pendingCount}
                     alertCount={alertCount}
                   />
@@ -435,7 +454,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                                 <SidebarLink
                                   key={item.href}
                                   item={item}
-                                  isActive={location.pathname === item.href || (item.href !== "/dashboard" && location.pathname.startsWith(item.href))}
+                                  isActive={isNavItemActive(
+                                    { pathname: location.pathname, search: location.search },
+                                    item
+                                  )}
                                   onClick={() => setSidebarOpen(false)}
                                   pendingCount={pendingCount}
                                   alertCount={alertCount}
@@ -450,7 +472,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                             <SidebarLink
                               key={item.href}
                               item={item}
-                              isActive={location.pathname === item.href || (item.href !== "/dashboard" && location.pathname.startsWith(item.href))}
+                              isActive={isNavItemActive(
+                                { pathname: location.pathname, search: location.search },
+                                item
+                              )}
                               onClick={() => setSidebarOpen(false)}
                               pendingCount={pendingCount}
                               alertCount={alertCount}

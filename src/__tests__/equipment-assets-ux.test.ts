@@ -155,8 +155,8 @@ describe("EQUIP-UX — Categorias agrupam os assetTypes corretos", () => {
     expect(assetsPage).toContain(
       "? (assets ?? []).filter((a) => matchesEquipmentCategory(a.assetType, category))"
     );
-    // O botão "Todos" limpa o parâmetro de categoria.
-    expect(assetsPage).toContain("onClick={() => setSearchParams({})}");
+    // O botão "Todos os equipamentos" volta ao recorte completo.
+    expect(assetsPage).toContain("onClick={() => selectCategory(null)}");
 
     // Um asset de qualquer tipo sobrevive ao filtro "Todos".
     for (const cat of EQUIPMENT_CATEGORIES) {
@@ -170,7 +170,7 @@ describe("EQUIP-UX — Categorias agrupam os assetTypes corretos", () => {
 describe("EQUIP-UX — Categoria vazia é explicativa, não um erro", () => {
   it("EQUIP-UX-07: categoria vazia possui explicação clara", () => {
     expect(EMPTY_CATEGORY_TITLE).toBe("Nenhum equipamento cadastrado nesta categoria.");
-    expect(NO_ASSETS_TITLE).toBe("Nenhum equipamento cadastrado");
+    expect(NO_ASSETS_TITLE).toBe("Nenhum equipamento cadastrado.");
     expect(NO_ASSETS_DESCRIPTION).toBe(
       "Os itens de estoque não aparecem aqui automaticamente. Esta área controla equipamentos/ativos individualmente.",
     );
