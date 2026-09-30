@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import {
   Printer, PackageMinus, Download, Settings2, Loader2, Search,
   RefreshCcw, Truck, ShoppingCart, ArrowLeftRight,
-  ChevronDown, ChevronRight, ShieldCheck,
+  ChevronDown, ChevronRight, ShieldCheck, TriangleAlert,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,9 @@ import {
   planPackOperation,
   extractColor,
   tonerDisplayLabel,
+  buildLowStockWarning,
+  buildWithdrawalConfirmation,
+  canConfirmWithdrawal,
   type SupplyRow,
   type StockStatus,
   type PackagingConversion,
@@ -325,6 +328,9 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
   const [osNumber, setOsNumber] = useState("");
   const [observation, setObservation] = useState("");
   const [saving, setSaving] = useState(false);
+  // Etapa 1 = formulário · Etapa 2 = confirmação "Confirmar retirada?".
+  // Nenhuma escrita acontece antes da confirmação explícita.
+  const [step, setStep] = useState<"form" | "confirm">("form");
 
   // Contrato defensivo: `organizations.list` retorna { orgs, byParent } —
   // normalizado SEMPRE para array plano (nunca cast cego); erro em formato
@@ -371,6 +377,30 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
   const departamentos = secretariaId ? orgList.filter((o) => o.parentId === secretariaId) : [];
   const unidades = departamentoId ? orgList.filter((o) => o.parentId === departamentoId) : [];
 
+  const nameOf = (id: string) => orgList.find((o) => o._id === id)?.name ?? null;
+  const lowStock = buildLowStockWarning(family.baseStock, family.minimumStock, qty);
+  const confirmRows = buildWithdrawalConfirmation({
+    productLabel: family.familyName,
+    quantity: qty,
+    baseUnit: inBaseUnits && conv ? conv.baseUnit : family.baseUnit,
+    currentStock: family.baseStock,
+    minimumStock: family.minimumStock,
+    secretaria: nameOf(secretariaId),
+    departamento: nameOf(departamentoId),
+    unidade: nameOf(unidadeId),
+    reason,
+    osNumber,
+    observation,
+  });
+  const canConfirm = canConfirmWithdrawal({ quantity: qty, available: family.baseStock, reason });
+
+  // Cancelar (em qualquer etapa) e fechar o modal são a MESMA ação: nenhum
+  // estado de estoque é tocado, apenas o estado local do formulário.
+  const cancel = () => {
+    setStep("form");
+    onClose();
+  };
+
   const submit = async () => {
     if (!check.ok) {
       toast.error(check.reason ?? "Quantidade inválida");
@@ -393,6 +423,7 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
         await withdraw({ productId: single.productId as Id<"products">, quantity: qty, ...destino });
       }
       toast.success(`Retirada registrada: ${qty} ${inBaseUnits && conv ? conv.baseUnit : family.baseUnit} — ${family.familyName}`);
+      setStep("form");
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha na retirada");
@@ -402,28 +433,64 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+    <Dialog open={open} onOpenChange={(v) => !v && cancel()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Retirar suprimento</DialogTitle>
+          <DialogTitle>
+            {step === "confirm" ? "Confirmar retirada?" : "Retirada de suprimento"}
+          </DialogTitle>
           <DialogDescription>
-            {family.familyName}
-            {family.brand ? ` — ${family.brand}` : ""} · unidade operacional: {family.baseUnit}
+            {step === "confirm"
+              ? "Confira os dados abaixo antes de registrar a saída de estoque."
+              : "Dispensação/entrega de material — o produto permanece vinculado à área Impressoras."}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-3 py-2">
-          <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/40 p-3 text-center text-sm">
+        {step === "confirm" ? (
+          <div className="grid gap-3 py-2">
+            <dl className="divide-y rounded-lg border text-sm">
+              {confirmRows.map((row) => (
+                <div key={row.label} className="flex items-baseline justify-between gap-4 px-3 py-2">
+                  <dt className="text-muted-foreground">{row.label}</dt>
+                  <dd className="text-right font-medium">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+
+            {lowStock.warn && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                <p className="flex items-start gap-1.5 font-medium">
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                  Esta retirada deixará o estoque abaixo do mínimo.
+                </p>
+              </div>
+            )}
+
+            {planLabel && (
+              <p className="text-xs text-muted-foreground">{planLabel}</p>
+            )}
+          </div>
+        ) : (
+          <div className="grid gap-3 py-2">
+          <div className="rounded-lg border bg-muted/40 p-3 text-sm">
+            <p className="font-medium">{family.familyName}</p>
+            <p className="text-xs text-muted-foreground">
+              Marca: {family.brand ?? "—"} · Modelo: {family.model ?? "—"} · Unidade:{" "}
+              {inBaseUnits && conv ? conv.baseUnit : family.baseUnit}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 rounded-lg border p-3 text-center text-sm">
             <div>
-              <p className="text-xs text-muted-foreground">Estoque ({family.baseUnit})</p>
+              <p className="text-xs text-muted-foreground">Estoque disponível</p>
               <p className="font-semibold tabular-nums">{family.baseStock}</p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Solicitado ({family.baseUnit})</p>
+              <p className="text-xs text-muted-foreground">Quantidade solicitada</p>
               <p className={`font-semibold tabular-nums ${!check.ok ? "text-destructive" : ""}`}>{qty}</p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Saldo após saída</p>
+              <p className="text-xs text-muted-foreground">Saldo após retirada</p>
               <p className="font-semibold tabular-nums">{check.ok ? check.balanceAfter : "—"}</p>
             </div>
           </div>
@@ -452,6 +519,32 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
             />
             {!check.ok && <p className="mt-1 text-xs text-destructive">{check.reason}</p>}
           </div>
+
+          {/* ALERTA (não bloqueio): saldo abaixo do mínimo apenas avisa.
+              A única regra que bloqueia é a falta de saldo físico, tratada
+              por `validateWithdrawal` e, na autoridade final, pelo backend. */}
+          {lowStock.warn && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+              <p className="flex items-start gap-1.5 font-medium">
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+                Atenção — Esta retirada deixará o estoque abaixo do mínimo.
+              </p>
+              <div className="mt-1.5 grid grid-cols-3 gap-2 text-center tabular-nums">
+                <div>
+                  <p className="opacity-70">Atual</p>
+                  <p className="font-semibold">{lowStock.current}</p>
+                </div>
+                <div>
+                  <p className="opacity-70">Mínimo</p>
+                  <p className="font-semibold">{lowStock.minimum}</p>
+                </div>
+                <div>
+                  <p className="opacity-70">Saldo após retirada</p>
+                  <p className="font-semibold">{lowStock.balanceAfter}</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
@@ -504,13 +597,23 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
             </div>
           </div>
         </div>
+        )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={saving}>Cancelar</Button>
-          <Button onClick={submit} disabled={saving || !check.ok || !reason.trim()} className="gap-1.5">
-            {saving && <Loader2 className="size-4 animate-spin" />}
-            Confirmar retirada
+          <Button variant="outline" onClick={cancel} disabled={saving}>
+            {step === "confirm" ? "Voltar" : "Cancelar"}
           </Button>
+          {step === "confirm" ? (
+            <Button onClick={submit} disabled={saving || !canConfirm} className="gap-1.5">
+              {saving && <Loader2 className="size-4 animate-spin" />}
+              Confirmar retirada
+            </Button>
+          ) : (
+            <Button onClick={() => setStep("confirm")} disabled={!canConfirm} className="gap-1.5">
+              <PackageMinus className="size-4" />
+              Continuar
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

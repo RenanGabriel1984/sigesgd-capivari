@@ -271,7 +271,8 @@ describe("PRINT-UOM-04 — detalhamento mostra 13 caixas + 18 un. avulsas", () =
 describe("PRINT-UOM-05 — a retirada trabalha em unidade-base", () => {
   it("a UI rotula a quantidade na unidade operacional da família", () => {
     expect(panel).toContain("Quantidade em {family.baseUnit}");
-    expect(panel).toContain("Estoque ({family.baseUnit})");
+    // Rótulo do saldo disponível no modal de retirada (unidade-base da família).
+    expect(panel).toContain("Estoque disponível");
   });
 
   it("a saída planned consome avulsas primeiro e abre caixa apenas se necessário", () => {

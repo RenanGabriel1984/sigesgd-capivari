@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -7,6 +7,7 @@ import { SearchInput } from "@/components/SearchInput";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Warehouse, ClipboardList } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,6 +15,11 @@ import { UNIT_LABELS } from "@/types/constants";
 import { getStockSituation, STOCK_SITUATION_LABELS, STOCK_SITUATION_BADGE_CLASSES } from "@/lib/stock-status";
 import { matchesStockSearch } from "@/convex/stockHelpers";
 import type { ProductView } from "@/lib/product-types";
+import {
+  EQUIPMENT_STOCK_PARAM,
+  findEquipmentCategory,
+  matchesEquipmentStockProduct,
+} from "@/lib/equipment-categories";
 
 function StockSkeleton() {
   return (
@@ -55,8 +61,14 @@ const FILTER_LABELS: Record<StockFilter, string> = {
 export default function Stock() {
   const products = useQuery(api.products.list) as ProductView[] | undefined;
   const implementation = useQuery(api.stockSetup.implementationStockStatus);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<StockFilter>("all");
+
+  // Atalho "Ver estoque" vindo de /assets?categoria=<slug>: a tela de EQUIPAMENTO
+  // aponta para cá e o MESMO filtro puro é aplicado sobre os produtos.
+  // Nenhum produto é duplicado — continua sendo a lista real de `products`.
+  const equipmentCategory = findEquipmentCategory(searchParams.get(EQUIPMENT_STOCK_PARAM));
 
   if (products === undefined) return <StockSkeleton />;
 
@@ -65,6 +77,7 @@ export default function Stock() {
 
   const filtered = products?.filter(
     (p) => {
+      if (equipmentCategory && !matchesEquipmentStockProduct(p, equipmentCategory)) return false;
       const matchesSearch = matchesStockSearch(p, search);
       if (!matchesSearch) return false;
       const physical = p.stock?.physicalQuantity ?? 0;
@@ -120,6 +133,28 @@ export default function Stock() {
             />
           </div>
         </div>
+
+        {/* Filtro herdado: atalho "Ver estoque" da tela de Equipamentos */}
+        {equipmentCategory && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--capivari-green)]/20 bg-[var(--capivari-green)]/5 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--capivari-green)]">
+                Equipamentos
+              </span>
+              <span className="text-sm font-semibold">{equipmentCategory.label}</span>
+              <span className="text-xs text-muted-foreground">
+                {filtered?.length ?? 0} produto(s) de estoque relacionado(s) — produtos de estoque, não equipamentos
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSearchParams({})}
+            >
+              Limpar filtro
+            </Button>
+          </div>
+        )}
 
         {/* Estoque de implantação (carga inicial conferida fisicamente) */}
         {implementation && implementation.entries.length > 0 && (

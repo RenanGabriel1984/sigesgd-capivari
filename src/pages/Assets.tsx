@@ -15,7 +15,7 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Plus, Monitor, Laptop, Server, Printer, Wifi, HardDrive, HelpCircle, Search, Phone } from "lucide-react";
+import { Plus, Monitor, Laptop, Server, Printer, Wifi, HardDrive, HelpCircle, Search, Phone, Warehouse } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useNavigate, useSearchParams } from "react-router";
@@ -24,7 +24,16 @@ import {
   EQUIPMENT_TYPE_LABELS,
   findEquipmentCategory,
   matchesEquipmentCategory,
+  NO_ASSETS_TITLE,
+  NO_ASSETS_DESCRIPTION,
+  EMPTY_CATEGORY_TITLE,
+  emptyCategoryDescription,
+  relatedStockTitle,
+  RELATED_STOCK_HINT,
+  RELATED_STOCK_ACTION,
+  stockHrefForEquipmentCategory,
 } from "@/lib/equipment-categories";
+import type { RelatedStockProduct } from "@/lib/equipment-categories";
 
 const ASSET_TYPE_LABELS: Record<string, string> = EQUIPMENT_TYPE_LABELS;
 
@@ -50,6 +59,77 @@ function getTypeIcon(type: string) {
     case "phone": return Phone;
     default: return HelpCircle;
   }
+}
+
+/**
+ * Estado vazio EXPLICATIVO de uma categoria de equipamento.
+ *
+ * Separa com clareza as duas dimensões que não se misturam:
+ *   - EQUIPAMENTO (assets) — nenhum cadastro nesta categoria;
+ *   - PRODUTO (stock)      — pode existir material relacionado, que NÃO é
+ *                            equipamento e por isso não é listado aqui como
+ *                            equipamento.
+ */
+function EmptyCategoryCard({
+  category,
+  relatedStock,
+}: {
+  category: ReturnType<typeof findEquipmentCategory> | null;
+  relatedStock: RelatedStockProduct[] | undefined;
+}) {
+  const navigate = useNavigate();
+  return (
+    <Card className="border-border/50">
+      <CardContent className="py-10">
+        <div className="empty-state">
+          <Monitor className="empty-state-icon" />
+          <p className="empty-state-title">
+            {category ? EMPTY_CATEGORY_TITLE : NO_ASSETS_TITLE}
+          </p>
+          <p className="empty-state-desc">
+            {category ? emptyCategoryDescription(category) : NO_ASSETS_DESCRIPTION}
+          </p>
+        </div>
+
+        {relatedStock && relatedStock.length > 0 && (
+          <div className="mt-6 rounded-lg border border-dashed p-4">
+            <div className="flex items-start gap-2">
+              <Warehouse className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">
+                  {relatedStockTitle(category?.label ?? "Equipamentos")}
+                </p>
+                <p className="text-xs text-muted-foreground">{RELATED_STOCK_HINT}</p>
+
+                <ul className="mt-3 divide-y">
+                  {relatedStock.map((p) => (
+                    <li key={p.productId} className="flex items-center justify-between gap-3 py-1.5">
+                      <span className="min-w-0 truncate text-sm">{p.productName}</span>
+                      <span className="shrink-0 tabular-nums text-sm text-muted-foreground">
+                        {p.availableQuantity} {p.unitOfMeasure}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                {category && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3 gap-1.5"
+                    onClick={() => navigate(stockHrefForEquipmentCategory(category))}
+                  >
+                    <Warehouse className="size-3.5" />
+                    {RELATED_STOCK_ACTION}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function AssetsSkeleton() {
@@ -91,6 +171,13 @@ export default function AssetsPage() {
   const organizations = useQuery(api.organizations.list);
   const createAsset = useMutation(api.assets.create);
   const navigate = useNavigate();
+
+  // Produtos de estoque relacionados à categoria — somente leitura e somente
+  // quando a categoria está vazia (evita carregar dados sem uso).
+  const relatedStock = useQuery(
+    api.assets.relatedStockByCategory,
+    category ? { category: category.slug } : "skip"
+  ) as RelatedStockProduct[] | undefined;
 
   if (assets === undefined) return <AssetsSkeleton />;
 
@@ -215,27 +302,27 @@ export default function AssetsPage() {
 
         {/* Empty State */}
         {filteredAssets.length === 0 ? (
-          <Card className="border-border/50">
-            <CardContent className="py-16">
-              <div className="empty-state">
-                <Monitor className="empty-state-icon" />
-                <p className="empty-state-title">
-                  {filters.search || filters.status || filters.assetType || category
-                    ? "Nenhum equipamento encontrado"
-                    : "Nenhum equipamento cadastrado"}
-                </p>
-                <p className="empty-state-desc">
-                  {filters.search
-                    ? `Nenhum resultado para "${filters.search}"${category ? ` em ${category.label}` : ""}. Tente outro termo ou limpe a busca.`
-                    : category
-                      ? `Nenhum equipamento em ${category.label}${filters.status || filters.assetType ? " com os filtros atuais" : ""}.`
-                      : filters.status || filters.assetType
-                        ? "Tente alterar os filtros aplicados."
-                        : "Cadastre o primeiro equipamento para iniciar o controle patrimonial."}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          // Filtros ativos ≠ categoria vazia: aqui a busca é que não encontrou
+          // nada, então não se fala em "nenhum equipamento cadastrado".
+          filters.search || filters.status || filters.assetType ? (
+            <Card className="border-border/50">
+              <CardContent className="py-16">
+                <div className="empty-state">
+                  <Monitor className="empty-state-icon" />
+                  <p className="empty-state-title">Nenhum equipamento encontrado</p>
+                  <p className="empty-state-desc">
+                    {filters.search
+                      ? `Nenhum resultado para "${filters.search}"${category ? ` em ${category.label}` : ""}. Tente outro termo ou limpe a busca.`
+                      : category
+                        ? `Nenhum equipamento em ${category.label} com os filtros atuais.`
+                        : "Tente alterar os filtros aplicados."}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <EmptyCategoryCard category={category} relatedStock={category ? relatedStock : undefined} />
+          )
         ) : (
           <>
             {/* Desktop Table */}

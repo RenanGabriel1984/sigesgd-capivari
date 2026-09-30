@@ -1,6 +1,8 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { findEquipmentCategory, buildRelatedStockProducts } from "../lib/equipment-categories";
+import type { RelatedStockProduct } from "../lib/equipment-categories";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -51,6 +53,56 @@ export const list = query({
       const responsible = a.responsibleUserId ? await ctx.db.get(a.responsibleUserId) : null;
       return { ...a, organization: org, responsible };
     }));
+  },
+});
+
+/**
+ * PRODUTOS DE ESTOQUE RELACIONADOS a uma categoria de equipamento.
+ *
+ * SOMENTE LEITURA: devolve os registros ORIGINAIS de `products`/`stock`.
+ * Nenhum asset é criado, nenhum saldo é alterado, nenhuma movimentação é
+ * registrada e o estoque NÃO é duplicado — a tela de /assets apenas aponta
+ * ONDE estão os produtos parecidos com a categoria.
+ *
+ * RBAC: exige `stock.view` porque os dados devolvidos são SALDO de estoque
+ * (products.view ficaria permissivo demais para expor quantidades).
+ */
+export const relatedStockByCategory = query({
+  args: { category: v.string() },
+  handler: async (ctx, args): Promise<RelatedStockProduct[]> => {
+    await requirePermission(ctx, "stock.view");
+    const category = findEquipmentCategory(args.category);
+    if (!category) return [];
+
+    const products = await ctx.db.query("products").collect();
+    const stockRows = await ctx.db.query("stock").collect();
+    const stockByProduct = new Map<string, { physicalQuantity: number; reservedQuantity: number }>();
+    for (const s of stockRows) {
+      stockByProduct.set(s.productId, {
+        physicalQuantity: s.physicalQuantity ?? 0,
+        reservedQuantity: s.reservedQuantity ?? 0,
+      });
+    }
+
+    // Categorias do catálogo resolvidas uma única vez (evita N+1 por produto).
+    const categoryNameById = new Map<string, string>();
+    for (const c of await ctx.db.query("categories").collect()) {
+      categoryNameById.set(c._id, c.name);
+    }
+
+    return buildRelatedStockProducts(
+      products.map((p) => ({
+        _id: p._id,
+        name: p.name,
+        brand: p.brand ?? null,
+        manufacturer: p.manufacturer ?? null,
+        model: p.model ?? null,
+        unitOfMeasure: p.unitOfMeasure,
+        categoryName: p.categoryId ? categoryNameById.get(p.categoryId) ?? null : null,
+        stock: stockByProduct.get(p._id) ?? null,
+      })),
+      category
+    );
   },
 });
 

@@ -240,6 +240,124 @@ export function validateWithdrawal(quantity: number, available: number): Withdra
   return { ok: true, balanceAfter: available - quantity };
 }
 
+/* ─── Dispensação: alerta de mínimo e resumo de confirmação (NÃO bloqueante) ── */
+
+/**
+ * Alerta de estoque abaixo do mínimo.
+ *
+ * REGRA DE NEGÓCIO INEGOCIÁVEL: avisar NÃO é bloquear. O operador pode concluir
+ * a retirada mesmo abaixo do mínimo (exige-se justificativa no motivo). A única
+ * regra que BLOQUEIA é a falta de saldo físico — tratada por
+ * `validateWithdrawal` e, na autoridade final, pelo backend.
+ */
+export interface LowStockWarning {
+  /** Deve exibir o alerta? (mínimo definido E saldo após < mínimo) */
+  warn: boolean;
+  /** Saldo atual (antes da retirada). */
+  current: number;
+  /** Estoque mínimo configurado; null = parâmetros indefinidos. */
+  minimum: number | null;
+  /** Saldo após a retirada. */
+  balanceAfter: number;
+}
+
+/**
+ * Calcula o alerta de mínimo. Sem mínimo configurado (null/0) não há alerta —
+ * parâmetros indefinidos não geram ruído operacional.
+ */
+export function buildLowStockWarning(
+  current: number,
+  minimum: number | null | undefined,
+  quantity: number
+): LowStockWarning {
+  const balanceAfter = current - (Number.isFinite(quantity) ? quantity : 0);
+  const hasMinimum = minimum != null && minimum > 0;
+  return {
+    warn: hasMinimum && balanceAfter < (minimum as number),
+    current,
+    minimum: hasMinimum ? (minimum as number) : null,
+    balanceAfter,
+  };
+}
+
+/** Linha rótulo/valor da tela de confirmação "Confirmar retirada?". */
+export interface ConfirmationRow {
+  label: string;
+  value: string;
+}
+
+/** Dados necessários ao resumo de confirmação da dispensa. */
+export interface WithdrawalConfirmationInput {
+  /** Rótulo do produto/família, ex.: "MFC-L6902DW — Preto". */
+  productLabel: string;
+  quantity: number;
+  baseUnit: string;
+  currentStock: number;
+  minimumStock: number | null;
+  /** Nome da secretaria de destino (vazio = não informado). */
+  secretaria?: string | null;
+  departamento?: string | null;
+  unidade?: string | null;
+  reason?: string | null;
+  osNumber?: string | null;
+  observation?: string | null;
+}
+
+/** Valor seguro para exibição: nunca "undefined" na tela de confirmação. */
+function orDash(value?: string | null): string {
+  const v = (value ?? "").trim();
+  return v.length > 0 ? v : "—";
+}
+
+/**
+ * Monta o resumo da confirmação (destino em uma linha só quando informado).
+ * Puro: nenhuma escrita, nenhuma chamada de backend — a gravação continua
+ * sendo feita exclusivamente por `withdraw`/`withdrawFamily`.
+ */
+export function buildWithdrawalConfirmation(
+  input: WithdrawalConfirmationInput
+): ConfirmationRow[] {
+  const destination = [input.secretaria, input.departamento, input.unidade]
+    .map((v) => (v ?? "").trim())
+    .filter(Boolean)
+    .join(" / ");
+
+  const rows: ConfirmationRow[] = [
+    { label: "Produto", value: orDash(input.productLabel) },
+    { label: "Quantidade", value: `${input.quantity} ${input.baseUnit}` },
+    { label: "Destino", value: destination.length > 0 ? destination : "—" },
+    { label: "Motivo", value: orDash(input.reason) },
+    { label: "O.S.", value: orDash(input.osNumber) },
+  ];
+
+  const observation = (input.observation ?? "").trim();
+  if (observation.length > 0) {
+    rows.push({ label: "Observação", value: observation });
+  }
+
+  rows.push({ label: "Estoque atual", value: `${input.currentStock} ${input.baseUnit}` });
+  rows.push({
+    label: "Estoque após retirada",
+    value: `${input.currentStock - input.quantity} ${input.baseUnit}`,
+  });
+
+  return rows;
+}
+
+/**
+ * O botão "Confirmar retirada" pode ser habilitado?
+ * Mesmas condições do formulário: saldo válido E motivo informado.
+ * Uma vez habilitado, a retirada NUNCA é bloqueada por estar abaixo do mínimo.
+ */
+export function canConfirmWithdrawal(input: {
+  quantity: number;
+  available: number;
+  reason: string;
+}): boolean {
+  if (!input.reason.trim()) return false;
+  return validateWithdrawal(input.quantity, input.available).ok;
+}
+
 /* ─── Conversão de embalagem e unidade-base (configurável; nunca inferida) ──── */
 
 /**

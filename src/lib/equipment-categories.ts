@@ -18,6 +18,18 @@
  * Por isso o fornecedor NUNCA aparece no nome estrutural do menu: se uma nova
  * licitação trocar a empresa contratada, a estrutura continua idêntica e o
  * histórico permanece com o fornecedor de cada entrada.
+ *
+ * ─── PRODUTO × EQUIPAMENTO ────────────────────────────────────────────────
+ *   PRODUTO     = material existente no estoque (products/stock/lots).
+ *   EQUIPAMENTO = ativo individual cadastrado em `assets`.
+ *
+ * Um produto de estoque NUNCA vira equipamento automaticamente:
+ *   - "Switch TP-Link 8 portas" com saldo 3 é PRODUTO (estoque = 3);
+ *   - "Switch TP-Link" com patrimônio 12345 é EQUIPAMENTO.
+ *
+ * As funções `matchesEquipmentStockProduct` / `buildRelatedStockProducts`
+ * são somente LEITURA: elas apenas APONTAM onde estão os produtos parecidos,
+ * nunca criam assets, nunca movem saldo e nunca duplicam estoque.
  */
 
 export interface EquipmentCategory {
@@ -87,3 +99,235 @@ export function matchesEquipmentCategory(
   if (!assetType) return false;
   return category.types.includes(assetType);
 }
+
+/* ─── Palavras-chave de ESTOQUE relacionadas a cada categoria ────────────── */
+
+/**
+ * Nomes de CATEGORIA de produto (tabela `categories`) cujo conteúdo pertence à
+ * categoria de equipamento. Sinal mais forte: o item já está classificado como
+ * rede/telefonia/etc. pelo catálogo.
+ */
+const CATEGORY_KEYWORDS: Record<string, string[]> = {
+  impressoras: ["suprimentos de impressão", "impressao", "impressão"],
+  computadores: ["periféricos", "perifericos", "armazenamento e hardware", "hardware"],
+  redes: ["redes e conectividade", "rede", "conectividade"],
+  telefonia: ["telefonia e comunicação", "telefonia", "comunicação", "comunicacao"],
+};
+
+/**
+ * Palavras-chave do NOME/MARCA/MODELO do produto. Complementam a categoria do
+ * catálogo quando o item foi cadastrado em uma categoria genérica.
+ * Termos deliberadamente específicos para não capturar itens vizinhos
+ * (ex.: "fita" NÃO entra em impressoras — "Fita isolante" é material elétrico).
+ */
+const NAME_KEYWORDS: Record<string, string[]> = {
+  impressoras: [
+    "toner",
+    "impressora",
+    "multifuncional",
+    "cartucho",
+    "ribbon",
+    "papel",
+    "etiqueta",
+    "crachá",
+    "cartao pvc",
+    "cartão pvc",
+    "protetor de crachá",
+  ],
+  computadores: [
+    "desktop",
+    "notebook",
+    "monitor",
+    "servidor",
+    "armazenamento",
+    "nobreak",
+    "ups",
+    "teclado",
+    "mouse",
+    "cooler",
+    "processador",
+    "memória",
+    "memoria",
+    "placa de vídeo",
+    "placa de video",
+    "gabinete",
+    "leitor de dvd",
+    "hd externo",
+    "disco rigido",
+    "disco rígido",
+    "ssd",
+    "nvme",
+  ],
+  redes: [
+    "switch",
+    "roteador",
+    "router",
+    "routerboard",
+    "access point",
+    "jetstream",
+    "rj45",
+    "cat5",
+    "cat6",
+    "patch panel",
+    "mikrotik",
+    "cabo de rede",
+    "poe",
+  ],
+  telefonia: ["telefone", "ramal", "voip", "headset", "fone de ouvido", "atendimento automatico"],
+};
+
+function normalizeForMatch(value: string | null | undefined): string {
+  return (value ?? "").toLowerCase().trim();
+}
+
+/** Remove acentos para casar "impressão"/"impressao", "módem"/"modem" etc. */
+function deaccent(value: string): string {
+  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "");
+}
+
+function haystackOf(p: {
+  name: string;
+  brand?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+}): string {
+  return deaccent(
+    normalizeForMatch(p.name) + " " +
+      normalizeForMatch(p.brand) + " " +
+      normalizeForMatch(p.manufacturer) + " " +
+      normalizeForMatch(p.model)
+  );
+}
+
+/**
+ * O PRODUTO de estoque é relacionado à categoria de equipamento?
+ *
+ * Regra OR entre (a) categoria do catálogo e (b) palavras-chave do nome.
+ * Retorna false quando a categoria é nula — sem categoria não há relação.
+ */
+export function matchesEquipmentStockProduct(
+  product: {
+    name: string;
+    brand?: string | null;
+    manufacturer?: string | null;
+    model?: string | null;
+    categoryName?: string | null;
+  },
+  category: EquipmentCategory | null
+): boolean {
+  if (!category) return false;
+
+  const categoryName = deaccent(normalizeForMatch(product.categoryName));
+  for (const keyword of CATEGORY_KEYWORDS[category.slug] ?? []) {
+    if (categoryName.includes(deaccent(keyword))) return true;
+  }
+
+  const haystack = haystackOf(product);
+  for (const keyword of NAME_KEYWORDS[category.slug] ?? []) {
+    if (haystack.includes(deaccent(keyword))) return true;
+  }
+  return false;
+}
+
+export interface RelatedStockProduct {
+  productId: string;
+  productName: string;
+  brand: string | null;
+  model: string | null;
+  unitOfMeasure: string;
+  /** Saldo físico REAL do produto (nunca calculado, nunca inventado). */
+  physicalQuantity: number;
+  reservedQuantity: number;
+  /** físico − reservado, nunca negativo. */
+  availableQuantity: number;
+}
+
+export interface RelatedStockProductInput {
+  _id: string;
+  name: string;
+  brand?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  unitOfMeasure: string;
+  categoryName?: string | null;
+  stock?: { physicalQuantity?: number; reservedQuantity?: number } | null;
+}
+
+/**
+ * Lista de produtos de estoque relacionados a uma categoria de equipamento.
+ * SOMENTE LEITURA e somente apresentação: devolve os registros ORIGINAIS de
+ * `products`/`stock` — nenhuma linha nova de estoque é criada.
+ *
+ * Só entram produtos com saldo físico > 0 (produto sem saldo não é "estoque
+ * relacionado"); a ordenação é alfabética para ser estável.
+ */
+export function buildRelatedStockProducts(
+  products: RelatedStockProductInput[],
+  category: EquipmentCategory | null
+): RelatedStockProduct[] {
+  if (!category) return [];
+  const out: RelatedStockProduct[] = [];
+  for (const p of products) {
+    const physical = p.stock?.physicalQuantity ?? 0;
+    if (physical <= 0) continue;
+    if (!matchesEquipmentStockProduct(p, category)) continue;
+    const reserved = p.stock?.reservedQuantity ?? 0;
+    out.push({
+      productId: p._id,
+      productName: p.name,
+      brand: p.brand ?? p.manufacturer ?? null,
+      model: p.model ?? null,
+      unitOfMeasure: p.unitOfMeasure,
+      physicalQuantity: physical,
+      reservedQuantity: reserved,
+      availableQuantity: Math.max(physical - reserved, 0),
+    });
+  }
+  return out.sort((a, b) => a.productName.localeCompare(b.productName, "pt-BR"));
+}
+
+/* ─── Cópia dos estados vazios (explicativa, nunca "erro de estoque") ──────── */
+
+/** Exibida quando /assets (Todos os equipamentos) não tem nenhum asset. */
+export const NO_ASSETS_TITLE = "Nenhum equipamento cadastrado";
+
+/** Explicita que produto de estoque não entra automaticamente em equipment. */
+export const NO_ASSETS_DESCRIPTION =
+  "Os itens de estoque não aparecem aqui automaticamente. Esta área controla equipamentos/ativos individualmente.";
+
+/** Título do estado vazio de uma categoria específica. */
+export function emptyCategoryTitle(categoryLabel: string): string {
+  return `Nenhum equipamento cadastrado nesta categoria${categoryLabel ? ` (${categoryLabel})` : ""}.`;
+}
+
+/** Título exato exigido para categoria vazia (sem sufixo redundante). */
+export const EMPTY_CATEGORY_TITLE = "Nenhum equipamento cadastrado nesta categoria.";
+
+/** Explicação de que a categoria está vazia por falta de cadastro patrimonial. */
+export function emptyCategoryDescription(category: EquipmentCategory): string {
+  return `Nenhum ativo foi cadastrado em ${category.label} ainda. Cadastre o equipamento com patrimônio e série para que ele passe a aparecer aqui.`;
+}
+
+/** Cabeçalho do bloco de produtos de estoque relacionados. */
+export function relatedStockTitle(categoryLabel: string): string {
+  return `Há produtos de estoque relacionados a esta categoria (${categoryLabel}).`;
+}
+
+/** Explica que são PRODUTOS, não equipamentos — evita confusão. */
+export const RELATED_STOCK_HINT =
+  "Estes são produtos de ESTOQUE, não equipamentos: nenhum item vira equipamento automaticamente.";
+
+/** Rótulo do atalho para a tela de estoque. */
+export const RELATED_STOCK_ACTION = "Ver estoque";
+
+/**
+ * Query string do atalho "Ver estoque" — leva a categoria para /stock.
+ * A tela de estoque aplica o MESMO filtro (`matchesEquipmentStockProduct`),
+ * de modo que a lista é sempre a mesma: nenhum estoque é duplicado.
+ */
+export function stockHrefForEquipmentCategory(category: EquipmentCategory): string {
+  return `/stock?equipamentos=${category.slug}`;
+}
+
+/** Parâmetro de URL lido por /stock para filtrar por categoria de equipamento. */
+export const EQUIPMENT_STOCK_PARAM = "equipamentos";
