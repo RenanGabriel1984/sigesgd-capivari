@@ -35,6 +35,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/convex/_generated/api";
+import { buildEstimatedNeedRow, NEED_SOURCE_LABELS } from "@/lib/supply-requests";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useAuth } from "@/hooks/use-auth";
 import { getPermissions } from "@/types/constants";
@@ -88,6 +89,7 @@ type SupplyFamilyView = {
   members: FamilyMemberView[];
   minimumStock: number | null;
   idealStock: number | null;
+  monthlyConsumptionTarget: number | null;
   status: StockStatus;
   withdrawMemberId: string | null;
   suggestedReorder: number | null;
@@ -890,6 +892,110 @@ function ReposicaoTab() {
   );
 }
 
+/* ═══ Planejamento de reposição (SUPLEMENTO ao painel de suprimentos) ════════ */
+
+/**
+ * "Planejamento de Reposição" — seção de APOIO dentro da Gestão de
+ * Suprimentos de Impressão. Ela lê os MESMOS produtos reais da área
+ * Impressoras: nenhuma cópia de produto, nenhum segundo estoque.
+ *
+ * A "necessidade estimada" é SEMPRE o parâmetro manual de consumo mensal
+ * cadastrado pelo gestor. Nunca é calculada a partir de movimentações e nunca
+ * é inventada quando o parâmetro não existe (`—`).
+ */
+function PlanejamentoReposicaoTab() {
+  const dashboard = useQuery(api.printSupplies.getSupplyDashboard) as DashboardData | undefined;
+  const families = dashboard?.families ?? [];
+
+  const rows = useMemo(
+    () =>
+      families.map((f) =>
+        buildEstimatedNeedRow({
+          currentStock: f.baseStock,
+          minimumStock: f.minimumStock,
+          idealStock: f.idealStock,
+          monthlyConsumptionTarget: f.monthlyConsumptionTarget ?? null,
+        })
+      ),
+    [families]
+  );
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-muted-foreground">
+        Base de planejamento para a solicitação mensal. A necessidade estimada é o
+        <strong> consumo mensal cadastrado pelo gestor</strong> — quando não há parâmetro,
+        o campo fica vazio em vez de estimar um número.
+      </p>
+
+      <div className="rounded-lg border">
+        <Table className="min-w-[760px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Produto</TableHead>
+              <TableHead className="text-right">Estoque atual</TableHead>
+              <TableHead className="text-right">Mínimo</TableHead>
+              <TableHead className="text-right">Ideal</TableHead>
+              <TableHead className="text-right">Consumo mensal</TableHead>
+              <TableHead className="text-right">Necessidade estimada</TableHead>
+              <TableHead className="text-right">Sugestão de reposição</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {families.map((f, i) => {
+              const row = rows[i];
+              return (
+                <TableRow key={f.familyKey}>
+                  <TableCell className="font-medium">{f.familyName}</TableCell>
+                  <TableCell className="text-right tabular-nums">{f.baseStock}</TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {f.minimumStock != null ? f.minimumStock : "—"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {f.idealStock != null ? f.idealStock : "—"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
+                    {f.monthlyConsumptionTarget != null ? f.monthlyConsumptionTarget : "—"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {row.estimatedNeed === null ? (
+                      <span className="text-xs text-muted-foreground">
+                        — <span className="italic">({NEED_SOURCE_LABELS[row.needSource]})</span>
+                      </span>
+                    ) : (
+                      <span className="tabular-nums">
+                        {row.estimatedNeed}
+                        <span className="ml-1 text-[10px] text-muted-foreground">
+                          ({NEED_SOURCE_LABELS[row.needSource]})
+                        </span>
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right font-semibold tabular-nums">
+                    {row.suggestedReplenishment}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {families.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                  {dashboard === undefined ? "Carregando..." : "Nenhum suprimento na área Impressoras."}
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        A sugestão de reposição é <code className="font-mono">max(ideal − estoque, 0)</code>:
+        um número de apoio. Ela não cria pedido, não reserva e não movimenta estoque.
+      </p>
+    </div>
+  );
+}
+
 /* ═══ Aba LOGÍSTICA REVERSA (funcionalidades GomaQ existentes) ══════════════ */
 
 type Exchange = {
@@ -1052,11 +1158,13 @@ export default function GomaQPage() {
             <TabsTrigger value="estoque">Estoque</TabsTrigger>
             <TabsTrigger value="consumo">Consumo Mensal</TabsTrigger>
             <TabsTrigger value="reposicao">Reposição</TabsTrigger>
+            <TabsTrigger value="planejamento">Planejamento de Reposição</TabsTrigger>
             <TabsTrigger value="reversa">Logística Reversa</TabsTrigger>
           </TabsList>
           <TabsContent value="estoque"><EstoqueTab /></TabsContent>
           <TabsContent value="consumo"><ConsumoTab /></TabsContent>
           <TabsContent value="reposicao"><ReposicaoTab /></TabsContent>
+          <TabsContent value="planejamento"><PlanejamentoReposicaoTab /></TabsContent>
           <TabsContent value="reversa"><ReversaTab /></TabsContent>
         </Tabs>
       </div>

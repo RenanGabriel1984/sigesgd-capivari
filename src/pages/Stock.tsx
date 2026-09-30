@@ -73,7 +73,7 @@ export default function Stock() {
   if (products === undefined) return <StockSkeleton />;
 
   const situationOf = (p: ProductView) =>
-    getStockSituation(p.stock?.physicalQuantity ?? 0, p.minimumStock, p.idealStock);
+    getStockSituation(p.stock?.physicalQuantity ?? 0, p.minimumStock ?? 0, p.idealStock ?? 0);
 
   const filtered = products?.filter(
     (p) => {
@@ -94,12 +94,12 @@ export default function Stock() {
 
   const criticalCount = filtered?.filter((p) => {
     const physical = p.stock?.physicalQuantity ?? 0;
-    return getStockSituation(physical, p.minimumStock, p.idealStock) === "critical";
+    return getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0) === "critical";
   }).length ?? 0;
 
   const belowMinCount = filtered?.filter((p) => {
     const physical = p.stock?.physicalQuantity ?? 0;
-    const s = getStockSituation(physical, p.minimumStock, p.idealStock);
+    const s = getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0);
     return s === "critical" || s === "below_min";
   }).length ?? 0;
 
@@ -236,7 +236,7 @@ export default function Stock() {
                     const physical = p.stock?.physicalQuantity ?? 0;
                     const reserved = p.stock?.reservedQuantity ?? 0;
                     const available = Math.max(physical - reserved, 0);
-                    const situation = getStockSituation(physical, p.minimumStock, p.idealStock);
+                    const situation = getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0);
                     const isLow = situation === "critical" || situation === "below_min";
                     return (
                       <TableRow key={p._id} className={isLow ? "bg-rose-50/30" : ""}>
@@ -257,8 +257,8 @@ export default function Stock() {
                           {reserved > 0 ? reserved : "—"}
                         </TableCell>
                         <TableCell className="text-center font-mono">{available}</TableCell>
-                        <TableCell className="text-center font-mono text-muted-foreground">{p.minimumStock}</TableCell>
-                        <TableCell className="text-center font-mono text-muted-foreground">{p.idealStock}</TableCell>
+                        <TableCell className="text-center font-mono text-muted-foreground">{p.minimumStock ?? "—"}</TableCell>
+                        <TableCell className="text-center font-mono text-muted-foreground">{p.idealStock ?? "—"}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Badge className={`text-[10px] shrink-0 ${STOCK_SITUATION_BADGE_CLASSES[situation]}`}>
@@ -305,15 +305,14 @@ export default function Stock() {
         </Card>
 
         {/* Mobile Card Layout */}
-        <div className="sm:hidden space-y-3">
-          {filtered?.map((p) => {
-            const physical = p.stock?.physicalQuantity ?? 0;
-            const reserved = p.stock?.reservedQuantity ?? 0;
-            const available = Math.max(physical - reserved, 0);
-            const situation = getStockSituation(physical, p.minimumStock, p.idealStock);
-            const isLow = situation === "critical" || situation === "below_min";
-            return (
-              <Card key={p._id} className={`border-border/50 ${isLow ? "border-rose-200 bg-rose-50/20" : ""}`}>
+        <div className="sm:hidden space-y-3">                  {filtered?.map((p) => {
+                    const physical = p.stock?.physicalQuantity ?? 0;
+                    const reserved = p.stock?.reservedQuantity ?? 0;
+                    const available = Math.max(physical - reserved, 0);
+                    const situation = getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0);
+                    const isLow = situation === "critical" || situation === "below_min";
+                    return (
+                      <Card key={p._id} className={`border-border/50 ${isLow ? "border-rose-200 bg-rose-50/20" : ""}`}>
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1 min-w-0">
@@ -341,8 +340,8 @@ export default function Stock() {
                     </div>
                   </div>
                   <div className="mt-3 flex items-center justify-between text-[10px] text-muted-foreground">
-                    <span>Mínimo: {p.minimumStock}</span>
-                    <span>Ideal: {p.idealStock}</span>
+                    <span>Mínimo: {p.minimumStock ?? "—"}</span>
+                    <span>Ideal: {p.idealStock ?? "—"}</span>
                     <span>Máximo: {p.maximumStock}</span>
                   </div>
                   {p.maximumStock > 0 && (

@@ -110,6 +110,12 @@ export const AUDIT_ACTIONS = {
   ASSET_PART_REMOVE: "asset_part_remove",
   LICENSE_CREATE: "license_create",
   LICENSE_ASSIGN: "license_assign",
+  /**
+   * Alteração de PARÂMETROS de reposição (mínimo/ideal/consumo mensal).
+   * NÃO é movimentação de estoque: vai para `auditLogs`, nunca para
+   * `stockMovements`, e jamais altera quantidade física ou lote.
+   */
+  STOCK_PARAMETER_UPDATE: "stock_parameter_update",
   PERMISSION_DENIED: "permission_denied",
 } as const;
 
@@ -150,6 +156,7 @@ export const auditActionValidator = v.union(
   v.literal(AUDIT_ACTIONS.ASSET_PART_REMOVE),
   v.literal(AUDIT_ACTIONS.LICENSE_CREATE),
   v.literal(AUDIT_ACTIONS.LICENSE_ASSIGN),
+  v.literal(AUDIT_ACTIONS.STOCK_PARAMETER_UPDATE),
   v.literal(AUDIT_ACTIONS.PERMISSION_DENIED),
 );
 
@@ -276,8 +283,19 @@ const schema = defineSchema(
       brand: v.optional(v.string()),
       specification: v.optional(v.string()),
       active: v.boolean(),
-      minimumStock: v.number(),
-      idealStock: v.number(),
+      // ── Parametrização de reposição (INDEPENDENTE do estoque físico) ──
+      // minimumStock/idealStock: ANULÁVEIS de propósito. `null` = "ainda não
+      // parametrizado"; `0` = "zero é um valor real configurado". Os dois
+      // estados NÃO são sinônimos e o sistema nunca os confunde.
+      minimumStock: v.optional(v.number()),
+      idealStock: v.optional(v.number()),
+      // Referência OPERACIONAL de planejamento (unidades consumidas por mês).
+      // NUNCA é calculada automaticamente: quem define é o operador.
+      monthlyConsumptionTarget: v.optional(v.number()),
+      // Opt-in do produto na fila de reposição da tela de parametrização.
+      replenishmentEnabled: v.optional(v.boolean()),
+      // Observação livre do gestor sobre a reposição do item.
+      replenishmentNote: v.optional(v.string()),
       maximumStock: v.number(),
       observation: v.optional(v.string()),
       photo: v.optional(v.string()),
@@ -331,6 +349,52 @@ const schema = defineSchema(
       updatedAt: v.number(),
     }).index("by_supplier", ["supplierId"])
       .index("by_supplier_code", ["supplierId", "supplierCode"])
+      .index("by_product", ["productId"]),
+
+    // ══════════════════════════════════════════════════════════════════════
+    // SOLICITAÇÃO MENSAL DE SUPRIMENTOS (documento — NÃO movimenta estoque)
+    // ══════════════════════════════════════════════════════════════════════
+    // Um documento de PLANEJAMENTO: oficializa o que será solicitado ao
+    // fornecedor. Criar/editar/gerar uma solicitação NUNCA cria entrada, saída,
+    // movimentação, reserva ou alteração de saldo — é papel, não estoque.
+    supplyRequests: defineTable({
+      // Mês (1..12) e ano do período de referência da solicitação.
+      periodMonth: v.number(),
+      periodYear: v.number(),
+      // Solicitante (usuário logado) e fornecedor pretendido.
+      requesterUserId: v.optional(v.id("users")),
+      supplierId: v.optional(v.id("suppliers")),
+      // Instante de geração do documento (preenchido ao virar "generated").
+      generatedAt: v.optional(v.number()),
+      observation: v.optional(v.string()),
+      status: v.union(
+        v.literal("draft"),
+        v.literal("ready_for_review"),
+        v.literal("generated")
+      ),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_period", ["periodYear", "periodMonth"])
+      .index("by_status", ["status"])
+      .index("by_supplier", ["supplierId"]),
+
+    supplyRequestItems: defineTable({
+      supplyRequestId: v.id("supplyRequests"),
+      // Produto/suprimento de estoque (fonte: `products`, sem cópia).
+      productId: v.optional(v.id("products")),
+      // Equipamento ao qual o suprimento se destina (opcional — agrupa por
+      // modelo do parque quando informado).
+      equipmentAssetId: v.optional(v.id("assets")),
+      equipmentModel: v.optional(v.string()),
+      // Fotografia do MOMENTO da solicitação (nunca recalculada depois).
+      currentStock: v.number(),
+      emptyStock: v.number(),
+      // Sugestão do sistema (informativa) e a quantidade REALMENTE solicitada,
+      // que o operador pode alterar — nunca é imposta pela sugestão.
+      suggestedQuantity: v.number(),
+      requestedQuantity: v.number(),
+      observation: v.optional(v.string()),
+    }).index("by_request", ["supplyRequestId"])
       .index("by_product", ["productId"]),
 
     // ── Stock Movements ──

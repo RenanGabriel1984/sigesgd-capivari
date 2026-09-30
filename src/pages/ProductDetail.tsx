@@ -58,7 +58,7 @@ export default function ProductDetail() {
   const available = Math.max(physical - reserved, 0);
   const maxStock = product.maximumStock || 100;
   const stockPercentage = Math.min(100, (physical / maxStock) * 100);
-  const situation = getStockSituation(physical, product.minimumStock, product.idealStock);
+  const situation = getStockSituation(physical, product.minimumStock ?? 0, product.idealStock ?? 0);
   const isLow = situation === "critical" || situation === "below_min";
   const locationTotal = (product.locations ?? []).reduce((sum, l) => sum + l.quantity, 0);
 
@@ -110,11 +110,12 @@ export default function ProductDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card className="border-border/50"><CardHeader className="pb-3"><CardTitle className="text-base">Parâmetros de Controle</CardTitle></CardHeader><CardContent>
             <dl className="space-y-3">
-              <div className="flex items-center justify-between"><dt className="text-sm text-muted-foreground">Estoque mínimo</dt><dd className="text-sm font-semibold">{product.minimumStock} {UNIT_LABELS[product.unitOfMeasure] ?? product.unitOfMeasure}</dd></div>
-              <div className="flex items-center justify-between"><dt className="text-sm text-muted-foreground">Estoque ideal</dt><dd className="text-sm font-semibold">{product.idealStock} {UNIT_LABELS[product.unitOfMeasure] ?? product.unitOfMeasure}</dd></div>
+              <div className="flex items-center justify-between"><dt className="text-sm text-muted-foreground">Estoque mínimo</dt><dd className="text-sm font-semibold">{product.minimumStock ?? "—"} {UNIT_LABELS[product.unitOfMeasure] ?? product.unitOfMeasure}</dd></div>
+              <div className="flex items-center justify-between"><dt className="text-sm text-muted-foreground">Estoque ideal</dt><dd className="text-sm font-semibold">{product.idealStock ?? "—"} {UNIT_LABELS[product.unitOfMeasure] ?? product.unitOfMeasure}</dd></div>
               <div className="flex items-center justify-between"><dt className="text-sm text-muted-foreground">Estoque máximo</dt><dd className="text-sm font-semibold">{product.maximumStock} {UNIT_LABELS[product.unitOfMeasure] ?? product.unitOfMeasure}</dd></div>
+              <div className="flex items-center justify-between"><dt className="text-sm text-muted-foreground">Consumo mensal</dt><dd className="text-sm font-semibold">{product.monthlyConsumptionTarget ?? "—"} {UNIT_LABELS[product.unitOfMeasure] ?? product.unitOfMeasure}</dd></div>
               <p className="text-xs text-muted-foreground pt-1 border-t border-border/50">
-                Níveis de alerta e planejamento — não alteram o saldo.
+                Níveis de alerta e planejamento — não alteram o saldo. "—" = ainda não parametrizado (não é zero).
               </p>
             </dl>
           </CardContent></Card>

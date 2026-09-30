@@ -40,7 +40,9 @@ export const stats = query({
         .withIndex("by_product", (q) => q.eq("productId", p._id))
         .first();
       const qty = stock?.physicalQuantity ?? 0;
-      if (qty <= p.minimumStock) criticalStock++;
+      // `?? 0` preserva exatamente o comportamento anterior (o campo passou a
+      // ser anulável; produto sem mínimo configurado continua com mínimo 0).
+      if (qty <= (p.minimumStock ?? 0)) criticalStock++;
     }
 
     // Pending requests this month
@@ -102,7 +104,7 @@ export const stats = query({
         .withIndex("by_product", (q) => q.eq("productId", p._id))
         .first();
       const qty = stock?.physicalQuantity ?? 0;
-      if (qty <= p.minimumStock) {
+      if (qty <= (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
         urgentAlerts.push({
           _id: p._id,
@@ -110,7 +112,7 @@ export const stats = query({
           brand: p.brand,
           model: p.model,
           currentStock: qty,
-          minimumStock: p.minimumStock,
+          minimumStock: p.minimumStock ?? 0,
           categoryName: category?.name ?? "",
         });
       }
@@ -191,8 +193,8 @@ export const stockPosition = query({
         const qty = stock?.physicalQuantity ?? 0;
         let status: string = "Normal";
         if (qty === 0) status = "Zerado";
-        else if (qty <= p.minimumStock) status = "Crítico";
-        else if (qty <= p.idealStock) status = "Baixo";
+        else if (qty <= (p.minimumStock ?? 0)) status = "Crítico";
+        else if (qty <= (p.idealStock ?? 0)) status = "Baixo";
         return {
           _id: p._id,
           name: p.name,
@@ -201,8 +203,8 @@ export const stockPosition = query({
           unitOfMeasure: p.unitOfMeasure,
           currentStock: qty,
           reservedQuantity: stock?.reservedQuantity ?? 0,
-          minimumStock: p.minimumStock,
-          idealStock: p.idealStock,
+          minimumStock: p.minimumStock ?? 0,
+          idealStock: p.idealStock ?? 0,
           maximumStock: p.maximumStock,
           status,
           brand: p.brand,

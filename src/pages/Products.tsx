@@ -82,14 +82,14 @@ export default function Products() {
       p.description?.toLowerCase().includes(q);
     const matchesCategory = categoryFilter === "all" || p.categoryId === categoryFilter;
     const stock = p.stock?.physicalQuantity ?? 0;
-    const situation = getStockSituation(stock, p.minimumStock, p.idealStock);
+    const situation = getStockSituation(stock, p.minimumStock ?? 0, p.idealStock ?? 0);
     const matchesBelowMin = !onlyBelowMin || situation === "critical" || situation === "below_min";
     return matchesSearch && matchesCategory && matchesBelowMin;
   });
 
   const belowMinCount = products?.filter((p) => {
     const stock = p.stock?.physicalQuantity ?? 0;
-    const situation = getStockSituation(stock, p.minimumStock, p.idealStock);
+    const situation = getStockSituation(stock, p.minimumStock ?? 0, p.idealStock ?? 0);
     return situation === "critical" || situation === "below_min";
   }).length ?? 0;
 
@@ -106,7 +106,7 @@ export default function Products() {
       unitOfMeasure: p.unitOfMeasure, internalCode: p.internalCode ?? "",
       manufacturer: p.manufacturer ?? "", model: p.model ?? "",
       brand: p.brand ?? "", specification: p.specification ?? "",
-      minimumStock: p.minimumStock, idealStock: p.idealStock, maximumStock: p.maximumStock,
+      minimumStock: p.minimumStock ?? 0, idealStock: p.idealStock ?? 0, maximumStock: p.maximumStock,
       observation: p.observation ?? "", hasSerial: p.hasSerial ?? false,
     });
     setEditingId(p._id);
@@ -244,7 +244,7 @@ export default function Products() {
               const stock = p.stock?.physicalQuantity ?? 0;
               const reserved = p.stock?.reservedQuantity ?? 0;
               const available = computeAvailableStock(stock, reserved);
-              const situation = getStockSituation(stock, p.minimumStock, p.idealStock);
+              const situation = getStockSituation(stock, p.minimumStock ?? 0, p.idealStock ?? 0);
               const isLow = situation === "critical" || situation === "below_min";
               const stockPct = p.maximumStock > 0 ? Math.min(100, (stock / p.maximumStock) * 100) : 0;
               return (
@@ -305,11 +305,11 @@ export default function Products() {
                         <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Parâmetros</p>
                         <div className="grid grid-cols-3 gap-2 text-center">
                           <div>
-                            <p className="text-sm font-mono">{p.minimumStock}</p>
+                            <p className="text-sm font-mono">{p.minimumStock ?? "—"}</p>
                             <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Mínimo</p>
                           </div>
                           <div>
-                            <p className="text-sm font-mono">{p.idealStock}</p>
+                            <p className="text-sm font-mono">{p.idealStock ?? "—"}</p>
                             <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Ideal</p>
                           </div>
                           <div>

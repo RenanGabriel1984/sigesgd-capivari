@@ -169,6 +169,12 @@ const PERMISSION_FLAGS = {
   canManageInventory: "inventory.manage",
   canManageStorageLocations: "locations.manage",
   canManageGomaQ: "gomaq.manage",
+  // Parametrização de reposição (parâmetros; não movimenta estoque)
+  canViewStockParameters: "stock_parameters.view",
+  canManageStockParameters: "stock_parameters.manage",
+  // Solicitação mensal de suprimentos (documento de planejamento)
+  canViewSupplyRequests: "supply_requests.view",
+  canManageSupplyRequests: "supply_requests.manage",
   canManageAssets: "equipment.manage",
   canManageLicenses: "licenses.manage",
 

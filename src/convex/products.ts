@@ -117,7 +117,7 @@ export const belowMinimum = query({
     for (const p of products) {
       const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", p._id)).first();
       const qty = stock?.physicalQuantity ?? 0;
-      if (qty < p.minimumStock) {
+      if (qty < (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
         result.push({ ...p, category, currentStock: qty });
       }

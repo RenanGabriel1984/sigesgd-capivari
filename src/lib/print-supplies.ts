@@ -448,6 +448,12 @@ export interface SupplyFamilyInput {
   currentStock: number;
   minimumStock: number;
   idealStock: number;
+  /**
+   * Consumo mensal MANUAL por membro (opcional). Quando TODOS os membros têm
+   * o parâmetro, a família soma; caso contrário a família fica sem valor —
+   * nunca é estimado a partir de movimentação.
+   */
+  monthlyConsumptionTarget?: number | null;
   inArea: number;
   /** Conversão explicitamente configurada (null = sem conversão). */
   packaging: PackagingConversion | null;
@@ -486,6 +492,8 @@ export interface SupplyFamily {
   /** Parâmetros em unidades-base quando todos os membros configurados; senão null. */
   minimumStock: number | null;
   idealStock: number | null;
+  /** Consumo mensal agregado (parâmetro manual); null quando não configurado. */
+  monthlyConsumptionTarget: number | null;
   status: StockStatus;
   /** Membro de retirada preferencial (com conversão; senão único membro com saldo). */
   withdrawMemberId: string | null;
@@ -542,6 +550,11 @@ export function buildSupplyFamilies(inputs: SupplyFamilyInput[]): SupplyFamily[]
     const allConfigured = mins.every((v) => v > 0) && ideals.every((v) => v > 0);
     const minimumStock = allConfigured ? mins.reduce((a, b) => a + b, 0) : null;
     const idealStock = allConfigured ? ideals.reduce((a, b) => a + b, 0) : null;
+    // Consumo mensal: agregado apenas se TODOS os membros tiverem o parâmetro.
+    const monthlies = membersInput.map((m) => m.monthlyConsumptionTarget ?? null);
+    const monthlyConsumptionTarget = monthlies.every((v) => v !== null && v > 0)
+      ? (monthlies as number[]).reduce((a, b) => a + b, 0)
+      : null;
     const parametersDefined = minimumStock != null && idealStock != null && minimumStock > 0;
     const withdrawMember =
       members.find((m) => m.packaging && m.currentStock > 0) ??
@@ -561,6 +574,7 @@ export function buildSupplyFamilies(inputs: SupplyFamilyInput[]): SupplyFamily[]
       members,
       minimumStock,
       idealStock,
+      monthlyConsumptionTarget,
       status,
       withdrawMemberId: withdrawMember.productId,
       suggestedReorder: parametersDefined ? Math.max(0, idealStock! - baseStock) : null,

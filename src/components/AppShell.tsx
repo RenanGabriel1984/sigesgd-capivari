@@ -35,6 +35,7 @@ import {
   PackageMinus,
   Network,
   Phone,
+  SlidersHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -110,6 +111,7 @@ const NAV_SECTIONS: NavSection[] = [
   ]},
   { title: "Administração", items: [
     { label: "Produtos", href: "/products", icon: Package, permission: "canManageProducts" },
+    { label: "Parametrização de Estoque", href: "/stock-parameters", icon: SlidersHorizontal, permission: "canViewStockParameters" },
     { label: "Categorias", href: "/categories", icon: Tags, permission: "canManageCategories" },
     { label: "Fornecedores", href: "/suppliers", icon: FileText, permission: "canManageSuppliers" },
     { label: "Lotes", href: "/lots", icon: Boxes, permission: "canManageStock" },

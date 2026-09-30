@@ -244,8 +244,8 @@ export const getSupplyDashboard = query({
           model: p.model ?? null,
           unitOfMeasure: p.unitOfMeasure,
           currentStock: current,
-          minimumStock: p.minimumStock,
-          idealStock: p.idealStock,
+          minimumStock: p.minimumStock ?? 0,
+          idealStock: p.idealStock ?? 0,
           inArea: inArea,
         });
       })
@@ -264,8 +264,10 @@ export const getSupplyDashboard = query({
         model: p.model ?? null,
         unitOfMeasure: p.unitOfMeasure,
         currentStock: current,
-        minimumStock: p.minimumStock,
-        idealStock: p.idealStock,
+        minimumStock: p.minimumStock ?? 0,
+        idealStock: p.idealStock ?? 0,
+        // Parâmetro MANUAL de consumo mensal (nunca calculado aqui).
+        monthlyConsumptionTarget: p.monthlyConsumptionTarget ?? null,
         inArea,
         packaging: readPackagingConversion(p),
       };
