@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { tonerKitObservation } from "./stockHelpers";
 import { requirePermission } from "./rbac";
+import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -154,6 +155,23 @@ export const create = mutation({
     if (!args.name.trim()) throw new Error("Nome do item é obrigatório");
     if (args.ean && !/^\d{8,14}$/.test(args.ean.replace(/\D/g, ""))) {
       throw new Error("EAN/GTIN inválido: use de 8 a 14 dígitos");
+    }
+
+    // Hardening §17: limite de tamanho nos campos livres (rejeita, nunca trunca).
+    assertTextLimits({ name: args.name, description: args.description, specification: args.specification });
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
+    assertShortTextLimits({ internalCode: args.internalCode, ean: args.ean, brand: args.brand, model: args.model });
+
+    // Hardening §14: nenhum valor numérico não finito entra no cadastro.
+    for (const [field, value] of Object.entries({
+      minimumStock: args.minimumStock,
+      idealStock: args.idealStock,
+      maximumStock: args.maximumStock,
+      initialStock: args.initialStock,
+    })) {
+      if (value !== undefined && !Number.isFinite(value as number)) {
+        throw new Error(`Valor numérico inválido em "${field}".`);
+      }
     }
 
     // Validate category exists

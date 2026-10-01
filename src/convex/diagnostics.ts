@@ -1115,10 +1115,11 @@ export const officialProductsInternal = internalQuery({
  * Exercita o fluxo completo de recuperação de senha CONTRA O DEPLOYMENT REAL,
  * sem expor o código e SEM depender do scheduler (injeção neutra):
  *
- *   request (reset real, mutation pública) → scheduler neutro → envio pelo
- *   transporte do emailOtp (aceite reportado) → confirmPasswordReset (fluxo
- *   público real) → token usado → senha nova válida → restauração da senha
- *   original (hash + salt idênticos, rejeitando a senha de teste).
+ *   request (reset real, mutation pública) → scheduler neutro → envio por
+ *   `internal.email.sendPasswordResetEmailInternal` (aceite reportado) →
+ *   confirmPasswordReset (fluxo público real) → token usado → senha nova
+ *   válida → restauração da senha original (hash + salt idênticos,
+ *   rejeitando a senha de teste).
  *
  * NUNCA retorna o código nem grava código em logs.
  *
@@ -1171,7 +1172,7 @@ export const passwordResetE2EInternal = internalAction({
       (r) => r.id !== active.id && r.usedAt !== null
     ).length;
 
-    // ── 2) transporte: envio direto pelo serviço do emailOtp ──
+    // ── 2) transporte: envio direto pela action interna de e-mail ──
     const payload = await ctx.runQuery(internal.email.getPasswordResetForEmailInternal, {
       resetId: active.id,
     });
@@ -1191,8 +1192,8 @@ export const passwordResetE2EInternal = internalAction({
     }
 
     // Política de senha (mesma validação do confirmPasswordReset).
-    if (args.probePassword.length < 6) {
-      throw new Error("probePassword deve ter ao menos 6 caracteres");
+    if (args.probePassword.length < 8) {
+      throw new Error("probePassword deve ter ao menos 8 caracteres");
     }
 
     // ── 3) confirmPasswordReset REAL (fluxo público) ──

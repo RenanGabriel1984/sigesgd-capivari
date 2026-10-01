@@ -4,6 +4,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { AppShell } from "@/components/AppShell";
+import { FreeFieldNotice } from "@/components/FreeFieldNotice";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -773,12 +774,16 @@ export default function Requests() {
                 <SelectContent>{REASON_OPTIONS.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
               </Select>
               {reasonSelect === "Outro" && (
-                <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Descreva o motivo..." rows={2} className="mt-2" />
+                <>
+                  <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Descreva o motivo..." rows={2} className="mt-2" />
+                  <FreeFieldNotice className="mt-1" />
+                </>
               )}
             </div>
             <div>
               <Label>Observações</Label>
               <Textarea value={observation} onChange={(e) => setObservation(e.target.value)} rows={2} placeholder="Opcional" />
+              <FreeFieldNotice className="mt-1" />
             </div>
           </div>
           <DialogFooter>
@@ -803,6 +808,7 @@ export default function Requests() {
             <div>
               <Label>Observação (opcional)</Label>
               <Textarea value={approveObservation} onChange={(e) => setApproveObservation(e.target.value)} rows={2} placeholder="Observação do aprovador..." />
+              <FreeFieldNotice className="mt-1" />
             </div>
           </div>
           <DialogFooter>
@@ -829,6 +835,7 @@ export default function Requests() {
             <div>
               <Label>Motivo da Rejeição <span className="text-destructive">*</span></Label>
               <Textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} rows={3} placeholder="Informe o motivo da rejeição..." className="mt-1" />
+              <FreeFieldNotice className="mt-1" />
             </div>
           </div>
           <DialogFooter>

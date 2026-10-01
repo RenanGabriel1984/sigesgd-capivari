@@ -1,21 +1,50 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { requirePermission } from "./rbac";
-import { mutation, query, internalQuery, internalMutation } from "./_generated/server";
+import { mutation, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword, verifyPassword } from "./auth/passwords";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
+import { APP_ROLES } from "../lib/rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
+/** Política de senha (§12). Todas as cinco ACTIONS de definição exigem este mínimo. */
+export const MIN_PASSWORD_LENGTH = 8;
+
+/** Janela de bloqueio por tentativas de login (§9/§10). */
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_LOCK_MINUTES = 15;
+
+/** Tentativas máximas do código de recuperação (§8). */
+const RESET_MAX_ATTEMPTS = 5;
+/** Intervalo mínimo entre dois pedidos de recuperação para o mesmo e-mail. */
+const RESET_REQUEST_COOLDOWN_MS = 60 * 1000;
+
+/** Mensagem ÚNICA para qualquer falha de autenticação — anti-enumeração (§11). */
+const GENERIC_AUTH_ERROR = "E-mail ou senha incorretos.";
+
+/** Papéis reconhecidos — fail closed na autenticação. */
+const VALID_ROLE_SET = new Set<string>(APP_ROLES);
+
+/** Valida a política de senha e devolve mensagem amigável. */
+function assertPasswordPolicy(password: string): void {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    throw new Error(
+      `A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`,
+    );
+  }
+  if (password.length > 200) {
+    throw new Error("A senha deve ter no máximo 200 caracteres.");
+  }
+}
+
 async function requireUser(ctx: any) {
-  // RBAC central: qualquer usuário autenticado gerencia a PRÓPRIA senha
-  // (troca obrigatória no 1º login). Ops. administrativas usam requireAdmin.
-  const userId = await getAuthUserId(ctx);
-  if (!userId) throw new Error("Não autenticado");
-  const user = await ctx.db.get(userId);
-  if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
-  return { userId, user };
+  // Hardening B-01: a gestão da PRÓPRIA senha também exige um cadastro SIGESGD
+  // válido (não anônimo, ativo, com `role` reconhecido). `settings.view` está
+  // presente em todos os cinco perfis — a checagem aqui é de IDENTIDADE, não de
+  // privilégio. Operações administrativas usam requireAdmin (`users.manage`).
+  return requirePermission(ctx, "settings.view", { entity: "passwords" });
 }
 
 async function requireAdmin(ctx: any) {
@@ -44,9 +73,7 @@ export const createPassword = mutation({
 
     if (existing) throw new Error("Usuário já possui senha definida. Use alteração de senha.");
 
-    if (args.password.length < 6) {
-      throw new Error("A senha deve ter pelo menos 6 caracteres");
-    }
+    assertPasswordPolicy(args.password);
 
     const { hash, salt } = await hashPassword(args.password);
 
@@ -84,9 +111,7 @@ export const changePassword = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireUser(ctx);
 
-    if (args.newPassword.length < 6) {
-      throw new Error("A nova senha deve ter pelo menos 6 caracteres");
-    }
+    assertPasswordPolicy(args.newPassword);
 
     if (args.currentPassword === args.newPassword) {
       throw new Error("A nova senha deve ser diferente da atual");
@@ -143,9 +168,7 @@ export const adminResetPassword = mutation({
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
 
-    if (args.newPassword.length < 6) {
-      throw new Error("A nova senha deve ter pelo menos 6 caracteres");
-    }
+    assertPasswordPolicy(args.newPassword);
 
     const passwordRecord = await ctx.db
       .query("passwords")
@@ -193,9 +216,7 @@ export const forceChangePassword = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireUser(ctx);
 
-    if (args.newPassword.length < 6) {
-      throw new Error("A nova senha deve ter pelo menos 6 caracteres");
-    }
+    assertPasswordPolicy(args.newPassword);
 
     const passwordRecord = await ctx.db
       .query("passwords")
@@ -243,11 +264,25 @@ export const verifyCredentials = internalQuery({
       .withIndex("email", (q) => q.eq("email", args.email))
       .first();
 
-    if (!user) return { success: false, error: "Usuário não encontrado" };
+    // ── ANTI-ENUMERAÇÃO (§11) ────────────────────────────────────────────
+    // TODOS os caminhos de falha devolvem EXATAMENTE a mesma mensagem, com a
+    // mesma forma. O chamador não consegue distinguir "e-mail não existe",
+    // "usuário inativo", "sem senha", "sem perfil de acesso" ou "senha errada".
+    if (!user) return { success: false, error: GENERIC_AUTH_ERROR };
 
     // Check if user is active
     if (user.active === false) {
-      return { success: false, error: "Usuário inativo. Contate o administrador." };
+      return { success: false, error: GENERIC_AUTH_ERROR };
+    }
+
+    // ── B-01 (defesa em profundidade) ────────────────────────────────────
+    // Identidade anônima (provider removido) ou identidade sem `role`
+    // válido nunca é autenticada, mesmo com senha correta.
+    if ((user as { isAnonymous?: boolean }).isAnonymous === true) {
+      return { success: false, error: GENERIC_AUTH_ERROR };
+    }
+    if (!VALID_ROLE_SET.has(user.role as string)) {
+      return { success: false, error: GENERIC_AUTH_ERROR };
     }
 
     // Find password record
@@ -257,7 +292,7 @@ export const verifyCredentials = internalQuery({
       .first();
 
     if (!passwordRecord) {
-      return { success: false, error: "Senha não configurada. Contate o administrador." };
+      return { success: false, error: GENERIC_AUTH_ERROR };
     }
 
     // Verify password
@@ -268,7 +303,7 @@ export const verifyCredentials = internalQuery({
     );
 
     if (!valid) {
-      return { success: false, error: "E-mail ou senha incorretos" };
+      return { success: false, error: GENERIC_AUTH_ERROR };
     }
 
     return {
@@ -280,7 +315,9 @@ export const verifyCredentials = internalQuery({
 });
 
 /** Check if a user has a password configured. */
-export const hasPassword = query({
+// INTERNAL: não é usado pelo frontend e, como query pública, allowia a
+// enumeração de contas (para qualquer `userId`, inclusive de terceiros).
+export const hasPassword = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
     const record = await ctx.db
@@ -335,9 +372,7 @@ export const bootstrapAdmin = internalMutation({
     // ── Validate ──
     const email = args.email.trim().toLowerCase();
     if (!email) throw new Error("E-mail é obrigatório");
-    if (args.password.length < 6) {
-      throw new Error("A senha deve ter pelo menos 6 caracteres");
-    }
+    assertPasswordPolicy(args.password);
 
     // ── Check for duplicate email ──
     const existingUser = await ctx.db
@@ -387,7 +422,7 @@ export const bootstrapAdmin = internalMutation({
  * Check if the system has been bootstrapped (at least one admin exists).
  * Used by the frontend to show/hide the bootstrap screen.
  */
-export const hasAdmin = query({
+export const hasAdmin = internalQuery({
   args: {},
   handler: async (ctx) => {
     const admin = await ctx.db
@@ -424,9 +459,7 @@ export const bootstrapSetPassword = internalMutation({
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
     if (!email) throw new Error("E-mail é obrigatório");
-    if (args.password.length < 6) {
-      throw new Error("A senha deve ter pelo menos 6 caracteres");
-    }
+    assertPasswordPolicy(args.password);
 
     // Find user by email
     const user = await ctx.db
@@ -522,12 +555,22 @@ export const diagnosticListUsers = internalQuery({
 /**
  * Request password reset — generates a 6-digit code valid for 15 minutes.
  * Does NOT reveal whether the email exists (security).
+ *
+ * Hardening §8: cooldown de RESET_REQUEST_COOLDOWN_MS por e-mail. Sem ele, o
+ * endpoint público permitia INUNDAR a caixa de e-mail de um endereço legítimo
+ * (envio ilimitado de códigos). O cooldown também é aplicado ANTES de qualquer
+ * resposta differentiation — o retorno é byte-a-byte idêntico ao caso de e-mail
+ * inexistente.
  */
+const RESET_GENERIC_MESSAGE =
+  "Se os dados estiverem cadastrados, enviaremos as instruções para recuperação.";
+
 export const requestPasswordReset = mutation({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
     if (!email) throw new Error("E-mail é obrigatório");
+    if (!Number.isFinite(args.email.length)) throw new Error("E-mail inválido");
 
     // Find user by email
     const user = await ctx.db
@@ -535,9 +578,17 @@ export const requestPasswordReset = mutation({
       .withIndex("email", (q) => q.eq("email", email))
       .first();
 
-    // Always return success to prevent email enumeration
-    if (!user) return { message: "Se os dados estiverem cadastrados, enviaremos as instruções para recuperação." };
-    if (user.active === false) return { message: "Se os dados estiverem cadastrados, enviaremos as instruções para recuperação." };
+    // Always return the same message to prevent email enumeration
+    if (!user) return { message: RESET_GENERIC_MESSAGE };
+    if (user.active === false) return { message: RESET_GENERIC_MESSAGE };
+    if ((user as { isAnonymous?: boolean }).isAnonymous === true) {
+      return { message: RESET_GENERIC_MESSAGE };
+    }
+    if (!VALID_ROLE_SET.has(user.role as string)) {
+      return { message: RESET_GENERIC_MESSAGE };
+    }
+
+    const now = Date.now();
 
     // Invalidate any existing tokens for this user
     const existingTokens = await ctx.db
@@ -545,21 +596,28 @@ export const requestPasswordReset = mutation({
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
 
+    // Cooldown: se um pedido foi feito há menos de RESET_REQUEST_COOLDOWN_MS,
+    // nada é gerado nem enviado — e a resposta continua idêntica.
+    const recent = existingTokens.some(
+      (t) => !t.usedAt && now - t.createdAt < RESET_REQUEST_COOLDOWN_MS,
+    );
+    if (recent) return { message: RESET_GENERIC_MESSAGE };
+
     for (const token of existingTokens) {
       if (!token.usedAt) {
-        await ctx.db.patch(token._id, { usedAt: Date.now() });
+        await ctx.db.patch(token._id, { usedAt: now });
       }
     }
 
     // Generate 6-digit code
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const now = Date.now();
 
     const resetId: Id<"passwordResets"> = await ctx.db.insert("passwordResets", {
       userId: user._id,
       token: code,
       expiresAt: now + 15 * 60 * 1000, // 15 minutes
       createdAt: now,
+      attempts: 0,
     });
 
     // Audit
@@ -572,7 +630,7 @@ export const requestPasswordReset = mutation({
     });
 
     // Send email with the reset code via the Freebuff email service (same
-    // transport as auth/emailOtp.ts). The scheduled INTERNAL action receives
+    // transport as internal.email.sendPasswordResetEmailInternal). The scheduled INTERNAL action receives
     // only the reset id and reads the code server-side — the code never
     // crosses a public endpoint, is never returned to the client and is
     // never written to production logs.
@@ -581,14 +639,19 @@ export const requestPasswordReset = mutation({
     });
 
     return {
-      message: "Se os dados estiverem cadastrados, enviaremos as instruções para recuperação.",
+      message: RESET_GENERIC_MESSAGE,
     };
   },
 });
 
 /**
  * Confirm password reset with the 6-digit code.
- * One-time use, expires after 15 minutes.
+ * One-time use, expires after 15 minutes, máximo de RESET_MAX_ATTEMPTS
+ * tentativas por token (hardening §8 — brute force).
+ *
+ * Mensagens de erro são IDÊNTICAS para: e-mail inexistente, token inexistente,
+ * token expirado, token já usado, token esgotado e código errado. Não há
+ * como enumerar contas nem distinguir a causa da falha.
  */
 export const confirmPasswordReset = mutation({
   args: {
@@ -599,9 +662,7 @@ export const confirmPasswordReset = mutation({
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
     if (!email) throw new Error("E-mail é obrigatório");
-    if (args.newPassword.length < 6) {
-      throw new Error("A nova senha deve ter pelo menos 6 caracteres");
-    }
+    assertPasswordPolicy(args.newPassword);
 
     const user = await ctx.db
       .query("users")
@@ -618,10 +679,30 @@ export const confirmPasswordReset = mutation({
       .collect();
 
     const validToken = tokens.find(
-      (t) => t.token === args.code && !t.usedAt && t.expiresAt > Date.now()
+      (t) =>
+        t.token === args.code &&
+        !t.usedAt &&
+        t.expiresAt > Date.now() &&
+        (t.attempts ?? 0) < RESET_MAX_ATTEMPTS,
     );
 
-    if (!validToken) throw new Error("Código inválido ou expirado");
+    if (!validToken) {
+      // Incrementa a contagem do token QUANDO o código confere, para não
+      // penalizar quem digita códigos aleatórios de outro e-mail.
+      const matching = tokens.find(
+        (t) => t.token === args.code && !t.usedAt && t.expiresAt > Date.now(),
+      );
+      if (matching) {
+        const attempts = (matching.attempts ?? 0) + 1;
+        await ctx.db.patch(matching._id, {
+          attempts,
+          // Ao exceder o limite o token é INVALIDADO (usedAt) — o atacante
+          // precisa pedir uma nova recuperação e um novo e-mail é enviado.
+          usedAt: attempts >= RESET_MAX_ATTEMPTS ? Date.now() : undefined,
+        });
+      }
+      throw new Error("Código inválido ou expirado");
+    }
 
     // Mark token as used
     await ctx.db.patch(validToken._id, { usedAt: Date.now() });
@@ -680,8 +761,15 @@ export const confirmPasswordReset = mutation({
 
 /**
  * Check and record failed login attempt for brute force protection.
+ *
+ * Hardening §9: era uma MUTATION PÚBLICA sem autenticação — qualquer pessoa
+ * podia chamá-la 5 vezes com o e-mail de um terceiro e BLOQUEAR a conta
+ * (negação de serviço). Passou a ser INTERNALMutation, executada apenas pelo
+ * provider de credenciais (`auth/credentials.ts`) no servidor, dentro do fluxo
+ * real de autenticação. Não existe mais endpoint público que incremente
+ * tentativas de terceiros.
  */
-export const recordFailedLogin = mutation({
+export const recordFailedLogin = internalMutation({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
@@ -695,13 +783,18 @@ export const recordFailedLogin = mutation({
 
     if (existing) {
       const newAttempts = (existing.attempts ?? 0) + 1;
+      const lockExpired =
+        existing.lockedUntil !== undefined && existing.lockedUntil <= now;
       const updates: any = {
         attempts: newAttempts,
         lastAttemptAt: now,
       };
-      // Lock after 5 failed attempts for 15 minutes
-      if (newAttempts >= 5 && !existing.lockedUntil) {
-        updates.lockedUntil = now + 15 * 60 * 1000;
+      // Bloqueia após LOGIN_MAX_ATTEMPTS falhas por LOGIN_LOCK_MINUTES.
+      // O bloqueio é REAVALIADO quando a janela anterior expirou — sem isso a
+      // condição `!existing.lockedUntil` nunca voltava a ser verdadeira e a
+      // proteção de força brute deixava de valer depois do 1º bloqueio (§10).
+      if (newAttempts >= LOGIN_MAX_ATTEMPTS && (!existing.lockedUntil || lockExpired)) {
+        updates.lockedUntil = now + LOGIN_LOCK_MINUTES * 60 * 1000;
       }
       await ctx.db.patch(existing._id, updates);
     } else {
@@ -711,6 +804,39 @@ export const recordFailedLogin = mutation({
         lastAttemptAt: now,
       });
     }
+  },
+});
+
+/**
+ * Check if an email is currently locked out due to brute force.
+ */
+/**
+ * Zera o contador de tentativas após um login BEN-SUCEDIDO (§10).
+ *
+ * Hardening §10: o contador NUNCA era zerado no sucesso (o comentário no
+ * provider afirmava o contrário). Resultado: depois do primeiro bloqueio, o
+ * limite de tentativas deixava de ser aplicado definitivamente.
+ *
+ * INTERNAL: chamada apenas pelo provider de credenciais, no servidor.
+ */
+export const recordSuccessfulLogin = internalMutation({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    const email = args.email.trim().toLowerCase();
+    if (!email) return { cleared: false };
+
+    const existing = await ctx.db
+      .query("failedLoginAttempts")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .first();
+
+    if (!existing) return { cleared: false };
+    if ((existing.attempts ?? 0) === 0 && existing.lockedUntil === undefined) {
+      return { cleared: false };
+    }
+
+    await ctx.db.patch(existing._id, { attempts: 0, lockedUntil: undefined });
+    return { cleared: true };
   },
 });
 
@@ -762,9 +888,7 @@ export const bootstrapResetPassword = internalMutation({
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
     if (!email) throw new Error("E-mail é obrigatório");
-    if (args.newPassword.length < 6) {
-      throw new Error("A senha deve ter pelo menos 6 caracteres");
-    }
+    assertPasswordPolicy(args.newPassword);
 
     const user = await ctx.db
       .query("users")

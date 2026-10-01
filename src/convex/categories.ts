@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { assertTextLimits } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -37,6 +38,7 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
     if (!args.name.trim()) throw new Error("Nome da categoria é obrigatório");
+    assertTextLimits({ name: args.name, description: args.description });
 
     // Check for duplicate name
     const existing = await ctx.db.query("categories").collect();

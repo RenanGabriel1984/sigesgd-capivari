@@ -1,5 +1,5 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { query, mutation, QueryCtx } from "./_generated/server";
+import { query, mutation, internalMutation, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
 import { requirePermission } from "./rbac";
@@ -21,10 +21,19 @@ async function requireAdmin(ctx: any) {
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
 /**
- * Bootstrap the first admin user.
- * Only works when NO users exist in the database.
+ * Bootstrap do primeiro administrador.
+ *
+ * Hardening B-01/§15: era uma MUTATION PÚBLICA sem autenticação, protegida
+ * apenas pela condição "não existem usuários". Isso é insuficiente — qualquer
+ * visitante poderia criar um administrador se a tabela fosse esvaziada.
+ *
+ * Agora é INTERNALMutation: executável somente via CLI/dashboard do
+ * deployment (`bunx convex run users:bootstrapAdmin '{...}'`), nunca pelo
+ * cliente. A proteção de "zero usuários" continua valendo.
+ *
+ * O bootstrap canônico do SIGESGD é `passwords.bootstrapAdmin` (internal).
  */
-export const bootstrapAdmin = mutation({
+export const bootstrapAdmin = internalMutation({
   args: { name: v.string(), email: v.string(), password: v.string() },
   handler: async (ctx, args) => {
     const existingUsers = await ctx.db.query("users").first();

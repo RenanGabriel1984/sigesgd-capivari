@@ -4,6 +4,7 @@ import { verifyPassword } from "./auth/passwords";
 import { generateExitNumber } from "./stockHelpers";
 import { requirePermission, requireRequestAction } from "./rbac";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
+import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -70,9 +71,17 @@ export const listByUser = query({
 export const get = query({
   args: { requestId: v.id("requests") },
   handler: async (ctx, args) => {
-    await requireUser(ctx);
+    // Hardening B-03: o escopo é calculado a partir do usuário AUTENTICADO.
+    // O `requestId` vindo do cliente NUNCA é prova de autorização.
+    const { user } = await requireUser(ctx);
+    const role = (user.role ?? "technician") as UserRole;
     const request = await ctx.db.get(args.requestId);
     if (!request) return null;
+    if (!hasFullVisibility(role) && request.requesterId !== user._id) {
+      throw new Error(
+        "ACESSO NEGADO: você só pode consultar as suas próprias solicitações.",
+      );
+    }
     return enrichRequest(ctx, request);
   },
 });
@@ -102,6 +111,11 @@ export const create = mutation({
     const reason = args.reason?.trim() ?? "";
     if (!reason) throw new Error("O motivo da solicitação é obrigatório");
     if (args.items.length === 0) throw new Error("A solicitação deve ter pelo menos um item");
+
+    // Hardening §17: limite de tamanho nos campos livres (rejeita, nunca trunca).
+    assertTextLimits({ reason }, MAX_OBSERVATION);
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
+    assertShortTextLimits({ osNumber: args.osNumber, patrimony: args.patrimony });
 
     // Validate secretaria exists
     const secretariaId = args.secretariaId;
@@ -225,6 +239,11 @@ export const approve = mutation({
       const requestItem = await ctx.db.get(item.itemId);
       if (!requestItem) throw new Error(`Item da solicitação não encontrado: ${item.itemId}`);
       if (requestItem.requestId !== args.requestId) throw new Error("O item não pertence a esta solicitação");
+      // Hardening §14: rejeita NaN/Infinity/-Infinity antes de qualquer soma,
+      // comparação ou escrita — um valor não finito corromperia reservedQuantity.
+      if (!Number.isFinite(item.quantityApproved)) {
+        throw new Error(`Quantidade aprovada inválida no item ${item.itemId}.`);
+      }
       if (item.quantityApproved <= 0) continue;
 
       const product = await ctx.db.get(requestItem.productId);
@@ -376,6 +395,9 @@ export const deliver = mutation({
       const requestItem = await ctx.db.get(input.itemId);
       if (!requestItem) throw new Error(`Item da solicitação não encontrado: ${input.itemId}`);
       if (requestItem.requestId !== args.requestId) throw new Error("Item não pertence a esta solicitação");
+      if (!Number.isFinite(input.quantityDelivered)) {
+        throw new Error(`Quantidade entregue inválida no item ${input.itemId}.`);
+      }
       if (input.quantityDelivered <= 0) throw new Error("Quantidade entregue deve ser maior que zero");
       if (input.quantityDelivered > requestItem.quantityApproved) {
         throw new Error(`Quantidade entregue (${input.quantityDelivered}) excede a aprovada (${requestItem.quantityApproved}) para "${(await ctx.db.get(requestItem.productId))?.name ?? "item"}"`);
@@ -589,13 +611,26 @@ export const listDelivered = query({
     serialSearch: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireUser(ctx);
+    // Hardening B-03: sem visão completa, o resultado é restrito às PRÓPRIAS
+    // solicitações — o filtro é aplicado ANTES de qualquer enriquecimento
+    // (nomes de servidores e números de patrimônio de terceiros).
+    const { user } = await requireUser(ctx);
+    const role = (user.role ?? "technician") as UserRole;
+    const fullVisibility = hasFullVisibility(role);
+
     let requests = await ctx.db
       .query("requests")
       .withIndex("by_status", (q: any) => q.eq("status", "delivered"))
       .order("desc")
       .take(500);
 
+    if (!fullVisibility) {
+      requests = requests.filter((r) => r.requesterId === user._id);
+    }
+
+    if (args.serialSearch?.trim()) {
+      assertShortTextLimits({ serialSearch: args.serialSearch });
+    }
     if (args.secretariaId) {
       requests = requests.filter((r) => r.secretariaId === args.secretariaId);
     }
@@ -626,7 +661,13 @@ export const listDelivered = query({
 export const listByOrganization = query({
   args: { organizationId: v.id("organizations") },
   handler: async (ctx, args) => {
-    await requireUser(ctx);
+    // Hardening B-03: `organizationId` NÃO é prova de autorização. O escopo é
+    // derivado do solicitante autenticado; perfis sem visão completa recebem
+    // apenas as próprias solicitações desta organização.
+    const { user } = await requireUser(ctx);
+    const role = (user.role ?? "technician") as UserRole;
+    const fullVisibility = hasFullVisibility(role);
+
     // Get all delivered requests that reference this org (as secretaria, departamento, or unidade)
     const allDelivered = await ctx.db
       .query("requests")
@@ -638,6 +679,10 @@ export const listByOrganization = query({
       (r) => r.secretariaId === args.organizationId || r.departamentoId === args.organizationId || r.unidadeId === args.organizationId
     );
 
-    return Promise.all(filtered.map(async (r) => enrichRequest(ctx, r)));
+    const scoped = fullVisibility
+      ? filtered
+      : filtered.filter((r) => r.requesterId === user._id);
+
+    return Promise.all(scoped.map(async (r) => enrichRequest(ctx, r)));
   },
 });

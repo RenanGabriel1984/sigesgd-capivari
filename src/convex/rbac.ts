@@ -9,12 +9,21 @@
  *   const { userId, user, role } = await requirePermission(ctx, "entries.create");
  *   // → lança "ACESSO NEGADO" ANTES de qualquer leitura/escrita de dados
  *     sensíveis, e registra um auditLog permission_denied (sem dados sensíveis).
+ *
+ * ─── FAIL CLOSED (hardening B-01) ────────────────────────────────────────────
+ * A identidade autenticada é SEMPRE validada contra a tabela `users` do
+ * SIGESGD. NÃO existe mais nenhum fallback que conceda acesso por ausência de
+ * `role`: um documento sem papel, com papel inválido ou marcado como
+ * `isAnonymous` é NEGADO. Somente um usuário autenticado, ATIVO, com `role`
+ * presente no conjunto APP_ROLES e usuário correspondente no banco recebe
+ * permissão.
  */
 
 import { getAuthUserId } from "@convex-dev/auth/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import {
+  APP_ROLES,
   roleHasPermission,
   canActOnRequest as canActOnRequestPure,
   type AppPermission,
@@ -23,18 +32,27 @@ import {
 
 type UserId = Id<"users">;
 
-/** Papel efetivo do usuário autenticado (fallback seguro: technician). */
-export function effectiveRole(user: { role?: string } | null | undefined): AppRole {
+/** Papéis efetivamente válidos (fonte única: src/lib/rbac.ts). */
+const VALID_ROLES = new Set<string>(APP_ROLES);
+
+/**
+ * Papel efetivo do usuário autenticado.
+ * Retorna `null` quando o documento NÃO possui um papel válido — o chamador
+ * deve NEGAR o acesso (fail closed). Nunca assume "technician".
+ */
+export function effectiveRole(user: { role?: string } | null | undefined): AppRole | null {
   const role = user?.role as AppRole | undefined;
-  return role ?? "technician";
+  if (!role) return null;
+  return VALID_ROLES.has(role) ? role : null;
 }
 
 /**
  * Exige que o usuário autenticado possua a permissão.
  *
- * Ordem garantida: autenticação → papel no banco → permissão → SÓ ENTÃO a
- * função prossegue. Em caso de negação, grava um auditLog `permission_denied`
- * (usuário, papel, entidade, motivo) — sem senha, token ou payload sensível.
+ * Ordem garantida: autenticação → documento no banco → não anônimo → ativo →
+ * role válida → permissão → SÓ ENTÃO a função prossegue. Em caso de negação,
+ * grava um auditLog `permission_denied` (usuário, papel, entidade, motivo) —
+ * sem senha, token ou payload sensível.
  */
 export async function requirePermission(
   ctx: MutationCtx | QueryCtx,
@@ -46,13 +64,45 @@ export async function requirePermission(
 
   const user = await ctx.db.get(userId);
   if (!user) throw new Error("Perfil de usuário não encontrado. Faça login novamente.");
+
+  // B-01: identidade anônima (Convex Auth Anonymous provider) nunca é aceita,
+  // mesmo que exista um documento correspondente na tabela `users`.
+  if ((user as { isAnonymous?: boolean }).isAnonymous === true) {
+    await logPermissionDenied(ctx, {
+      userId,
+      role: "anonymous",
+      permission,
+      entity: opts.entity ?? "auth",
+      entityId: opts.entityId,
+      details: "Identidade anônima rejeitada pelo SIGESGD (sessão sem credenciais).",
+    });
+    throw new Error("ACESSO NEGADO: sessão anônima não é aceita por este sistema.");
+  }
+
   if (user.active === false) throw new Error("Usuário inativo. Procure um administrador.");
 
-  const role = (user.role ?? "technician") as AppRole;
+  // B-01: fail closed — sem `role` OU com `role` inválido o acesso é NEGADO.
+  const role = effectiveRole(user);
+  if (!role) {
+    await logPermissionDenied(ctx, {
+      userId,
+      role: typeof user.role === "string" ? user.role : "(ausente)",
+      permission,
+      entity: opts.entity ?? "users",
+      entityId: opts.entityId,
+      details:
+        "Perfil de acesso ausente ou inválido. Usuários do SIGESGD são criados " +
+        "exclusivamente por um administrador (users.createUser).",
+    });
+    throw new Error(
+      "ACESSO NEGADO: seu cadastro não possui um perfil de acesso válido. Procure um administrador.",
+    );
+  }
+
   if (!roleHasPermission(role, permission)) {
     await logPermissionDenied(ctx, {
       userId,
-      role: user.role ?? "technician",
+      role,
       permission,
       entity: opts.entity,
       entityId: opts.entityId,

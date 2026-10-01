@@ -893,6 +893,9 @@ const schema = defineSchema(
       token: v.string(),
       expiresAt: v.number(),
       usedAt: v.optional(v.number()),
+      // Tentativas de confirmação do código. Ao atingir o limite o token é
+      // invalidado (usedAt), encerrando o brute force do OTP de 6 dígitos.
+      attempts: v.optional(v.number()),
       createdAt: v.number(),
     }).index("by_user", ["userId"])
       .index("by_token", ["token"]),

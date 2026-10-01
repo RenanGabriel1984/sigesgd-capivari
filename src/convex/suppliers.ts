@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -47,6 +48,11 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
     if (!args.legalName.trim()) throw new Error("Razão social é obrigatória");
+
+    // Hardening §17: limite de tamanho nos campos livres (rejeita, nunca trunca).
+    assertTextLimits({ legalName: args.legalName, tradeName: args.tradeName, address: args.address });
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
+    assertShortTextLimits({ cnpj: args.cnpj, contact: args.contact, phone: args.phone, email: args.email });
 
     // Check CNPJ uniqueness if provided
     if (args.cnpj) {

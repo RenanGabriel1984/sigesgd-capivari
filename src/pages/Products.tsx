@@ -4,6 +4,7 @@ import { api } from "@/convex/_generated/api";
 import { Link } from "react-router";
 import { AppShell } from "@/components/AppShell";
 import { SearchInput } from "@/components/SearchInput";
+import { FreeFieldNotice } from "@/components/FreeFieldNotice";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -396,7 +397,7 @@ export default function Products() {
                 </div>
               </div>
             )}
-            <div><Label>Observações</Label><Textarea value={form.observation} onChange={(e) => setForm({ ...form, observation: e.target.value })} rows={2} /></div>
+            <div><Label>Observações</Label><Textarea value={form.observation} onChange={(e) => setForm({ ...form, observation: e.target.value })} rows={2} /><FreeFieldNotice className="mt-1" /></div>
 
             {/* ═══ Printer Compatibility ═══ */}
             {editingId && (

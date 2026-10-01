@@ -1,4 +1,4 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 
 /**
@@ -13,8 +13,12 @@ import { v } from "convex/values";
  * - Only inserts if NO organizations exist (prevents duplicates).
  * - Creates: Paço Municipal → Secretarias → Unidades (UBS, Escolas).
  * - All records created with active: true.
+ *
+ * Hardening §15: era uma mutation PÚBLICA sem autenticação, protegida apenas
+ * pela condição "não existem organizações". Passou a ser INTERNALMutation —
+ * executável somente via CLI/dashboard do deployment, nunca pelo cliente.
  */
-export const seedOrganizations = mutation({
+export const seedOrganizations = internalMutation({
   args: {},
   handler: async (ctx) => {
     // ── Prevent duplicate seeding ──────────────────────────────────────────
