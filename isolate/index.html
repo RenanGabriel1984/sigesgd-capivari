@@ -7,13 +7,17 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0d3a1f" />
+  <!-- Hardening §20: não envia a URL completa (com path e query) a terceiros.
+       HSTS, CSP, X-Content-Type-Options e frame-ancestors NÃO podem ser
+       definidos por <meta> — dependem do hosting (ver relatório §20/M). -->
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
   <meta name="description" content="Gestão de Estoque SGGD — Sistema Integrado de Gestão da Secretaria de Gestão e Governo Digital — Capivari." />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Estoque SGGD" />
   <meta name="mobile-web-app-capable" content="yes" />
   <title>Gestão de Estoque SGGD</title>
-  <script type="module" crossorigin src="/assets/index-CChpXWrM.js"></script>
+  <script type="module" crossorigin src="/assets/index-ysVMjP1i.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/react-vendor-KgAAZzzj.js">
   <link rel="modulepreload" crossorigin href="/assets/framer-motion-CzqMM4Kv.js">
   <link rel="modulepreload" crossorigin href="/assets/radix-ui-Bye_oU4f.js">
