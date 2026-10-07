@@ -334,11 +334,35 @@ const schema = defineSchema(
     suppliers: defineTable({
       legalName: v.string(),
       tradeName: v.optional(v.string()),
+      // CNPJ normalizado (apenas dígitos; vícios de digitação são rejeitados por
+      // `assertValidCnpj`). A busca por CNPJ ignora pontuação/máscara.
       cnpj: v.optional(v.string()),
+      // Pessoa física/jurídica para contato: pode ser o próprio representante,
+      // um setor ou um contato genérico.
+      contactPerson: v.optional(v.string()),
       contact: v.optional(v.string()),
+      // Máscaras visuais nas telas; valores normalizados no backend.
       phone: v.optional(v.string()),
       email: v.optional(v.string()),
-      address: v.optional(v.string()),
+      // Endereço estruturado (Campos Complementares). Campos ausentes significam
+      // "ainda não informados" — NÃO significam que o campo textual legado seja
+      // vazio ou contrario ao novo. O campo `addressLegacy` é a referência do
+      // antigo campo livre até o fornecedor ser revisitado.
+      addressType: v.optional(v.union(
+        v.literal("rua"), v.literal("avenida"), v.literal("travessa"),
+        v.literal("alameda"), v.literal("rodovia"), v.literal("estrada"),
+        v.literal("outro"),
+      )),
+      streetName: v.optional(v.string()),
+      number: v.optional(v.string()),
+      complement: v.optional(v.string()),
+      district: v.optional(v.string()),
+      postalCode: v.optional(v.string()),
+      city: v.optional(v.string()),
+      state: v.optional(v.string()),
+      // Legado do antigo campo livre de endereço. Mantido como referência e
+      // preservado até o fornecedor ser revisitado manualmente.
+      addressLegacy: v.optional(v.string()),
       active: v.boolean(),
       observation: v.optional(v.string()),
     }).index("by_active", ["active"])
