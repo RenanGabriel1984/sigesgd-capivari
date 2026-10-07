@@ -146,6 +146,54 @@ export function findEntryByAccessKey(
   return entries.find((e) => e.accessKey && digitsOnly(e.accessKey) === target);
 }
 
+export interface DuplicateEntryProbe {
+  accessKey?: string;
+  number?: string;
+  series?: string;
+  supplierId?: string;
+}
+
+/**
+ * Checagem prévia de duplicidade de NF (§16), usada pela UI antes de abrir a
+ * conferência (XML ou DANFE/OCR):
+ *  • com chave de acesso → compara os 44 dígitos;
+ *  • sem chave → combinação fornecedor + número + série (quando disponíveis).
+ * A GARANTIA FINAL é o backend (entries.create recusa chave repetida); esta
+ * função apenas evita que o usuário perca o tempo de uma conferência inútil.
+ */
+export function findDuplicateEntry(
+  entries: Array<{
+    _id: string;
+    entryNumber: string;
+    accessKey?: string | null;
+    invoiceNumber?: string | null;
+    series?: string | null;
+    supplier?: { _id: string } | null;
+    supplierId?: string;
+  }>,
+  probe: DuplicateEntryProbe,
+): { _id: string; entryNumber: string } | undefined {
+  const key = digitsOnly(probe.accessKey ?? "");
+  if (key) return findEntryByAccessKey(entries, key);
+
+  const number = (probe.number ?? "").trim();
+  if (!number) return undefined;
+  const series = (probe.series ?? "").trim();
+  const supplierId = probe.supplierId;
+
+  const hit = entries.find((e) => {
+    if ((e.invoiceNumber ?? "").trim() !== number) return false;
+    if (series && e.series && e.series.trim() !== series) return false;
+    if (supplierId) {
+      const entrySupplier = e.supplier?._id ?? e.supplierId;
+      // Entrada com OUTRO fornecedor não é a mesma nota.
+      if (entrySupplier && entrySupplier !== supplierId) return false;
+    }
+    return true;
+  });
+  return hit ? { _id: hit._id, entryNumber: hit.entryNumber } : undefined;
+}
+
 // ─── Helpers de texto ────────────────────────────────────────────────────────
 
 const normalizeAccents = (s: string): string =>

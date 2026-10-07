@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, ShoppingCart, CheckCircle, RotateCcw, Eye, Trash2, ExternalLink, Save, Pencil, FileUp, FileText, Loader2 } from "lucide-react";
+import { Plus, ShoppingCart, CheckCircle, RotateCcw, Eye, Trash2, ExternalLink, Save, Pencil, FileUp, FileText, FileImage, Loader2 } from "lucide-react";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
 import { IMPLEMENTATION_STOCK_DATE } from "@/convex/stockHelpers";
 import {
@@ -38,11 +38,13 @@ import { PatrimonyUnitsEditor } from "@/components/PatrimonyUnitsEditor";
 import { NewEntryItemsEditor } from "@/components/NewEntryItemsEditor";
 import { EditEntryItemCard } from "@/components/EditEntryItemCard";
 import { NfeReviewTable } from "@/components/NfeReviewTable";
+import { SupplierForm } from "@/components/SupplierForm";
+import { DanfeImportDialog, type DanfeParsedData } from "@/components/DanfeImportDialog";
 import { toast } from "sonner";
 import {
   parseNfeXml, findSupplierMatch, findEntryByAccessKey, matchNfeProduct,
   buildEntryDraftFromNfe, mapNfeUnit, formatCnpj, canContinueNfeReview,
-  extractNfeProductHints, reconcileNfeReviewMatches,
+  extractNfeProductHints, reconcileNfeReviewMatches, digitsOnly, findDuplicateEntry,
   type NfeData, type NfeItem, type ProductMatchStatus, type ProductMatchSource,
   type ProductAssociationType,
 } from "@/lib/nfe";
@@ -142,11 +144,12 @@ export default function Entries() {
   const createProduct = useMutation(api.products.create);
   const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
 
-  // Contextual supplier creation
+  // Contextual supplier creation — formulário padrão (endereço estruturado)
+  // aberto sem sair da tela de Entrada. `newSupplierName/Cnpj` guardam o
+  // pré-preenchimento vindo da NF-e em conferência.
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
   const [newSupplierName, setNewSupplierName] = useState("");
   const [newSupplierCnpj, setNewSupplierCnpj] = useState("");
-  const createSupplier = useMutation(api.suppliers.create);
 
   // Contextual category creation
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
@@ -187,6 +190,9 @@ export default function Entries() {
   // Conferência do destino (tipo de material + área/subestoque) antes de registrar a entrada da NF-e
   const [nfeDestOpen, setNfeDestOpen] = useState(false);
   const nfeDestConfirmedRef = useRef(false);
+  // Origem da importação em conferência: XML (preferencial) ou DANFE/OCR
+  const [importSource, setImportSource] = useState<"xml" | "danfe">("xml");
+  const [danfeOpen, setDanfeOpen] = useState(false);
 
   // Reavalia o vínculo por CNPJ quando a lista de fornecedores termina de
   // carregar: a importação pode rodar antes da query resolver (estado travado
@@ -465,19 +471,19 @@ export default function Entries() {
   };
 
   // ─── Quick create supplier ───
-  const handleQuickCreateSupplier = async () => {
-    if (!newSupplierName.trim()) { toast.error("Razão social é obrigatória"); return; }
-    try {
-      const newId = await createSupplier({ legalName: newSupplierName.trim(), cnpj: newSupplierCnpj.trim() || undefined });
-      if (nfe) {
-        // Fluxo de importação: associa à NF
-        setNfeSupplierId(newId as string); setNfeSupplierFound(true);
-      } else {
-        setcSupplierId(newId as string);
-      }
-      setSupplierModalOpen(false); setNewSupplierName(""); setNewSupplierCnpj("");
-      toast.success("Fornecedor criado e selecionado");
-    } catch (e: any) { toast.error(e.message ?? "Erro ao criar fornecedor"); }
+  // O cadastro acontece no SupplierForm (modal padrão). Ao salvar, o fornecedor
+  // é selecionado automaticamente e os demais campos da Entrada permanecem
+  // intactos — cancelar não altera nada.
+  const handleSupplierCreated = (newId: string) => {
+    if (nfe) {
+      setNfeSupplierId(newId);
+      setNfeSupplierFound(true);
+    } else {
+      setcSupplierId(newId);
+    }
+    setNewSupplierName("");
+    setNewSupplierCnpj("");
+    toast.success("Fornecedor criado e selecionado");
   };
 
   // ─── Quick create category ───
@@ -542,6 +548,7 @@ export default function Entries() {
     setNfeMaterialType("consumption"); setNfeAreaId("");
     nfeDestConfirmedRef.current = false; setNfeDestOpen(false);
     setProductModalTarget(null);
+    setImportSource("xml");
   };
 
   const readXmlText = async (file: File): Promise<string> => {
@@ -599,7 +606,98 @@ export default function Entries() {
     } catch (e: any) {
       setImportError(e.message ?? "Não foi possível ler a NF-e");
     } finally { setImportLoading(false); }
-  };    // Confirma o destino escolhido pelo usuário na conferência da NF-e e
+  };
+
+  // ─── Importação DANFE / PDF / Imagem (OCR) ───
+  // O OCR é um assistente de preenchimento: só alimenta a conferência.
+  // NADA é criado aqui — entrada, lotes e movimentos vêm apenas da
+  // confirmação do usuário, pelas mesmas regras do caminho XML.
+  const handleDanfeImport = (data: DanfeParsedData) => {
+    const accessKey = digitsOnly(data.accessKey ?? "");
+    const number = (data.nfeNumber ?? "").trim();
+    if (!number && !accessKey) {
+      toast.error("Não foi possível identificar a NF-e na DANFE. Confira o documento ou use a entrada manual.");
+      return;
+    }
+
+    const nfeData: NfeData = {
+      accessKey,
+      number,
+      series: (data.series ?? "").trim(),
+      emissionDate: data.emissionDate ?? "",
+      emitterCnpj: data.emitterCnpj,
+      emitterName: data.emitterName,
+      totalValue: data.totalValue,
+      items: (data.items ?? []).map((item, i) => ({
+        lineNumber: i + 1,
+        code: (item.code ?? "").trim(),
+        description: item.description,
+        unit: (item.unit ?? "").trim() || "UN",
+        quantity: item.quantity,
+        unitValue: item.unitValue,
+        totalValue: item.totalValue,
+      })),
+    };
+
+    // Fornecedor: opção explícita na tela da DANFE ou matching por CNPJ.
+    let supplierId = "";
+    let supplierFound = false;
+    let suggestion: { id: string; name: string } | null = null;
+    if (data.supplierId) {
+      supplierId = data.supplierId;
+      supplierFound = true;
+    } else {
+      const match = findSupplierMatch(nfeData, suppliers ?? []);
+      supplierId = match.supplierId ?? "";
+      supplierFound = match.found;
+      suggestion =
+        match.suggestedSupplierId && match.suggestedSupplierName
+          ? { id: match.suggestedSupplierId, name: match.suggestedSupplierName }
+          : null;
+    }
+
+    // §16 — duplicidade: chave de acesso; sem chave, fornecedor + número + série.
+    const dup = findDuplicateEntry(entries ?? [], {
+      accessKey,
+      number,
+      series: nfeData.series,
+      supplierId: supplierId || undefined,
+    });
+    if (dup) {
+      toast.error(`Esta NF-e já está cadastrada no SIGESGD (entrada ${dup.entryNumber}).`);
+      return;
+    }
+
+    const initialItems: NfeReviewItem[] = nfeData.items.map((item) => ({
+      item,
+      productId: "",
+      matchStatus: "not_found",
+      matchScore: 0,
+      associationType: "automatic",
+      locationId: "",
+      supplierLot: "",
+    }));
+
+    resetImport();
+    setImportSource("danfe");
+    setNfe(nfeData);
+    setNfeXmlFile(data.rawFile ?? null);
+    setNfeSupplierId(supplierId);
+    setNfeSupplierFound(supplierFound || !!supplierId);
+    setNfeSupplierSuggestion(suggestion);
+    setNfeItems(
+      reconcileNfeReviewMatches(initialItems, products ?? [], {
+        supplierId: supplierId || undefined,
+        aliases: nfeAliases ?? [],
+      }),
+    );
+    setImportObservation("Dados extraídos por OCR de DANFE/PDF/imagem — conferir antes de confirmar.");
+    setImportStep("review");
+    setImportOpen(true);
+    toast.success("DANFE lida com sucesso. Confira os dados e a associação dos itens.");
+  };
+
+    // Confirma o destino escolhido pelo usuário na conferência da NF-e e
     // prossegue com o registro da entrada.
     // O destino viaja por ARGUMENTO (ver correção do stale closure abaixo).
   const handleNfeDestConfirm = (materialType: MaterialType, areaId: string) => {
@@ -628,7 +726,7 @@ export default function Entries() {
   const handleConfirmImport = async (
     arg?: { materialType: MaterialType; areaId: string } | React.SyntheticEvent,
   ) => {
-    if (!nfe || !nfeXmlFile) return;
+    if (!nfe) return;
     // Só um objeto com `materialType` é um override válido; um SyntheticEvent
     // do onClick é descartado e o destino vem do estado já confirmado.
     const override =
@@ -665,13 +763,25 @@ export default function Entries() {
     const destinationPayload = toEntryDestinationPayload(destination);
     setImportSaving(true);
     try {
-      // 1) Preserva o XML original no armazenamento
-      const uploadUrl = await generateUploadUrl();
-      const upRes = await fetch(uploadUrl, {
-        method: "POST", headers: { "Content-Type": "application/xml" }, body: nfeXmlFile,
-      });
-      if (!upRes.ok) throw new Error("Falha ao salvar o XML original");
-      const { storageId: xmlStorageId } = await upRes.json();
+      // 1) Preserva o arquivo original (XML ou DANFE) no armazenamento
+      let xmlStorageId: string | undefined;
+      if (nfeXmlFile) {
+        const uploadUrl = await generateUploadUrl();
+        const upRes = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": nfeXmlFile.type || "application/xml" },
+          body: nfeXmlFile,
+        });
+        if (!upRes.ok) {
+          throw new Error(
+            importSource === "danfe"
+              ? "Falha ao salvar o DANFE original"
+              : "Falha ao salvar o XML original",
+          );
+        }
+        const { storageId } = await upRes.json();
+        xmlStorageId = storageId as string;
+      }
 
       // 2) Monta o rascunho (NÃO altera estoque — só rascunho)
       const draft = buildEntryDraftFromNfe(nfe, nfeItems.map((r) => ({
@@ -686,7 +796,7 @@ export default function Entries() {
         contractNumber: nfeContract || undefined,
         observation: importObservation || undefined,
         documentStorageId: importDocStorageId || undefined,
-        xmlStorageId: xmlStorageId as string,
+        xmlStorageId,
       });
 
       const entryId = await createEntry({
@@ -779,6 +889,7 @@ export default function Entries() {
           <div><h1 className="text-2xl font-bold tracking-tight">Entrada de material</h1><p className="text-sm text-muted-foreground">Registre aqui materiais que chegaram fisicamente ao estoque — {entries?.length ?? 0} entrada(s)</p></div>
           <div className="flex flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => { resetImport(); setImportOpen(true); }} className="gap-2"><FileUp className="h-4 w-4" /> Importar NF-e XML</Button>
+            <Button variant="outline" onClick={() => { resetImport(); setDanfeOpen(true); }} className="gap-2"><FileImage className="h-4 w-4" /> Importar DANFE / PDF / Imagem</Button>
             <Button onClick={() => { resetCreateForm(); setCreateDialogOpen(true); }} className="gap-2"><Plus className="h-4 w-4" /> Nova Entrada</Button>
           </div>
 
@@ -793,6 +904,14 @@ export default function Entries() {
             initialMaterialType={nfeMaterialType}
             initialAreaId={nfeAreaId}
             onConfirm={handleNfeDestConfirm}
+          />
+
+          {/* Entrada via DANFE/PDF/imagem — OCR local, sempre com conferência humana */}
+          <DanfeImportDialog
+            open={danfeOpen}
+            onOpenChange={setDanfeOpen}
+            onImport={handleDanfeImport}
+            onClose={() => setDanfeOpen(false)}
           />
         </div>
 
@@ -983,7 +1102,7 @@ export default function Entries() {
       {/* ═══ Import NF-e XML Dialog ═══ */}
       <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) resetImport(); }}>
         <DialogContent className="flex h-[90vh] w-[95vw] max-w-[95vw] flex-col gap-3 overflow-hidden p-4 sm:p-6">
-          <DialogHeader className="shrink-0 pr-8"><DialogTitle>Importar NF-e XML</DialogTitle></DialogHeader>
+          <DialogHeader className="shrink-0 pr-8"><DialogTitle>{importSource === "danfe" ? "Conferir DANFE (OCR)" : "Importar NF-e XML"}</DialogTitle></DialogHeader>
 
           <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
             <span className={importStep === "file" ? "font-semibold text-primary" : ""}>1. Arquivo</span><span>→</span>
@@ -1065,7 +1184,10 @@ export default function Entries() {
                 onManualSelect={handleManualNfeSelect}
                 onConfirmSuggestion={handleConfirmNfeSuggestion}
                 onNewProduct={openProductModalForImport}
-                onBack={() => { setImportStep("file"); setImportError(""); }}
+                onBack={() => {
+                  if (importSource === "danfe") { setImportOpen(false); resetImport(); return; }
+                  setImportStep("file"); setImportError("");
+                }}
                 onContinue={() => {
                   if (!canContinueNfeReview(nfeItems)) { toast.error("Associe todos os itens e confirme explicitamente as correspondências possíveis antes de continuar."); return; }
                   setImportStep("location");
@@ -1194,16 +1316,18 @@ export default function Entries() {
           <DialogFooter><Button variant="outline" onClick={() => setProductModalOpen(false)}>Cancelar</Button><Button onClick={handleQuickCreateProduct}>Criar e Selecionar</Button></DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* ═══ Quick Create Supplier ═══ */}
-      <Dialog open={supplierModalOpen} onOpenChange={setSupplierModalOpen}>
-        <DialogContent className="max-w-md"><DialogHeader><DialogTitle className="flex items-center gap-2"><Plus className="h-4 w-4" /> Novo Fornecedor</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div><Label>Razão Social *</Label><Input value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)} placeholder="Nome do fornecedor" /></div>
-            <div><Label>CNPJ</Label><Input value={newSupplierCnpj} onChange={(e) => setNewSupplierCnpj(e.target.value)} placeholder="Opcional" /></div>
-          </div>
-          <DialogFooter><Button variant="outline" onClick={() => { setSupplierModalOpen(false); setNewSupplierName(""); setNewSupplierCnpj(""); }}>Cancelar</Button><Button onClick={handleQuickCreateSupplier}>Criar e Selecionar</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* ═══ Novo Fornecedor (inline na Entrada — endereço estruturado) ═══ */}
+      <SupplierForm
+        open={supplierModalOpen}
+        onOpenChange={(o) => {
+          setSupplierModalOpen(o);
+          if (!o) { setNewSupplierName(""); setNewSupplierCnpj(""); }
+        }}
+        mode="create"
+        supplierId={null}
+        preFilled={supplierModalOpen ? { legalName: newSupplierName, cnpj: newSupplierCnpj } : null}
+        onCreated={handleSupplierCreated}
+      />
 
       {/* ═══ Quick Create Category ═══ */}
       <Dialog open={categoryModalOpen} onOpenChange={setCategoryModalOpen}>

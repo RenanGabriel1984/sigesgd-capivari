@@ -108,6 +108,44 @@ export const formatCep = (raw: string | undefined | null): string => {
 };
 
 /**
+ * Máscaras VISUAIS progressivas (digitção → exibição).
+ * O valor gravado continua sendo só dígitos; estas funções servem ao `value`
+ * do input, aplicando a pontuação enquanto o usuário digita:
+ *   22816315000144 → 22.816.315/0001-44
+ *   8330530760      → (83) 3053-0760
+ *   11987654321     → (11) 98765-4321
+ *   88701600        → 88701-600
+ * Os separadores só aparecem quando já existe dígito depois deles — assim o
+ * Backspace apaga sempre o dígito certo, sem "lutar" com a máscara.
+ */
+export const maskCnpj = (raw: string | undefined | null): string => {
+  const d = digitsOnly(raw).slice(0, MAX_CNPJ_LENGTH);
+  if (d.length <= 2) return d;
+  let out = d.slice(0, 2);
+  if (d.length > 2) out += `.${d.slice(2, 5)}`;
+  if (d.length > 5) out += `.${d.slice(5, 8)}`;
+  if (d.length > 8) out += `/${d.slice(8, 12)}`;
+  if (d.length > 12) out += `-${d.slice(12, 14)}`;
+  return out;
+};
+
+export const maskPhone = (raw: string | undefined | null): string => {
+  const d = digitsOnly(raw).slice(0, MAX_PHONE_LENGTH);
+  if (d.length <= 2) return d;
+  const rest = d.slice(2);
+  // 11 dígitos → (XX) 9XXXX-XXXX (5+4); 10 → (XX) XXXX-XXXX (4+4).
+  const split = d.length === MAX_PHONE_LENGTH ? 5 : 4;
+  const body = rest.length > split ? `${rest.slice(0, split)}-${rest.slice(split)}` : rest;
+  return `(${d.slice(0, 2)}) ${body}`;
+};
+
+export const maskCep = (raw: string | undefined | null): string => {
+  const d = digitsOnly(raw).slice(0, MAX_CEP_LENGTH);
+  if (d.length <= 5) return d;
+  return `${d.slice(0, 5)}-${d.slice(5, 8)}`;
+};
+
+/**
  * Formata a chave de acesso de NF-e em grupos para facilitar conferência:
  *   xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx
  * (11 grupos de 4 dígitos). O valor no banco continua sendo os 44 dígitos.

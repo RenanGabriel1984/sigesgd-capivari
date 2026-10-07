@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +14,7 @@ import {
   type SupplierPreFill,
   type AddressType,
 } from "@/lib/supplier-form";
-import { isValidCnpj } from "@/lib/br-validators";
+import { isValidCnpj, digitsOnly, maskCnpj, maskPhone, maskCep } from "@/lib/br-validators";
 import { cn } from "@/lib/utils";
 
 interface SupplierFormProps {
@@ -22,11 +23,42 @@ interface SupplierFormProps {
   mode: "create" | "edit";
   supplierId: string | null;
   preFilled?: SupplierPreFill | null;
+  /** Chamado após a criação com o id do fornecedor (seleção automática na Entrada). */
+  onCreated?: (id: string) => void;
 }
 
-export function SupplierForm({ open, onOpenChange, mode, supplierId, preFilled }: SupplierFormProps) {
+const emptyDraft = (): SupplierDraft => ({
+  legalName: "",
+  tradeName: "",
+  cnpj: "",
+  contactPerson: "",
+  contact: "",
+  phone: "",
+  email: "",
+  addressType: "rua",
+  streetName: "",
+  number: "",
+  complement: "",
+  district: "",
+  postalCode: "",
+  city: "",
+  state: "",
+  addressLegacy: "",
+  observation: "",
+});
+
+export function SupplierForm({ open, onOpenChange, mode, supplierId, preFilled, onCreated }: SupplierFormProps) {
   const saveMutation = useMutation(
     mode === "edit" ? api.suppliers.update : api.suppliers.create,
+  );
+
+  // Dados do fornecedor em edição — assinatura reativa, só enquanto aberto.
+  // `get` devolve o documento completo (inclui addressLegacy/observation).
+  const editSupplier = useQuery(
+    api.suppliers.get,
+    open && mode === "edit" && supplierId
+      ? { id: supplierId as Id<"suppliers"> }
+      : "skip",
   );
 
   const [saving, setSaving] = useState(false);
@@ -34,30 +66,15 @@ export function SupplierForm({ open, onOpenChange, mode, supplierId, preFilled }
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [form, setForm] = useState<SupplierDraft>({
-    legalName: "",
-    tradeName: "",
-    cnpj: "",
-    contactPerson: "",
-    contact: "",
-    phone: "",
-    email: "",
-    addressType: "rua",
-    streetName: "",
-    number: "",
-    complement: "",
-    district: "",
-    postalCode: "",
-    city: "",
-    state: "",
+    ...emptyDraft(),
     addressLegacy: preFilled?.addressLegacy ?? preFilled?.fullAddress ?? "",
-    observation: "",
   });
 
   const [localId, setLocalId] = useState<string | null>(supplierId);
 
-  // Pré-preenchimento a partir de dados extraídos pelo OCR (primeiro render)
+  // Pré-preenchimento a partir de dados extraídos pelo OCR (apenas ao abrir)
   useEffect(() => {
-    if (!preFilled || mode === "edit") return;
+    if (!open || !preFilled || mode === "edit") return;
     setForm((prev) => ({
       ...prev,
       legalName: preFilled.legalName ?? prev.legalName,
@@ -77,45 +94,47 @@ export function SupplierForm({ open, onOpenChange, mode, supplierId, preFilled }
       state: preFilled.state ?? prev.state,
       addressLegacy: preFilled.addressLegacy ?? prev.addressLegacy,
     }));
-  }, [preFilled, mode]);
+  }, [preFilled, mode, open]);
 
-  // Quando se edita um fornecedor, carrega os dados
+  // Quando se edita um fornecedor, carrega os dados (a cada abertura)
   useEffect(() => {
-    if (mode !== "edit" || !supplierId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const s = await api.suppliers.findByIdForNfe(supplierId);
-        if (cancelled || !s) return;
+    if (!open || mode !== "edit" || !supplierId || !editSupplier) return;
+    const s: any = editSupplier;
 
-        setForm((prev) => ({
-          ...prev,
-          legalName: s?.legalName ?? prev.legalName,
-          tradeName: s.tradeName ?? "",
-          cnpj: s.cnpj ?? "",
-          contactPerson: s.contactPerson ?? "",
-          contact: s.contact ?? "",
-          phone: s.phone ?? "",
-          email: s.email ?? "",
-          addressType: s.addressType ?? prev.addressType,
-          streetName: s.streetName ?? "",
-          number: s.number ?? "",
-          complement: s.complement ?? "",
-          district: s.district ?? "",
-          postalCode: s.postalCode ?? "",
-          city: s.city ?? "",
-          state: s.state ?? "",
-          addressLegacy: s.addressLegacy ?? prev.addressLegacy,
-        }));
-        setLocalId(supplierId);
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [supplierId, mode]);
+    setForm((prev) => ({
+      ...prev,
+      legalName: s?.legalName ?? prev.legalName,
+      tradeName: s.tradeName ?? "",
+      cnpj: s.cnpj ?? "",
+      contactPerson: s.contactPerson ?? "",
+      contact: s.contact ?? "",
+      phone: s.phone ?? "",
+      email: s.email ?? "",
+      addressType: s.addressType ?? prev.addressType,
+      streetName: s.streetName ?? "",
+      number: s.number ?? "",
+      complement: s.complement ?? "",
+      district: s.district ?? "",
+      postalCode: s.postalCode ?? "",
+      city: s.city ?? "",
+      state: s.state ?? "",
+      addressLegacy: s.addressLegacy ?? prev.addressLegacy,
+      observation: s.observation ?? prev.observation,
+    }));
+    setLocalId(supplierId);
+  }, [supplierId, mode, open, editSupplier]);
+
+  // Ao fechar, limpa o formulário: cancelar não deixa resíduo para a próxima abertura.
+  useEffect(() => {
+    if (open) return;
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    setForm(emptyDraft());
+    setSavingError(null);
+    setSaving(false);
+  }, [open]);
 
   const updateField = (field: keyof SupplierDraft, value: string) => {
     setForm((f: SupplierDraft) => ({ ...f, [field]: value }));
@@ -153,13 +172,29 @@ export function SupplierForm({ open, onOpenChange, mode, supplierId, preFilled }
       debounceRef.current = null;
     }
 
+    // CNPJ: formato + dígitos verificadores (apenas quando informado).
+    // O backend faz a mesma validação — aqui é só o feedback imediato.
+    const cnpjDigits = digitsOnly(form.cnpj);
+    if (cnpjDigits.length > 0 && cnpjDigits.length !== 14) {
+      setSavingError("CNPJ deve conter 14 dígitos.");
+      return;
+    }
+    if (cnpjDigits.length === 14 && !isValidCnpj(cnpjDigits)) {
+      setSavingError("CNPJ inválido: confira os dígitos verificadores.");
+      return;
+    }
+    if (!form.legalName.trim()) {
+      setSavingError("Razão social é obrigatória.");
+      return;
+    }
+
     setSaving(true);
     setSavingError(null);
     try {
       const args: any = {
         legalName: form.legalName.trim(),
         tradeName: form.tradeName.trim() || undefined,
-        cnpj: form.cnpj.trim() || undefined,
+        cnpj: cnpjDigits || undefined,
         contactPerson: form.contactPerson.trim() || undefined,
         contact: form.contact.trim() || undefined,
         phone: form.phone.trim() || undefined,
@@ -176,27 +211,10 @@ export function SupplierForm({ open, onOpenChange, mode, supplierId, preFilled }
         observation: form.observation.trim() || undefined,
       };
       if (mode === "edit" && localId) args.id = localId;
-      await saveMutation(args);
+      const savedId = await saveMutation(args);
+      if (mode === "create" && savedId) onCreated?.(savedId as string);
       onOpenChange(false);
-      setForm({
-        legalName: "",
-        tradeName: "",
-        cnpj: "",
-        contactPerson: "",
-        contact: "",
-        phone: "",
-        email: "",
-        addressType: "rua",
-        streetName: "",
-        number: "",
-        complement: "",
-        district: "",
-        postalCode: "",
-        city: "",
-        state: "",
-        addressLegacy: "",
-        observation: "",
-      });
+      setForm(emptyDraft());
     } catch (err: any) {
       setSavingError(err?.message ?? "Não foi possível salvar o fornecedor");
     } finally {
@@ -250,12 +268,13 @@ export function SupplierForm({ open, onOpenChange, mode, supplierId, preFilled }
             <div className="relative">
               <Label>CNPJ</Label>
               <Input
-                value={form.cnpj}
+                value={maskCnpj(form.cnpj)}
                 onChange={(e) => {
                   const digits = e.target.value.replace(/\D/g, "").slice(0, 14);
                   updateField("cnpj", digits);
                 }}
-                placeholder="00000000000000"
+                inputMode="numeric"
+                placeholder="00.000.000/0000-00"
               />
               {form.cnpj?.length === 14 && isValidCnpj(form.cnpj) ? (
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-600 text-[11px]">✓</span>
@@ -290,11 +309,12 @@ export function SupplierForm({ open, onOpenChange, mode, supplierId, preFilled }
             <div>
               <Label>Telefone</Label>
               <Input
-                value={form.phone}
+                value={maskPhone(form.phone)}
                 onChange={(e) => {
                   const digits = e.target.value.replace(/\D/g, "").slice(0, 11);
                   updateField("phone", digits);
                 }}
+                inputMode="tel"
                 placeholder="(00) 00000-0000"
               />
               <p className="text-[10px] text-muted-foreground mt-1">10 ou 11 dígitos</p>
@@ -362,9 +382,10 @@ export function SupplierForm({ open, onOpenChange, mode, supplierId, preFilled }
               <div className="relative col-span-2 sm:col-span-1">
                 <Label>CEP</Label>
                 <Input
-                  value={form.postalCode}
+                  value={maskCep(form.postalCode)}
                   onChange={(e) => handleCepInput(e.target.value)}
-                  placeholder="00000000"
+                  inputMode="numeric"
+                  placeholder="00000-000"
                 />
                 {form.postalCode?.length === 8 ? (
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-600 text-[11px]">✓</span>

@@ -45,15 +45,18 @@ export type DanfeParsedItem = {
  * falha em alguns campos. O usuário pode editar tudo na tela de conferência.
  */
 export function parseDanfeText(text: string): DanfeParsed {
+  // Preserva as QUEBRAS DE LINHA (a leitura de itens é linha a linha) e
+  // apenas normaliza espaços duplicados dentro de cada linha.
   const normalized = text
     .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{2,}/g, "\n")
-    .replace(/\s+/g, " ")
     .trim();
 
-  // 1) Chave de acesso (44 dígitos)
-  const accessKeyMatch = normalized.match(/\b(\d{44})\b/);
-  const accessKey = accessKeyMatch?.[1] ?? undefined;
+  // 1) Chave de acesso (44 dígitos) — contínua OU agrupada em 11 grupos de 4
+  //    (a DANFE impressa costuma imprimir a chave em grupos de 4 dígitos).
+  const accessKey = extractAccessKey(normalized);
 
   // 2) Número da NF-e (busca padrão "Nº NF: 00000" ou "Nota: 00000" ou "NF-e Nº 00000")
   const nfeNumberMatch = normalized.match(/(?:N[ºo]\.?\s*(?:NF|NF-e)\s*:?\s*|NF-e\s*N[ºo]\.?\s*|N[ºo]\s*Nota\s*(?:Fiscal)?\s*:?\s*)(\d{1,7})/i);
@@ -75,9 +78,8 @@ export function parseDanfeText(text: string): DanfeParsed {
     if (emissionDate) break;
   }
 
-  // 5) CNPJ do emitente
-  const emitterCnpj = extractCnpj(normalized, /(?:CNPJ\s*(?:do\s*)?Emitente\s*:?\s*|(?:emitente|emissor)[^0-9]{0,30})(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})/i);
-  const emitterCnpjDigits = emitterCnpj ? digitsOnly(emitterCnpj) : undefined;
+  // 5) CNPJ do emitente (com ou sem máscara — o OCR pode perder a pontuação)
+  const emitterCnpj = extractCnpj(normalized, /(?:CNPJ\s*(?:do\s*)?Emitente\s*:?\s*|CNPJ\s*:?\s*|(?:emitente|emissor)[^0-9]{0,30})(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14})/i);
 
   // 6) Razão social do emitente (após CNPJ)
   const emitterName = extractAfter(normalized, /(?:Nome\s*(?:de\s*)?(?:Raz[ãa]o\s*)?(?:Social\s*)?(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|Raz[ãa]o\s*Social\s*:?\s*|Empresa\s*:?\s*)/i);
@@ -100,9 +102,10 @@ export function parseDanfeText(text: string): DanfeParsed {
   // 12) CEP do emitente
   const emitterPostalCode = extractCep(normalized, /(?:CEP\s*(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|CEP\s*:?\s*)/i);
 
-  // 13) CNPJ do destinatário/receptor
-  const receiverCnpj = extractCnpj(normalized, /(?:CNPJ\s*(?:do\s*)?(?:Destinat[áa]rio|Respons[áa]vel|Cliente|Receptor)|CNPJ\s*do\s*Cliente\s*:?\s*|(?:destinat[áa]rio|receptor)[^0-9]{0,30})(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})/i);
-  const receiverCnpjDigits = receiverCnpj ? digitsOnly(receiverCnpj) : undefined;
+  // 13) CNPJ do destinatário/receptor — rótulo específico; sem rótulo,
+  //     considera apenas um SEGUNDO CNPJ distinto do documento (nunca repete
+  //     o CNPJ do emitente como se fosse do destinatário).
+  const receiverCnpj = extractReceiverCnpj(normalized, emitterCnpj);
 
   // 14) Razão social do destinatário
   const receiverName = extractAfter(normalized, /(?:Nome\s*(?:de\s*)?(?:Raz[ãa]o\s*)?(?:Social\s*)?(?:do\s*)?(?:Destinat[áa]rio|Respons[áa]vel|Cliente|Receptor)|Raz[ãa]o\s*Social\s*do\s*Cliente\s*:?\s*)/i);
@@ -118,7 +121,7 @@ export function parseDanfeText(text: string): DanfeParsed {
     nfeNumber,
     series,
     emissionDate,
-    accessKey: accessKeyDigits?.[0] === undefined ? accessKey : undefined,
+    accessKey,
     emitterCnpj: emitterCnpj ?? undefined,
     emitterName: emitterName?.trim() ?? undefined,
     emitterPhone,
@@ -135,21 +138,72 @@ export function parseDanfeText(text: string): DanfeParsed {
 }
 
 /**
- * Extrai CNPJ dos dígitos com máscara esperada 00.000.000/0000-00.
+ * Extrai a chave de acesso de 44 dígitos, tolerando o formato agrupado em
+ * 11 grupos de 4 dígitos usado pelas DANFEs impressas (ex.:
+ * "3524 0622 8163 1500 0144 ..."). O valor devolvido é SEMPRE só dígitos.
+ */
+function extractAccessKey(text: string): string | undefined {
+  // a) 44 dígitos contíguos
+  const contiguous = text.match(/\b(\d{44})\b/);
+  if (contiguous?.[1]) return contiguous[1];
+
+  // b) 11 grupos de 4 dígitos separados por espaço/quebra de linha (DANFE impressa)
+  const grouped = text.match(/(?:\d{4}[\s]?){11}/);
+  if (grouped) {
+    const d = digitsOnly(grouped[0]);
+    if (d.length === 44) return d;
+  }
+
+  // c) tolerância a perda de separadores do OCR: sequência de dígitos com
+  //    espaços opcionais totalizando exatamente 44
+  const loose = text.match(/\d(?:[ \t\n]?\d){43,}/);
+  if (loose) {
+    const d = digitsOnly(loose[0]);
+    if (d.length === 44) return d;
+  }
+  return undefined;
+}
+
+/**
+ * CNPJ do destinatário: rótulo específico ("CNPJ do Destinatário", "receptor",…)
+ * ou, na ausência de rótulo, o segundo CNPJ distinto do documento.
+ */
+function extractReceiverCnpj(text: string, emitterCnpj?: string): string | undefined {
+  const labeled = text.match(
+    /(?:CNPJ\s*(?:do\s*)?(?:Destinat[áa]rio|Respons[áa]vel|Cliente|Receptor)|CNPJ\s*do\s*Cliente\s*:?\s*|(?:destinat[áa]rio|receptor)[^0-9]{0,30})(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14})/i,
+  );
+  if (labeled?.[1]) return labeled[1];
+
+  const all = text.match(/(?:\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}|\b\d{14}\b)/g) ?? [];
+  const emitterDigits = emitterCnpj ? digitsOnly(emitterCnpj) : "";
+  for (const candidate of all) {
+    if (digitsOnly(candidate) !== emitterDigits) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Extrai CNPJ: aceita a máscara 00.000.000/0000-00 OU os 14 dígitos
+ * consecutivos (o OCR frequentemente perde a pontuação).
  */
 function extractCnpj(text: string, prefix?: RegExp): string | undefined {
-  const match = (prefix ? text.match(prefix) : null) ?? text.match(/(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})/);
+  const match =
+    (prefix ? text.match(prefix) : null) ??
+    text.match(/(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})/) ??
+    text.match(/\b(\d{14})\b/);
   return match?.[1]?.trim() ?? undefined;
 }
 
 /**
  * Extrai texto após um ponto de referência (ex.: "Razão Social: XYZ S/A").
+ * Para no fim da LINHA — sem isso, o valor engoliria o resto do documento.
  */
 function extractAfter(text: string, regex: RegExp): string | undefined {
   const match = text.match(regex);
   if (!match) return undefined;
   const start = match.index! + match[0].length;
-  const remainder = text.slice(start).trim();
+  const line = text.slice(start).split("\n", 1)[0] ?? "";
+  const remainder = line.trim();
   return remainder.length > 0 ? remainder : undefined;
 }
 
@@ -176,11 +230,18 @@ function extractEmail(text: string, prefix?: RegExp): string | undefined {
 }
 
 /**
- * Extrai CEP.
+ * Extrai CEP após o rótulo ("CEP:", "CEP do Emitente"), na MESMA linha.
+ * O rótulo é apenas o ponto de partida — os dígitos são capturados à parte,
+ * aceitando com ou sem hífen (01001-000 ou 01001000).
  */
 function extractCep(text: string, prefix?: RegExp): string | undefined {
-  const regex = prefix ?? /(?:CEP|Postal)[^0-9]{0,30}?(\d{5})[- ](\d{3})/i;
-  const match = text.match(regex);
+  let scope = text;
+  if (prefix) {
+    const label = text.match(prefix);
+    if (!label || label.index === undefined) return undefined;
+    scope = text.slice(label.index + label[0].length).split("\n", 1)[0] ?? "";
+  }
+  const match = scope.match(/\b(\d{5})[-\s]?(\d{3})\b/);
   if (!match) return undefined;
   return `${match[1]}${match[2]}`;
 }
@@ -196,35 +257,81 @@ function extractState(text: string): string | undefined {
 }
 
 /**
- * Extrai valor total da NF.
+ * Extrai valor total da NF. O gap entre o rótulo e o número pode conter
+ * espaços ("VALOR TOTAL R$ 1.323,50") — por isso a classe ignora espaço.
  */
 function extractTotalValue(text: string): number | undefined {
-  const matches = text.matchAll(/(?:valor\s*total|Total|Valor\s*NF|NF\s*Total|Valor\s*da\s*NF)[^0-9R$\s]{0,20}?(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*(?:[,.]\d{2})?)/gi);
-  for (const m of matches) {
-    const raw = m[1];
-    if (!raw) continue;
-    let cleaned = raw.replace(/\./g, "").replace(",", ".");
-    const n = parseFloat(cleaned);
-    if (isFinite(n) && n > 0) return n;
+  const parse = (raw: string | undefined): number | undefined => {
+    if (!raw) return undefined;
+    const n = parseFloat(raw.replace(/\./g, "").replace(",", "."));
+    return isFinite(n) && n > 0 ? n : undefined;
+  };
+
+  const labeled = text.matchAll(
+    /(?:valor\s*total|Total|Valor\s*NF|NF\s*Total|Valor\s*da\s*NF)[^0-9R$]{0,20}?(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*(?:[,.]\d{2})?)/gi,
+  );
+  for (const m of labeled) {
+    const n = parse(m[1]);
+    if (n !== undefined) return n;
   }
-  // fallback: último valor monetário plausível
-  const fallbackMatches = [...text.matchAll(/\b(R\$\s*)?(\d{1,3}(?:\.\d{3})*(?:[,.]\d{2})?)\b/g)];
-  if (fallbackMatches.length > 0) {
-    const last = fallbackMatches[fallbackMatches.length - 1];
-    const raw = last[2];
-    if (raw) {
-      const cleaned = raw.replace(/\./g, "").replace(",", ".");
-      const n = parseFloat(cleaned);
-      if (isFinite(n) && n > 0) return n;
-    }
+
+  // fallback 1: último valor monetário precedido de R$
+  const withSymbol = [...text.matchAll(/R\$\s*(\d{1,3}(?:\.\d{3})*(?:[,.]\d{2})?)/gi)];
+  if (withSymbol.length > 0) {
+    const n = parse(withSymbol[withSymbol.length - 1]?.[1]);
+    if (n !== undefined) return n;
+  }
+
+  // fallback 2: último número com casas decimais plausível
+  const anyNumber = [...text.matchAll(/\b(\d{1,3}(?:\.\d{3})*(?:[,.]\d{2})?)\b/g)];
+  if (anyNumber.length > 0) {
+    const n = parse(anyNumber[anyNumber.length - 1]?.[1]);
+    if (n !== undefined) return n;
   }
   return undefined;
+}
+
+/**
+ * Linha tabular típica da DANFE:
+ *   001 KIT TECLADO E MOUSE USB SLIM CHOCO 25 UN 12,50 312,50
+ * colunas: nItem, cProd, xProd, qCom, uCom, vUnCom, vProd (vProd opcional).
+ */
+const DANFE_ROW =
+  /^\s*(?:\|\s*)?(\d{1,3})\s+(\S+)\s+(.{3,}?)\s+(\d{1,7}(?:[.,]\d{1,4})?)\s+([A-Za-z]{2,4})\s+(\d{1,3}(?:[.,]\d{3})*[.,]\d{2,4})(?:\s+(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}))?\s*(?:\|\s*)?$/;
+
+/**
+ * Extrai itens pela leitura das linhas da tabela de produtos.
+ * Retorna vazio quando o layout não combina (aí vale o parser heurístico).
+ */
+function extractItemRows(text: string): DanfeParsedItem[] {
+  const items: DanfeParsedItem[] = [];
+  for (const line of text.split("\n")) {
+    const m = line.match(DANFE_ROW);
+    if (!m) continue;
+    const [, _seq, code, desc, qty, unit, unitValue, totalValue] = m;
+    if (!desc || desc.trim().length < 3) continue;
+    const quantity = parseBrazilianNumber(qty ?? "");
+    if (quantity === undefined || !(quantity > 0)) continue;
+    items.push({
+      code: code?.replace(/[-\s]/g, "").toUpperCase() || undefined,
+      description: desc.trim(),
+      quantity,
+      unit: (unit ?? "").toUpperCase(),
+      unitValue: parseBrazilianNumber(unitValue ?? ""),
+      totalValue: totalValue ? parseBrazilianNumber(totalValue) : undefined,
+    });
+  }
+  return items;
 }
 
 /**
  * Extrai itens da NF.
  */
 function extractItems(text: string): DanfeParsedItem[] {
+  // Caminho preferencial: linhas da tabela de produtos (layout DANFE).
+  const rows = extractItemRows(text);
+  if (rows.length > 0) return rows;
+
   const items: DanfeParsedItem[] = [];
   // Padrão comum: linha item, descrição, qtd, unid, valor unit, valor total
   const lines = text.split("\n").map((l) => l.trim());
