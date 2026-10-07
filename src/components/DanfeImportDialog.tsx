@@ -13,6 +13,7 @@ import { Progress } from "@/components/ui/progress";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { MapPin, Phone, Mail, Copy } from "lucide-react";
 import { parseDanfeText } from "../lib/danfe-ocr";
+import type { DanfeParsed as AnyDanfeParsed } from "../lib/danfe-ocr";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertTriangle, FileText, Image, Loader2, CheckCircle, X, Upload, Eye, Download, Building, Package, Key, DollarSign, Calendar, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
@@ -113,7 +114,7 @@ export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: Dan
       setOcrProgress(100);
       setOcrStatus("OCR concluído. Analisando dados...");
       const text = result.data.text ?? "";
-      const parsed = parseDanfeText(text);
+      const parsed = parseDanfeText(text) as unknown as AnyDanfeParsed;
       if (!parsed.accessKey && !parsed.nfeNumber) {
         setError("Não foi possível identificar os dados da NF-e nesta Danfe. Verifique se o documento é legível ou tente importar o XML da NF-e.");
         setStep("upload");
@@ -156,7 +157,7 @@ export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: Dan
 
   const handleCreateSupplier = async (preFilled: any) => {
     try {
-      const s = await api.suppliers.create({
+      const { data: s } = await api.suppliers.create({
         legalName: preFilled.legalName,
         tradeName: preFilled.tradeName,
         cnpj: preFilled.cnpj,
