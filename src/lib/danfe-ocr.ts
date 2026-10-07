@@ -308,7 +308,7 @@ const digitsOnly = (s: string): string => s.replace(/\D/g, "");
 /**
  * Acess key com 44 dígitos (detectado via OCR).
  */
-function accessKeyDigits(accessKey: string | undefined): string | undefined {
+export function accessKeyDigits(accessKey: string | undefined): string | undefined {
   if (!accessKey) return undefined;
   const digits = digitsOnly(accessKey);
   return digits.length === 44 ? digits : undefined;
