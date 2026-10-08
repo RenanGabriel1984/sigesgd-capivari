@@ -12,7 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { SupplierForm } from "@/components/SupplierForm";
 import type { SupplierPreFill } from "@/lib/supplier-form";
 import { MapPin, Phone, Mail, Copy } from "lucide-react";
-import { parseDanfeText } from "@/lib/danfe-ocr";
+import { parseDanfeText, DANFE_REGIONS, danfeFieldSummary, hasUsableTextLayer, mergeDanfeTexts, type DanfeRegion, type DanfeParsed } from "@/lib/danfe-ocr";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertTriangle, FileText, Loader2, Upload, Eye, Key, DollarSign, Calendar, Building, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
@@ -21,8 +21,15 @@ import {
   formatCnpj,
   formatPhone,
   formatCep,
+  formatCurrency,
+  isValidAccessKey,
   digitsOnly,
 } from "@/lib/br-validators";
+
+/** Resolução alvo da rasterização de PDF escaneado (≈300 DPI). */
+const TARGET_DPI = 300;
+/** Abaixo desta largura o OCR degrada — a imagem é reamostrada para cima. */
+const MIN_OCR_WIDTH = 1100;
 
 export type DanfeImportField = {
   field: string;
@@ -115,43 +122,218 @@ async function extractPdfText(file: File, onProgress?: (p: number) => void): Pro
   }
 }
 
-/** Renderiza uma página do PDF em imagem (fallback para PDF escaneado). */
-async function renderPdfPageImage(file: File, pageNumber = 1): Promise<File> {
+/**
+ * Renderiza páginas do PDF em canvas a ~300 DPI (resolução adequada para OCR).
+ * Um PDF escaneado rasterizado pequeno degrada o Tesseract — por isso a escala
+ * é calculada a partir do DPI alvo, e não de um multiplicador fixo.
+ */
+async function renderPdfPages(file: File, maxPages = 2): Promise<HTMLCanvasElement[]> {
   const pdfjs = await loadPdfjs();
   const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
   try {
-    const page = await doc.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: 2 });
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(viewport.width);
-    canvas.height = Math.round(viewport.height);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas indisponível para ler o PDF.");
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-    if (!blob) throw new Error("Não foi possível renderizar a página do PDF.");
-    return new File([blob], "danfe-render.png", { type: "image/png" });
+    const pages = Math.min(doc.numPages, maxPages);
+    const canvases: HTMLCanvasElement[] = [];
+    for (let i = 1; i <= pages; i++) {
+      const page = await doc.getPage(i);
+      const viewport = page.getViewport({ scale: TARGET_DPI / 72 });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(viewport.width);
+      canvas.height = Math.round(viewport.height);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas indisponível para ler o PDF.");
+      // Fundo branco: páginas com transparência ficariam pretas no OCR.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      canvases.push(canvas);
+    }
+    return canvases;
   } finally {
     await doc.destroy();
   }
 }
 
-/** OCR local (tesseract.js) — eng+por, sem chave de API. */
-async function ocrImage(
-  file: File,
-  onStatus?: (s: string) => void,
-  onProgress?: (p: number) => void,
-): Promise<string> {
-  onStatus?.("Reconhecendo o texto da imagem (OCR)... ");
-  const { recognize } = await import("tesseract.js");
-  const result = await recognize(file, "eng+por", {
+/** Carrega imagem (JPG/PNG) em canvas, garantindo resolução mínima para OCR. */
+async function loadImageCanvas(file: File): Promise<HTMLCanvasElement> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.max(1, MIN_OCR_WIDTH / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas indisponível para ler a imagem.");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  return canvas;
+}
+
+/**
+ * Pré-processamento para OCR: escala de cinza + estiramento de contraste.
+ * NÃO binariza nem satura a imagem: o Tesseract já aplica Otsu internamente e
+ * uma limiarização agressiva degrada textos com impressão fraca (o cenário
+ * exato do DANFE escaneado que falhou). Ruído e nitidez são tratados pelo
+ * próprio motor; aqui só corrigimos o que melhora o resultado.
+ */
+function preprocessForOcr(source: HTMLCanvasElement): HTMLCanvasElement {
+  const { width, height } = source;
+  if (!width || !height) return source;
+  const out = document.createElement("canvas");
+  out.width = width;
+  out.height = height;
+  const ctx = out.getContext("2d");
+  if (!ctx) return source;
+  ctx.drawImage(source, 0, 0);
+  const image = ctx.getImageData(0, 0, width, height);
+  const data = image.data;
+
+  // 1) Escala de cinza
+  let min = 255;
+  let max = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
+    data[i] = data[i + 1] = data[i + 2] = gray;
+    if (gray < min) min = gray;
+    if (gray > max) max = gray;
+  }
+
+  // 2) Estiramento de contraste (fundo de papel vira branco, texto ganha corpo)
+  const range = Math.max(1, max - min);
+  for (let i = 0; i < data.length; i += 4) {
+    const stretched = Math.min(255, Math.max(0, Math.round(((data[i] - min) * 255) / range)));
+    data[i] = data[i + 1] = data[i + 2] = stretched;
+  }
+
+  ctx.putImageData(image, 0, 0);
+  return out;
+}
+
+/** Rotaciona um canvas (90°/180°/270°) — usado só quando a 1ª tentativa sai vazia. */
+function rotateCanvas(source: HTMLCanvasElement, degrees: 90 | 180 | 270): HTMLCanvasElement {
+  const out = document.createElement("canvas");
+  const swap = degrees === 90 || degrees === 270;
+  out.width = swap ? source.height : source.width;
+  out.height = swap ? source.width : source.height;
+  const ctx = out.getContext("2d");
+  if (!ctx) return source;
+  ctx.translate(out.width / 2, out.height / 2);
+  ctx.rotate((degrees * Math.PI) / 180);
+  ctx.drawImage(source, -source.width / 2, -source.height / 2);
+  return out;
+}
+
+/** Recorta uma região da página (coordenadas relativas 0–1) para OCR por área. */
+function cropRegion(source: HTMLCanvasElement, region: DanfeRegion): HTMLCanvasElement | null {
+  const sx = Math.max(0, Math.round(region.x * source.width));
+  const sy = Math.max(0, Math.round(region.y * source.height));
+  const sw = Math.min(source.width - sx, Math.round(region.w * source.width));
+  const sh = Math.min(source.height - sy, Math.round(region.h * source.height));
+  if (sw < 80 || sh < 40) return null;
+  const out = document.createElement("canvas");
+  out.width = sw;
+  out.height = sh;
+  const ctx = out.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, sw, sh);
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
+  return out;
+}
+
+function canvasToFile(canvas: HTMLCanvasElement, name: string): Promise<File> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("Não foi possível preparar a imagem para o OCR."));
+        return;
+      }
+      resolve(new File([blob], name, { type: "image/png" }));
+    }, "image/png");
+  });
+}
+
+/**
+ * OCR local (tesseract.js) — eng+por, sem chave de API. Um único worker é
+ * reutilizado para a página inteira e para todas as regiões da DANFE.
+ */
+async function createOcrWorker(onProgress?: (p: number) => void): Promise<any> {
+  const { createWorker } = await import("tesseract.js");
+  return createWorker("eng+por", undefined, {
     logger: (m: any) => {
       if (m?.status === "recognizing text") {
         onProgress?.(Math.round((m.progress ?? 0) * 100));
       }
     },
   });
+}
+
+async function ocrImageWithWorker(
+  worker: any,
+  file: File,
+  options?: { region?: boolean },
+): Promise<string> {
+  // PSM 6 (bloco único) para os recortes; PSM 3 (automático) para a página.
+  await worker.setParameters({
+    tessedit_pageseg_mode: options?.region ? "6" : "3",
+    preserve_interword_spaces: "1",
+  });
+  const result = await worker.recognize(file);
   return result?.data?.text ?? "";
+}
+
+/**
+ * Pipeline de um canvas → texto: pré-processa, OCR a página inteira e, quando o
+ * reconhecimento veio pobre, tenta outras rotações antes de desistir.
+ */
+async function ocrCanvas(
+  worker: any,
+  canvas: HTMLCanvasElement,
+  onStatus?: (s: string) => void,
+): Promise<string> {
+  const processed = preprocessForOcr(canvas);
+  let text = await ocrImageWithWorker(worker, await canvasToFile(processed, "danfe.png"));
+  if (text.replace(/\s/g, "").length < 40) {
+    for (const degrees of [90, 180, 270] as const) {
+      onStatus?.(`Primeira leitura vazia — corrigindo rotação (${degrees}°)...`);
+      const rotated = rotateCanvas(processed, degrees);
+      const retry = await ocrImageWithWorker(worker, await canvasToFile(rotated, `danfe-${degrees}.png`));
+      if (retry.replace(/\s/g, "").length > text.replace(/\s/g, "").length) text = retry;
+      if (text.replace(/\s/g, "").length >= 40) break;
+    }
+  }
+  return text;
+}
+
+/**
+ * OCR por REGIÕES da DANFE (cabeçalho, emitente, chave, destinatário,
+ * produtos, totais, dados adicionais). Roda em ADDIÇÃO à página inteira: o
+ * Tesseract lê muito melhor um bloco pequeno do que a página toda.
+ */
+async function ocrDanfeRegions(
+  worker: any,
+  canvas: HTMLCanvasElement,
+  onStatus?: (s: string) => void,
+): Promise<string[]> {
+  const texts: string[] = [];
+  for (const region of DANFE_REGIONS) {
+    const crop = cropRegion(canvas, region);
+    if (!crop) continue;
+    onStatus?.(`Lendo região: ${region.label}...`);
+    try {
+      const text = await ocrImageWithWorker(
+        worker,
+        await canvasToFile(crop, `danfe-${region.key}.png`),
+        { region: true },
+      );
+      if (text.trim()) texts.push(text);
+    } catch {
+      // Região opcional: falha aqui não invalida o resto da leitura.
+    }
+  }
+  return texts;
 }
 
 export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: DanfeImportDialogProps) {
@@ -201,29 +383,68 @@ export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: Dan
     setStep("ocr");
     setOcrProgress(0);
     setOcrStatus("Preparando a leitura do documento...");
+    let worker: any = null;
     try {
       const isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
       let text = "";
+      const canvases: HTMLCanvasElement[] = [];
 
       if (isPdf) {
         setOcrStatus("Lendo o texto do PDF...");
         text = await extractPdfText(f, setOcrProgress);
-        // PDF sem camada de texto (digitalizado) → renderiza e faz OCR.
-        if (text.replace(/\s/g, "").length < 80) {
-          setOcrStatus("PDF digitalizado — convertendo página em imagem...");
-          const image = await renderPdfPageImage(f);
-          text = await ocrImage(image, setOcrStatus, setOcrProgress);
+        // PDF sem camada de texto (digitalizado) → rasteriza a ~300 DPI e faz OCR.
+        if (!hasUsableTextLayer(text)) {
+          setOcrStatus("PDF digitalizado — rasterizando as páginas em ~300 DPI...");
+          canvases.push(...(await renderPdfPages(f)));
+          worker = await createOcrWorker(setOcrProgress);
+          const pageTexts: string[] = [];
+          for (const canvas of canvases) {
+            pageTexts.push(await ocrCanvas(worker, canvas, setOcrStatus));
+          }
+          text = pageTexts.join("\n");
         }
       } else {
-        text = await ocrImage(f, setOcrStatus, setOcrProgress);
+        setOcrStatus("Preparando a imagem para o OCR (mínimo de resolução)...");
+        canvases.push(await loadImageCanvas(f));
+        worker = await createOcrWorker(setOcrProgress);
+        text = await ocrCanvas(worker, canvases[0], setOcrStatus);
+      }
+
+      let result = parseDanfeText(text);
+      let summary = result.ok
+        ? danfeFieldSummary(result)
+        : { found: 0, total: 10, missing: [] as string[] };
+
+      // OCR por REGIÕES (§8): quando a página inteira não bastou, os blocos da
+      // DANFE são lidos individualmente — o Tesseract acerta muito mais em
+      // blocos pequenos (chave de acesso, emitente, itens, dados adicionais).
+      const canvas = canvases[0];
+      if (canvas && (!result.ok || summary.found < summary.total)) {
+        if (!worker) worker = await createOcrWorker(setOcrProgress);
+        const regionTexts = await ocrDanfeRegions(worker, canvas, setOcrStatus);
+        if (regionTexts.length > 0) {
+          const merged = mergeDanfeTexts(text, regionTexts);
+          const retry = parseDanfeText(merged);
+          if (retry.ok) {
+            const retrySummary = danfeFieldSummary(retry);
+            // Só adota se não piorar o conjunto de campos identificados.
+            if (!result.ok || retrySummary.found >= summary.found) {
+              result = retry;
+              summary = retrySummary;
+              text = merged;
+            }
+          }
+        }
       }
 
       setOcrProgress(100);
       setOcrStatus("Analisando os dados da NF-e...");
-      const result = parseDanfeText(text);
-      if (!result.ok || (!result.accessKey && !result.nfeNumber)) {
+      // §10 — falha total APENAS quando nada relevante foi identificado.
+      // OCR parcial (ex.: 7 de 10 campos) segue para conferência: o usuário
+      // corrige e confirma. O OCR é um assistente, nunca o fim do processo.
+      if (!result.ok || summary.found === 0) {
         setError(
-          "Não foi possível identificar os dados da NF-e nesta DANFE. Verifique se o documento é legível ou importe o XML da NF-e.",
+          "Não foi possível identificar nenhum dado da NF-e nesta DANFE. Verifique se o documento é legível, importe o XML da NF-e ou use a entrada manual — nada foi perdido.",
         );
         setStep("upload");
         return;
@@ -237,6 +458,12 @@ export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: Dan
           "Não foi possível ler o arquivo. Verifique se ele é um PDF ou imagem válido e tente novamente.",
       );
       setStep("upload");
+    } finally {
+      try {
+        await worker?.terminate?.();
+      } catch {
+        // worker já finalizado — nada a fazer
+      }
     }
   };
 
@@ -277,6 +504,13 @@ export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: Dan
     };
   }, [createSupplierOpen, parsed]);
 
+  // §10 — conferência parcial: quantos campos centrais o OCR identificou.
+  // OCR parcial NÃO é falha: o usuário corrige o que faltou e confirma.
+  const fieldSummary = useMemo(
+    () => (parsed ? danfeFieldSummary({ ok: true, ...parsed } as DanfeParsed) : null),
+    [parsed],
+  );
+
   const confirmImport = () => {
     if (!parsed) return;
     // Apenas entrega os dados à tela de conferência — nada de estoque aqui.
@@ -299,8 +533,7 @@ export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: Dan
         { field: "emitterState", label: "UF do emitente", value: parsed.emitterState ?? "—", icon: MapPin },
         { field: "emitterPostalCode", label: "CEP do emitente", value: parsed.emitterPostalCode ? formatCep(parsed.emitterPostalCode) : "—", icon: MapPin },
         { field: "receiverCnpj", label: "CNPJ do destinatário", value: parsed.receiverCnpj ? formatCnpj(parsed.receiverCnpj) : "—", icon: Building },
-        { field: "receiverName", label: "Razão social do destinatário", value: parsed.receiverName ?? "—", icon: Building },
-        { field: "totalValue", label: "Valor total", value: parsed.totalValue ? `R$ ${parsed.totalValue.toFixed(2).replace(".", ",")}` : "—", icon: DollarSign },
+        { field: "receiverName", label: "Razão social do destinatário", value: parsed.receiverName ?? "—", icon: Building },        {field: "totalValue", label: "Valor total", value: parsed.totalValue != null ? formatCurrency(parsed.totalValue) : "—", icon: DollarSign },
       ]
     : [];
 
@@ -377,6 +610,29 @@ export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: Dan
                   : "Chave de acesso não identificada"}
               </Badge>
             </div>
+
+            {/* §10 — conferência parcial: "Dados identificados: X de 10 campos".
+                O que faltou é apenas um campo a preender na conferência, nunca
+                um motivo para descartar a DANFE inteira. */}
+            {fieldSummary && (
+              <div
+                className={`rounded-lg border p-3 text-xs ${
+                  fieldSummary.missing.length === 0
+                    ? "border-emerald-200 bg-emerald-50/60 text-emerald-800"
+                    : "border-amber-200 bg-amber-50/60 text-amber-800"
+                }`}
+              >
+                <p className="font-medium">
+                  Dados identificados: {fieldSummary.found} de {fieldSummary.total} campos
+                </p>
+                {fieldSummary.missing.length > 0 && (
+                  <p className="mt-1">
+                    Não reconhecido(s): {fieldSummary.missing.join(", ")}. Você pode informar ou corrigir
+                    esses dados na conferência — nada é criado sem a sua confirmação.
+                  </p>
+                )}
+              </div>
+            )}
 
             {!parsed.accessKey && (
               <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 flex items-start gap-2">
@@ -516,10 +772,10 @@ export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: Dan
                               {item.unit ? ` ${item.unit}` : ""}
                             </TableCell>
                             <TableCell className="text-right font-mono">
-                              {item.unitValue != null ? `R$ ${item.unitValue.toFixed(2).replace(".", ",")}` : "—"}
+                              {item.unitValue != null ? formatCurrency(item.unitValue) : "—"}
                             </TableCell>
                             <TableCell className="text-right font-mono">
-                              {item.totalValue != null ? `R$ ${item.totalValue.toFixed(2).replace(".", ",")}` : "—"}
+                              {item.totalValue != null ? formatCurrency(item.totalValue) : "—"}
                             </TableCell>
                           </TableRow>
                         ))}
@@ -529,7 +785,7 @@ export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: Dan
                   <div className="mt-3 pt-3 border-t flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Total geral:</span>
                     <span className="font-medium font-mono">
-                      {parsed.totalValue != null ? `R$ ${parsed.totalValue.toFixed(2).replace(".", ",")}` : "—"}
+                      {parsed.totalValue != null ? formatCurrency(parsed.totalValue) : "—"}
                     </span>
                   </div>
                 </CardContent>
@@ -575,10 +831,10 @@ export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: Dan
                     </Button>
                   )}
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  {digitsOnly(parsed.accessKey ?? "").length === 44
-                    ? "44 dígitos conferidos — valor normalizado no banco"
-                    : `${digitsOnly(parsed.accessKey ?? "").length} de 44 dígitos`}
+                <p className={`text-[10px] mt-1 ${isValidAccessKey(parsed.accessKey ?? "") ? "text-muted-foreground" : "text-amber-700"}`}>
+                  {isValidAccessKey(parsed.accessKey ?? "")
+                    ? "44 dígitos conferidos — estrutura válida, valor normalizado no banco"
+                    : `${digitsOnly(parsed.accessKey ?? "").length} de 44 dígitos — confira a chave com o documento`}
                 </p>
               </CardContent>
             </Card>

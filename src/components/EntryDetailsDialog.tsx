@@ -4,6 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { FileUpload } from "@/components/FileUpload";
 import { MATERIAL_TYPE_LABELS, PATRIMONY_STATUS_LABELS, type MaterialType, type PatrimonyStatus } from "@/lib/material-types";
 import { NO_AREA_LABEL } from "@/lib/stock-areas";
+import { formatCurrency } from "@/lib/br-validators";
 
 export function EntryDetailsDialog({ entry, statusLabels, statusColors, originLabels, onClose }: {
   entry: any;
@@ -26,12 +27,13 @@ export function EntryDetailsDialog({ entry, statusLabels, statusColors, originLa
             <div><span className="text-muted-foreground">Responsável:</span> {entry.responsible?.name ?? "—"}</div>
             {entry.supplier && <div><span className="text-muted-foreground">Fornecedor:</span> {entry.supplier.legalName}</div>}
             {entry.invoiceNumber && <div><span className="text-muted-foreground">NF:</span> {entry.invoiceNumber}</div>}
-            {entry.invoiceDate && <div><span className="text-muted-foreground">Data NF:</span> {entry.invoiceDate}</div>}
+            {entry.invoiceDate && <div><span className="text-muted-foreground">Data de emissão da NF-e:</span> {entry.invoiceDate}</div>}
             {entry.series && <div><span className="text-muted-foreground">Série:</span> {entry.series}</div>}
-            {entry.totalValue != null && <div><span className="text-muted-foreground">Valor total NF:</span> R$ {entry.totalValue.toFixed(2)}</div>}
+            {entry.totalValue != null && <div><span className="text-muted-foreground">Valor total NF:</span> {formatCurrency(entry.totalValue)}</div>}
             {entry.accessKey && <div className="col-span-2"><span className="text-muted-foreground">Chave de acesso:</span> <span className="font-mono text-xs break-all">{entry.accessKey}</span></div>}
             {entry.purchaseAuthorizationNumber && <div><span className="text-muted-foreground">AF:</span> {entry.purchaseAuthorizationNumber}</div>}
-            {entry.processNumber && <div><span className="text-muted-foreground">Processo:</span> {entry.processNumber}</div>}
+            {entry.processNumber && <div><span className="text-muted-foreground">Processo Administrativo:</span> {entry.processNumber}</div>}
+            {entry.empenhoNumber && <div><span className="text-muted-foreground">Empenho:</span> {entry.empenhoNumber}</div>}
             {entry.contractNumber && <div><span className="text-muted-foreground">Contrato:</span> {entry.contractNumber}</div>}
           </div>
           {entry.observation && <div className="text-sm"><span className="text-muted-foreground">Observação:</span> {entry.observation}</div>}

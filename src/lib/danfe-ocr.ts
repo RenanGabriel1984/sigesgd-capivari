@@ -168,31 +168,38 @@ export function parseDanfeText(text: string): DanfeParsed {
     if (emissionDate) break;
   }
 
+  // O bloco do EMITENTE termina onde começa o destinatário (quando o documento
+  // traz esse marcador). Sem isso, o CNPJ/razão social do destinatário podiam
+  // ser lidos como se fossem do emitente — exatamente o que derrubou a DANFE
+  // escaneada da Incotech no teste real.
+  const receiverStart = normalized.search(/\b(DESTINAT[ÁA]RIO|REMETENTE|CLIENTE|ADRESSEE)\b/i);
+  const emitenteScope = receiverStart > 0 ? normalized.slice(0, receiverStart) : normalized;
+
   // 5) CNPJ do emitente (com ou sem máscara — o OCR pode perder a pontuação)
-  const emitterCnpj = extractCnpj(normalized, /(?:CNPJ\s*(?:do\s*)?Emitente\s*:?\s*|CNPJ\s*:?\s*|(?:emitente|emissor)[^0-9]{0,30})(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14})/i);
+  const emitterCnpj = extractCnpj(emitenteScope, /(?:CNPJ\s*(?:do\s*)?Emitente\s*:?\s*|CNPJ\s*:?\s*|(?:emitente|emissor)[^0-9]{0,30})(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14})/i);
 
   // 6) Razão social do emitente (após CNPJ; fallback: primeira linha após o CNPJ)
   const emitterName =
-    extractAfter(normalized, /(?:Nome\s*(?:de\s*)?(?:Raz[ãa]o\s*)?(?:Social\s*)?(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|Raz[ãa]o\s*Social\s*:?\s*|Empresa\s*:?\s*)/i) ??
-    extractNameAfterCnpj(normalized, emitterCnpj);
+    extractAfter(emitenteScope, /(?:Nome\s*(?:de\s*)?(?:Raz[ãa]o\s*)?(?:Social\s*)?(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|Raz[ãa]o\s*Social\s*:?\s*|Empresa\s*:?\s*)/i) ??
+    extractNameAfterCnpj(emitenteScope, emitterCnpj);
 
   // 7) Telefone do emitente
-  const emitterPhone = extractPhone(normalized, /(?:Telefone|Tel|Fone|Phone|T [eE]l)[^0-9]{0,30}?\(?(\d{2})\)?\s?(\d{4,5}[- ]?\d{4})/i);
+  const emitterPhone = extractPhone(emitenteScope, /(?:Telefone|Tel|Fone|Phone|T [eE]l)[^0-9]{0,30}?\(?(\d{2})\)?\s?(\d{4,5}[- ]?\d{4})/i);
 
   // 8) E-mail do emitente
-  const emitterEmail = extractEmail(normalized, /(?:E-mail|Email|e-mail|Mail)[^@\s]{0,30}?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
+  const emitterEmail = extractEmail(emitenteScope, /(?:E-mail|Email|e-mail|Mail)[^@\s]{0,30}?([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
 
   // 9) Endereço do emitente
-  const emitterAddress = extractAfter(normalized, /(?:Endere[çc]o\s*(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|Endere[çc]o\s*:?\s*)/i);
+  const emitterAddress = extractAfter(emitenteScope, /(?:Endere[çc]o\s*(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|Endere[çc]o\s*:?\s*)/i);
 
   // 10) Cidade do emitente
-  const emitterCity = extractAfter(normalized, /(?:Cidade\s*(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|Cidade\s*:?\s*)/i);
+  const emitterCity = extractAfter(emitenteScope, /(?:Cidade\s*(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|Cidade\s*:?\s*)/i);
 
   // 11) UF do emitente (busca estado por sigla após cidade ou na linha de endereço)
-  const emitterState = extractState(normalized);
+  const emitterState = extractState(emitenteScope);
 
   // 12) CEP do emitente
-  const emitterPostalCode = extractCep(normalized, /(?:CEP\s*(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|CEP\s*:?\s*)/i);
+  const emitterPostalCode = extractCep(emitenteScope, /(?:CEP\s*(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|CEP\s*:?\s*)/i);
 
   // 13) CNPJ do destinatário/receptor — rótulo específico; sem rótulo,
   //     considera apenas um SEGUNDO CNPJ distinto do documento (nunca repete
@@ -277,17 +284,28 @@ function extractNameAfterCnpj(text: string, cnpj: string | undefined): string | 
   const cnpjDigits = digitsOnly(cnpj);
   if (!cnpjDigits) return undefined;
   const lines = text.split("\n");
+
+  const looksLikeCompanyName = (candidate: string): boolean => {
+    const value = candidate.trim();
+    if (value.length < 4 || value.length > 80) return false;
+    if (!/[A-Za-zÀ-ú]{4,}/.test(value)) return false;
+    // Nome de empresa não traz dígito (endereço, telefone e CNPJ têm).
+    if (/\d/.test(value)) return false;
+    return !/^(CEP|CNPJ|Insc|I\.?E|Tel|Fone|E-mail|Endere|Nº|N[úu]m|RUA|AVENIDA|AV\.?|RODOVIA|ESTRADA|TRAVESSA|ALAMEDA|BAIRRO|COMPLEMENTO|X\s*NOME|NOME|DANFE|DOCUMENTO)/i.test(value);
+  };
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
     if (!line.includes(cnpjDigits) && !line.includes(cnpj)) continue;
+    // 1) Layout canônico da DANFE: o nome vem ACIMA do CNPJ.
+    for (let j = i - 1; j >= Math.max(0, i - 3); j--) {
+      const candidate = lines[j] ?? "";
+      if (looksLikeCompanyName(candidate)) return candidate.trim();
+    }
+    // 2) Fallback: primeiras linhas textuais DEPOIS do CNPJ.
     for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
-      const candidate = (lines[j] ?? "").trim();
-      if (!candidate || candidate.length < 4) continue;
-      if (!/[A-Za-zÀ-ú]{4,}/.test(candidate)) continue;
-      // Endereço/CNPJ/valor não são nome de empresa.
-      if (/\d{3,}/.test(candidate) && !/[A-Za-zÀ-ú]/.test(candidate.replace(/\d+/g, ""))) continue;
-      if (/^(CEP|CNPJ|Insc|I\.E|Tel|Fone|E-mail|Endere|Nº|N[úu]m)/i.test(candidate)) continue;
-      return candidate;
+      const candidate = lines[j] ?? "";
+      if (looksLikeCompanyName(candidate)) return candidate.trim();
     }
   }
   return undefined;
@@ -303,31 +321,37 @@ function extractNameAfterCnpj(text: string, cnpj: string | undefined): string | 
  */
 function extractAccessKey(text: string): string | undefined {
   const candidates: string[] = [];
+  const pushIfComplete = (digits: string) => {
+    if (digits.length === 44) candidates.push(digits);
+  };
 
   // a) 44 dígitos contíguos
   const contiguous = text.match(/\b(\d{44})\b/);
   if (contiguous?.[1]) candidates.push(contiguous[1]);
 
-  // b) 11 grupos de 4 dígitos separados por espaço/quebra de linha (DANFE impressa)
-  for (const grouped of text.match(/(?:\d{4}[\s]?){11}/g) ?? []) {
-    const d = digitsOnly(grouped);
-    if (d.length === 44) candidates.push(d);
+  // b) 11 GRUPOS de 4 dígitos (DANFE impressa), inclusive com quebra de linha
+  //    entre os blocos. Todos os alinhamentos são testados — o número da NF
+  //    (4 dígitos) imediatamente acima da chave não pode "desalinhar" a leitura.
+  const groupTokens = text.match(/\d{4}(?!\d)/g) ?? [];
+  for (let i = 0; i + 11 <= groupTokens.length; i++) {
+    pushIfComplete(groupTokens.slice(i, i + 11).join(""));
   }
 
-  // c) tolerância a perda de separadores do OCR: sequência de dígitos com
-  //    espaços/pontos/hífens opcionais totalizando exatamente 44
-  for (const loose of text.match(/\d(?:[\s.\-]?\d){43}/g) ?? []) {
-    const d = digitsOnly(loose);
-    if (d.length === 44) candidates.push(d);
-  }
+  // c) tolerância a perda de separadores do OCR: espaços, pontos, hífens e
+  //    quebras de linha opcionais entre os 44 dígitos (sobreposição incluída).
+  const collectLoose = (src: string) => {
+    for (const m of src.matchAll(/\d(?=(?:[\s.\-]?\d){43})/g)) {
+      const start = m.index ?? 0;
+      const window = src.slice(start).match(/\d(?:[\s.\-]?\d){43}/)?.[0];
+      if (window) pushIfComplete(digitsOnly(window));
+    }
+  };
+  collectLoose(text);
 
   // d) OCR confundindo letras com dígitos ("O" por "0", "S" por "5", ...):
   //    reaplica a busca sobre o texto com os glifos corrigidos.
   const digitized = text.replace(/[OoDdIliIZzSsGgBbqQ]/g, (ch) => GLYPH_TO_DIGIT[ch] ?? ch);
-  for (const m of digitized.match(/\d(?:[\s.\-]?\d){43}/g) ?? []) {
-    const d = digitsOnly(m);
-    if (d.length === 44) candidates.push(d);
-  }
+  collectLoose(digitized);
 
   // Primeira sequência com ESTRUTURA válida (§9: validar antes de aceitar).
   for (const candidate of candidates) {
@@ -457,15 +481,16 @@ function extractTotalValue(text: string): number | undefined {
     if (n !== undefined) return n;
   }
 
-  // fallback 1: último valor monetário precedido de R$
-  const withSymbol = [...text.matchAll(/R\$\s*(\d{1,3}(?:\.\d{3})*(?:[,.]\d{2})?)/gi)];
+  // fallback 1: último valor monetário precedido de R$ (com centavos)
+  const withSymbol = [...text.matchAll(/R\$\s*(\d{1,3}(?:\.\d{3})*,\d{2})/gi)];
   if (withSymbol.length > 0) {
     const n = parse(withSymbol[withSymbol.length - 1]?.[1]);
     if (n !== undefined) return n;
   }
 
-  // fallback 2: último número com casas decimais plausível
-  const anyNumber = [...text.matchAll(/\b(\d{1,3}(?:\.\d{3})*(?:[,.]\d{2})?)\b/g)];
+  // fallback 2: último número no padrão brasileiro (vírgula decimal). Exige a
+  // vírgula para não confundir CNPJ/CEP/chave ("61.457.941") com valor.
+  const anyNumber = [...text.matchAll(/(?:^|[^\d./-])(\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{2})(?![\d/])/gm)];
   if (anyNumber.length > 0) {
     const n = parse(anyNumber[anyNumber.length - 1]?.[1]);
     if (n !== undefined) return n;

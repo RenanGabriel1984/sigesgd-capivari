@@ -144,6 +144,10 @@ describe("R2 — NF-e: regras fiscais (testes unitários reais)", () => {
   });
 
   it("R2-15: conferência da NF mostra a categoria do material (fornecedor ≠ categoria)", () => {
-    expect(ENTRIES).toContain("products?.find((p: any) => p._id === r.productId)?.category?.name");
+    // A tabela de revisão foi extraída para o componente NfeReviewTable —
+    // a categoria continua exibida ao lado do produto associado.
+    const REVIEW_TABLE = read("src/components/NfeReviewTable.tsx");
+    expect(ENTRIES).toContain("<NfeReviewTable");
+    expect(REVIEW_TABLE).toContain("products.find((product) => product._id === review.productId)?.category?.name");
   });
 });

@@ -147,6 +147,12 @@ describe("Entries.tsx — conferência da NF-e", () => {
   });
 
   it("dropdown 'Selecionar fornecedor' exibe o CNPJ para desambiguar cadastros", () => {
-    expect(ENTRIES).toContain("${s.legalName} — ${formatCnpj(s.cnpj)}");
+    // Item do dropdown em duas linhas: razão social + CNPJ formatado.
+    expect(ENTRIES).toContain("CNPJ: ${formatCnpj(s.cnpj)}");
+    expect(ENTRIES).toContain("textValue={s.legalName}");
+    // O valor selecionado também mostra razão social (com truncate) + CNPJ,
+    // contido no próprio componente (não invade o campo Nº da NF).
+    expect(ENTRIES).toContain("<SupplierSelectValue");
+    expect(ENTRIES).toContain("min-w-0 truncate");
   });
 });
