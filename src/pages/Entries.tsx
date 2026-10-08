@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,17 +11,14 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, ShoppingCart, CheckCircle, RotateCcw, Eye, Trash2, ExternalLink, Save, Pencil, FileUp, FileText, FileImage, Loader2 } from "lucide-react";
-import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Plus, ShoppingCart, CheckCircle, RotateCcw, Eye, Trash2, Save, Pencil, FileUp, FileImage, Loader2, HelpCircle } from "lucide-react";
 import { IMPLEMENTATION_STOCK_DATE } from "@/convex/stockHelpers";
 import {
   MATERIAL_TYPE_LABELS,
   PATRIMONY_STATUS_LABELS,
-  PATRIMONY_STATUS_VALUES,
   validateEntryUnits,
   type MaterialType,
-  type PatrimonyStatus,
   type PatrimonyUnitDraft,
 } from "@/lib/material-types";
 import { NO_AREA_LABEL } from "@/lib/stock-areas";
@@ -35,19 +32,42 @@ import { NfeDestinationDialog } from "@/components/NfeDestinationDialog";
 import { FileUpload } from "@/components/FileUpload";
 import { EntryDetailsDialog } from "@/components/EntryDetailsDialog";
 import { PatrimonyUnitsEditor } from "@/components/PatrimonyUnitsEditor";
-import { NewEntryItemsEditor } from "@/components/NewEntryItemsEditor";
 import { EditEntryItemCard } from "@/components/EditEntryItemCard";
-import { NfeReviewTable } from "@/components/NfeReviewTable";
 import { SupplierForm } from "@/components/SupplierForm";
 import { DanfeImportDialog, type DanfeParsedData } from "@/components/DanfeImportDialog";
 import { toast } from "sonner";
 import {
-  parseNfeXml, findSupplierMatch, findEntryByAccessKey, matchNfeProduct,
-  buildEntryDraftFromNfe, mapNfeUnit, formatCnpj, canContinueNfeReview,
-  extractNfeProductHints, reconcileNfeReviewMatches, digitsOnly, findDuplicateEntry,
-  type NfeData, type NfeItem, type ProductMatchStatus, type ProductMatchSource,
+  parseNfeXml,
+  findSupplierMatch,
+  findEntryByAccessKey,
+  buildEntryDraftFromNfe,
+  mapNfeUnit,
+  canContinueNfeReview,
+  extractNfeProductHints,
+  reconcileNfeReviewMatches,
+  digitsOnly,
+  findDuplicateEntry,
+  type NfeData,
+  type NfeItem,
+  type ProductMatchStatus,
+  type ProductMatchSource,
   type ProductAssociationType,
 } from "@/lib/nfe";
+import {
+  formatCnpj,
+  formatPhone,
+  formatAccessKeyGrouped,
+  formatCurrency,
+  cnpjFrom,
+  phoneFrom,
+  cepFrom,
+  normalizeCnpj,
+  normalizePhone,
+  normalizeCep,
+  normalizeAccessKey,
+  currencyRe,
+  normalizeCurrency,
+} from "@/lib/br-validators";
 
 const ORIGIN_LABELS: Record<string, string> = {
   purchase: "Compra", donation: "Doação", transfer: "Transferência",
@@ -71,6 +91,21 @@ const optionalNumber = (value?: string): number | undefined => {
   const parsed = Number(value);
   return isFinite(parsed) ? parsed : undefined;
 };
+
+function SupplierChip({ name, cnpj }: { name: string; cnpj: string }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1.5 rounded-md border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] ring-1 ring-transparent hover:ring-foreground/10 focus-visible:ring-foreground/20">
+      <span className="line-clamp-1 truncate flex-1 min-w-0 text-foreground">
+        {name}
+      </span>
+      {cnpj && (
+        <span className="tabular-nums text-muted-foreground">
+          {formatCnpj(cnpj)}
+        </span>
+      )}
+    </span>
+  );
+}
 
 export default function Entries() {
   const entries = useQuery(api.entries.list);
@@ -106,14 +141,22 @@ export default function Entries() {
   const [cReceivedAt, setCReceivedAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [cOriginType, setcOriginType] = useState("purchase");
   const [cSupplierId, setcSupplierId] = useState("");
+  const [cSupplierName, setcSupplierName] = useState("");
+  const [cSupplierCnpj, setcSupplierCnpj] = useState("");
   const [cInvoiceNumber, setcInvoiceNumber] = useState("");
   const [cInvoiceDate, setcInvoiceDate] = useState("");
   const [cPurchaseAuth, setcPurchaseAuth] = useState("");
+  const [cAfNumber, setcAfNumber] = useState("");
+  const [cAdministrativeProcessNumber, setcAdministrativeProcessNumber] = useState("");
+  const [cEmpenhoNumber, setcEmpenhoNumber] = useState("");
   const [cProcessNumber, setcProcessNumber] = useState("");
   const [cContractNumber, setcContractNumber] = useState("");
   const [cObservation, setcObservation] = useState("");
   const [cDocStorageId, setcDocStorageId] = useState("");
   const [cItems, setCItems] = useState<EntryItemDraft[]>([{ ...EMPTY_ITEM }]);
+  const cSupplierLockRef = useRef<string | undefined>(undefined);
+  const cSupplierLockedNameRef = useRef<string>("");
+  const cSupplierLockedCnpjRef = useRef<string>("");
   // Classificação da entrada: tipo de material + área/subestoque
   // (a área é ESCOLHA do usuário — fornecedor/categoria não a definem)
   const [cMaterialType, setCMaterialType] = useState<MaterialType>("consumption");
@@ -180,6 +223,9 @@ export default function Entries() {
   const [nfeSupplierFound, setNfeSupplierFound] = useState(true);
   const [nfeSupplierSuggestion, setNfeSupplierSuggestion] = useState<{ id: string; name: string } | null>(null);
   const nfeSupplier = nfeSupplierId ? suppliers?.find((s) => s._id === nfeSupplierId) : undefined;
+  const [nfeAfNumber, setNfeAfNumber] = useState("");
+  const [nfeProcessNumber, setNfeProcessNumber] = useState("");
+  const [nfeEmpenhoNumber, setNfeEmpenhoNumber] = useState("");
   const [nfeContract, setNfeContract] = useState("");
   const [importLocationId, setImportLocationId] = useState(""); // destino padrão da importação
   const [importDocStorageId, setImportDocStorageId] = useState("");
@@ -228,13 +274,18 @@ export default function Entries() {
   });
 
   // ─── Helpers ───
-  const resetCreateForm = () => {
+  const resetCreateForm = useCallback(() => {
     setCReceivedAt(new Date().toISOString().slice(0, 10));
-    setcOriginType("purchase"); setcSupplierId(""); setcInvoiceNumber(""); setcInvoiceDate("");
-    setcPurchaseAuth(""); setcProcessNumber(""); setcContractNumber(""); setcObservation("");
+    setcOriginType("purchase"); setcSupplierId(""); setcSupplierName(""); setcSupplierCnpj("");
+    setcInvoiceNumber(""); setcInvoiceDate("");
+    setcPurchaseAuth(""); setcAfNumber(""); setcAdministrativeProcessNumber(""); setcEmpenhoNumber(""); setcContractNumber(""); setcObservation("");
     setcDocStorageId(""); setCItems([{ ...EMPTY_ITEM }]);
     setCMaterialType("consumption"); setCAreaId("");
-  };
+    cSupplierRef.current = undefined;
+    cSupplierLegalNameRef.current = "";
+    cSupplierCnpjRef.current = "";
+  }, []);
+  if (!resetCreateForm) return null;
 
   const openEditDialog = useCallback((entry: any) => {
     seteDocStorageId(entry.documentStorageId ?? "");
@@ -308,9 +359,17 @@ export default function Entries() {
         receivedAt: new Date(cReceivedAt + "T12:00:00").getTime(),
         originType: cOriginType as any,
         supplierId: cSupplierId ? (cSupplierId as any) : undefined,
-        invoiceNumber: cInvoiceNumber || undefined, invoiceDate: cInvoiceDate || undefined,
-        purchaseAuthorizationNumber: cPurchaseAuth || undefined, processNumber: cProcessNumber || undefined,
-        contractNumber: cContractNumber || undefined, observation: cObservation || undefined,
+        supplierLegalName: cSupplierName || undefined,
+        supplierCnpj: cSupplierCnpj || undefined,
+        invoiceNumber: cInvoiceNumber || undefined,
+        invoiceDate: cInvoiceDate || undefined,
+        purchaseAuthorizationNumber: cPurchaseAuth || undefined,
+        afNumber: cAfNumber || undefined,
+        processNumber: cProcessNumber || undefined,
+        administrativeProcessNumber: cAdministrativeProcessNumber || undefined,
+        empenhoNumber: cEmpenhoNumber || undefined,
+        contractNumber: cContractNumber || undefined,
+        observation: cObservation || undefined,
         documentStorageId: cDocStorageId || undefined,
         materialType: cMaterialType,
         areaId: cAreaId ? (cAreaId as any) : undefined,
@@ -544,7 +603,8 @@ export default function Entries() {
   const resetImport = () => {
     setImportStep("file"); setImportLoading(false); setImportSaving(false); setImportError("");
     setNfe(null); setNfeXmlFile(null); setNfeItems([]); setNfeSupplierId(""); setNfeSupplierFound(true); setNfeSupplierSuggestion(null);
-    setNfeContract(""); setImportLocationId(""); setImportDocStorageId(""); setImportObservation("");
+    setNfeAfNumber(""); setNfeProcessNumber(""); setNfeEmpenhoNumber(""); setNfeContract("");
+    setImportLocationId(""); setImportDocStorageId(""); setImportObservation("");
     setNfeMaterialType("consumption"); setNfeAreaId("");
     nfeDestConfirmedRef.current = false; setNfeDestOpen(false);
     setProductModalTarget(null);
@@ -588,6 +648,11 @@ export default function Entries() {
           : null
       );
       setNfeContract(parsed.orderReference ?? "");
+      // A DANFE da Incotech não traz número de processo em documento legível;
+      // AF e empenho vêm do OCR, processo é deixado em branco (não inventar).
+      setNfeAfNumber(parsed.additionalReference1 ?? "");
+      setNfeProcessNumber("");
+      setNfeEmpenhoNumber(parsed.additionalReference2 ?? "");
       const initialItems: NfeReviewItem[] = parsed.items.map((item) => ({
         item,
         productId: "",
@@ -690,9 +755,13 @@ export default function Entries() {
         supplierId: supplierId || undefined,
         aliases: nfeAliases ?? [],
       }),
-    );
-    setImportObservation("Dados extraídos por OCR de DANFE/PDF/imagem — conferir antes de confirmar.");
-    setImportStep("review");
+    );      setImportObservation(
+        "Dados extraídos por OCR de DANFE/PDF/imagem — conferir antes de confirmar.",
+      );
+      setNfeAfNumber("");
+      setNfeProcessNumber("");
+      setNfeEmpenhoNumber("");
+      setImportStep("review");
     setImportOpen(true);
     toast.success("DANFE lida com sucesso. Confira os dados e a associação dos itens.");
   };
@@ -804,10 +873,20 @@ export default function Entries() {
         originType: "purchase" as any,
         supplierId: draft.supplierId ? (draft.supplierId as any) : undefined,
         invoiceNumber: draft.invoiceNumber, invoiceDate: draft.invoiceDate, series: draft.series,
-        contractNumber: draft.contractNumber, observation: draft.observation,
+        contractNumber: draft.contractNumber,
+        observation: draft.observation,
         documentStorageId: draft.documentStorageId,
-        accessKey: draft.accessKey, totalValue: draft.totalValue,
-        xmlStorageId: draft.xmlStorageId, importedFromXml: true,
+        accessKey: draft.accessKey,
+        totalValue: draft.totalValue,
+        // Os três identificadores fiscais da NF-e são campos distintos:
+        // AF (Conhecimento de Admissão), processo administrativo e empenho.
+        // Para a DANFE Incotech: AF 2223/2026, Empenho 778/2026, sem processo.
+        purchaseAuthorizationNumber: draft.purchaseAuthorizationNumber,
+        afNumber: draft.afNumber,
+        administrativeProcessNumber: draft.administrativeProcessNumber,
+        empenhoNumber: draft.empenhoNumber,
+        xmlStorageId: draft.xmlStorageId,
+        importedFromXml: true,
         // Destino resolvido (override > estado). Enviado SEMPRE explicitamente:
         // a escolha "Material permanente" nunca pode virar "consumption".
         materialType: destinationPayload.materialType,
@@ -900,6 +979,7 @@ export default function Entries() {
             supplierName={nfeSupplier?.legalName ?? nfe?.emitterName ?? null}
             supplierCnpj={nfeSupplier?.cnpj ?? nfe?.emitterCnpj ?? null}
             invoiceNumber={nfe?.number ?? null}
+            invoiceDate={nfe?.emissionDate ?? null}
             itemCount={nfeItems.length}
             initialMaterialType={nfeMaterialType}
             initialAreaId={nfeAreaId}
@@ -952,9 +1032,16 @@ export default function Entries() {
                     {(entry.items?.length ?? 0) > 5 && <Badge variant="secondary" className="text-[10px]">+{(entry.items?.length ?? 0) - 5} mais</Badge>}
                   </div>
                   <div className="flex gap-4 text-[10px] text-muted-foreground">
-                    {entry.supplier && <span>Fornecedor: {entry.supplier.legalName}</span>}
+                                  {entry.supplier && (
+                      <SupplierChip
+                        name={entry.supplier.legalName ?? ""}
+                        cnpj={entry.supplier.cnpj ?? ""}
+                      />
+                    )}
                     {entry.invoiceNumber && <span>NF: {entry.invoiceNumber}</span>}
-                    {entry.purchaseAuthorizationNumber && <span>AF: {entry.purchaseAuthorizationNumber}</span>}
+                    {entry.afNumber && <span>AF: {entry.afNumber}</span>}
+                    {entry.administrativeProcessNumber && <span>Processo: {entry.administrativeProcessNumber}</span>}
+                    {entry.empenhoNumber && <span>Empenho: {entry.empenhoNumber}</span>}
                   </div>
                 </CardContent>
               </Card>
