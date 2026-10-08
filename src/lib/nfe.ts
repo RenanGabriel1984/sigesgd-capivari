@@ -51,6 +51,14 @@ export interface NfeData {
   additionalInfo?: string;
   /** Pedido/contrato detectado nas informações adicionais (melhor esforço) */
   orderReference?: string;
+  /**
+   * Identificadores de compras públicas detectados nas informações adicionais
+   * (infAdFisco/infCpl/procRef). São campos DISTINTOS — um nunca preenche o
+   * outro — e ficam ausentes quando o documento não traz a informação.
+   */
+  afNumber?: string;
+  processNumber?: string;
+  empenhoNumber?: string;
   items: NfeItem[];
 }
 
@@ -304,6 +312,21 @@ function nodeText(value: unknown): string | undefined {
 const PEDIDO_PATTERN = /(?:pedido|contrato|af|empenho|processo)\s*[:\s#º.]*\s*([0-9]{3,}[0-9a-zA-Z\-/]*)/i;
 
 /**
+ * Captura um identificador rotulado (AF / Empenho / Processo) preservando o
+ * formato usado pela administração pública ("2223/2026", "778/2026").
+ * Aceita espaços inseridos pelo OCR/XML ("2223 / 2026") e os normaliza.
+ */
+const matchLabelledReference = (text: string, pattern: RegExp): string | undefined => {
+  const match = text.match(pattern);
+  const value = match?.[1]?.trim().replace(/\s*\/\s*/g, "/");
+  return value || undefined;
+};
+
+const AF_PATTERN = /(?:\bAF\b|Autoriza[çc][ãa]o\s+de\s+Fornecimento)\s*[:\-#º.]*\s*([0-9]{1,6}\s*\/\s*[0-9]{4})/i;
+const EMPENHO_PATTERN = /(?:Nota\s+de\s+Empenho|Empenho|\bNE\b)\s*[:\-#º.]*\s*([0-9]{1,6}\s*\/\s*[0-9]{4})/i;
+const PROCESSO_PATTERN = /(?:Processo(?:\s+Administrativo)?|Proc\.)\s*[:\-.#º]*\s*([0-9]{4,12}(?:\s*[\/.-]\s*[0-9A-Za-z]{1,8})*)/i;
+
+/**
  * Valida e interpreta um XML de NF-e.
  * Lança erro com mensagem amigável se o arquivo não for uma NF-e válida.
  * NÃO altera estoque — apenas leitura.
@@ -363,6 +386,9 @@ export function parseNfeXml(xmlText: string): NfeData {
   });
 
   const infCpl = nodeText(infNFe?.infAdic?.infCpl);
+  const infAdFisco = nodeText(infNFe?.infAdic?.infAdFisco);
+  const procRef = nodeText(infNFe?.infAdic?.procRef);
+  const additionalText = [procRef, infAdFisco, infCpl].filter(Boolean).join("\n");
   const orderMatch = infCpl ? infCpl.match(PEDIDO_PATTERN) : null;
 
   const emissionRaw = firstString(ide.dhEmi) ?? firstString(ide.dEmi) ?? "";
@@ -378,6 +404,11 @@ export function parseNfeXml(xmlText: string): NfeData {
     totalValue: parseNum(nfe?.total?.ICMSTot?.vNF) ?? parseNum(infNFe?.total?.ICMSTot?.vNF),
     additionalInfo: infCpl,
     orderReference: orderMatch ? orderMatch[1] : undefined,
+    // AF / Processo Administrativo / Empenho: só quando rotulados no documento
+    // (nunca inventados; nunca preenchem um ao outro).
+    afNumber: matchLabelledReference(additionalText, AF_PATTERN),
+    processNumber: matchLabelledReference(additionalText, PROCESSO_PATTERN),
+    empenhoNumber: matchLabelledReference(additionalText, EMPENHO_PATTERN),
     items,
   };
 }

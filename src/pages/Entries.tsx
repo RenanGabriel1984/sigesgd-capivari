@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Plus, ShoppingCart, CheckCircle, RotateCcw, Eye, Trash2, Save, Pencil, FileUp, FileImage, Loader2, HelpCircle } from "lucide-react";
+import { Plus, ShoppingCart, CheckCircle, RotateCcw, Eye, Trash2, Save, Pencil, FileUp, FileImage, Loader2, HelpCircle, ExternalLink } from "lucide-react";
 import { IMPLEMENTATION_STOCK_DATE } from "@/convex/stockHelpers";
 import {
   MATERIAL_TYPE_LABELS,
@@ -33,6 +33,9 @@ import { FileUpload } from "@/components/FileUpload";
 import { EntryDetailsDialog } from "@/components/EntryDetailsDialog";
 import { PatrimonyUnitsEditor } from "@/components/PatrimonyUnitsEditor";
 import { EditEntryItemCard } from "@/components/EditEntryItemCard";
+import { NewEntryItemsEditor } from "@/components/NewEntryItemsEditor";
+import { NfeReviewTable } from "@/components/NfeReviewTable";
+import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
 import { SupplierForm } from "@/components/SupplierForm";
 import { DanfeImportDialog, type DanfeParsedData } from "@/components/DanfeImportDialog";
 import { toast } from "sonner";
@@ -58,9 +61,6 @@ import {
   formatPhone,
   formatAccessKeyGrouped,
   formatCurrency,
-  cnpjFrom,
-  phoneFrom,
-  cepFrom,
   normalizeCnpj,
   normalizePhone,
   normalizeCep,
@@ -88,7 +88,10 @@ type EntryItemDraft = {
 const EMPTY_ITEM: EntryItemDraft = { productId: "", quantity: "1", unitOfMeasure: "un", unitCost: "", brand: "", model: "", specification: "", locationId: "", observation: "", photoStorageId: "", supplierLotNumber: "" };
 const optionalNumber = (value?: string): number | undefined => {
   if (value == null || value.trim() === "") return undefined;
-  const parsed = Number(value);
+  // Aceita o valor com máscara monetária digitada ("R$ 1.234,56") e também
+  // valores numéricos legados ("12.5"): o banco guarda sempre o número.
+  const normalized = normalizeCurrency(value);
+  const parsed = Number(normalized || value);
   return isFinite(parsed) ? parsed : undefined;
 };
 
@@ -103,6 +106,25 @@ function SupplierChip({ name, cnpj }: { name: string; cnpj: string }) {
           {formatCnpj(cnpj)}
         </span>
       )}
+    </span>
+  );
+}
+
+/**
+ * Valor selecionado do seletor de fornecedor: Razão Social com truncamento
+ * visual + CNPJ formatado. O conteúdo nunca transborda para o campo vizinho
+ * (Nº da NF, por exemplo) — a largura é controlada pelo próprio componente.
+ */
+function SupplierSelectValue({ supplier }: { supplier: { _id: string; legalName: string; cnpj?: string | null } | null }) {
+  if (!supplier) {
+    return <span className="text-muted-foreground">Opcional</span>;
+  }
+  return (
+    <span className="flex min-w-0 items-center gap-2" title={`${supplier.legalName}${supplier.cnpj ? ` — CNPJ ${formatCnpj(supplier.cnpj)}` : ""}`}>
+      <span className="min-w-0 truncate">{supplier.legalName}</span>
+      {supplier.cnpj ? (
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">CNPJ {formatCnpj(supplier.cnpj)}</span>
+      ) : null}
     </span>
   );
 }
@@ -141,22 +163,20 @@ export default function Entries() {
   const [cReceivedAt, setCReceivedAt] = useState(() => new Date().toISOString().slice(0, 10));
   const [cOriginType, setcOriginType] = useState("purchase");
   const [cSupplierId, setcSupplierId] = useState("");
-  const [cSupplierName, setcSupplierName] = useState("");
-  const [cSupplierCnpj, setcSupplierCnpj] = useState("");
   const [cInvoiceNumber, setcInvoiceNumber] = useState("");
   const [cInvoiceDate, setcInvoiceDate] = useState("");
-  const [cPurchaseAuth, setcPurchaseAuth] = useState("");
+  // AF, Processo Administrativo e Empenho são três campos DISTINTOS.
+  // Nenhum preenche automaticamente o outro (§5 da rodada).
   const [cAfNumber, setcAfNumber] = useState("");
-  const [cAdministrativeProcessNumber, setcAdministrativeProcessNumber] = useState("");
-  const [cEmpenhoNumber, setcEmpenhoNumber] = useState("");
   const [cProcessNumber, setcProcessNumber] = useState("");
+  const [cEmpenhoNumber, setcEmpenhoNumber] = useState("");
   const [cContractNumber, setcContractNumber] = useState("");
   const [cObservation, setcObservation] = useState("");
   const [cDocStorageId, setcDocStorageId] = useState("");
   const [cItems, setCItems] = useState<EntryItemDraft[]>([{ ...EMPTY_ITEM }]);
-  const cSupplierLockRef = useRef<string | undefined>(undefined);
-  const cSupplierLockedNameRef = useRef<string>("");
-  const cSupplierLockedCnpjRef = useRef<string>("");
+  const cSupplierRef = useRef<string | undefined>(undefined);
+  const cSupplierLegalNameRef = useRef<string>("");
+  const cSupplierCnpjRef = useRef<string>("");
   // Classificação da entrada: tipo de material + área/subestoque
   // (a área é ESCOLHA do usuário — fornecedor/categoria não a definem)
   const [cMaterialType, setCMaterialType] = useState<MaterialType>("consumption");
@@ -276,9 +296,9 @@ export default function Entries() {
   // ─── Helpers ───
   const resetCreateForm = useCallback(() => {
     setCReceivedAt(new Date().toISOString().slice(0, 10));
-    setcOriginType("purchase"); setcSupplierId(""); setcSupplierName(""); setcSupplierCnpj("");
+    setcOriginType("purchase"); setcSupplierId("");
     setcInvoiceNumber(""); setcInvoiceDate("");
-    setcPurchaseAuth(""); setcAfNumber(""); setcAdministrativeProcessNumber(""); setcEmpenhoNumber(""); setcContractNumber(""); setcObservation("");
+    setcAfNumber(""); setcProcessNumber(""); setcEmpenhoNumber(""); setcContractNumber(""); setcObservation("");
     setcDocStorageId(""); setCItems([{ ...EMPTY_ITEM }]);
     setCMaterialType("consumption"); setCAreaId("");
     cSupplierRef.current = undefined;
@@ -359,14 +379,12 @@ export default function Entries() {
         receivedAt: new Date(cReceivedAt + "T12:00:00").getTime(),
         originType: cOriginType as any,
         supplierId: cSupplierId ? (cSupplierId as any) : undefined,
-        supplierLegalName: cSupplierName || undefined,
-        supplierCnpj: cSupplierCnpj || undefined,
         invoiceNumber: cInvoiceNumber || undefined,
         invoiceDate: cInvoiceDate || undefined,
-        purchaseAuthorizationNumber: cPurchaseAuth || undefined,
-        afNumber: cAfNumber || undefined,
+        // AF (purchaseAuthorizationNumber), Processo Administrativo (processNumber)
+        // e Empenho (empenhoNumber): três campos distintos, todos opcionais.
+        purchaseAuthorizationNumber: cAfNumber || undefined,
         processNumber: cProcessNumber || undefined,
-        administrativeProcessNumber: cAdministrativeProcessNumber || undefined,
         empenhoNumber: cEmpenhoNumber || undefined,
         contractNumber: cContractNumber || undefined,
         observation: cObservation || undefined,
@@ -375,7 +393,7 @@ export default function Entries() {
         areaId: cAreaId ? (cAreaId as any) : undefined,
         items: validItems.map((i) => ({
           productId: i.productId as any, quantity: Number(i.quantity), unitOfMeasure: i.unitOfMeasure,
-          unitCost: i.unitCost ? Number(i.unitCost) : undefined, brand: i.brand || undefined,
+          unitCost: i.unitCost ? (Number(normalizeCurrency(i.unitCost)) || undefined) : undefined, brand: i.brand || undefined,
           model: i.model || undefined, specification: i.specification || undefined,
           locationId: i.locationId ? (i.locationId as any) : undefined,
           photoStorageId: i.photoStorageId || undefined, observation: i.observation || undefined,
@@ -441,7 +459,7 @@ export default function Entries() {
           productId: item.productId as any,
           quantity: Number(item.quantity),
           unitOfMeasure: item.unitOfMeasure,
-          unitCost: item.unitCost ? Number(item.unitCost) : undefined,
+          unitCost: item.unitCost ? (Number(normalizeCurrency(item.unitCost)) || undefined) : undefined,
           brand: item.brand || undefined, model: item.model || undefined,
           specification: item.specification || undefined,
           locationId: item.locationId ? (item.locationId as any) : undefined,
@@ -648,11 +666,12 @@ export default function Entries() {
           : null
       );
       setNfeContract(parsed.orderReference ?? "");
-      // A DANFE da Incotech não traz número de processo em documento legível;
-      // AF e empenho vêm do OCR, processo é deixado em branco (não inventar).
-      setNfeAfNumber(parsed.additionalReference1 ?? "");
-      setNfeProcessNumber("");
-      setNfeEmpenhoNumber(parsed.additionalReference2 ?? "");
+      // AF, Processo Administrativo e Empenho vêm do XML quando existem nas
+      // informações adicionais; quando não existem, ficam VAZIOS — nunca
+      // inventados (a DANFE Incotech, ex., não traz número de processo).
+      setNfeAfNumber(parsed.afNumber ?? "");
+      setNfeProcessNumber(parsed.processNumber ?? "");
+      setNfeEmpenhoNumber(parsed.empenhoNumber ?? "");
       const initialItems: NfeReviewItem[] = parsed.items.map((item) => ({
         item,
         productId: "",
@@ -680,7 +699,17 @@ export default function Entries() {
   const handleDanfeImport = (data: DanfeParsedData) => {
     const accessKey = digitsOnly(data.accessKey ?? "");
     const number = (data.nfeNumber ?? "").trim();
-    if (!number && !accessKey) {
+    // §10 — OCR é ASSISTENTE: falha total apenas quando não há NENHUM dado
+    // relevante. Com número, chave, emitente ou itens, o resto vira conferência
+    // parcial que o usuário corrige na tela de revisão.
+    const hasAnyData = Boolean(
+      number ||
+        accessKey ||
+        data.emitterCnpj ||
+        data.emitterName ||
+        (data.items?.length ?? 0) > 0,
+    );
+    if (!hasAnyData) {
       toast.error("Não foi possível identificar a NF-e na DANFE. Confira o documento ou use a entrada manual.");
       return;
     }
@@ -693,6 +722,9 @@ export default function Entries() {
       emitterCnpj: data.emitterCnpj,
       emitterName: data.emitterName,
       totalValue: data.totalValue,
+      afNumber: data.afNumber,
+      empenhoNumber: data.empenhoNumber,
+      processNumber: data.processNumber,
       items: (data.items ?? []).map((item, i) => ({
         lineNumber: i + 1,
         code: (item.code ?? "").trim(),
@@ -758,9 +790,11 @@ export default function Entries() {
     );      setImportObservation(
         "Dados extraídos por OCR de DANFE/PDF/imagem — conferir antes de confirmar.",
       );
-      setNfeAfNumber("");
-      setNfeProcessNumber("");
-      setNfeEmpenhoNumber("");
+      // AF, processo e empenho reconhecidos pelo OCR são apenas SUGESTÃO:
+      // o usuário confere/edita antes de confirmar. Ausentes = ficam vazios.
+      setNfeAfNumber(data.afNumber ?? "");
+      setNfeProcessNumber(data.processNumber ?? "");
+      setNfeEmpenhoNumber(data.empenhoNumber ?? "");
       setImportStep("review");
     setImportOpen(true);
     toast.success("DANFE lida com sucesso. Confira os dados e a associação dos itens.");
@@ -878,13 +912,12 @@ export default function Entries() {
         documentStorageId: draft.documentStorageId,
         accessKey: draft.accessKey,
         totalValue: draft.totalValue,
-        // Os três identificadores fiscais da NF-e são campos distintos:
-        // AF (Conhecimento de Admissão), processo administrativo e empenho.
-        // Para a DANFE Incotech: AF 2223/2026, Empenho 778/2026, sem processo.
-        purchaseAuthorizationNumber: draft.purchaseAuthorizationNumber,
-        afNumber: draft.afNumber,
-        administrativeProcessNumber: draft.administrativeProcessNumber,
-        empenhoNumber: draft.empenhoNumber,
+        // Os três identificadores fiscais são campos DISTINTOS e opcionais:
+        // AF (purchaseAuthorizationNumber), Processo Administrativo
+        // (processNumber) e Empenho (empenhoNumber). Nenhum preenche o outro.
+        purchaseAuthorizationNumber: nfeAfNumber || undefined,
+        processNumber: nfeProcessNumber || undefined,
+        empenhoNumber: nfeEmpenhoNumber || undefined,
         xmlStorageId: draft.xmlStorageId,
         importedFromXml: true,
         // Destino resolvido (override > estado). Enviado SEMPRE explicitamente:
@@ -1039,8 +1072,8 @@ export default function Entries() {
                       />
                     )}
                     {entry.invoiceNumber && <span>NF: {entry.invoiceNumber}</span>}
-                    {entry.afNumber && <span>AF: {entry.afNumber}</span>}
-                    {entry.administrativeProcessNumber && <span>Processo: {entry.administrativeProcessNumber}</span>}
+                    {entry.purchaseAuthorizationNumber && <span>AF: {entry.purchaseAuthorizationNumber}</span>}
+                    {entry.processNumber && <span>Processo Administrativo: {entry.processNumber}</span>}
                     {entry.empenhoNumber && <span>Empenho: {entry.empenhoNumber}</span>}
                   </div>
                 </CardContent>
@@ -1133,14 +1166,54 @@ export default function Entries() {
               <div><Label>Data de Recebimento *</Label><Input type="date" value={cReceivedAt} onChange={(e) => setCReceivedAt(e.target.value)} className="mt-1" /></div>
               <div><Label>Origem *</Label><Select value={cOriginType} onValueChange={setcOriginType}><SelectTrigger className="mt-1"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(ORIGIN_LABELS).map(([k, v]) => (<SelectItem key={k} value={k}>{v}</SelectItem>))}</SelectContent></Select></div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><Label>Fornecedor</Label><div className="flex gap-1"><Select value={cSupplierId} onValueChange={setcSupplierId}><SelectTrigger className="mt-1 flex-1"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{suppliers?.map((s) => (<SelectItem key={s._id} value={s._id}>{s.cnpj ? `${s.legalName} — ${formatCnpj(s.cnpj)}` : s.legalName}</SelectItem>))}</SelectContent></Select><Button type="button" variant="outline" size="icon" className="mt-1 h-9 w-9 shrink-0" onClick={() => setSupplierModalOpen(true)} title="Novo fornecedor"><Plus className="h-4 w-4" /></Button></div></div>
-              <div><Label>Nº Nota Fiscal</Label><Input value={cInvoiceNumber} onChange={(e) => setcInvoiceNumber(e.target.value)} placeholder="Opcional" className="mt-1" /></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="min-w-0">
+                <Label>Fornecedor</Label>
+                <div className="flex gap-1">
+                  <Select value={cSupplierId} onValueChange={setcSupplierId}>
+                    <SelectTrigger className="mt-1 h-9 min-w-0 flex-1">
+                      <SelectValue placeholder="Opcional">
+                        <SupplierSelectValue supplier={suppliers?.find((s) => s._id === cSupplierId) ?? null} />
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      {suppliers?.map((s) => (
+                        <SelectItem key={s._id} value={s._id} textValue={s.legalName} className="min-w-0">
+                          <span className="flex min-w-0 flex-col gap-0.5 py-0.5">
+                            <span className="truncate text-sm font-medium">{s.legalName}</span>
+                            <span className="truncate font-mono text-[11px] text-muted-foreground">
+                              {s.cnpj ? `CNPJ: ${formatCnpj(s.cnpj)}` : "CNPJ não informado"}
+                            </span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" variant="outline" size="icon" className="mt-1 h-9 w-9 shrink-0" onClick={() => setSupplierModalOpen(true)} title="Novo fornecedor"><Plus className="h-4 w-4" /></Button>
+                </div>
+              </div>
+              <div className="min-w-0"><Label>Nº Nota Fiscal</Label><Input value={cInvoiceNumber} onChange={(e) => setcInvoiceNumber(e.target.value)} placeholder="Opcional" className="mt-1" /></div>
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><Label>Data NF</Label><Input type="date" value={cInvoiceDate} onChange={(e) => setcInvoiceDate(e.target.value)} className="mt-1" /></div>
-              <div><Label>Nº AF</Label><Input value={cPurchaseAuth} onChange={(e) => setcPurchaseAuth(e.target.value)} placeholder="Opcional" className="mt-1" /></div>
-              <div><Label>Nº Processo</Label><Input value={cProcessNumber} onChange={(e) => setcProcessNumber(e.target.value)} placeholder="Opcional" className="mt-1" /></div>
+            {/* Data de emissão + os três identificadores fiscais DISTINTOS:
+                AF, Processo Administrativo e Empenho (§4/§5 da rodada). */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1">
+                  <Label>Data de emissão da NF-e</Label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button type="button" variant="ghost" size="icon" className="h-4 w-4 shrink-0 p-0 text-muted-foreground hover:text-foreground" aria-label="Ajuda">
+                        <HelpCircle className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Data em que a NF-e foi emitida pelo fornecedor.</TooltipContent>
+                  </Tooltip>
+                </div>
+                <Input type="date" value={cInvoiceDate} onChange={(e) => setcInvoiceDate(e.target.value)} className="mt-1" />
+              </div>
+              <div className="min-w-0"><Label>Número da AF</Label><Input value={cAfNumber} onChange={(e) => setcAfNumber(e.target.value)} placeholder="Ex.: 2223/2026" className="mt-1" /></div>
+              <div className="min-w-0"><Label>Número do Processo Administrativo</Label><Input value={cProcessNumber} onChange={(e) => setcProcessNumber(e.target.value)} placeholder="Opcional" className="mt-1" /></div>
+              <div className="min-w-0"><Label>Número do Empenho</Label><Input value={cEmpenhoNumber} onChange={(e) => setcEmpenhoNumber(e.target.value)} placeholder="Ex.: 778/2026" className="mt-1" /></div>
             </div>
             <div><Label>Nº Contrato</Label><Input value={cContractNumber} onChange={(e) => setcContractNumber(e.target.value)} placeholder="Opcional" className="mt-1" /></div>
             <div className="grid grid-cols-2 gap-3">
@@ -1243,7 +1316,7 @@ export default function Entries() {
                 <div><span className="text-muted-foreground">NF:</span> <span className="font-medium">{nfe.number}</span></div>
                 <div><span className="text-muted-foreground">Série:</span> <span className="font-medium">{nfe.series || "—"}</span></div>
                 <div><span className="text-muted-foreground">Data de emissão:</span> <span className="font-medium">{nfe.emissionDate ? new Date(nfe.emissionDate + "T12:00:00").toLocaleDateString("pt-BR") : "—"}</span></div>
-                <div><span className="text-muted-foreground">Valor total:</span> <span className="font-medium">{nfe.totalValue != null ? `R$ ${nfe.totalValue.toFixed(2)}` : "—"}</span></div>
+                <div><span className="text-muted-foreground">Valor total:</span> <span className="font-medium">{nfe.totalValue != null ? formatCurrency(nfe.totalValue) : "—"}</span></div>
                 <div className="col-span-2 sm:col-span-3"><span className="text-muted-foreground">Chave de acesso:</span> <span className="font-mono text-[10px] break-all">{nfe.accessKey}</span></div>
               </div>
 
@@ -1257,12 +1330,32 @@ export default function Entries() {
                   <span className="text-xs text-muted-foreground">Nome similar cadastrado: {nfeSupplierSuggestion.name} — selecione no seletor se for o mesmo fornecedor</span>
                 )}
                 {!nfeSupplierFound && nfeSupplierId && <span className="text-xs text-emerald-700">✓ {suppliers?.find((s) => s._id === nfeSupplierId)?.legalName}</span>}
-                <Select value={nfeSupplierId} onValueChange={(v) => { setNfeSupplierId(v); setNfeSupplierFound(true); }}><SelectTrigger className="h-7 w-52 text-xs"><SelectValue placeholder="Selecionar fornecedor" /></SelectTrigger><SelectContent>{suppliers?.map((s) => (<SelectItem key={s._id} value={s._id}>{s.cnpj ? `${s.legalName} — ${formatCnpj(s.cnpj)}` : s.legalName}</SelectItem>))}</SelectContent>
+                <Select value={nfeSupplierId} onValueChange={(v) => { setNfeSupplierId(v); setNfeSupplierFound(true); }}>
+                  <SelectTrigger className="h-7 w-52 min-w-0 text-xs"><SelectValue placeholder="Selecionar fornecedor"><SupplierSelectValue supplier={nfeSupplier ?? null} /></SelectValue></SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {suppliers?.map((s) => (
+                      <SelectItem key={s._id} value={s._id} textValue={s.legalName} className="min-w-0">
+                        <span className="flex min-w-0 flex-col gap-0.5 py-0.5">
+                          <span className="truncate text-sm font-medium">{s.legalName}</span>
+                          <span className="truncate font-mono text-[11px] text-muted-foreground">{s.cnpj ? `CNPJ: ${formatCnpj(s.cnpj)}` : "CNPJ não informado"}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
                 <div className="flex items-center gap-1 ml-auto">
                   <span className="text-[10px]">Pedido/contrato:</span>
                   <Input value={nfeContract} onChange={(e) => setNfeContract(e.target.value)} placeholder="Opcional" className="h-7 w-40 text-xs" />
                 </div>
+              </div>
+
+              {/* AF, Processo Administrativo e Empenho: três campos distintos,
+                  opcionais e editáveis na conferência (§5). O processo NUNCA é
+                  preenchido com o número do empenho. */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="min-w-0"><Label className="text-xs">Número da AF</Label><Input value={nfeAfNumber} onChange={(e) => setNfeAfNumber(e.target.value)} placeholder="Ex.: 2223/2026" className="mt-1 h-8 text-xs" /></div>
+                <div className="min-w-0"><Label className="text-xs">Número do Processo Administrativo</Label><Input value={nfeProcessNumber} onChange={(e) => setNfeProcessNumber(e.target.value)} placeholder="Opcional" className="mt-1 h-8 text-xs" /></div>
+                <div className="min-w-0"><Label className="text-xs">Número do Empenho</Label><Input value={nfeEmpenhoNumber} onChange={(e) => setNfeEmpenhoNumber(e.target.value)} placeholder="Ex.: 778/2026" className="mt-1 h-8 text-xs" /></div>
               </div>
 
               <NfeReviewTable
@@ -1280,53 +1373,6 @@ export default function Entries() {
                   setImportStep("location");
                 }}
               />
-              <div className="hidden">PLACEHOLDER</div>
-              <div className="hidden flex-wrap gap-2 text-xs">
-                <Badge className="text-[10px] bg-emerald-50 text-emerald-700">🟢 {nfeItems.filter((r) => r.matchStatus === "found" && r.associationType === "automatic").length} encontrados</Badge>
-                <Badge className="text-[10px] bg-amber-50 text-amber-700">🟡 {nfeItems.filter((r) => r.matchStatus === "possible").length} possíveis</Badge>
-                <Badge className="text-[10px] bg-rose-50 text-rose-700">🔴 {nfeItems.filter((r) => !r.productId || r.matchStatus === "not_found").length} não encontrados</Badge>
-              </div>
-
-              <div className="hidden border rounded-lg overflow-x-auto">
-                <Table><TableHeader><TableRow><TableHead className="text-xs">#</TableHead><TableHead className="text-xs">Produto da NF</TableHead><TableHead className="text-xs text-center">Qtd</TableHead><TableHead className="text-xs">Unid.</TableHead><TableHead className="text-xs">Situação</TableHead><TableHead className="text-xs">Produto no estoque</TableHead></TableRow></TableHeader>
-                  <TableBody>{nfeItems.map((r, idx) => (
-                    <TableRow key={idx} className={!r.productId ? "bg-rose-50/40" : ""}>
-                      <TableCell className="text-xs text-muted-foreground">{r.item.lineNumber}</TableCell>
-                      <TableCell className="text-xs max-w-[220px]">
-                        <p className="font-medium leading-tight">{r.item.description}</p>
-                        <p className="text-[10px] text-muted-foreground font-mono">{r.item.code}{r.item.ncm ? ` · NCM ${r.item.ncm}` : ""}{r.item.cfop ? ` · CFOP ${r.item.cfop}` : ""}</p>
-                      </TableCell>
-                      <TableCell className="text-center font-mono text-sm">{r.item.quantity}</TableCell>
-                      <TableCell className="text-xs">{r.item.unit}</TableCell>
-                      <TableCell><Badge variant="secondary">Revisado</Badge></TableCell>
-                      <TableCell className="min-w-[220px]">
-                        <div className="flex items-center gap-1">
-                          {/* Categoria do material mapeado (regra: fornecedor ≠ categoria) */}
-                          {r.productId && (
-                            <Badge variant="secondary" className="hidden sm:inline-flex text-[9px] shrink-0 max-w-[96px] whitespace-normal app-break">
-                              {products?.find((p: any) => p._id === r.productId)?.category?.name}
-                            </Badge>
-                          )}
-                          <Select value={r.productId} onValueChange={(v) => {
-                            const n = [...nfeItems]; n[idx].productId = v; n[idx].matchStatus = "found"; setNfeItems(n);
-                          }}>
-                            <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Selecionar" /></SelectTrigger>
-                            <SelectContent>{products?.map((p) => (<SelectItem key={p._id} value={p._id}>{p.name}{p.brand ? ` (${p.brand})` : ""}</SelectItem>))}</SelectContent>
-                          </Select>
-                          <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0" title="Cadastrar produto" onClick={() => openProductModalForImport(idx)}><Plus className="h-3.5 w-3.5" /></Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}</TableBody></Table>
-                </div>
-
-                <div className="flex justify-between pt-2">
-                  <Button variant="outline" onClick={() => { setImportStep("file"); setImportError(""); }}>Voltar</Button>
-                  <Button onClick={() => {
-                    if (nfeItems.some((r) => !r.productId)) { toast.error("Todos os itens precisam de um produto associado (🟡 confirme ou cadastre os 🔴)"); return; }
-                    setImportStep("location");
-                  }}>Continuar → Localização</Button>
-                </div>
               </div>
           )}
 

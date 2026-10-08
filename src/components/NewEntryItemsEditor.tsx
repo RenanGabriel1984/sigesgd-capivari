@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ExternalLink, Plus, Trash2 } from "lucide-react";
 import { FileUpload } from "@/components/FileUpload";
 import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
+import { maskCurrency } from "@/lib/br-validators";
 
 export function NewEntryItemsEditor({ items, products, locations, onUpdateItem, onAddItem, onRemoveItem, onNewProduct }: {
   items: any[];
@@ -27,7 +28,7 @@ export function NewEntryItemsEditor({ items, products, locations, onUpdateItem, 
       <div className="grid grid-cols-4 gap-2">
         <div><Label className="text-xs">Marca</Label><Input value={item.brand} onChange={(event) => onUpdateItem(index, 'brand', event.target.value)} className="mt-1 h-8" /></div>
         <div><Label className="text-xs">Modelo</Label><Input value={item.model} onChange={(event) => onUpdateItem(index, 'model', event.target.value)} className="mt-1 h-8" /></div>
-        <div><Label className="text-xs">Custo Unit.</Label><Input type="number" step="0.01" min="0" value={item.unitCost} onChange={(event) => onUpdateItem(index, 'unitCost', event.target.value)} placeholder="R$" className="mt-1 h-8" /></div>
+        <div><Label className="text-xs">Custo Unit.</Label><Input inputMode="decimal" value={maskCurrency(item.unitCost)} onChange={(event) => onUpdateItem(index, 'unitCost', event.target.value)} placeholder="R$ 0,00" className="mt-1 h-8" /></div>
         <div><Label className="text-xs">Local</Label><Select value={item.locationId} onValueChange={(value) => onUpdateItem(index, 'locationId', value)}><SelectTrigger className="mt-1 h-8"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{locations.map((location) => <SelectItem key={location._id} value={location._id}>{location.name}</SelectItem>)}</SelectContent></Select></div>
       </div>
       <div className="grid grid-cols-2 gap-2"><div><Label className="text-xs">Lote do Fornecedor</Label><Input value={item.supplierLotNumber} onChange={(event) => onUpdateItem(index, 'supplierLotNumber', event.target.value)} className="mt-1 h-8" /></div><div><Label className="text-xs">Especificação</Label><Input value={item.specification} onChange={(event) => onUpdateItem(index, 'specification', event.target.value)} className="mt-1 h-8" /></div></div>

@@ -56,6 +56,14 @@ export interface DanfeParsedData {
   receiverCnpj?: string;
   receiverName?: string;
   totalValue?: number;
+  /**
+   * Identificadores de compras públicas detectados pelo OCR — campos
+   * DISTINTOS (AF, Processo Administrativo, Empenho), todos opcionais.
+   * Servem apenas de sugestão: o usuário confere/edita na tela de revisão.
+   */
+  afNumber?: string;
+  processNumber?: string;
+  empenhoNumber?: string;
   items: DanfeParsedItem[];
   /** Arquivo original (DANFE PDF/imagem) — preservado junto à entrada. */
   rawFile?: File | null;

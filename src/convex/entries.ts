@@ -119,6 +119,7 @@ export const create = mutation({
     invoiceDate: v.optional(v.string()),
     purchaseAuthorizationNumber: v.optional(v.string()),
     processNumber: v.optional(v.string()),
+    empenhoNumber: v.optional(v.string()),
     contractNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
     documentStorageId: v.optional(v.string()),
@@ -197,6 +198,7 @@ export const create = mutation({
       invoiceDate: args.invoiceDate || undefined,
       purchaseAuthorizationNumber: args.purchaseAuthorizationNumber || undefined,
       processNumber: args.processNumber || undefined,
+      empenhoNumber: args.empenhoNumber || undefined,
       contractNumber: args.contractNumber || undefined,
       responsibleUserId: userId,
       observation: args.observation || undefined,
@@ -573,6 +575,7 @@ export const editDraft = mutation({
     invoiceDate: v.optional(v.string()),
     purchaseAuthorizationNumber: v.optional(v.string()),
     processNumber: v.optional(v.string()),
+    empenhoNumber: v.optional(v.string()),
     contractNumber: v.optional(v.string()),
     documentStorageId: v.optional(v.string()),
     materialType: v.optional(v.union(v.literal("consumption"), v.literal("permanent"))),
@@ -592,6 +595,7 @@ export const editDraft = mutation({
     if (args.invoiceDate !== undefined) updates.invoiceDate = args.invoiceDate;
     if (args.purchaseAuthorizationNumber !== undefined) updates.purchaseAuthorizationNumber = args.purchaseAuthorizationNumber;
     if (args.processNumber !== undefined) updates.processNumber = args.processNumber;
+    if (args.empenhoNumber !== undefined) updates.empenhoNumber = args.empenhoNumber;
     if (args.contractNumber !== undefined) updates.contractNumber = args.contractNumber;
     if (args.documentStorageId !== undefined) updates.documentStorageId = args.documentStorageId;
     if (args.materialType !== undefined) {

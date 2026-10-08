@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2 } from "lucide-react";
 import { PATRIMONY_STATUS_LABELS, PATRIMONY_STATUS_VALUES, validateEntryUnits, type PatrimonyUnitDraft } from "@/lib/material-types";
+import { maskCurrency } from "@/lib/br-validators";
 
 export function PatrimonyUnitsEditor({ items, itemIds, unitsByItem, products, locations, organizations, saving, onChange, onSave }: {
   items: Array<{ productId: string; quantity: string }>;
@@ -46,7 +47,7 @@ export function PatrimonyUnitsEditor({ items, itemIds, unitsByItem, products, lo
             <div><Label className="text-[10px]">Tombamento</Label><Input type="date" value={unit.incorporationDate ?? ""} onChange={(e) => update(unitIndex, { incorporationDate: e.target.value })} className="h-7 text-xs" /></div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-            {([['acquisitionValue', 'Valor aquisição'], ['accountingValue', 'Valor contábil'], ['residualValue', 'Valor residual'], ['accumulatedDepreciation', 'Depreciação acumulada'], ['netBookValue', 'Valor líquido']] as const).map(([field, label]) => <div key={field}><Label className="text-[10px]">{label}</Label><Input type="number" step="0.01" min="0" value={unit[field] ?? ""} onChange={(e) => update(unitIndex, { [field]: e.target.value })} className="h-7 text-xs" /></div>)}
+            {([['acquisitionValue', 'Valor aquisição'], ['accountingValue', 'Valor contábil'], ['residualValue', 'Valor residual'], ['accumulatedDepreciation', 'Depreciação acumulada'], ['netBookValue', 'Valor líquido']] as const).map(([field, label]) => <div key={field}><Label className="text-[10px]">{label}</Label><Input inputMode="decimal" value={maskCurrency(unit[field] ?? "")} onChange={(e) => update(unitIndex, { [field]: e.target.value })} placeholder="R$ 0,00" className="h-7 text-xs" /></div>)}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div><Label className="text-[10px]">Secretaria</Label><Select value={unit.secretariaId ?? ""} onValueChange={(value) => update(unitIndex, { secretariaId: value })}><SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{orgsOfType('secretaria').map((org) => <SelectItem key={org._id} value={org._id}>{org.name}</SelectItem>)}</SelectContent></Select></div>

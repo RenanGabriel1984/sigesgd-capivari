@@ -535,6 +535,9 @@ const schema = defineSchema(
       invoiceDate: v.optional(v.string()),
       purchaseAuthorizationNumber: v.optional(v.string()),
       processNumber: v.optional(v.string()),
+      // Número do empenho — distinto da AF (purchaseAuthorizationNumber) e do
+      // processo administrativo (processNumber); opcional em toda entrada.
+      empenhoNumber: v.optional(v.string()),
       contractNumber: v.optional(v.string()),
       responsibleUserId: v.id("users"),
       observation: v.optional(v.string()),

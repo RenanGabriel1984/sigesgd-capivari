@@ -21,6 +21,8 @@ interface NfeDestinationDialogProps {
   supplierName?: string | null;
   supplierCnpj?: string | null;
   invoiceNumber?: string | null;
+  /** Data de emissão da NF-e (informativa na conferência) */
+  invoiceDate?: string | null;
   /** Quantidade de itens conferidos na NF-e */
   itemCount?: number;
   initialMaterialType?: MaterialType;
@@ -43,6 +45,7 @@ export function NfeDestinationDialog({
   supplierName,
   supplierCnpj,
   invoiceNumber,
+  invoiceDate,
   itemCount,
   initialMaterialType = "consumption",
   initialAreaId = "",
@@ -88,6 +91,12 @@ export function NfeDestinationDialog({
               <div className="flex flex-wrap gap-x-2">
                 <span className="text-muted-foreground">NF:</span>
                 <span className="font-mono">{invoiceNumber}</span>
+              </div>
+            )}
+            {invoiceDate && (
+              <div className="flex flex-wrap gap-x-2">
+                <span className="text-muted-foreground">Data de emissão da NF-e:</span>
+                <span className="font-mono">{invoiceDate}</span>
               </div>
             )}
             {typeof itemCount === "number" && (

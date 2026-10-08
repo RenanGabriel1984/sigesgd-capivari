@@ -5,6 +5,8 @@
  * Não substitui o XML; apenas alimenta a tela de conferência.
  */
 
+import { isValidAccessKey } from "@/lib/br-validators";
+
 export type DanfeParsed =
   | {
       ok: true;
@@ -23,9 +25,93 @@ export type DanfeParsed =
       receiverCnpj?: string;
       receiverName?: string;
       totalValue?: number;
+      /**
+       * Identificadores de compras públicas — três campos DISTINTOS, todos
+       * opcionais (um nunca preenche o outro) e revistos pelo usuário.
+       */
+      afNumber?: string;
+      processNumber?: string;
+      empenhoNumber?: string;
       items: DanfeParsedItem[];
     }
   | { ok: false };
+
+/**
+ * Regiões clássicas de uma DANFE retrato (frações da página: x/y/largura/altura).
+ * O pipeline de OCR recorta cada região do PDF escaneado/imagem e roda o
+ * Tesseract nelas, em ADDIÇÃO à página inteira — o parser recebe os dois.
+ */
+export type DanfeRegion = {
+  key: string;
+  label: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+export const DANFE_REGIONS: DanfeRegion[] = [
+  { key: "cabecalho", label: "Cabeçalho (nº e série)", x: 0.42, y: 0.0, w: 0.58, h: 0.1 },
+  { key: "chave", label: "Chave de acesso", x: 0.0, y: 0.05, w: 1.0, h: 0.09 },
+  { key: "emitente", label: "Emitente", x: 0.0, y: 0.09, w: 0.5, h: 0.22 },
+  { key: "destinatario", label: "Destinatário", x: 0.0, y: 0.3, w: 1.0, h: 0.18 },
+  { key: "produtos", label: "Produtos", x: 0.0, y: 0.52, w: 1.0, h: 0.24 },
+  { key: "totais", label: "Totais", x: 0.0, y: 0.74, w: 1.0, h: 0.08 },
+  { key: "dadosAdicionais", label: "Dados adicionais", x: 0.0, y: 0.8, w: 1.0, h: 0.2 },
+];
+
+/** Combina a página inteira + regiões para o parser (uma linha por trecho). */
+export function mergeDanfeTexts(fullPageText: string, regionTexts: string[]): string {
+  return [fullPageText, ...regionTexts].filter((t) => t && t.trim()).join("\n");
+}
+
+/**
+ * Um PDF com menos de 80 caracteres úteis não tem camada de texto utilizável:
+ * é um PDF escaneado e precisa ser rasterizado antes do OCR.
+ */
+export function hasUsableTextLayer(text: string | null | undefined): boolean {
+  return (text ?? "").replace(/\s/g, "").length >= 80;
+}
+
+/** Campos acompanhados na conferência parcial (§10 — "X de Y campos"). */
+export const DANFE_TRACKED_FIELDS: { key: string; label: string }[] = [
+  { key: "nfeNumber", label: "Número da NF-e" },
+  { key: "series", label: "Série" },
+  { key: "emissionDate", label: "Data de emissão" },
+  { key: "accessKey", label: "Chave de acesso" },
+  { key: "emitterCnpj", label: "CNPJ do emitente" },
+  { key: "emitterName", label: "Razão social do emitente" },
+  { key: "emitterAddress", label: "Endereço do emitente" },
+  { key: "emitterCity", label: "Cidade do emitente" },
+  { key: "totalValue", label: "Valor total" },
+  { key: "items", label: "Itens da NF-e" },
+];
+
+/**
+ * Conferência parcial: quantos campos centrais foram identificados e quais
+ * faltam. O OCR é um ASSISTENTE — nunca exige 100% para continuar (§10).
+ */
+export function danfeFieldSummary(parsed: DanfeParsed): {
+  found: number;
+  total: number;
+  missing: string[];
+} {
+  const total = DANFE_TRACKED_FIELDS.length;
+  if (!parsed.ok) {
+    return { found: 0, total, missing: DANFE_TRACKED_FIELDS.map((f) => f.label) };
+  }
+  const missing: string[] = [];
+  let found = 0;
+  for (const field of DANFE_TRACKED_FIELDS) {
+    const present =
+      field.key === "items"
+        ? (parsed.items?.length ?? 0) > 0
+        : Boolean((parsed as Record<string, unknown>)[field.key]);
+    if (present) found += 1;
+    else missing.push(field.label);
+  }
+  return { found, total, missing };
+}
 
 export type DanfeParsedItem = {
   code?: string;
@@ -56,15 +142,19 @@ export function parseDanfeText(text: string): DanfeParsed {
 
   // 1) Chave de acesso (44 dígitos) — contínua OU agrupada em 11 grupos de 4
   //    (a DANFE impressa costuma imprimir a chave em grupos de 4 dígitos).
+  //    Tolerante a espaços, pontos, hífens, quebras de linha e OCR trocando
+  //    letras por dígitos (O→0, S→5, B→8...).
   const accessKey = extractAccessKey(normalized);
 
-  // 2) Número da NF-e (busca padrão "Nº NF: 00000" ou "Nota: 00000" ou "NF-e Nº 00000")
-  const nfeNumberMatch = normalized.match(/(?:N[ºo]\.?\s*(?:NF|NF-e)\s*:?\s*|NF-e\s*N[ºo]\.?\s*|N[ºo]\s*Nota\s*(?:Fiscal)?\s*:?\s*)(\d{1,7})/i);
-  const nfeNumber = nfeNumberMatch?.[1] ?? undefined;
+  // 2) Número da NF-e ("Nº NF: 00000", "NF-e Nº 00000", ou apenas "Nº 000002967")
+  const nfeNumberMatch = normalized.match(/(?:N[ºo]\.?\s*(?:NF|NF-e)\s*:?\s*|NF-e\s*N[ºo]\.?\s*|N[ºo]\s*Nota\s*(?:Fiscal)?\s*:?\s*)(\d{1,9})/i);
+  const looseNumberMatch = normalized.match(/\bN[ºo]\.?\s*0*(\d{3,9})\b/i);
+  const fromKey = accessKey ? nfFieldsFromAccessKey(accessKey) : undefined;
+  const nfeNumber = nfeNumberMatch?.[1] ?? looseNumberMatch?.[1] ?? fromKey?.number ?? undefined;
 
-  // 3) Série (comum em DANFE Modelo 1: "Série: 001" ou "Série 001")
+  // 3) Série (comum em DANFE Modelo 1: "Série: 001" ou "SÉRIE 001")
   const seriesMatch = normalized.match(/(?:S[ée]rie\s*:?\s*)(\d{2,3})/i);
-  const series = seriesMatch?.[1] ?? undefined;
+  const series = seriesMatch?.[1] ?? fromKey?.series ?? undefined;
 
   // 4) Data de emissão (MM/DD/AAAA ou DD/MM/AAAA ou AAAA-MM-DD)
   const dateMatches = normalized.matchAll(/(?:Data\s*(?:de\s*Emiss[ãa]o)?\s*:?\s*|Emiss[ãa]o\s*:?\s*)(?:(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})|(?:(\d{4})[\/\-\.](\d{2})[\/\-\.](\d{2})))/gi);
@@ -81,8 +171,10 @@ export function parseDanfeText(text: string): DanfeParsed {
   // 5) CNPJ do emitente (com ou sem máscara — o OCR pode perder a pontuação)
   const emitterCnpj = extractCnpj(normalized, /(?:CNPJ\s*(?:do\s*)?Emitente\s*:?\s*|CNPJ\s*:?\s*|(?:emitente|emissor)[^0-9]{0,30})(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}|\d{14})/i);
 
-  // 6) Razão social do emitente (após CNPJ)
-  const emitterName = extractAfter(normalized, /(?:Nome\s*(?:de\s*)?(?:Raz[ãa]o\s*)?(?:Social\s*)?(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|Raz[ãa]o\s*Social\s*:?\s*|Empresa\s*:?\s*)/i);
+  // 6) Razão social do emitente (após CNPJ; fallback: primeira linha após o CNPJ)
+  const emitterName =
+    extractAfter(normalized, /(?:Nome\s*(?:de\s*)?(?:Raz[ãa]o\s*)?(?:Social\s*)?(?:do\s*)?(?:Emitente|Empresa|Instala[çc][ãa]o|Estabelecimento)|Raz[ãa]o\s*Social\s*:?\s*|Empresa\s*:?\s*)/i) ??
+    extractNameAfterCnpj(normalized, emitterCnpj);
 
   // 7) Telefone do emitente
   const emitterPhone = extractPhone(normalized, /(?:Telefone|Tel|Fone|Phone|T [eE]l)[^0-9]{0,30}?\(?(\d{2})\)?\s?(\d{4,5}[- ]?\d{4})/i);
@@ -116,6 +208,12 @@ export function parseDanfeText(text: string): DanfeParsed {
   // 16) Itens da NF (descrição, quantidade, unidade, valor unitário, valor total, código)
   const items = extractItems(normalized);
 
+  // 17) Compras públicas: AF, Processo Administrativo e Empenho são campos
+  //     DISTINTOS, todos opcionais — o que não estiver rotulado fica vazio.
+  const afNumber = matchLabelledReference(normalized, AF_LABEL_PATTERN);
+  const processNumber = matchLabelledReference(normalized, PROCESSO_LABEL_PATTERN);
+  const empenhoNumber = matchLabelledReference(normalized, EMPENHO_LABEL_PATTERN);
+
   return {
     ok: true,
     nfeNumber,
@@ -133,36 +231,120 @@ export function parseDanfeText(text: string): DanfeParsed {
     receiverCnpj: receiverCnpj ?? undefined,
     receiverName: receiverName?.trim() ?? undefined,
     totalValue,
+    afNumber,
+    processNumber,
+    empenhoNumber,
     items: items.length > 0 ? items : [],
   };
+}
+
+// ─── Compras públicas (AF / Processo / Empenho) ───────────────────────────────
+
+const AF_LABEL_PATTERN = /(?:\bAF\b|Autoriza[çc][ãa]o\s+de\s+Fornecimento)\s*[:\-#º.]*\s*([0-9]{1,6}\s*\/\s*[0-9]{4})/i;
+const EMPENHO_LABEL_PATTERN = /(?:Nota\s+de\s+Empenho|Empenho|\bNE\b)\s*[:\-#º.]*\s*([0-9]{1,6}\s*\/\s*[0-9]{4})/i;
+const PROCESSO_LABEL_PATTERN = /(?:Processo(?:\s+Administrativo)?|Proc\.)\s*[:\-.#º]*\s*([0-9]{4,12}(?:\s*[\/.-]\s*[0-9A-Za-z]{1,8})*)/i;
+
+function matchLabelledReference(text: string, pattern: RegExp): string | undefined {
+  const match = text.match(pattern);
+  const value = match?.[1]?.trim().replace(/\s+/g, "");
+  return value || undefined;
+}
+
+// ─── Derivação de campos a partir da chave de acesso ──────────────────────────
+
+/**
+ * Série (dígitos 22–24) e número (dígitos 25–33) são parte da própria chave de
+ * acesso NF-e — servem de CONFIRMAÇÃO/fallback quando o OCR não lê o cabeçalho.
+ */
+function nfFieldsFromAccessKey(accessKey: string): { number?: string; series?: string } {
+  const d = accessKey.replace(/\D/g, "");
+  if (d.length !== 44) return {};
+  const series = d.slice(22, 25);
+  const rawNumber = d.slice(25, 34).replace(/^0+/, "");
+  return {
+    number: rawNumber || undefined,
+    series: series || undefined,
+  };
+}
+
+/**
+ * Razão social sem rótulo: a linha seguinte ao CNPJ do emitente costuma ser o
+ * nome da empresa (layout canônico da DANFE). Só aceita linhas puramente
+ * textuais para não capturar endereço, número ou valor.
+ */
+function extractNameAfterCnpj(text: string, cnpj: string | undefined): string | undefined {
+  if (!cnpj) return undefined;
+  const cnpjDigits = digitsOnly(cnpj);
+  if (!cnpjDigits) return undefined;
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (!line.includes(cnpjDigits) && !line.includes(cnpj)) continue;
+    for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+      const candidate = (lines[j] ?? "").trim();
+      if (!candidate || candidate.length < 4) continue;
+      if (!/[A-Za-zÀ-ú]{4,}/.test(candidate)) continue;
+      // Endereço/CNPJ/valor não são nome de empresa.
+      if (/\d{3,}/.test(candidate) && !/[A-Za-zÀ-ú]/.test(candidate.replace(/\d+/g, ""))) continue;
+      if (/^(CEP|CNPJ|Insc|I\.E|Tel|Fone|E-mail|Endere|Nº|N[úu]m)/i.test(candidate)) continue;
+      return candidate;
+    }
+  }
+  return undefined;
 }
 
 /**
  * Extrai a chave de acesso de 44 dígitos, tolerando o formato agrupado em
  * 11 grupos de 4 dígitos usado pelas DANFEs impressas (ex.:
- * "3524 0622 8163 1500 0144 ..."). O valor devolvido é SEMPRE só dígitos.
+ * "3524 0622 8163 1500 0144 ..."), espaços, pontos, hífens, quebras de linha
+ * e trocas clássicas de OCR (O→0, I/l→1, S→5, B→8...).
+ * A estrutura é VALIDADA antes de aceitar (UF, mês e modelo da NF-e).
+ * O valor devolvido é SEMPRE só dígitos.
  */
 function extractAccessKey(text: string): string | undefined {
+  const candidates: string[] = [];
+
   // a) 44 dígitos contíguos
   const contiguous = text.match(/\b(\d{44})\b/);
-  if (contiguous?.[1]) return contiguous[1];
+  if (contiguous?.[1]) candidates.push(contiguous[1]);
 
   // b) 11 grupos de 4 dígitos separados por espaço/quebra de linha (DANFE impressa)
-  const grouped = text.match(/(?:\d{4}[\s]?){11}/);
-  if (grouped) {
-    const d = digitsOnly(grouped[0]);
-    if (d.length === 44) return d;
+  for (const grouped of text.match(/(?:\d{4}[\s]?){11}/g) ?? []) {
+    const d = digitsOnly(grouped);
+    if (d.length === 44) candidates.push(d);
   }
 
   // c) tolerância a perda de separadores do OCR: sequência de dígitos com
-  //    espaços opcionais totalizando exatamente 44
-  const loose = text.match(/\d(?:[ \t\n]?\d){43,}/);
-  if (loose) {
-    const d = digitsOnly(loose[0]);
-    if (d.length === 44) return d;
+  //    espaços/pontos/hífens opcionais totalizando exatamente 44
+  for (const loose of text.match(/\d(?:[\s.\-]?\d){43}/g) ?? []) {
+    const d = digitsOnly(loose);
+    if (d.length === 44) candidates.push(d);
+  }
+
+  // d) OCR confundindo letras com dígitos ("O" por "0", "S" por "5", ...):
+  //    reaplica a busca sobre o texto com os glifos corrigidos.
+  const digitized = text.replace(/[OoDdIliIZzSsGgBbqQ]/g, (ch) => GLYPH_TO_DIGIT[ch] ?? ch);
+  for (const m of digitized.match(/\d(?:[\s.\-]?\d){43}/g) ?? []) {
+    const d = digitsOnly(m);
+    if (d.length === 44) candidates.push(d);
+  }
+
+  // Primeira sequência com ESTRUTURA válida (§9: validar antes de aceitar).
+  for (const candidate of candidates) {
+    if (isValidAccessKey(candidate)) return candidate;
   }
   return undefined;
 }
+
+/** Correção clássica de OCR: letra que o Tesseract lê no lugar de um dígito. */
+const GLYPH_TO_DIGIT: Record<string, string> = {
+  O: "0", o: "0", D: "0",
+  I: "1", l: "1", i: "1",
+  Z: "2", z: "2",
+  S: "5", s: "5",
+  G: "6", g: "6",
+  B: "8", b: "8",
+};
 
 /**
  * CNPJ do destinatário: rótulo específico ("CNPJ do Destinatário", "receptor",…)
