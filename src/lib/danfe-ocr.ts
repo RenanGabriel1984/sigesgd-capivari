@@ -1,292 +1,524 @@
-/** @license University of São Paulo (CC-BY-SA 4.0) — modifications allowed under LGPL-3.0-or-later. */
+/**
+ * Gestão de Estoque SGGD — parser PURO de DANFE / OCR (sem DOM).
+ *
+ * Núcleo testável compartilhado pelo diálogo de importação DANFE/PDF/imagem:
+ *  - parseDanfeText: extrai os campos estruturados de um texto DANFE;
+ *  - isValidDanfeItemCandidate: rejeita cabeçalhos/rodapés da tabela de
+ *    produtos ANTES de criar um item (nunca "cabeçalho vira produto");
+ *  - extractAccessKey44 / validateAccessKey44: reconhecem a chave de acesso
+ *    com espaços, pontos, hífens, quebras de linha e glifos trocados, e
+ *    validam ESTRUTURA (UF, mês, modelo) + dígito verificador módulo 11;
+ *  - danfeFieldSummary: "X de 10 campos" contando SOMENTE campos válidos.
+ *
+ * REGRA FUNDAMENTAL: o parser apenas LÊ dados. Nada aqui cria entrada,
+ * estoque, lote ou movimentação — a efetivação é exclusiva de entries.confirm
+ * após confirmação humana na tela de conferência.
+ */
+import {
+  digitsOnly,
+  formatCnpj,
+  isValidAccessKey,
+  isValidCnpj,
+} from "./br-validators";
 
-// Utilities we reuse from the built browser bundle.
+// ─── Tipos ───────────────────────────────────────────────────────────────────
 
-function isValidDanfeItemCandidate(line: string): boolean {
-  // Tenta detectar colunas típicas de uma DANFE Modelo 1 / GERAF:
-  //   nItem  cProd  xProd  qCom   uCom   vUnCom  vProd
-  // Linhas que são cabeçalho ou rodapé da tabela usam nomes normalizados
-  // em maiúsculas; rejeitamos explicitamente essas strings.
-  const upper = line.toUpperCase();
-  // Sem âncoras de início — cabeçalho pode ser "NÍVEL  1  OTA ..." em OCR ruim.
-  if (upper.includes("DESCRICAO DOS PRODUTOS") || upper.includes("DESCRICAO DOS SERVICOS")) return false;
-  if (upper.includes("DESCRICAO") && upper.includes("SERVICOS")) return false;
-  if (upper.includes("QUANT") && upper.includes("VALOR") && upper.includes("UNITARIO")) return false;
-  if (upper.includes("NCM") && upper.includes("C.S.T.")) return false;
-  if (upper.includes("ALIQ") && (upper.includes("ICMS") || upper.includes("IPI"))) return false;
-  if (upper.includes("NOME DO PRODUTO") || upper.includes("DESCRIÇÃO DO PRODUTO")) return false;
-  if (upper.includes("NOME DO CLIENTE") || upper.includes("NOME DO DESTINATÁRIO")) return false;
-  if (upper.includes("HELLO WORLD") || upper.includes("PARA NOTA FISCAL Nº")) return false;
-  if (upper.includes("REMETENTE") && upper.includes("CNPJ")) return false;
+export interface DanfeItem {
+  /** Nº do item na DANFE (quando identificado) */
+  lineNumber?: number;
+  /** Código do produto (cProd) */
+  code?: string;
+  description: string;
+  quantity?: number;
+  unit?: string;
+  unitValue?: number;
+  totalValue?: number;
+}
 
-  // Não queremos ler qualificadores de campo: textos curtos e puramente
-  // numéricos também são descartados (isso evita confundir CEP/chave com itens).
-  if (line.length < 8) return false;
+export interface DanfeParseResult {
+  ok: boolean;
+  nfeNumber?: string;
+  series?: string;
+  /** Data de emissão em "yyyy-mm-dd" */
+  emissionDate?: string;
+  accessKey?: string;
+  /** CNPJ formatado (61.457.941/0001-43) */
+  emitterCnpj?: string;
+  emitterName?: string;
+  emitterAddress?: string;
+  emitterCity?: string;
+  emitterState?: string;
+  emitterPostalCode?: string;
+  receiverCnpj?: string;
+  receiverName?: string;
+  totalValue?: number;
+  afNumber?: string;
+  processNumber?: string;
+  empenhoNumber?: string;
+  items: DanfeItem[];
+}
 
-  // Número de série 1..4 dígitos; produto com código, descrição, qtd, unid.
-  // Permitimos pequenos vazios entre colunas.
-  const DANFE_ROW =
-    /^\s*(?:\|\s*)?(\d{1,4})\s+([0-9A-Z]{2,16})\s+(.{3,60}?)\s+(\d+(?:[.,]\d{1,4})?)\s+([A-Za-z]{2,4})\s+(\d{1,3}(?:[.,]\d{3})*[.,]\d{2,4})(?:\s+(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}))?\s*(?:\|\s*)?$/i;
+// ─── Regiões clássicas da DANFE (normalizadas 0..1) ──────────────────────────
 
-  const m = line.match(DANFE_ROW);
-  if (!m) return false;
-  const [, ?seq, code, desc, qty, unit, unitValue] = m;
+export interface DanfeRegion {
+  key: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
 
-  // Validamos: código + descrição com maiúsculas + quantidade comunicável.
-  const descricaoOk      = desc && desc.trim().length >= 3 && /[A-ZÀ-Ú]{3,}/i.test(desc);
-  const quantidadeValida = qty && /^\d+(?:,\d{1,4})?$/.test(qty) && parseFloat(qty.replace(",", ".")) > 0;
-  const unidadePlausivel = unit && /^[A-ZÀ-Ú]{2,4}$/i.test(unit);
-  const valorUnitarioOk  = unitValue && /^\d+(?:\.\d{3})*,\d{1,4}$/.test(unitValue) && parseFloat(unitValue.replace(/\./g, "").replace(",", ".")) > 0;
+export const DANFE_REGIONS: DanfeRegion[] = [
+  { key: "cabecalho", x: 0.02, y: 0.01, w: 0.96, h: 0.1 },
+  { key: "chave", x: 0.02, y: 0.09, w: 0.66, h: 0.06 },
+  { key: "emitente", x: 0.02, y: 0.14, w: 0.96, h: 0.15 },
+  { key: "destinatario", x: 0.02, y: 0.29, w: 0.96, h: 0.13 },
+  { key: "produtos", x: 0.02, y: 0.42, w: 0.96, h: 0.28 },
+  { key: "totais", x: 0.02, y: 0.7, w: 0.96, h: 0.06 },
+  { key: "dadosAdicionais", x: 0.02, y: 0.77, w: 0.96, h: 0.2 },
+];
 
-  // Um produto “confiável” tem descrição + qtd + unidade + valor unitário
-  // (ou, ao menos, três dos quatro). Relaxamos quando o valor total
-  // estiver aparente na mesma linha.
-  if (!descricaoOk || !quantidadeValida || !unidadePlausivel) {
-    // Permite sem valor unitário somente se houver valor total na linha.
-    const vprod = m[7] ?? "";
-    if (vprod && !valorUnitarioOk) {
-      // Só confia se a unidade estiver presente e a descrição for razoável.
-      if (!unidadePlausivel || !descricaoOk) return false;
-      // quantidade ok? se não, não aceitamos.
-      if (!quantidadeValida) return false;
-      return true;
-    }
-    return false;
+// ─── Campos rastreados ("X de 10 campos") ────────────────────────────────────
+
+export const DANFE_TRACKED_FIELDS = [
+  "Número da NF-e",
+  "Série",
+  "Chave de acesso",
+  "CNPJ do emitente",
+  "Razão social do emitente",
+  "Data de emissão",
+  "Valor total da NF",
+  "Itens da NF-e",
+  "CEP do emitente",
+  "UF do emitente",
+] as const;
+
+const VALID_UFS = new Set([
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS",
+  "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC",
+  "SP", "SE", "TO",
+]);
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const stripAccents = (s: string): string =>
+  s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+/** Converte "1.323,50" / "12,50" / "1323.50" em número. */
+function parseNumberBR(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  let s = raw.trim();
+  if (s.includes(",")) {
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (/^\d{1,3}(?:\.\d{3})+$/.test(s)) {
+    s = s.replace(/\./g, "");
   }
+  const n = Number(s.replace(/[^\d.\-]/g, ""));
+  return isFinite(n) ? n : undefined;
+}
+
+// ─── Chave de acesso ─────────────────────────────────────────────────────────
+
+/** Glifos que o OCR frequentemente confunde com dígitos. */
+const GLYPH_MAP: Record<string, string> = {
+  O: "0", o: "0", D: "0", d: "0", Q: "0", q: "0",
+  I: "1", i: "1", L: "1", l: "1",
+  Z: "2", z: "2",
+  S: "5", s: "5",
+  G: "6", g: "6",
+  B: "8", b: "8",
+};
+
+const KEY_TOKEN_RE = /^[0-9OoDdQqIiLlZzSsGgBb]{4}$/;
+
+function normalizeKeyToken(token: string): string | null {
+  if (!KEY_TOKEN_RE.test(token)) return null;
+  let out = "";
+  for (const ch of token) out += GLYPH_MAP[ch] ?? ch;
+  return /^\d{4}$/.test(out) ? out : null;
+}
+
+/**
+ * Valida a chave de 44 dígitos: estrutura (UF, mês, modelo 55/65) +
+ * dígito verificador módulo 11 (último dígito da chave NF-e).
+ * Não aceita qualquer sequência de 44 caracteres.
+ */
+export function validateAccessKey44(raw: string | undefined | null): boolean {
+  const d = digitsOnly(raw ?? "");
+  if (d.length !== 44) return false;
+  if (!isValidAccessKey(d)) return false;
+  // Dígito verificador módulo 11: pesos 2..9 da direita para a esquerda
+  // sobre os 43 primeiros dígitos.
+  let sum = 0;
+  let weight = 2;
+  for (let i = 42; i >= 0; i--) {
+    sum += Number(d[i]) * weight;
+    weight = weight === 9 ? 2 : weight + 1;
+  }
+  const rest = sum % 11;
+  const dv = 11 - rest;
+  const expected = dv >= 10 ? 0 : dv;
+  return expected === Number(d[43]);
+}
+
+/**
+ * Reconhece a chave de acesso em texto OCR: sequência direta de 44 dígitos,
+ * blocos de 4 dígitos separados por espaço/ponto/hífen/quebra de linha e
+ * normalização de glifos (O→0, S→5, B→8, I→1…).
+ * Retorna SOMENTE chaves que passam na validação estrutural + DV.
+ */
+export function extractAccessKey44(text: string | undefined | null): string | undefined {
+  if (!text) return undefined;
+
+  // 1) Sequência direta de 44 dígitos.
+  const direct = text.match(/\d{44}/);
+  if (direct && validateAccessKey44(direct[0])) return direct[0];
+
+  // 2) Blocos de 4 caracteres "semelhantes a dígitos" acumulados em ordem.
+  const tokens = text.split(/[^0-9A-Za-z]+/).filter(Boolean);
+  let buffer = "";
+  for (const token of tokens) {
+    const normalized = normalizeKeyToken(token);
+    if (normalized) {
+      buffer += normalized;
+      if (buffer.length === 44) {
+        if (validateAccessKey44(buffer)) return buffer;
+        buffer = "";
+      } else if (buffer.length > 44) {
+        buffer = "";
+      }
+    } else {
+      buffer = "";
+    }
+  }
+
+  return undefined;
+}
+
+/** Mantido por compatibilidade com o diálogo (validação estrutural + DV). */
+export const validateAccessKey = validateAccessKey44;
+
+// ─── Validação de itens (NUNCA cabeçalho vira produto) ───────────────────────
+
+/** Palavras/títulos que caracterizam cabeçalho, rodapé ou paginação. */
+const HEADER_MARKERS = [
+  "DESCRICAO DOS PRODUTOS",
+  "DESCRIÇÃO DOS PRODUTOS",
+  "DESCRICAO DOS SERVICOS",
+  "DESCRIÇÃO DOS SERVIÇOS",
+  "DADOS DOS PRODUTOS",
+  "DADOS DOS SERVICOS",
+  "DADOS DOS PROD",
+  "NOME DO PRODUTO",
+  "DESCRICAO DO PRODUTO",
+  "VALOR UNITARIO",
+  "VALOR UNITÁRIO",
+  "VALOR TOTAL",
+  "ALIQ",
+  "ICMS",
+  "CHAVE DE ACESSO",
+  "DADOS ADICIONAIS",
+  "DADOS GERAIS",
+  "NOTA FISCAL ELETRONICA",
+  "NOTA FISCAL ELETRÔNICA",
+  "DANFE",
+  "DESTINATARIO",
+  "REMETENTE",
+  "INSCRICAO",
+  "PROTOCOLO DE USO",
+  "FOLHA",
+  "PAGINA",
+  "PÁGINA",
+];
+
+/** Linhas de item da DANFE: nItem cProd xProd qCom uCom vUnCom vProd. */
+const DANFE_ITEM_ROW =
+  /^\s*(?:\|\s*)?(\d{1,4})\s+([0-9A-Z]{2,16})\s+(.{3,80}?)\s+(\d+(?:[.,]\d{1,4})?)\s+([A-Za-z]{2,4})\s+(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4})(?:\s+(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4}))?\s*(?:\|\s*)?$/;
+
+/** Unidades que NUNCA são unidade de produto (são colunas do cabeçalho). */
+const BAD_UNITS = new Set(["NCM", "CST", "CFOP", "UNID", "QTDE", "ALIQ", "ICMS", "IPI", "ST"]);
+
+/**
+ * Valida estruturalmente uma linha como candidata a ITEM da DANFE.
+ * Rejeita explicitamente cabeçalhos/rodapés/títulos/paginação e exige
+ * evidências suficientes: descrição, quantidade numérica válida, unidade
+ * plausível e valor unitário ou total numérico.
+ */
+export function isValidDanfeItemCandidate(line: string | undefined | null): boolean {
+  const raw = (line ?? "").trim();
+  if (raw.length < 10 || raw.length > 200) return false;
+
+  const upper = stripAccents(raw.toUpperCase());
+  for (const marker of HEADER_MARKERS) {
+    if (upper.includes(marker)) return false;
+  }
+
+  const m = raw.match(DANFE_ITEM_ROW);
+  if (!m) return false;
+  const [, , , desc, qty, unit, unitValue, totalValue] = m;
+
+  // Descrição: ao menos 3 letras seguidas (não serves para "2 EPP", "Cód. IGO").
+  if (!desc || !/[A-Za-zÀ-Ú]{3,}/.test(desc)) return false;
+
+  // Quantidade numérica > 0.
+  const q = parseNumberBR(qty);
+  if (q === undefined || q <= 0) return false;
+
+  // Unidade plausível (2 a 4 letras, não é nome de coluna).
+  if (!unit || !/^[A-Za-zÀ-Ú]{2,4}$/.test(unit)) return false;
+  if (BAD_UNITS.has(unit.toUpperCase())) return false;
+
+  // Ao menos um valor numérico > 0 (unitário ou total).
+  const vu = parseNumberBR(unitValue);
+  const tv = parseNumberBR(totalValue);
+  const hasValue = (vu !== undefined && vu > 0) || (tv !== undefined && tv > 0);
+  if (!hasValue) return false;
+
   return true;
 }
 
-function isAccessKeyStructure44(digits: string): boolean {
-  if (digits.length !== 44) return false;
-  const uf2  = digits.slice(0, 2);
-  const month = parseInt(digits.slice(4,6),10);
-  const model = digits.slice(20,22);
-  const uf_ok  = ["11","12","13","14","15","16","17","21","22","23","24","25","26","27","28","29","31","32","33","35","41","42","43","50","51","52","53","91"].includes(uf2);
-  const month_ok = month >= 1 && month <= 12;
-  const model_ok = model === "55" || model === "65";
-  return uf_ok && month_ok && model_ok;
-}
+// ─── Parse linha a linha ─────────────────────────────────────────────────────
 
-function checkAccessKeyValidation(digits: string): boolean {
-  return isAccessKeyStructure44(digits);
-}
-
-function validateAccessKey44(digits: string): boolean {
-  return checkAccessKeyValidation(digits);
-}
-
-// ─── Nós reconstruímos parte do DOM para montar a imagem e enviar ao OCR ───
-
-function getCanvasFromImageBitmap(bitmap: ImageBitmap): HTMLCanvasElement {
-  const w = Math.max(128, bitmap.width);
-  const h = Math.max(128, bitmap.height);
-  const cvs = document.createElement("canvas");
-  cvs.width  = Math.round(w);
-  cvs.height = Math.round(h);
-  const ctx = cvs.getContext("2d");
-  if (ctx) {
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality  = "high";
-    ctx.drawImage(bitmap, 0, 0, cvs.width, cvs.height);
-  }
-  return cvs;
-}
-
-async function preprocessImageForCanvas(canvas: HTMLCanvasElement): Promise<{ canvas: HTMLCanvasElement; imageData: ImageData }> {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas context unavailable");
-  const imageData = ctx.getImageData(0,0,canvas.width,canvas.height);
-  const processed = new Uint8ClampedArray(imageData.data.length);
-  for (let i=0;i<imageData.data.length;i+=4) {
-    const r=imageData.data[i], g=imageData.data[i+1], b=imageData.data[i+2];
-    const gray = 0.299*r + 0.587*g + 0.114*b;
-    processed[i]   = gray;
-    processed[i+1] = gray;
-    processed[i+2] = gray;
-    processed[i+3] = imageData.data[i+3];
-  }
-  const out = new ImageData(processed, canvas.width, canvas.height);
-  const outCanvas = document.createElement("canvas");
-  outCanvas.width  = canvas.width;
-  outCanvas.height = canvas.height;
-  const outCtx = outCanvas.getContext("2d");
-  if (!outCtx) throw new Error("Canvas context unavailable");
-  outCtx.putImageData(out, 0, 0);
-  return { canvas: outCanvas, imageData: out };
-}
-
-async function renderPdfPageToCanvas(pdfPage: PDFPageProxy, opts: { width?: number; height?: number }): Promise<HTMLCanvasElement> {
-  const viewport = pdfPage.getViewport({ scale: 1 });
-  const width  = opts.width  ?? viewport.width;
-  const height = opts.height ?? viewport.height;
-  const cvs = document.createElement("canvas");
-  cvs.width  = Math.round(width);
-  cvs.height = Math.round(height);
-  const ctx = cvs.getContext("2d");
-  if (!ctx) throw new Error("Canvas context unavailable");
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0,0,cvs.width,cvs.height);
-  await pdfPage.render({
-    canvasContext: ctx,
-    viewport: new pdfjsLib.PageViewport({ width, height, scale: 1, rotation: 0 }),
-  }).promise;
-  return cvs;
-}
-
-export async function extractKeyFromPdfPage(worker: TesseractWorker, page: PDFPageProxy): Promise<string | null> {
-  const canvas = await renderPdfPageToCanvas(page, { width: 1200, height: 1200 });
-  const { canvas: processed, imageData } = await preprocessImageForCanvas(canvas);
-
-  const candidates: string[] = [];
-  let mostCommonlyLen44 = "";
-
-  for (let y = 0; y <= processed.height - 24; y += 12) {
-    for (let x = 0; x <= processed.width - 24; x += 12) {
-      const regionCanvas = document.createElement("canvas");
-      regionCanvas.width  = 24;
-      regionCanvas.height = 24;
-      const rctx = regionCanvas.getContext("2d");
-      if (rctx) rctx.drawImage(processed, x, y, 24, 24, 0, 0, 24, 24);
-      const blob = await new Promise<Blob | null>(r => regionCanvas.toBlob(r, "image/png"));
-      if (!blob) continue;
-      const regionFile = new File([blob], "region-key.png", { type: "image/png" });
-      const ocrResult = await worker.recognize(regionFile);
-      const text = ocrResult.data.text.replace(/\s+/g, "");
-      if (text.length === 44) candidates.push(text);
-      if (text.length === 44 && !mostCommonlyLen44) mostCommonlyLen44 = text;
-    }
-  }
-
-  // Se achamos pelo menos um candidato de 44 dígitos, validamos a estrutura
-  // (UF, mês, modelo 55/65 — que é o padrão da NF-e).
-  const filtered = candidates.filter(t => isAccessKeyStructure44(t));
-  if (filtered.length > 0) {
-    // Desempate simples por frequência — normalmente só aparece um.
-    const byFreq = new Map<string, number>();
-    for (const t of filtered) byFreq.set(t, (byFreq.get(t) ?? 0) + 1);
-    const best = [...byFreq.entries()].sort((a,b) => b[1]-a[1] || a[0].localeCompare(b[0]))[0];
-    if (best) return best[0];
-  }
-
-  return null;
-}
-
-export async function extractKeyFromPdfRegions(worker: TesseractWorker, pdfPage: PDFPageProxy): Promise<string | null> {
-  // Header region (top 15-20% of the page):
-  const headerCanvas = await renderPdfPageToCanvas(pdfPage, { width: 900, height: 160 });
-  const { canvas: headerProcessed } = await preprocessImageForCanvas(headerCanvas);
-  const regionFile = await new Promise<File>(r => headerProcessed.toBlob(r, "image/png").then(blob => {
-    if (!blob) throw new Error("Blob was null");
-    return r(new File([blob], "header-key.png", { type: "image/png" }));
-  }));
-  const ocrResult = await worker.recognize(regionFile);
-  const headerText = ocrResult.data.text;
-  const keyInHeader = extractAccessKey44(headerText);
-  if (keyInHeader) return keyInHeader;
-
-  const cropSize = 220;
-  for (let y = 0; y <= pdfPage.getViewport({scale:1}).height - cropSize; y += 32) {
-    for (let x = 0; x <= pdfPage.getViewport({scale:1}).width - cropSize; x += 32) {
-      const region = await renderPdfPageToCanvas(pdfPage, { width: cropSize, height: cropSize });
-      // Offsets locais para recorte na região:
-      const ctx = region.getContext("2d");
-      if (!ctx) continue;
-      const sx = x, sy = y;
-      if (sx + cropSize > region.width || sy + cropSize > region.height) continue;
-      const cropped = document.createElement("canvas");
-      cropped.width  = cropSize;
-      cropped.height = cropSize;
-      const cctx = cropped.getContext("2d");
-      if (cctx) cctx.drawImage(region, sx, sy, cropSize, cropSize, 0, 0, cropSize, cropSize);
-      const{ canvas: croppedP } = await preprocessImageForCanvas(cropped);
-      const blob = await new Promise<Blob | null>(r => croppedP.toBlob(r, "image/png"));
-      if (!blob) continue;
-      const file = new File([blob], "region-key.png", { type: "image/png" });
-      const ocrRes = await worker.recognize(file);
-      const text = ocrRes.data.text.replace(/\s+/g, "");
-      const key = extractAccessKey44(text);
-      if (key) return key;
-    }
-  }
-
-  return null;
-}
-
-function extractAccessKey44(text: string): string | null {
-  // remove espaços, pontuação, e inteligentemente resolve O→0 S→5 B→8 I→1
-  const gcr = (s: string): string => {
-    let out = "";
-    for (const ch of s) {
-      if ("OoDdIiLlZzSsGgBbQq".includes(ch)) {
-        const map: Record<string, string> = { O:"0", o:"0", D:"0", d:"0", I:"1", i:"1", L:"1", l:"1", Z:"2", z:"2", S:"5", s:"5", G:"6", g:"6", B:"8", b:"8", Q:"0", q:"0" };
-        out += map[ch] ?? ch;
-      } else {
-        out += ch;
-      }
-    }
-    return out.replace(/[^\d]/g, "");
+function parseItemLine(line: string, index: number): DanfeItem | null {
+  if (!isValidDanfeItemCandidate(line)) return null;
+  const m = line.trim().match(DANFE_ITEM_ROW);
+  if (!m) return null;
+  const [, seq, code, desc, qty, unit, unitValue, totalValue] = m;
+  return {
+    lineNumber: Number(seq) || index + 1,
+    code,
+    description: desc.trim(),
+    quantity: parseNumberBR(qty),
+    unit: unit.toUpperCase(),
+    unitValue: parseNumberBR(unitValue),
+    totalValue: parseNumberBR(totalValue),
   };
+}
 
-  const digits = gcr(text);
-  if (digits.length === 44) {
-    if (isAccessKeyStructure44(digits)) return digits;
-  }
+/**
+ * Lê um texto de DANFE (camada de texto ou OCR) e devolve os campos
+ * estruturados. O parser NUNCA falha por completo: sem chave identificada a
+ * conferência continua possível (chave pode ser informada manualmente).
+ */
+export function parseDanfeText(text: string | undefined | null): DanfeParseResult {
+  const result: DanfeParseResult = { ok: false, items: [] };
+  if (!text || !text.trim()) return result;
 
-  // Tenta 11 grupos de 4 dígitos (ex.: "4226 0922 8163 1500 0144 ...")
-  const groups = text.match(/\d{4}(?:\s|$)/g);
-  if (groups) {
-    let buffer = "";
-    for (const g of groups) {
-      buffer += g.replace(/\s/g, "");
-      if (buffer.length === 44) {
-        if (isAccessKeyStructure44(buffer)) return buffer;
+  const lines = text.split(/\r?\n/);
+  let inReceiverSection = false;
+  let prevLine = "";
+  let prevCnpjLineIdx = -1;
+
+  lines.forEach((rawLine, idx) => {
+    const line = rawLine.trim();
+    if (!line) return;
+    const upper = stripAccents(line.toUpperCase());
+
+    // Seção do destinatário/remetente (o CNPJ ali é o DO DESTINATÁRIO).
+    if (/DESTINAT[AÁ]RIO|REMETENTE/.test(upper) && upper.length < 60) {
+      inReceiverSection = true;
+    }
+
+    // ── Número da NF-e ──
+    if (!result.nfeNumber) {
+      const mNum =
+        line.match(/NF-?E?\s*N[ºo°]\s*:?\s*0*(\d{1,9})/i) ||
+        line.match(/\bN[ºo°]\s*:?\s*0*(\d{1,9})/i);
+      if (mNum) result.nfeNumber = mNum[1];
+    }
+
+    // ── Série (preserva zeros à esquerda) ──
+    if (!result.series) {
+      const mSeries = line.match(/S[ÉE]RIE\s*:?\s*(\d{1,3})/i);
+      if (mSeries) result.series = mSeries[1];
+    }
+
+    // ── Data de emissão ──
+    if (!result.emissionDate) {
+      const mDate = upper.match(/EMISS[AÃ]O[^0-9]{0,12}?(\d{2})\/(\d{2})\/(\d{4})/);
+      if (mDate) result.emissionDate = `${mDate[3]}-${mDate[2]}-${mDate[1]}`;
+    }
+
+    // ── CNPJ (emitente ou destinatário conforme a seção) ──
+    const mCnpjLabel = line.match(
+      /CNPJ\s*:?\s*(\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})/i,
+    );
+    const mCnpjBare = line.match(/\b(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})\b/);
+    const mCnpjDigits = line.match(/(?<!\d)(\d{14})(?!\d)/);
+    const cnpjRaw =
+      mCnpjLabel?.[1] ?? mCnpjBare?.[1] ?? mCnpjDigits?.[1] ?? null;
+    if (cnpjRaw) {
+      const cnpjFormatted = formatCnpj(digitsOnly(cnpjRaw));
+      if (inReceiverSection) {
+        if (!result.receiverCnpj) {
+          result.receiverCnpj = cnpjFormatted;
+          // Nome do destinatário: linha imediatamente anterior, se parecer nome.
+          const nm = stripAccents(prevLine.toUpperCase());
+          if (
+            prevLine &&
+            prevLine.length >= 5 &&
+            !prevLine.includes(":") &&
+            /[A-ZÀ-Ú]{3,}/.test(nm) &&
+            !/CHAVE|DANFE|DADOS|NOTA/.test(nm)
+          ) {
+            result.receiverName = prevLine;
+          }
+        }
+      } else if (!result.emitterCnpj) {
+        result.emitterCnpj = cnpjFormatted;
+        prevCnpjLineIdx = idx;
       }
     }
-  }
 
-  // Tenta extrair o cabeçalho da DANFE com uma expressão para sequência de
-  // 44 dígitos isolada (provavelmente após "CHAVE DE ACESSO" ou "Nº ...")
-  const regexIsolated = /\b\d{44}\b/;
-  const isolatedMatch = text.match(regexIsolated);
-  if (isolatedMatch) {
-    const raw = isolatedMatch[0];
-    const d = gcr(raw);
-    if (d.length === 44 && isAccessKeyStructure44(d)) return d;
-  }
-
-  return null;
-}
-
-
-// ─── Classe auxiliar para rodar OCR em PDF inteiro, pagina a pagina ───
-
-export async function runOcrOnPdfPages(pdfDoc: PDFDocumentProxy, worker: TesseractWorker, maxPages: number = 4): Promise<{ textsByPage: string[], accessKey: string | null }> {
-  const pagesCount = Math.min(pdfDoc.numPages, maxPages);
-  const textsByPage: string[] = [];
-
-  let accessKey: string | null = null;
-  for (let n = 1; n <= pagesCount; n++) {
-    const page = await pdfDoc.getPage(n);
-    const canvas = await renderPdfPageToCanvas(page, { width: 1200, height: 1200 });
-    const { canvas: processed } = await preprocessImageForCanvas(canvas);
-    const blob = await new Promise<Blob | null>(r => processed.toBlob(r, "image/png"));
-    if (!blob) continue;
-    const file = new File([blob], `page-${n}.png`, { type: "image/png" });
-    const result = await worker.recognize(file);
-    textsByPage.push(result.data.text);
-    if (!accessKey) {
-      const key = extractAccessKey44(result.data.text);
-      if (key) accessKey = key;
+    // ── Razão social do emitente ──
+    if (!inReceiverSection && !result.emitterName) {
+      const mName = line.match(/RAZ[ÃA]O\s+SOCIAL\s*:?\s*(.+)/i);
+      if (mName) result.emitterName = mName[1].trim();
     }
-  }
 
-  return { textsByPage, accessKey };
+    // ── Endereço / cidade / UF / CEP do emitente ──
+    if (!inReceiverSection) {
+      if (!result.emitterAddress) {
+        const mAddr = line.match(/ENDERE[ÇC]O\s*:?\s*(.+)/i);
+        if (mAddr) result.emitterAddress = mAddr[1].trim();
+        else if (
+          result.emitterCnpj &&
+          idx === prevCnpjLineIdx + 1 &&
+          /^(RUA|AV\.?|AVENIDA|AL\.?|ALAMEDA|TRAVESSA|ESTRADA|RODOVIA)\b/i.test(line)
+        ) {
+          result.emitterAddress = line;
+        }
+      }
+      if (!result.emitterCity) {
+        const mCity = line.match(/CIDADE\s*:?\s*(.+)/i);
+        if (mCity) result.emitterCity = mCity[1].trim();
+        else if (
+          result.emitterAddress &&
+          idx > 0 &&
+          lines[idx - 1]?.trim() === result.emitterAddress &&
+          /^[A-Za-zÀ-Ú]{3,30}$/.test(line)
+        ) {
+          result.emitterCity = line;
+        }
+      }
+      if (!result.emitterState) {
+        const mUf = line.match(/\bUF\s*:?\s*([A-Za-z]{2})\b/i);
+        if (mUf && VALID_UFS.has(mUf[1].toUpperCase())) {
+          result.emitterState = mUf[1].toUpperCase();
+        } else if (
+          result.emitterCity &&
+          idx > 0 &&
+          lines[idx - 1]?.trim() === result.emitterCity &&
+          VALID_UFS.has(line.toUpperCase()) &&
+          /^[A-Za-z]{2}$/.test(line)
+        ) {
+          result.emitterState = line.toUpperCase();
+        }
+      }
+      if (!result.emitterPostalCode) {
+        const mCep = line.match(/CEP\s*:?\s*(\d{5}-?\d{3})/i);
+        if (mCep) result.emitterPostalCode = mCep[1];
+      }
+    }
+
+    // ── Valor total da NF (rótulo específico; nunca pega valor de item) ──
+    if (result.totalValue === undefined) {
+      const mTotal = upper.match(
+        /VALOR\s+TOTAL\s+DA\s+NF\D{0,12}?R?\$?\s*([\d.,]+)/,
+      );
+      if (mTotal) {
+        const v = parseNumberBR(mTotal[1]);
+        if (v !== undefined && v > 0) result.totalValue = v;
+      }
+    }
+
+    // ── AF / Empenho / Processo (campos distintos; um nunca preenche outro) ──
+    if (!result.afNumber) {
+      const mAf = line.match(/\bAF\s*:?\s*(\d{3,6}\/\d{4})\b/i);
+      if (mAf) result.afNumber = mAf[1];
+    }
+    if (!result.empenhoNumber) {
+      const mEmp = line.match(/\bEMPENHO\s*:?\s*([\d]{1,6}\/\d{4})\b/i);
+      if (mEmp) result.empenhoNumber = mEmp[1];
+    }
+    if (!result.processNumber) {
+      const mProc = line.match(
+        /\bPROCESSO(?:\s+ADMINISTRATIVO)?\s*:?\s*([\w/-]{3,20})\b/i,
+      );
+      if (mProc && !/USO/i.test(mProc[1])) result.processNumber = mProc[1];
+    }
+
+    // ── Itens ( SOMENTE linhas que passam na validação estrutural ) ──
+    const item = parseItemLine(line, idx);
+    if (item) result.items.push(item);
+
+    prevLine = line;
+  });
+
+  // ── Chave de acesso (página inteira + blocos + glifos) ──
+  result.accessKey = extractAccessKey44(text);
+
+  const foundAny =
+    result.nfeNumber ||
+    result.series ||
+    result.accessKey ||
+    result.emitterCnpj ||
+    result.emitterName ||
+    result.afNumber ||
+    result.empenhoNumber ||
+    result.items.length > 0;
+  result.ok = Boolean(foundAny);
+  return result;
 }
 
+// ─── Resumo "X de 10 campos" (somente campos VÁLIDOS contam) ─────────────────
 
-// ─── Função pública exportada (usada no diálogo) ───
+export interface DanfeFieldSummary {
+  total: number;
+  found: number;
+  missing: string[];
+}
 
-export async function signatureRegionOcr(worker: TesseractWorker, pdfPage: PDFPageProxy): Promise<string | null> {
-  const key = await extractKeyFromPdfRegions(worker, pdfPage);
-  return key;
+export function danfeFieldSummary(parsed: DanfeParseResult): DanfeFieldSummary {
+  const validity: Record<(typeof DANFE_TRACKED_FIELDS)[number], boolean> = {
+    "Número da NF-e": Boolean(parsed.nfeNumber),
+    Série: Boolean(parsed.series),
+    "Chave de acesso": validateAccessKey44(parsed.accessKey),
+    "CNPJ do emitente": Boolean(parsed.emitterCnpj) && isValidCnpj(parsed.emitterCnpj ?? ""),
+    "Razão social do emitente": Boolean(parsed.emitterName),
+    "Data de emissão": Boolean(parsed.emissionDate),
+    "Valor total da NF": parsed.totalValue !== undefined && parsed.totalValue > 0,
+    "Itens da NF-e": parsed.items.length > 0,
+    "CEP do emitente": digitsOnly(parsed.emitterPostalCode ?? "").length === 8,
+    "UF do emitente": VALID_UFS.has((parsed.emitterState ?? "").toUpperCase()),
+  };
+  const missing: string[] = [];
+  let found = 0;
+  for (const field of DANFE_TRACKED_FIELDS) {
+    if (validity[field]) found++;
+    else missing.push(field);
+  }
+  return { total: DANFE_TRACKED_FIELDS.length, found, missing };
+}
+
+// ─── Utilitários de OCR multi-região ─────────────────────────────────────────
+
+export function hasUsableTextLayer(text: string | null | undefined): boolean {
+  return typeof text === "string" && text.trim().length >= 100;
+}
+
+export function mergeDanfeTexts(pageText: string, regionTexts: string[]): string {
+  return [pageText, ...regionTexts].filter((t) => t && t.trim()).join("\n");
+}
+
+/**
+ * Compara dois resultados de parse de forma SEMÂNTICA: prefere o resultado
+ * com MAIS campos estruturados válidos. Nunca usa apenas quantidade de
+ * caracteres — um texto maior não é automaticamente melhor.
+ */
+export function isDanfeParseBetter(
+  candidate: DanfeParseResult,
+  current: DanfeParseResult,
+): boolean {
+  return danfeFieldSummary(candidate).found > danfeFieldSummary(current).found;
 }

@@ -1,329 +1,277 @@
-/** @license University of São Paulo (CC-BY-SA 4.0) / modifications allowed under LGPL-3.0-or-later. */
+/**
+ * Tabela de conferência da NF-e (XML ou DANFE/OCR).
+ *
+ * REGRAS DESTA TELA:
+ *  • `canContinueNfeReview(items)` é a ÚNICA regra visual e funcional do
+ *    avanço — nenhum item pode avançar sem produto associado e "found".
+ *  • Um item que o OCR NÃO conseguiu identificar vira uma linha PENDENTE:
+ *    campos editáveis/vazios, nunca um produto inventado. O usuário associa
+ *    manualmente (ou cria o produto) antes de finalizar.
+ *  • A categoria do material fica visível ao lado do produto associado.
+ *  • Quantidades/preços vêm do documento fiscal; quando o OCR não trouxe uma
+ *    quantidade válida, o campo fica VAZIO para digitação — nunca inventado.
+ */
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  canContinueNfeReview,
+  type NfeItem,
+  type ProductAssociationType,
+  type ProductForMatch,
+  type ProductMatchStatus,
+} from "@/lib/nfe";
 
-import React from "react";
-import { useCallback, useMemo } from "react";
-import type { NfeDataFields, NfeProductFields, OcrParadigm } from "@/components/DanfeImportDialog";
-
-import { Badge, Button, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text, Card, CardHeader, CardTitle, CardDescription, CardContent } from "@sjoy/eds";
-import { CodeTemplate, ClassNotFoundSnackbar } from "@/components/common";
-
-import { NfeItemPruner } from "../lib/nfe-pruner";
-
-// ─── Constants ─────────────────────────────────────────────────────────────
-
-const fieldsShowMessage = {
-  missingAccessKey: "Chave de acesso está pendente de conferência.",
-  missingNfeNumber: "Número da NF-e está pendente de conferência.",
+export type NfeReviewProduct = ProductForMatch & {
+  category?: { name: string } | null;
 };
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+export type NfeReviewRow = {
+  item: NfeItem;
+  productId: string;
+  matchStatus: ProductMatchStatus;
+  matchScore: number;
+  matchSource?: string;
+  matchReason?: string;
+  associationType: ProductAssociationType;
+  locationId?: string;
+  supplierLot?: string;
+};
 
-function formatProductSeq(seq: string | null): string {
-  if (!seq) return "—";
-  return seq.trim();
+export interface NfeReviewTableProps {
+  items: NfeReviewRow[];
+  products: NfeReviewProduct[];
+  locations?: Array<{ _id: string; name: string }>;
+  /** Atualiza UMA linha (associação manual, lote, local, quantidade pendente). */
+  onUpdate: (index: number, patch: Partial<NfeReviewRow>) => void;
+  /** Abre o cadastro de produto para o item pendente. */
+  onNewProduct?: () => void;
+  /** Avança para a próxima etapa (destino da NF-e). */
+  onContinue?: () => void;
+  /** Origem dos dados lidos (XML ou DANFE/OCR) — apenas informativo. */
+  sourceLabel?: string;
 }
 
-function formatProductDescription(item: NfeProductFields): string {
-  if (item?.productDescription) return item.productDescription.trim();
-  if (item?.productKey) return item.productKey.trim();
-  if (item?.productBrand || item?.productModel) {
-    return [item.productBrand, item.productModel].filter(Boolean).join(" / ");
-  }
-  return null;
-}
+const STATUS_LABEL: Record<ProductMatchStatus, { label: string; className: string }> = {
+  found: { label: "Encontrado", className: "bg-emerald-100 text-emerald-800" },
+  possible: { label: "Confirme a associação", className: "bg-amber-100 text-amber-800" },
+  not_found: { label: "Pendente", className: "bg-amber-100 text-amber-800" },
+};
 
-function formatMoney(value: number | null | undefined): string {
-  if (value == null) return "—";
+function formatMoney(value: number | undefined | null): string {
+  if (value == null || !isFinite(value)) return "—";
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 }
 
-// ─── Component ─────────────────────────────────────────────────────────────
-
-export type NfeReviewTableProps = {
-  nfeFields: NfeDataFields | null;
-  paradigm: OcrParadigm | "unknown";
-  originalFileName: string | null;
-  onGoNext?: () => void;
-  onGoBack?: () => void;
-  onSnackClassNotFound?: (className: string, error?: Error) => void;
-  onSnackCodeTemplate?: (className: string) => void;
-  onProductCodeError?: (productKey: string) => void;
-};
-
 export function NfeReviewTable({
-  nfeFields,
-  paradigm,
-  originalFileName,
-  onGoNext,
-  onGoBack,
-  onSnackClassNotFound,
-  onSnackCodeTemplate,
-  onProductCodeError,
-}: NfeReviewTableProps) {
-  const [snackbarSnackClassNotFound, setSnackbarSnackClassNotFound] = React.useState<string | null>(null);
-  const [snackbarSnackCodeTemplate, setSnackbarSnackCodeTemplate] = React.useState<string | null>(null);
-
-  const items = useMemo<NfeProductFields[]>(() => nfeFields?.products ?? [], [nfeFields]);
-
-  const prepareGoNext = useCallback((): boolean => {
-    if (!nfeFields) return false;
-    if (!nfeFields.accessKey || nfeFields.accessKey.trim() === "") {
-      onSnackClassNotFound?.call(null, "missingAccessKey");
-      return false;
-    }
-    if (!nfeFields.nfeNumber || nfeFields.nfeNumber.trim() === "") {
-      onSnackClassNotFound?.call(null, "missingNfeNumber");
-      return false;
-    }
-    // Prune: we can optionally prune items here using legacy pruning rules,
-    // but for now we leave them all.
-    // NfeItemPruner.safeItems(items);
-    return true;
-  }, [nfeFields, onSnackClassNotFound]);
-
-  const handleGo = useCallback(() => {
-    if (!prepareGoNext()) return;
-    onGoNext?.();
-  }, [prepareGoNext, onGoNext]);
-
-  const handleCodeTemplateRequest = useCallback((className: string) => {
-    if (onSnackCodeTemplate) onSnackCodeTemplate(className);
-    else setSnackbarSnackCodeTemplate(className);
-  }, [onSnackCodeTemplate]);
-
-  //
-  // ── Render helpers ──────────────────────────────────────────────────────
-  //
-
-  if (!nfeFields) return null;
-
-  return (
-    <>
-      <ClassNotFoundSnackbar
-        className={snackbarSnackClassNotFound ?? undefined}
-        onClose={() => setSnackbarSnackClassNotFound(null)}
-      />
-      <CodeTemplate className={snackbarSnackCodeTemplate ?? undefined} onClose={() => setSnackbarSnackCodeTemplate(null)} />
-
-      <Card variant="outlined" tone="info">
-        <CardHeader>
-          <CardTitle>Conferência de NF-e — OCR</CardTitle>
-          <CardDescription>
-            Edite os campos abaixo antes de confirmar a importação.
-            O acesso é necessário para evitar duplicidade.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Campo</TableHead>
-                <TableHead>Valor</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {/* Access key */}
-              <TableRow>
-                <TableCell>Chave de acesso</TableCell>
-                <TableCell>
-                  <Text size="sm">
-                    {nfeFields.accessKey ?? (
-                      <Text color="red" weight="bold">Pendente</Text>
-                    )}
-                  </Text>
-                </TableCell>
-              </TableRow>
-              {/* NFE number */}
-              <TableRow>
-                <TableCell>Número da NF-e</TableCell>
-                <TableCell>
-                  <Text size="sm">
-                    {nfeFields.nfeNumber ?? (
-                      <Text color="red" weight="bold">Pendente</Text>
-                    )}
-                  </Text>
-                </TableCell>
-              </TableRow>
-              {/* Emitente */}
-              <TableRow>
-                <TableCell>Emitente (CNPJ)</TableCell>
-                <TableCell>
-                  <Text size="sm">
-                    {nfeFields.emitentCnpj ?? "Pendente"}
-                  </Text>
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Emitente (Razão Social)</TableCell>
-                <TableCell>
-                  <Text size="sm">
-                    {nfeFields.emitentLegalName ?? "Pendente"}
-                  </Text>
-                </TableCell>
-              </TableRow>
-              {/* Destinatário */}
-              <TableRow>
-                <TableCell>Destinatário (CNPJ)</TableCell>
-                <TableCell>
-                  <Text size="sm">
-                    {nfeFields.receiverCnpj ?? "Pendente"}
-                  </Text>
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Destinatário (Razão Social)</TableCell>
-                <TableCell>
-                  <Text size="sm">
-                    {nfeFields.receiverLegalName ?? "Pendente"}
-                  </Text>
-                </TableCell>
-              </TableRow>
-              {/* Valores */}
-              <TableRow>
-                <TableCell>Valor Total</TableCell>
-                <TableCell>
-                  <Text size="sm">{formatMoney(nfeFields.totalAmount ? parseFloat(nfeFields.totalAmount) : null)}</Text>
-                </TableCell>
-              </TableRow>
-              {/* Data de emissão / etc */}
-              <TableRow>
-                <TableCell>Data de emissão</TableCell>
-                <TableCell>
-                  <Text size="sm">{nfeFields.issueDate ?? "Pendente"}</Text>
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Nota de Emissão</TableCell>
-                <TableCell>
-                  <Text size="sm">{nfeFields.noteOfCharge ?? "—"}</Text>
-                </TableCell>
-              </TableRow>
-              <TableRow>
-                <TableCell>Imposto de Embarque</TableCell>
-                <TableCell>
-                  <Text size="sm">{nfeFields.noteOfInCharge ?? "—"}</Text>
-                </TableCell>
-              </TableRow>
-              {/* Produtos */}
-            </TableBody>
-          </Table>
-
-          {/* Produtos */}
-          <SectionProductList
-            products={items}
-            onSnackClassNotFound={handleCodeTemplateRequest}
-          />
-        </CardContent>
-      </Card>
-
-      {/* Aviso de dados pendentes */}
-      {!nfeFields.accessKey && (
-        <Card variant="outlined" tone="warning">
-          <CardContent>
-            <Text>{fieldsShowMessage.missingAccessKey}</Text>
-          </CardContent>
-        </Card>
-      )}
-      {!nfeFields.nfeNumber && (
-        <Card variant="outlined" tone="warning">
-          <CardContent>
-            <Text>{fieldsShowMessage.missingNfeNumber}</Text>
-          </CardContent>
-        </Card>
-      )}
-
-      <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
-        <Button variant="subtle" onMouseDown={(e) => { e.preventDefault(); onGoBack?.(); }}>
-          Voltar
-        </Button>
-        <Button variant="primary" onMouseDown={(e) => { e.preventDefault(); handleGo(); }}>
-          Continuar
-        </Button>
-      </div>
-    </>
-  );
-}
-
-// ─── Sub-component: list of products ────────────────────────────────────────
-
-function SectionProductList({
+  items,
   products,
-  onSnackClassNotFound,
-}: {
-  products: NfeProductFields[];
-  onSnackClassNotFound: (className: string) => void;
-}) {
-  const [snackbarClassNotFound, setSnackbarClassNotFound] = React.useState<string | null>(null);
-
-  const handleSnackClassNotFound = useCallback((className: string) => {
-    onSnackClassNotFound(className);
-    setSnackbarClassNotFound(className);
-  }, [onSnackClassNotFound]);
-
-  if (products.length === 0) {
-    return (
-      <Card variant="outlined" tone="warning">
-        <CardContent>
-          <Text muted>Nenhum produto identificado.</Text>
-        </CardContent>
-      </Card>
-    );
-  }
+  locations,
+  onUpdate,
+  onNewProduct,
+  onContinue,
+  sourceLabel,
+}: NfeReviewTableProps) {
+  const pendingCount = items.filter((row) => row.matchStatus !== "found").length;
+  const hasInvalidQuantity = items.some((row) => !(Number(row.item.quantity) > 0));
 
   return (
-    <>
-      <ClassNotFoundSnackbar
-        className={snackbarClassNotFound ?? undefined}
-        onClose={() => setSnackbarClassNotFound(null)}
-      />
-      <Card variant="outlined">
-        <CardHeader>
-          <CardTitle>Produtos</CardTitle>
-          <CardDescription>Produtos identificados no DANFE (via OCR)</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead style={{ width: 60 }}>#</TableHead>
-                <TableHead>Descrição</TableHead>
-                <TableHead style={{ width: 80 }}>Qtd</TableHead>
-                <TableHead style={{ width: 80 }}>Un.</TableHead>
-                <TableHead style={{ width: 120 }}>V. Unit.</TableHead>
-                <TableHead style={{ width: 120 }}>V. Total</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {products.map((item, index) => (
-                <TableRow key={index}>
-                  <TableCell>{formatProductSeq(item.seq)}</TableCell>
-                  <TableCell>
-                    <Text size="sm">
-                      {formatProductDescription(item) ?? (
-                        <Text color="red" weight="bold">Sem descrição</Text>
-                      )}
-                    </Text>
-                    {item.productBrand && (
-                      <Text size="xs" color="gray">
-                        Marca: {item.productBrand.trim()}
-                      </Text>
+    <div className="min-w-0 max-w-full overflow-x-hidden space-y-3">
+      {/* Hierarquia: primeiro o estado geral, depois o que falta conferir. */}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Badge className="bg-muted text-foreground">{items.length} item(ns) da NF-e</Badge>
+        {sourceLabel && <Badge variant="outline">Fonte: {sourceLabel}</Badge>}
+        {pendingCount === 0 && (
+          <Badge className="bg-emerald-100 text-emerald-800">Todos os itens associados</Badge>
+        )}
+      </div>
+
+      {pendingCount > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Produto não identificado automaticamente. Faça a associação manual na conferência.
+        </div>
+      )}
+
+      <div className="border rounded-lg overflow-x-hidden">
+        <div className="min-w-0 max-w-full overflow-x-hidden">
+          {items.map((review, index) => {
+            const status = STATUS_LABEL[review.matchStatus] ?? STATUS_LABEL.not_found;
+            const quantityMissing = !(Number(review.item.quantity) > 0);
+            return (
+              <div
+                key={`${review.item.lineNumber}-${index}`}
+                className="min-w-0 max-w-full overflow-hidden border-b last:border-b-0 p-3 space-y-2"
+              >
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <span className="text-xs font-mono text-muted-foreground">
+                    Item {review.item.lineNumber ?? index + 1}
+                  </span>
+                  {review.item.code && (
+                    <span className="text-xs font-mono text-muted-foreground">
+                      cód. {review.item.code}
+                    </span>
+                  )}
+                  <Badge className={`${status.className} text-[10px]`}>{status.label}</Badge>
+                  {review.matchStatus === "found" && (
+                    <span className="text-[10px] text-muted-foreground">
+                      {review.matchScore}% · {review.associationType === "manual" ? "manual" : "automática"}
+                    </span>
+                  )}
+                </div>
+
+                {/* Descrição: quebra de linha, nunca invade a coluna vizinha */}
+                <p className="text-sm font-medium min-w-0 max-w-full break-words">
+                  {review.item.description || "Sem descrição identificada"}
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Quantidade — editável somente quando o documento não trouxe uma
+                      quantidade válida (nunca inventamos o valor). */}
+                  <div className="min-w-0 max-w-full overflow-hidden">
+                    <span className="text-[10px] uppercase text-muted-foreground">Quantidade</span>
+                    {quantityMissing ? (
+                      <Input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value=""
+                        placeholder="Informe a quantidade"
+                        className="mt-1 h-8"
+                        onChange={(event) =>
+                          onUpdate(index, {
+                            item: { ...review.item, quantity: Number(event.target.value) || 0 },
+                          })
+                        }
+                      />
+                    ) : (
+                      <p className="text-sm font-mono">
+                        {review.item.quantity} {review.item.unit}
+                      </p>
                     )}
-                    {item.productModel && (
-                      <Text size="xs" color="gray">
-                        Modelo: {item.productModel.trim()}
-                      </Text>
+                  </div>
+
+                  <div className="min-w-0 max-w-full overflow-hidden">
+                    <span className="text-[10px] uppercase text-muted-foreground">Valores</span>
+                    <p className="text-sm font-mono">
+                      {formatMoney(review.item.unitValue)} · total {formatMoney(review.item.totalValue)}
+                    </p>
+                  </div>
+
+                  {/* Local */}
+                  <div className="min-w-0 max-w-full overflow-hidden">
+                    <span className="text-[10px] uppercase text-muted-foreground">Local</span>
+                    <Select
+                      value={review.locationId || "none"}
+                      onValueChange={(value) =>
+                        onUpdate(index, { locationId: value === "none" ? "" : value })
+                      }
+                    >
+                      <SelectTrigger className="mt-1 h-8 w-full min-w-0">
+                        <SelectValue placeholder="Opcional" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Sem local específico</SelectItem>
+                        {(locations ?? []).map((location) => (
+                          <SelectItem key={location._id} value={location._id}>
+                            {location.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Lote do fornecedor */}
+                  <div className="min-w-0 max-w-full overflow-hidden">
+                    <span className="text-[10px] uppercase text-muted-foreground">
+                      Lote do fornecedor
+                    </span>
+                    <Input
+                      className="mt-1 h-8"
+                      value={review.supplierLot ?? ""}
+                      placeholder="Opcional"
+                      onChange={(event) => onUpdate(index, { supplierLot: event.target.value })}
+                    />
+                  </div>
+                </div>
+
+                {/* Associação de produto + categoria ao lado */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="min-w-0 max-w-full overflow-hidden">
+                    <span className="text-[10px] uppercase text-muted-foreground">
+                      Produto associado
+                    </span>
+                    <Select
+                      value={review.productId || "none"}
+                      onValueChange={(value) =>
+                        onUpdate(index, {
+                          productId: value === "none" ? "" : value,
+                          matchStatus: value === "none" ? "not_found" : "found",
+                          matchScore: value === "none" ? 0 : 100,
+                          associationType: "manual",
+                        })
+                      }
+                    >
+                      <SelectTrigger className="mt-1 h-8 w-full min-w-0">
+                        <SelectValue placeholder="Associar produto…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">— Associar manualmente —</SelectItem>
+                        {products.map((product) => (
+                          <SelectItem key={product._id} value={product._id}>
+                            {product.name}
+                            {product.brand ? ` (${product.brand})` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {review.productId && (
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        <Badge variant="outline" className="text-[10px]">
+                          {products.find((product) => product._id === review.productId)?.category?.name ?? "Sem categoria"}
+                        </Badge>
+                      </div>
                     )}
-                  </TableCell>
-                  <TableCell>{item.productQuantity}</TableCell>
-                  <TableCell>{item.unitOfMeasure ?? "—"}</TableCell>
-                  <TableCell>{formatMoney(item.productUnitAmount ?? null)}</TableCell>
-                  <TableCell>{formatMoney(item.productTotalAmount ?? null)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </>
+                  </div>
+
+                  <div className="min-w-0 max-w-full overflow-hidden flex items-end gap-2">
+                    {onNewProduct && (
+                      <Button variant="outline" size="sm" className="h-8" onClick={onNewProduct}>
+                        Cadastrar novo produto
+                      </Button>
+                    )}
+                    {review.matchReason && (
+                      <span className="text-[10px] text-muted-foreground pb-1.5">
+                        {review.matchReason}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {hasInvalidQuantity && (
+        <p className="text-xs text-amber-700">
+          Preencha a quantidade real de todos os itens — quantidades não são inventadas.
+        </p>
+      )}
+
+      {onContinue && (
+        <div className="flex justify-end">
+          <Button disabled={!canContinueNfeReview(items)} onClick={onContinue}>
+            Continuar conferência
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }
