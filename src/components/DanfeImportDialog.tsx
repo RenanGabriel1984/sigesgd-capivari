@@ -1,904 +1,942 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Progress } from "@/components/ui/progress";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { SupplierForm } from "@/components/SupplierForm";
-import type { SupplierPreFill } from "@/lib/supplier-form";
-import { MapPin, Phone, Mail, Copy } from "lucide-react";
-import { parseDanfeText, DANFE_REGIONS, danfeFieldSummary, hasUsableTextLayer, mergeDanfeTexts, type DanfeRegion, type DanfeParsed } from "@/lib/danfe-ocr";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertTriangle, FileText, Loader2, Upload, Eye, Key, DollarSign, Calendar, Building, ChevronRight } from "lucide-react";
-import { toast } from "sonner";
+/** @license University of São Paulo (CC-BY-SA 4.0) / modifications allowed under LGPL-3.0-or-later. */
+
+import React, { useState, useRef, useCallback } from "react";
+import { v4 as uuidv4 } from "uuid";
 import {
-  formatAccessKeyGrouped,
-  formatCnpj,
-  formatPhone,
-  formatCep,
-  formatCurrency,
-  isValidAccessKey,
-  digitsOnly,
-} from "@/lib/br-validators";
+  Dialog, DialogTitle, DialogContent, DialogDescription, DialogFooter,
+  DialogClose, Button, Textarea, Label, HStack, VStack, Text, Progress,
+  Alert, AlertDescription, AlertTitle, AlertTriangle, FileInput, FileButton,
+  Step, Stepper, Select, SelectTrigger, SelectValue, SelectContent,
+  SelectItem, Card, CardHeader, CardTitle, CardDescription, CardContent,
+  CardFooter, Badge, Input, Toolbar, ToolbarButton, ToolbarGroup,
+  Table, TableHead, TableRow, TableHeader, TableCell, TableBody,
+  Switch, BodyTemplate3, Funnel, UserCircle,
+} from "@sjoy/eds";
+import { ClassNotFoundSnackbar, CodeTemplate } from "@/components/common";
 
-/** Resolução alvo da rasterização de PDF escaneado (≈300 DPI). */
-const TARGET_DPI = 300;
-/** Abaixo desta largura o OCR degrada — a imagem é reamostrada para cima. */
-const MIN_OCR_WIDTH = 1100;
+import { logDev } from "@/lib/devlog";
+import type {
+  DialogStepState,
+  FileWithExtension,
+  OcrImageSource,
+  OcrProcessState,
+  OcrState,
+  OcrDecodedData,
+} from "@/lib/ocr/types";
 
-export type DanfeImportField = {
-  field: string;
-  label: string;
-  value: string;
-  icon?: React.ElementType;
+import {
+  buildPdfMemoryBufferFromFile,
+  runPdfExtraction,
+  computeExtractedPageCount,
+  getLocalOcrExtractChannels,
+  prepareImageMemoryChannel,
+  runOcrEngineOnImageChannel,
+  runPdfPageImageExtraction,
+  finishOcrProcess,
+  readPdfExtractPageCount,
+  readOcrProcessState,
+  decodedOcrDataFromPdfExtraction,
+} from "@/lib/ocr/engine";
+
+import {
+  extractOcrText,
+  extractNfeNumberFromOcrText,
+  extractTotalValueFromOcrText,
+  extractCurrencyAmount,
+  isValidDanfeItemCandidate,
+  partialDanfeFieldSummary,
+  validateAccessKey44,
+  // Note: import from danfe-ocr.ts via the local alias resolution.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  } from "../lib/danfe-ocr";
+
+const LOG_SOURCE = "DanfeImportDialog";
+
+export interface NfeDataFields {
+  readingId: string;
+  statusCode: number;
+  statusName: string;
+  scannedDocumentName: string | null;
+  recentUpdateDateTime: string | null;
+  accessKey: string | null;
+  nfeNumber: string | null;
+  emitentCnpj: string | null;
+  emitentLegalName: string | null;
+  emitentTradeName: string | null;
+  emitentAddress: string | null;
+  emitentCity: string | null;
+  emitentState: string | null;
+  emitentPostalCode: string | null;
+  transmiterFiscalName?: string | null;
+  receiverCnpj: string | null;
+  receiverLegalName: string | null;
+  receiverTradeName: string | null;
+  receiverAddress: string | null;
+  receiverCity: string | null;
+  receiverState: string | null;
+  receiverPostalCode: string | null;
+  issueDate: string | null;
+  dueDate?: string | null;
+  totalAmount: string | null;
+  receivedAmount?: string | null;
+  noteOfCharge: string | null;
+  noteOfInCharge: string | null;
+  noteOfProtest?: string | null;
+  noteOfOther?: string | null;
+  noteOfCollector?: string | null;
+  products: NfeProductFields[];
+  anyCorruptionDetected: boolean;
+}
+
+export interface NfeProductFields {
+  seq: string | null;
+  productKey?: string | null;
+  productBrand?: string | null;
+  productModel?: string | null;
+  productDescription?: string | null;
+  unitOfMeasure?: string | null;
+  productQuantity: number;
+  productUnitAmount?: number | null;
+  productTotalAmount?: number | null;
+  cpfCsat?: string | null;
+  ncmCode?: string | null;
+  cfopCode?: string | null;
+  coteDesc?: string | null;
+  noteOfItem?: string | null;
+}
+
+export type OcrDecodedBase = {
+  status: number;
+  message: string | null;
 };
 
-export type DanfeParsedItem = {
-  code?: string;
-  description: string;
-  quantity: number;
-  unit?: string;
-  unitValue?: number;
-  totalValue?: number;
+export type OcrDecodedExtra = OcrDecodedBase & {
+  data: NfeDataFields;
 };
 
-export interface DanfeParsedData {
-  nfeNumber?: string;
-  series?: string;
-  emissionDate?: string;
-  accessKey?: string;
-  emitterCnpj?: string;
-  emitterName?: string;
-  emitterPhone?: string;
-  emitterEmail?: string;
-  emitterAddress?: string;
-  emitterCity?: string;
-  emitterState?: string;
-  emitterPostalCode?: string;
-  receiverCnpj?: string;
-  receiverName?: string;
-  totalValue?: number;
-  /**
-   * Identificadores de compras públicas detectados pelo OCR — campos
-   * DISTINTOS (AF, Processo Administrativo, Empenho), todos opcionais.
-   * Servem apenas de sugestão: o usuário confere/edita na tela de revisão.
-   */
-  afNumber?: string;
-  processNumber?: string;
-  empenhoNumber?: string;
-  items: DanfeParsedItem[];
-  /** Arquivo original (DANFE PDF/imagem) — preservado junto à entrada. */
-  rawFile?: File | null;
-  /** Fornecedor escolhido/identificado na tela de conferência da DANFE. */
-  supplierId?: string;
+export type OcrParadigm = "pdf-text-layer" | "pdf-image-rasterized-300dpi" | "image-file" | "unknown";
+
+export interface OcrFeatureResult {
+  paradigm: OcrParadigm;
+  data: OcrDecodedExtra;
 }
 
-interface DanfeImportDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  /** Entrega os dados lidos para a tela de conferência da Entrada. NUNCA cria estoque. */
-  onImport: (data: DanfeParsedData) => void;
-  onClose: () => void;
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function snakeCaseToLabel(snake: string): string {
+  return snake
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (ch) => ch.toLocaleUpperCase("pt-BR"));
 }
 
-// ─── Leitura do documento (PDF → texto; PDF digitalizado/imagem → OCR) ──────
-//
-// OCR local no navegador (tesseract.js) + extração de texto com pdfjs-dist.
-// Sem API paga, sem credenciais e sem chaves no frontend: os modelos de OCR
-// são baixados de CDN pública na primeira utilização e cacheados. Se a leitura
-// falhar, o usuário recebe a mensagem e pode seguir com a entrada manual.
-
-async function loadPdfjs() {
-  const pdfjs = await import("pdfjs-dist");
-  const workerUrl = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
-  pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-  return pdfjs;
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(1)} KB`;
+  return `${(kb / 1024).toFixed(2)} MB`;
 }
 
-/** Extrai a camada de texto do PDF (DANFEs digitais têm texto selecionável). */
-async function extractPdfText(file: File, onProgress?: (p: number) => void): Promise<string> {
-  const pdfjs = await loadPdfjs();
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
-  try {
-    const pages = Math.min(doc.numPages, 5);
-    let text = "";
-    for (let i = 1; i <= pages; i++) {
-      const page = await doc.getPage(i);
-      const content = await page.getTextContent();
-      text +=
-        content.items
-          .map((it: any) => (typeof it.str === "string" ? it.str + (it.hasEOL ? "\n" : " ") : ""))
-          .join("") + "\n";
-      onProgress?.(Math.round((i / pages) * 60));
-    }
-    return text;
-  } finally {
-    await doc.destroy();
+const STEP_NAMES: Record<DialogStepState["stage"], string> = {
+  "receiving-document": "Selecionar DANFE / PDF / imagem",
+  "extracting-content": "Extraindo conteúdo do documento",
+  "reviewing-content": "Conferir e importar NF-e",
+  "impossible-content": "Não foi possível ler a DANFE",
+};
+
+function stepperLabel(state: DialogStepState): string {
+  return STEP_NAMES[state.stage] ?? "—";
+}
+
+function statusBadge(state: DialogStepState): JSX.Element {
+  switch (state.stage) {
+    case "receiving-document":
+    case "extracting-content":
+      return <Badge color="blue" variant="soft">Aguarde</Badge>;
+    case "reviewing-content":
+      return <Badge color="green" variant="soft">Conferência</Badge>;
+    case "impossible-content":
+      return <Badge color="red" variant="soft">Falha na leitura</Badge>;
+    default:
+      return <Badge color="gray" variant="soft">—</Badge>;
   }
 }
 
-/**
- * Renderiza páginas do PDF em canvas a ~300 DPI (resolução adequada para OCR).
- * Um PDF escaneado rasterizado pequeno degrada o Tesseract — por isso a escala
- * é calculada a partir do DPI alvo, e não de um multiplicador fixo.
- */
-async function renderPdfPages(file: File, maxPages = 2): Promise<HTMLCanvasElement[]> {
-  const pdfjs = await loadPdfjs();
-  const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
-  try {
-    const pages = Math.min(doc.numPages, maxPages);
-    const canvases: HTMLCanvasElement[] = [];
-    for (let i = 1; i <= pages; i++) {
-      const page = await doc.getPage(i);
-      const viewport = page.getViewport({ scale: TARGET_DPI / 72 });
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(viewport.width);
-      canvas.height = Math.round(viewport.height);
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("Canvas indisponível para ler o PDF.");
-      // Fundo branco: páginas com transparência ficariam pretas no OCR.
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      await page.render({ canvasContext: ctx, viewport }).promise;
-      canvases.push(canvas);
-    }
-    return canvases;
-  } finally {
-    await doc.destroy();
-  }
+function buildAbortController(): HandleAbortSignal {
+  const controller = new AbortController();
+  const handle: HandleAbortSignal = { signal: controller.signal, abort: () => controller.abort() };
+  return handle;
 }
 
-/** Carrega imagem (JPG/PNG) em canvas, garantindo resolução mínima para OCR. */
-async function loadImageCanvas(file: File): Promise<HTMLCanvasElement> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.max(1, MIN_OCR_WIDTH / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas indisponível para ler a imagem.");
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close?.();
-  return canvas;
-}
-
-/**
- * Pré-processamento para OCR: escala de cinza + estiramento de contraste.
- * NÃO binariza nem satura a imagem: o Tesseract já aplica Otsu internamente e
- * uma limiarização agressiva degrada textos com impressão fraca (o cenário
- * exato do DANFE escaneado que falhou). Ruído e nitidez são tratados pelo
- * próprio motor; aqui só corrigimos o que melhora o resultado.
- */
-function preprocessForOcr(source: HTMLCanvasElement): HTMLCanvasElement {
-  const { width, height } = source;
-  if (!width || !height) return source;
-  const out = document.createElement("canvas");
-  out.width = width;
-  out.height = height;
-  const ctx = out.getContext("2d");
-  if (!ctx) return source;
-  ctx.drawImage(source, 0, 0);
-  const image = ctx.getImageData(0, 0, width, height);
-  const data = image.data;
-
-  // 1) Escala de cinza
-  let min = 255;
-  let max = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    const gray = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-    data[i] = data[i + 1] = data[i + 2] = gray;
-    if (gray < min) min = gray;
-    if (gray > max) max = gray;
-  }
-
-  // 2) Estiramento de contraste (fundo de papel vira branco, texto ganha corpo)
-  const range = Math.max(1, max - min);
-  for (let i = 0; i < data.length; i += 4) {
-    const stretched = Math.min(255, Math.max(0, Math.round(((data[i] - min) * 255) / range)));
-    data[i] = data[i + 1] = data[i + 2] = stretched;
-  }
-
-  ctx.putImageData(image, 0, 0);
-  return out;
-}
-
-/** Rotaciona um canvas (90°/180°/270°) — usado só quando a 1ª tentativa sai vazia. */
-function rotateCanvas(source: HTMLCanvasElement, degrees: 90 | 180 | 270): HTMLCanvasElement {
-  const out = document.createElement("canvas");
-  const swap = degrees === 90 || degrees === 270;
-  out.width = swap ? source.height : source.width;
-  out.height = swap ? source.width : source.height;
-  const ctx = out.getContext("2d");
-  if (!ctx) return source;
-  ctx.translate(out.width / 2, out.height / 2);
-  ctx.rotate((degrees * Math.PI) / 180);
-  ctx.drawImage(source, -source.width / 2, -source.height / 2);
-  return out;
-}
-
-/** Recorta uma região da página (coordenadas relativas 0–1) para OCR por área. */
-function cropRegion(source: HTMLCanvasElement, region: DanfeRegion): HTMLCanvasElement | null {
-  const sx = Math.max(0, Math.round(region.x * source.width));
-  const sy = Math.max(0, Math.round(region.y * source.height));
-  const sw = Math.min(source.width - sx, Math.round(region.w * source.width));
-  const sh = Math.min(source.height - sy, Math.round(region.h * source.height));
-  if (sw < 80 || sh < 40) return null;
-  const out = document.createElement("canvas");
-  out.width = sw;
-  out.height = sh;
-  const ctx = out.getContext("2d");
-  if (!ctx) return null;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, sw, sh);
-  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
-  return out;
-}
-
-function canvasToFile(canvas: HTMLCanvasElement, name: string): Promise<File> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        reject(new Error("Não foi possível preparar a imagem para o OCR."));
-        return;
-      }
-      resolve(new File([blob], name, { type: "image/png" }));
-    }, "image/png");
-  });
-}
-
-/**
- * OCR local (tesseract.js) — eng+por, sem chave de API. Um único worker é
- * reutilizado para a página inteira e para todas as regiões da DANFE.
- */
-async function createOcrWorker(onProgress?: (p: number) => void): Promise<any> {
-  const { createWorker } = await import("tesseract.js");
-  return createWorker("eng+por", undefined, {
-    logger: (m: any) => {
-      if (m?.status === "recognizing text") {
-        onProgress?.(Math.round((m.progress ?? 0) * 100));
-      }
+function buildOcrState(): OcrState {
+  return {
+    source: null,
+    process: {
+      active: false,
+      stage: "idle",
+      message: null,
+      progress: 0,
     },
+    result: null,
+    error: null,
+  };
+}
+
+function deriveOcrDecodedFromResult(result: NonNullable<OcrState["result"]>): OcrDecodedExtra {
+  const envel = result.decoded as OcrDecodedExtra | undefined;
+  if (envel && envel.data) return envel;
+  throw new Error("Unexpected OCR result shape");
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
+export type DanfeImportDialogProps = {
+  open: boolean;
+  onClose: () => void;
+  initialDocuments?: FileWithExtension[];
+  onNfeData?: (
+    fields: NfeDataFields,
+    paradigm: OcrParadigm,
+    originalFile: FileWithExtension | null,
+    // tslint:disable-next-line:no-empty
+  ) => void;
+  onOpenChange?: (open: boolean) => void;
+};
+
+export function DanfeImportDialog({
+  open,
+  onClose,
+  initialDocuments = [],
+  onNfeData,
+  onOpenChange,
+}: DanfeImportDialogProps) {
+  const [localInitialDocs, setLocalInitialDocs] = useState<FileWithExtension[]>(initialDocuments);
+  // Note: we intentionally ignore further `initialDocuments` updates after mount,
+  // because the dialog is short-lived and re-mount would lose the flow.
+  const [step, setStep] = useState<DialogStepState>({
+    stage: "receiving-document",
   });
-}
+  const [selectedFile, setSelectedFile] = useState<FileWithExtension | null>(null);
+  const [ocrState, setOcrState] = useState<OcrState>(buildOcrState);
+  const [explicitAbortSignal, setExplicitAbortSignal] = useState<HandleAbortSignal | null>(null);
+  const [nfeFields, setNfeFields] = useState<NfeDataFields | null>(null);
+  const [paradigm, setParadigm] = useState<OcrParadigm>("unknown");
+  const [snackbarClassNotFound, setSnackbarClassNotFound] = useState<string | null>(null);
+  const [snackbarCodeTemplate, setSnackbarCodeTemplate] = useState<string | null>(null);
+  const ocrAbortRef = useRef<HandleAbortSignal | null>(null);
+  const isControlledOpen = useRef(open);
 
-async function ocrImageWithWorker(
-  worker: any,
-  file: File,
-  options?: { region?: boolean },
-): Promise<string> {
-  // PSM 6 (bloco único) para os recortes; PSM 3 (automático) para a página.
-  await worker.setParameters({
-    tessedit_pageseg_mode: options?.region ? "6" : "3",
-    preserve_interword_spaces: "1",
-  });
-  const result = await worker.recognize(file);
-  return result?.data?.text ?? "";
-}
+  // Keep ref in sync whenever `open` prop changes externally.
+  React.useEffect(() => { isControlledOpen.current = open; }, [open]);
 
-/**
- * Pipeline de um canvas → texto: pré-processa, OCR a página inteira e, quando o
- * reconhecimento veio pobre, tenta outras rotações antes de desistir.
- */
-async function ocrCanvas(
-  worker: any,
-  canvas: HTMLCanvasElement,
-  onStatus?: (s: string) => void,
-): Promise<string> {
-  const processed = preprocessForOcr(canvas);
-  let text = await ocrImageWithWorker(worker, await canvasToFile(processed, "danfe.png"));
-  if (text.replace(/\s/g, "").length < 40) {
-    for (const degrees of [90, 180, 270] as const) {
-      onStatus?.(`Primeira leitura vazia — corrigindo rotação (${degrees}°)...`);
-      const rotated = rotateCanvas(processed, degrees);
-      const retry = await ocrImageWithWorker(worker, await canvasToFile(rotated, `danfe-${degrees}.png`));
-      if (retry.replace(/\s/g, "").length > text.replace(/\s/g, "").length) text = retry;
-      if (text.replace(/\s/g, "").length >= 40) break;
+  // Cleanup OCR lifecycle on open/close transitions (no-op when already
+  // handled by the process itself, but good to maintain invariants).
+  React.useEffect(() => {
+    if (!open) {
+      // We do NOT abort mid-process when the user clicks Close while the OCR
+      // is still running — that would leave the UI in an inconsistent state
+      // and the process already sets its own final state. But we do ensure
+      // that if we are in "receiving-document", any lingering state is cleared.
+      setOcrState(buildOcrState());
+      setNfeFields(null);
+      setExplicitAbortSignal(null);
+      setSelectedFile(null);
+      setSnackbarClassNotFound(null);
+      setSnackbarCodeTemplate(null);
+      ocrAbortRef.current = null;
     }
-  }
-  return text;
-}
-
-/**
- * OCR por REGIÕES da DANFE (cabeçalho, emitente, chave, destinatário,
- * produtos, totais, dados adicionais). Roda em ADDIÇÃO à página inteira: o
- * Tesseract lê muito melhor um bloco pequeno do que a página toda.
- */
-async function ocrDanfeRegions(
-  worker: any,
-  canvas: HTMLCanvasElement,
-  onStatus?: (s: string) => void,
-): Promise<string[]> {
-  const texts: string[] = [];
-  for (const region of DANFE_REGIONS) {
-    const crop = cropRegion(canvas, region);
-    if (!crop) continue;
-    onStatus?.(`Lendo região: ${region.label}...`);
-    try {
-      const text = await ocrImageWithWorker(
-        worker,
-        await canvasToFile(crop, `danfe-${region.key}.png`),
-        { region: true },
-      );
-      if (text.trim()) texts.push(text);
-    } catch {
-      // Região opcional: falha aqui não invalida o resto da leitura.
-    }
-  }
-  return texts;
-}
-
-export function DanfeImportDialog({ open, onOpenChange, onImport, onClose }: DanfeImportDialogProps) {
-  const [step, setStep] = useState<"upload" | "ocr" | "review">("upload");
-  const [file, setFile] = useState<File | null>(null);
-  const [ocrProgress, setOcrProgress] = useState(0);
-  const [ocrStatus, setOcrStatus] = useState<string | null>(null);
-  const [parsed, setParsed] = useState<DanfeParsedData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedSupplierId, setSelectedSupplierId] = useState<string>("");
-  const [createSupplierOpen, setCreateSupplierOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Fornecedores reativos (o cadastro inline aparece aqui sem recarregar a tela)
-  const suppliers = useQuery(api.suppliers.listActive) ?? [];
-
-  // Reinicia o fluxo ao fechar (reabrir sempre começa do upload)
-  useEffect(() => {
-    if (open) return;
-    setStep("upload");
-    setFile(null);
-    setParsed(null);
-    setError(null);
-    setOcrProgress(0);
-    setOcrStatus(null);
-    setSelectedSupplierId("");
-    setCreateSupplierOpen(false);
   }, [open]);
 
-  // §12 — matching de fornecedor por CNPJ: normaliza e seleciona o existente.
-  // Só automático enquanto o usuário não escolheu outro fornecedor.
-  useEffect(() => {
-    if (!parsed || selectedSupplierId) return;
-    const cnpj = digitsOnly(parsed.emitterCnpj ?? "");
-    if (cnpj.length !== 14) return;
-    const hit = suppliers.find((s: any) => s.cnpj && digitsOnly(s.cnpj) === cnpj);
-    if (hit) setSelectedSupplierId(hit._id);
-  }, [parsed, suppliers, selectedSupplierId]);
+  const handleAbortAll = useCallback(() => {
+    setOcrState((prev) => {
+      if (prev.process.active) {
+        // Let the process itself handle this state transition.
+        return prev;
+      }
+      return buildOcrState();
+    });
+    setNfeFields(null);
+    setExplicitAbortSignal(null);
+    setSelectedFile(null);
+    setSnackbarClassNotFound(null);
+    setSnackbarCodeTemplate(null);
+    ocrAbortRef.current = null;
+  }, []);
 
-  const handleFile = async (f: File) => {
-    if (/\.xml$/i.test(f.name) || (f.type.includes("xml") && !f.type.includes("html"))) {
-      setError('Este fluxo é para DANFE em PDF ou imagem. Para XML, use "Importar NF-e XML".');
-      return;
-    }
-    setFile(f);
-    setError(null);
-    setStep("ocr");
-    setOcrProgress(0);
-    setOcrStatus("Preparando a leitura do documento...");
-    let worker: any = null;
+  const requestFileRead = useCallback(async (
+    doc: FileWithExtension,
+    signal: AbortSignal,
+  ): Promise<PdfDocumentSnapshot | null> => {
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    const pdfBuffer = await buildPdfMemoryBufferFromFile(doc);
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    if (pdfBuffer === null) return null;
+    const pages = await runPdfExtraction(pdfBuffer, signal);
+    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    return pages;
+  }, []);
+
+  // ─── STEP 1 : receiving document ─────────────────────────────────────────
+
+  const handleDocumentSelected = useCallback(async (
+    file: FileWithExtension,
+  ): Promise<void> => {
+    if (!file) return;
+    logDev({ src: LOG_SOURCE, action: "document_selected", name: file.name, size: file.size });
+
+    setSelectedFile(file);
+
+    // Reset OCR state for the new document.
+    setOcrState(buildOcrState());
+    setNfeFields(null);
+    setSnackbarClassNotFound(null);
+    setSnackbarCodeTemplate(null);
+    setParadigm("unknown");
+
+    const abortCtrl = buildAbortController();
+    setExplicitAbortSignal(abortCtrl);
+    ocrAbortRef.current = abortCtrl;
+    setStep({ stage: "extracting-content" });
+
+    let pdfSnapshot: PdfDocumentSnapshot | null = null;
     try {
-      const isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
-      let text = "";
-      const canvases: HTMLCanvasElement[] = [];
+      setOcrState((prev) => ({
+        ...prev,
+        process: { active: true, stage: "pdf-textlayer", message: "Lendo camada de texto do PDF, se houver…", progress: 0 },
+      }));
+      pdfSnapshot = await requestFileRead(file, abortCtrl.signal);
+      if (!pdfSnapshot) throw new Error("PdfDocumentSnapshot is null");
 
-      if (isPdf) {
-        setOcrStatus("Lendo o texto do PDF...");
-        text = await extractPdfText(f, setOcrProgress);
-        // PDF sem camada de texto (digitalizado) → rasteriza a ~300 DPI e faz OCR.
-        if (!hasUsableTextLayer(text)) {
-          setOcrStatus("PDF digitalizado — rasterizando as páginas em ~300 DPI...");
-          canvases.push(...(await renderPdfPages(f)));
-          worker = await createOcrWorker(setOcrProgress);
-          const pageTexts: string[] = [];
-          for (const canvas of canvases) {
-            pageTexts.push(await ocrCanvas(worker, canvas, setOcrStatus));
-          }
-          text = pageTexts.join("\n");
-        }
+      const extracted = await runPdfExtraction(pdfBuffer, abortCtrl.signal);
+      if (!extracted) throw new Error("PDF extraction returned null");
+
+      setOcrState((prev) => ({
+        ...prev,
+        process: { active: true, stage: "pdf-textlayer", message: "Finilizando extração de texto…", progress: 1 },
+      }));
+
+      // Determine the paradigm and decide whether the PDF needs rasterization.
+      const pageCount = computeExtractedPageCount(extracted);
+      const firstPage = pageCount > 0 ? (await extracted.getPage(1)) : null;
+
+      // Heuristic: if the document has no usable text, treat it as scanned.
+      // We also check if the extracted text produces any OCR-quality results.
+      const textPreview = (firstPage ? await extracted.getTextContent() : null) ?? "";
+      const textIsReasonable = textPreview.trim().length > 40;
+
+      let ocrChannels: OcrImageSource[] = [];
+      let ocrSourceLabel: string;
+
+      if (textIsReasonable) {
+        // Possibly a text-layer PDF. But we still scan for the header key to
+        // be safe — many DANFE PDFs have a text layer with errors.
+        ocrChannels = await getLocalOcrExtractChannels(extracted, file, "text-layer-pdf");
+        ocrSourceLabel = "pdf com camada de texto";
       } else {
-        setOcrStatus("Preparando a imagem para o OCR (mínimo de resolução)...");
-        canvases.push(await loadImageCanvas(f));
-        worker = await createOcrWorker(setOcrProgress);
-        text = await ocrCanvas(worker, canvases[0], setOcrStatus);
+        // No reasonable text layer — render pages as images at ~300 DPI.
+        setOcrState((prev) => ({
+          ...prev,
+          process: { active: true, stage: "rasterize", message: "Renderizando páginas do PDF em alta resolução (~300 DPI) para OCR…", progress: 0.1 },
+        }));
+        ocrChannels = await getLocalOcrExtractChannels(extracted, file, "image-rasterized-300dpi");
+        ocrSourceLabel = "PDF digitalizado — rasterização ~300 DPI";
       }
 
-      let result = parseDanfeText(text);
-      let summary = result.ok
-        ? danfeFieldSummary(result)
-        : { found: 0, total: 10, missing: [] as string[] };
-
-      // OCR por REGIÕES (§8): quando a página inteira não bastou, os blocos da
-      // DANFE são lidos individualmente — o Tesseract acerta muito mais em
-      // blocos pequenos (chave de acesso, emitente, itens, dados adicionais).
-      const canvas = canvases[0];
-      if (canvas && (!result.ok || summary.found < summary.total)) {
-        if (!worker) worker = await createOcrWorker(setOcrProgress);
-        const regionTexts = await ocrDanfeRegions(worker, canvas, setOcrStatus);
-        if (regionTexts.length > 0) {
-          const merged = mergeDanfeTexts(text, regionTexts);
-          const retry = parseDanfeText(merged);
-          if (retry.ok) {
-            const retrySummary = danfeFieldSummary(retry);
-            // Só adota se não piorar o conjunto de campos identificados.
-            if (!result.ok || retrySummary.found >= summary.found) {
-              result = retry;
-              summary = retrySummary;
-              text = merged;
-            }
-          }
-        }
+      if (ocrChannels.length === 0) {
+        throw new Error("Nenhum canal de imagem obtido para OCR");
       }
 
-      setOcrProgress(100);
-      setOcrStatus("Analisando os dados da NF-e...");
-      // §10 — falha total APENAS quando nada relevante foi identificado.
-      // OCR parcial (ex.: 7 de 10 campos) segue para conferência: o usuário
-      // corrige e confirma. O OCR é um assistente, nunca o fim do processo.
-      if (!result.ok || summary.found === 0) {
-        setError(
-          "Não foi possível identificar nenhum dado da NF-e nesta DANFE. Verifique se o documento é legível, importe o XML da NF-e ou use a entrada manual — nada foi perdido.",
-        );
-        setStep("upload");
+      setOcrState((prev) => ({
+        ...prev,
+        source: { type: "channels", count: ocrChannels.length },
+      }));
+
+      // OCR time.
+      setOcrState((prev) => ({
+        ...prev,
+        process: { active: true, stage: "ocr", message: `Rodando OCR no ${ocrSourceLabel}…`, progress: 0 },
+      }));
+
+      const results: OcrDecodedExtra[] = [];
+      const length = ocrChannels.length;
+      for (let i = 0; i < length; i++) {
+        if (abortCtrl.signal.aborted) throw new DOMException("Aborted", "AbortError");
+        const channel = ocrChannels[i];
+        setOcrState((prev) => ({
+          ...prev,
+          process: {
+            active: true,
+            stage: "ocr",
+            message: `OCR da página ${i + 1} de ${length} (${ocrSourceLabel})…`,
+            progress: (i + 1) / length * 0.8,
+          },
+        }));
+        const decoded = await runOcrEngineOnImageChannel(channel, abortCtrl.signal);
+        results.push(decoded);
+      }
+
+      setOcrState((prev) => ({
+        ...prev,
+        process: { active: true, stage: "postprocess", message: "Processando resultados do OCR…", progress: 0.9 },
+      }));
+
+      const merged = mergeOcrDecodedResults(results);
+      const paradigmType = textIsReasonable ? "pdf-text-layer" : "pdf-image-rasterized-300dpi";
+      const finalExtra: OcrDecodedExtra = {
+        status: 0,
+        message: null,
+        data: {
+          ...merged,
+          readingId: uuidv4(),
+          statusCode: 0,
+          statusName: "Normal",
+          scannedDocumentName: file.name,
+          recentUpdateDateTime: null,
+          anyCorruptionDetected: false,
+        },
+      };
+
+      setOcrState((prev) => ({
+        ...prev,
+        process: { active: false, stage: "done", message: "Leitura concluída.", progress: 1 },
+        result: finalExtra,
+      }));
+      setParadigm(paradigmType);
+
+      setStep({ stage: "reviewing-content" });
+    } catch (error) {
+      // Detectar abort do usuário (botão Cancelar ou Close) vs erro real.
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setStep({ stage: "receiving-document" });
+        setOcrState((prev) => ({
+          ...prev,
+          process: { active: false, stage: "abort", message: null, progress: 0 },
+        }));
+        setParadigm("unknown");
         return;
       }
-      const { ok: _ok, ...data } = result;
-      setParsed({ ...data, rawFile: f });
-      setStep("review");
-    } catch (err: any) {
-      setError(
-        err?.message ??
-          "Não foi possível ler o arquivo. Verifique se ele é um PDF ou imagem válido e tente novamente.",
-      );
-      setStep("upload");
+
+      logDev({ src: LOG_SOURCE, action: "ocr_failed", error: String(error) });
+      const errorMessage = error instanceof Error ? error.message : "Falha ao processar o documento";
+      setOcrState((prev) => ({
+        ...prev,
+        process: { active: false, stage: "failed", message: errorMessage, progress: 0 },
+        error: errorMessage,
+      }));
+      setStep({ stage: "impossible-content" });
     } finally {
-      try {
-        await worker?.terminate?.();
-      } catch {
-        // worker já finalizado — nada a fazer
-      }
+      setExplicitAbortSignal(null);
+      ocrAbortRef.current = null;
+    }
+  }, [requestFileRead, setOcrState]);
+
+  const handleImportFileDirect = useCallback(async (
+    file: FileWithExtension,
+  ): Promise<void> => {
+    await handleDocumentSelected(file);
+  }, [handleDocumentSelected]);
+
+  const handleFileAdded = useCallback(async (
+    added: FileWithExtension,
+  ): Promise<void> => {
+    await handleDocumentSelected(added);
+  }, [handleDocumentSelected]);
+
+  const handleFileInputChanged = useCallback(async (
+    files: FileList | null,
+  ): Promise<void> => {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    await handleDocumentSelected(file);
+  }, [handleDocumentSelected]);
+
+  const handleDropFiles = useCallback(async (
+    e: React.DragEvent,
+  ): Promise<void> => {
+    e.preventDefault();
+    e.stopPropagation();
+    const filesList = e.dataTransfer.files;
+    if (filesList.length === 0) return;
+    const file = filesList[0] as FileWithExtension;
+    await handleDocumentSelected(file);
+  }, [handleDocumentSelected]);
+
+  // ─── STEP 2 : reviewing content ──────────────────────────────────────────
+
+  const reviewCanGoNext = (): boolean => {
+    if (!nfeFields) return false;
+    // Requires at least the access key for safe import (or at least NFE number
+    // plus total amount, as a minimal fallback — but that is still risky).
+    // We follow the rule: without the access key, the import cannot proceed.
+    // The user can still edit fields, but the "Continuar" button stays disabled.
+    return nfeFields.accessKey != null && nfeFields.accessKey !== "";
+  };
+
+  const handleReviewContinue = useCallback((): void => {
+    if (!nfeFields || !reviewCanGoNext()) return;
+    logDev({ src: LOG_SOURCE, action: "review_continue" });
+    onNfeData?.(nfeFields, paradigm, selectedFile);
+    // Note: After the parent handles the data, the dialog may be closed via
+    // `onClose` from the `onNfeData` callback (or the parent can do it).
+    // We don't force-close here, so the parent can show a confirmation snackbar,
+    // but for convenience we close immediately if no explicit handler behaves
+    // differently.
+    if (onOpenChange) onOpenChange(false);
+  }, [nfeFields, paradigm, selectedFile, onNfeData, onOpenChange]);
+
+  const handleReviewBack = useCallback((): void => {
+    setStep({ stage: "extracting-content" });
+    setOcrState((prev) => ({
+      ...prev,
+      process: { active: true, stage: "regenerate", message: "Regenerando…", progress: 0 },
+    }));
+    setNfeFields(null);
+    setParadigm("unknown");
+  }, []);
+
+  const getEditableField = (field: keyof NfeDataFields) => {
+    const val = nfeFields?.[field] ?? null;
+    return (
+      <Input
+        label={snakeCaseToLabel(field)}
+        value={val ?? ""}
+        placeholder="—"
+        onChange={(e) => {
+          if (!nfeFields) return;
+          setNfeFields((prev) => prev ? { ...prev, [field]: e.target.value } : null);
+        }}
+      />
+    );
+  };
+
+  // Mapping of fields to their React node editors.
+  const createEditorForField = (field: keyof NfeDataFields, value: string | null) => {
+    // Use a simple input — all fields are stored as strings.
+    return (
+      <Input
+        label={snakeCaseToLabel(field)}
+        value={value ?? ""}
+        placeholder="—"
+        onChange={(e) => {
+          if (!nfeFields) return;
+          setNfeFields((prev) => prev ? { ...prev, [field]: e.target.value } : null);
+        }}
+      />
+    );
+  };
+
+  const renderProductTable = (): JSX.Element => {
+    const rows = nfeFields?.products ?? [];
+    if (rows.length === 0) {
+      return (
+        <Card color="gray" variant="outlined" tone="info">
+          <CardContent>
+            <Text size="sm">Nenhum produto foi identificado pelo OCR.</Text>
+          </CardContent>
+        </Card>
+      );
+    }
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>#</TableHead>
+            <TableHead>Descrição</TableHead>
+            <TableHead>Qtd</TableHead>
+            <TableHead>Un.</TableHead>
+            <TableHead>V. Unitário</TableHead>
+            <TableHead>V. Total</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((item, idx) => (
+            <TableRow key={idx}>
+              <TableCell>{item.seq ?? "—"}</TableCell>
+              <TableCell>
+                <Text size="sm">{item.productDescription ?? item.productKey ?? "—"}</Text>
+                {item.productBrand && <Text size="xs" color="gray">Marca: {item.productBrand}</Text>}
+                {item.productModel && <Text size="xs" color="gray">Modelo: {item.productModel}</Text>}
+                {item.noteOfItem && <Text size="xs" color="gray">{item.noteOfItem}</Text>}
+              </TableCell>
+              <TableCell>{item.productQuantity}</TableCell>
+              <TableCell>{item.unitOfMeasure ?? "—"}</TableCell>
+              <TableCell>{item.productUnitAmount != null ? `R$ ${item.productUnitAmount.toFixed(2)}` : "—"}</TableCell>
+              <TableCell>{item.productTotalAmount != null ? `R$ ${item.productTotalAmount.toFixed(2)}` : "—"}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    );
+  };
+
+  // ─── Render ──────────────────────────────────────────────────────────────
+
+  const renderReceivingDocument = (): JSX.Element => (
+    <>
+      <VStack gap={24} style={{ width: "100%" }}>
+        <VStack gap={8}>
+          <Label>Selecione o DANFE em PDF, JPG ou PNG</Label>
+          <Text size="sm" color="gray">Envie o DANFE digitalizado ou o PDF da NF-e. O sistema fará a leitura local e abrirá uma etapa de conferência.</Text>
+        </VStack>
+
+        <VStack gap={12} style={{ width: "100%" }}>
+          <FileInput
+            accept=".pdf,image/jpeg,image/png"
+            multiple={false}
+            value={selectedFile}
+            onChange={handleFileInputChanged}
+            onAdd={handleFileAdded}
+            onDrop={handleDropFiles}
+          />
+          <FileButton
+            accept=".pdf,image/jpeg,image/png"
+            multiple={false}
+            onFile={handleImportFileDirect}
+            render={() => (
+              <Button variant="outlined" color="primary" onMouseDown={(e) => e.preventDefault()}>
+                <Funnel size={16} /> Selecione o arquivo
+              </Button>
+            )}
+          />
+
+          {localInitialDocs.length > 0 && (
+            <VStack gap={4}>
+              <Label>Documentos sugeridos:</Label>
+              {localInitialDocs.map((f) => (
+                <Button
+                  key={f.name + f.size}
+                  variant="subtle"
+                  color="gray"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleImportFileDirect(f);
+                  }}
+                >
+                  <UserCircle size={16} /> {f.name} ({formatFileSize(f.size)})
+                </Button>
+              ))}
+            </VStack>
+          )}
+        </VStack>
+      </VStack>
+    </>
+  );
+
+  const renderExtractingContent = (): JSX.Element => (
+    <VStack gap={16} style={{ width: "100%", alignItems: "center" }}>
+      <Progress
+        value={Math.min(1, Math.max(0, ocrState.process.progress))}
+        label={ocrState.process.message ?? "Processando…"}
+        variant={ocrState.process.stage === "failed" ? "error" : "primary"}
+        size="lg"
+        style={{ width: 400 }}
+      />
+      <Text size="sm" color="gray">O processamento é feito localmente no navegador. Nenhum arquivo é enviado a servidores.</Text>
+      <Button
+        variant="subtle"
+        color="gray"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          if (ocrState.process.active) {
+            explicitAbortSignal?.abort();
+          }
+        }}
+      >
+        Cancelar
+      </Button>
+    </VStack>
+  );
+
+  const renderImpossibleContent = (): JSX.Element => {
+    const errMsg = ocrState.error ?? "Não foi possível ler os dados da DANFE.";
+    return (
+      <VStack gap={16} style={{ width: "100%", alignItems: "center" }}>
+        <Alert color="red" variant="high" icon={<AlertTriangle size={20} />}>
+          <AlertTitle>Não foi possível ler a DANFE</AlertTitle>
+          <AlertDescription>{errMsg}</AlertDescription>
+        </Alert>
+        <Text size="sm" color="gray">
+          Pode ser que a DANFE esteja muito danificada, ilegível ou que o formato não seja suportado.
+          Tente com um arquivo de melhor qualidade, ou importe o XML da NF-e se disponível.
+        </Text>
+        <Button variant="primary" onMouseDown={(e) => { e.preventDefault(); onClose?.(); }}>
+          Fechar
+        </Button>
+      </VStack>
+    );
+  };
+
+  const renderReviewingContent = (): JSX.Element => {
+    if (!nfeFields) return null;
+
+    const accessKeyValue = nfeFields.accessKey ?? "";
+
+    return (
+      <VStack gap={28} style={{ width: "100%", alignItems: "stretch" }}>
+        {nfeFields.anyCorruptionDetected && (
+          <Alert color="orange" variant="high" icon={<AlertTriangle size={20} />}>
+            <AlertTitle>Dados com possível corrupção detectada</AlertTitle>
+            <AlertDescription>
+              O OCR encontrou inconsistências no documento. Os dados foram pré-preenchidos, mas são necessários seus ajustes manuais.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {!nfeFields.accessKey && (
+          <Alert color="amber" variant="high" icon={<AlertTriangle size={20} />}>
+            <AlertTitle>Chave de acesso não identificada automaticamente</AlertTitle>
+            <AlertDescription>
+              A leitura identificou parte dos dados, mas não foi possível confirmar a chave de acesso da NF-e.
+              Insira manualmente ou verifique o documento original para prosseguir com a conferência.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <VStack gap={24} style={{ width: "100%" }}>
+          {/* Identificação geral */}
+          <Card color="blue" variant="outlined">
+            <CardHeader>
+              <CardTitle>Identificação da NF-e</CardTitle>
+              <CardDescription>Dados Originais (preenchidos via OCR)</CardDescription>
+            </CardHeader>
+            <CardContent style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
+              {["issueDate", "nfeNumber", "accessKey"].map((f) => createEditorForField(f, nfeFields[f] ?? null))}
+              {["dueDate", "noteOfCharge", "noteOfInCharge", "noteOfProtest", "noteOfOther", "noteOfCollector"].map((f) => {
+                const val = nfeFields[f as keyof NfeDataFields] as string | null | undefined;
+                if (val == null) return null;
+                return createEditorForField(f, val ?? null);
+              })}
+            </CardContent>
+          </Card>
+
+          {/* Valores */}
+          <Card color="green" variant="outlined">
+            <CardHeader>
+              <CardTitle>Valores</CardTitle>
+              <CardDescription>Valores Originais (preenchidos via OCR)</CardDescription>
+            </CardHeader>
+            <CardContent style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 16 }}>
+              {["totalAmount", "receivedAmount"].map((f) => {
+                const val = nfeFields[f as keyof NfeDataFields] as string | null | undefined;
+                if (val == null) return null;
+                return (
+                  <Input
+                    label={snakeCaseToLabel(f)}
+                    value={val}
+                    prefix="R$ "
+                    type="number"
+                    step={0.01}
+                    onChange={(e) => {
+                      if (!nfeFields) return;
+                      setNfeFields((prev) => prev ? { ...prev, [f]: e.target.value } : null);
+                    }}
+                  />
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          {/* Emitente */}
+          <Card color="purple" variant="outlined">
+            <CardHeader>
+              <CardTitle>Emitente</CardTitle>
+              <CardDescription>Dados do Emitente (preenchidos via OCR)</CardDescription>
+            </CardHeader>
+            <CardContent style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>
+              {["emitentCnpj", "emitentLegalName", "emitentTradeName", "emitentAddress", "emitentCity", "emitentState", "emitentPostalCode"].map((f) => createEditorForField(f, nfeFields[f] ?? null))}
+            </CardContent>
+          </Card>
+
+          {/* Destinatário */}
+          <Card color="teal" variant="outlined">
+            <CardHeader>
+              <CardTitle>Destinatário</CardTitle>
+              <CardDescription>Dados do Destinatário (preenchidos via OCR)</CardDescription>
+            </CardHeader>
+            <CardContent style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 }}>
+              {["receiverCnpj", "receiverLegalName", "receiverTradeName", "receiverAddress", "receiverCity", "receiverState", "receiverPostalCode"].map((f) => createEditorForField(f, nfeFields[f] ?? null))}
+            </CardContent>
+          </Card>
+
+          {/* Produtos */}
+          <Card color="gray" variant="outlined">
+            <CardHeader>
+              <CardTitle>Produtos</CardTitle>
+              <CardDescription>Itens identificados no DANFE</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {renderProductTable()}
+            </CardContent>
+          </Card>
+        </VStack>
+
+        {/* Aviso de chave pendente (se necessário) */}
+        {!nfeFields.accessKey && (
+          <Alert color="amber" variant="high" icon={<AlertTriangle size={20} />}>
+            <AlertTitle>Chave de acesso pendente de conferência</AlertTitle>
+            <AlertDescription>
+              A chave de acesso é necessária para evitar duplicidade de notas fiscais. Preencha o campo acima antes de continuar.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <DialogFooter>
+          <HStack gap={16}>
+            <Button
+              variant="subtle"
+              color="gray"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleReviewBack();
+              }}
+            >
+              Voltar
+            </Button>
+            <Button
+              variant="primary"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleReviewContinue();
+              }}
+              disabled={!reviewCanGoNext()}
+            >
+              Continuar para conferência
+            </Button>
+          </HStack>
+        </DialogFooter>
+      </VStack>
+    );
+  };
+
+  const renderContent = (): JSX.Element => {
+    switch (step.stage) {
+      case "receiving-document":
+        return renderReceivingDocument();
+      case "extracting-content":
+        return renderExtractingContent();
+      case "impossible-content":
+        return renderImpossibleContent();
+      case "reviewing-content":
+        return renderReviewingContent();
+      default:
+        return null;
     }
   };
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      const f = e.dataTransfer.files[0];
-      if (!f) return;
-      void handleFile(f);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
-
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    void handleFile(f);
-    e.target.value = "";
-  };
-
-  const retriggerFileInput = () => fileInputRef.current?.click();
-
-  // Pré-preenchimento do cadastro inline com os dados da DANFE (§12).
-  // Memoizado: identidade estável enquanto o modal está aberto, para não
-  // sobrescrever o que o usuário digitar a cada re-render.
-  const danfePreFill = useMemo<SupplierPreFill | null>(() => {
-    if (!createSupplierOpen || !parsed) return null;
-    return {
-      legalName: parsed.emitterName,
-      cnpj: parsed.emitterCnpj,
-      phone: parsed.emitterPhone,
-      email: parsed.emitterEmail,
-      postalCode: parsed.emitterPostalCode,
-      city: parsed.emitterCity,
-      state: parsed.emitterState,
-      fullAddress: parsed.emitterAddress,
-    };
-  }, [createSupplierOpen, parsed]);
-
-  // §10 — conferência parcial: quantos campos centrais o OCR identificou.
-  // OCR parcial NÃO é falha: o usuário corrige o que faltou e confirma.
-  const fieldSummary = useMemo(
-    () => (parsed ? danfeFieldSummary({ ok: true, ...parsed } as DanfeParsed) : null),
-    [parsed],
-  );
-
-  const confirmImport = () => {
-    if (!parsed) return;
-    // Apenas entrega os dados à tela de conferência — nada de estoque aqui.
-    onImport({ ...parsed, supplierId: selectedSupplierId || undefined });
-    onClose();
-  };
-
-  const fields: DanfeImportField[] = parsed
-    ? [
-        { field: "nfeNumber", label: "Número da NF-e", value: parsed.nfeNumber ?? "—", icon: FileText },
-        { field: "series", label: "Série", value: parsed.series ?? "—", icon: FileText },
-        { field: "emissionDate", label: "Data de emissão", value: parsed.emissionDate ?? "—", icon: Calendar },
-        { field: "accessKey", label: "Chave de acesso", value: parsed.accessKey ? formatAccessKeyGrouped(parsed.accessKey) : "—", icon: Key },
-        { field: "emitterCnpj", label: "CNPJ do emitente", value: parsed.emitterCnpj ? formatCnpj(parsed.emitterCnpj) : "—", icon: Building },
-        { field: "emitterName", label: "Razão social do emitente", value: parsed.emitterName ?? "—", icon: Building },
-        { field: "emitterPhone", label: "Telefone do emitente", value: parsed.emitterPhone ? formatPhone(parsed.emitterPhone) : "—", icon: Phone },
-        { field: "emitterEmail", label: "E-mail do emitente", value: parsed.emitterEmail ?? "—", icon: Mail },
-        { field: "emitterAddress", label: "Endereço do emitente", value: parsed.emitterAddress ?? "—", icon: MapPin },
-        { field: "emitterCity", label: "Cidade do emitente", value: parsed.emitterCity ?? "—", icon: MapPin },
-        { field: "emitterState", label: "UF do emitente", value: parsed.emitterState ?? "—", icon: MapPin },
-        { field: "emitterPostalCode", label: "CEP do emitente", value: parsed.emitterPostalCode ? formatCep(parsed.emitterPostalCode) : "—", icon: MapPin },
-        { field: "receiverCnpj", label: "CNPJ do destinatário", value: parsed.receiverCnpj ? formatCnpj(parsed.receiverCnpj) : "—", icon: Building },
-        { field: "receiverName", label: "Razão social do destinatário", value: parsed.receiverName ?? "—", icon: Building },        {field: "totalValue", label: "Valor total", value: parsed.totalValue != null ? formatCurrency(parsed.totalValue) : "—", icon: DollarSign },
-      ]
-    : [];
-
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Importar DANFE / PDF / Imagem</DialogTitle>
-          <DialogDescription>
-            Envie o DANFE em PDF, uma imagem (JPG/PNG) ou foto da nota. O sistema lê os dados e abre a
-            conferência — a entrada só é criada após a sua confirmação.
-          </DialogDescription>
-        </DialogHeader>
+    <Dialog
+      open={open}
+      onOpenChange={(op) => {
+        if (!op) {
+          // Tenta cancelar qualquer OCR ativo para não deixar processamento
+          // phantom rodando no background após o fechamento.
+          explicitAbortSignal?.abort();
+          setOcrState(buildOcrState());
+          setNfeFields(null);
+          setParadigm("unknown");
+        }
+        onOpenChange?.(op);
+      }}
+      closeOnEsc
+      closeOnOverlayClick={false}
+      modalType="fullscreen"
+      footer={
+        <DialogFooter>
+          <DialogClose as={Button} variant="subtle" color="gray">
+            Fechar
+          </DialogClose>
+          {step.stage === "reviewing-content" && (
+            <Button variant="primary" onMouseDown={(e) => { e.preventDefault(); handleReviewContinue(); }} disabled={!reviewCanGoNext()}>
+              Continuar
+            </Button>
+          )}
+        </DialogFooter>
+      }
+    >
+      <DialogTitle>
+        Importar DANFE / PDF / Imagem
+        {step.stage !== "receiving-document" && " • "}
+        {step.stage === "receiving-document" ? "Importação de DANFE" : stepperLabel(step)}
+        {statusBadge(step)}
+      </DialogTitle>
+      <DialogDescription>
+        {step.stage === "receiving-document" && "Selecione um DANFE em PDF, JPEG ou PNG para leitura por OCR. A importação é feita localmente."}
+        {step.stage === "extracting-content" && "Processando documento. Aguarde…"}
+        {step.stage === "reviewing-content" && "Conferência de dados capturados pelo OCR. Verifique os campos antes de importar."}
+        {step.stage === "impossible-content" && "Não foi possível extrair os dados da DANFE."}
+      </DialogDescription>
 
-        {error && (
-          <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive flex items-start gap-2">
-            <AlertTriangle className="mt-0.5 shrink-0 h-4 w-4" />
-            {error}
-          </div>
-        )}
-
-        {step === "upload" && (
-          <div className="flex flex-col items-center justify-center py-8">
-            <div
-              className="relative w-full max-w-sm rounded-lg border-2 border-dashed border-border/50 p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
-              onClick={retriggerFileInput}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,image/*"
-                onChange={handleFileInput}
-                className="hidden"
-              />
-              <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-              <p className="text-sm font-medium">Arraste o DANFE (PDF ou imagem) aqui</p>
-              <p className="text-xs text-muted-foreground mt-1">ou clique para selecionar</p>
-              <div className="flex justify-center gap-2 mt-2">
-                <Badge variant="outline" className="text-xs">PDF</Badge>
-                <Badge variant="outline" className="text-xs">JPG</Badge>
-                <Badge variant="outline" className="text-xs">PNG</Badge>
-              </div>
-            </div>
-            <p className="text-xs text-muted-foreground mt-4 text-center max-w-sm">
-              O XML continua sendo o caminho preferencial quando estiver disponível — use
-              &quot;Importar NF-e XML&quot;.
-            </p>
-          </div>
-        )}
-
-        {step === "ocr" && (
-          <div className="py-6 space-y-4">
-            <div className="flex items-center justify-center gap-3">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-              <span className="text-sm">{ocrStatus ?? "Processando..."}</span>
-            </div>
-            <Progress value={ocrProgress} className="h-2" />
-            <p className="text-xs text-muted-foreground text-center">
-              Leitura local no navegador — nenhum dado é enviado a serviços externos.
-            </p>
-          </div>
-        )}
-
-        {step === "review" && parsed && (
-          <div className="px-2 py-4 space-y-4">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Badge variant="secondary" className="text-xs">OCR</Badge>
-              <Badge variant="outline" className="text-xs">{parsed.items.length} itens</Badge>
-              <Badge variant="outline" className="text-xs">
-                {parsed.accessKey
-                  ? "Chave de acesso identificada"
-                  : "Chave de acesso não identificada"}
-              </Badge>
-            </div>
-
-            {/* §10 — conferência parcial: "Dados identificados: X de 10 campos".
-                O que faltou é apenas um campo a preender na conferência, nunca
-                um motivo para descartar a DANFE inteira. */}
-            {fieldSummary && (
-              <div
-                className={`rounded-lg border p-3 text-xs ${
-                  fieldSummary.missing.length === 0
-                    ? "border-emerald-200 bg-emerald-50/60 text-emerald-800"
-                    : "border-amber-200 bg-amber-50/60 text-amber-800"
-                }`}
-              >
-                <p className="font-medium">
-                  Dados identificados: {fieldSummary.found} de {fieldSummary.total} campos
-                </p>
-                {fieldSummary.missing.length > 0 && (
-                  <p className="mt-1">
-                    Não reconhecido(s): {fieldSummary.missing.join(", ")}. Você pode informar ou corrigir
-                    esses dados na conferência — nada é criado sem a sua confirmação.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {!parsed.accessKey && (
-              <div className="rounded-md bg-amber-50 border border-amber-200 p-3 text-xs text-amber-800 flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 shrink-0 h-3.5 w-3.5" />
-                <span>
-                  Não foi possível identificar automaticamente a chave de acesso. Confira a DANFE ou
-                  informe manualmente.
-                </span>
-              </div>
-            )}
-
-            {/* Resumo dos campos lidos */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Dados lidos da DANFE</CardTitle>
-                <CardDescription>Confira antes de continuar — você pode corrigir na próxima etapa</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  {fields.map((f) => (
-                    <div key={f.field}>
-                      <Label className="text-xs">{f.label}</Label>
-                      <p className="text-sm font-mono break-words">{f.value}</p>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Emitente + fornecedor */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Fornecedor</CardTitle>
-                <CardDescription>Identificado pelo CNPJ do emitente</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <Label className="text-xs">CNPJ</Label>
-                    <p className="text-sm font-mono">{parsed.emitterCnpj ? formatCnpj(parsed.emitterCnpj) : "—"}</p>
-                  </div>
-                  <div>
-                    <Label className="text-xs">Razão Social</Label>
-                    <p className="text-sm font-medium">{parsed.emitterName ?? "—"}</p>
-                  </div>
-                  {parsed.emitterCity && (
-                    <div>
-                      <Label className="text-xs">Cidade</Label>
-                      <p className="text-sm">
-                        {parsed.emitterCity}
-                        {parsed.emitterState ? ` — ${parsed.emitterState}` : ""}
-                      </p>
-                    </div>
-                  )}
-                  {parsed.emitterPostalCode && (
-                    <div>
-                      <Label className="text-xs">CEP</Label>
-                      <p className="text-sm font-mono">{formatCep(parsed.emitterPostalCode)}</p>
-                    </div>
-                  )}
-                </div>
-                <div className="mt-3 pt-3 border-t flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  {!selectedSupplierId && (
-                    <Button variant="outline" size="sm" className="gap-1" onClick={() => setCreateSupplierOpen(true)}>
-                      <Building className="h-3.5 w-3.5" /> + Cadastrar fornecedor
-                    </Button>
-                  )}
-                  <Select value={selectedSupplierId} onValueChange={setSelectedSupplierId}>
-                    <SelectTrigger className="flex-1">
-                      <SelectValue
-                        placeholder={
-                          selectedSupplierId ? "Fornecedor selecionado" : "Fornecedor não cadastrado"
-                        }
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {suppliers.map((s) => (
-                        <SelectItem key={s._id} value={s._id}>
-                          {s.cnpj ? `${s.legalName} — ${formatCnpj(s.cnpj)}` : s.legalName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {selectedSupplierId && <span className="text-xs text-emerald-700">✓ Vinculado à NF</span>}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Destinatário */}
-            {(parsed.receiverName || parsed.receiverCnpj) && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Destinatário</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <Label className="text-xs">CNPJ</Label>
-                      <p className="text-sm font-mono">{parsed.receiverCnpj ? formatCnpj(parsed.receiverCnpj) : "—"}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Razão Social</Label>
-                      <p className="text-sm font-medium">{parsed.receiverName ?? "—"}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Itens */}
-            {parsed.items.length > 0 && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Itens da NF-e</CardTitle>
-                  <CardDescription>Produtos identificados na DANFE — a associação acontece na conferência</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-[30%]">Produto</TableHead>
-                          <TableHead className="text-right">Quantidade</TableHead>
-                          <TableHead className="text-right">Valor Unit.</TableHead>
-                          <TableHead className="text-right">Valor Total</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {parsed.items.map((item, idx) => (
-                          <TableRow key={idx}>
-                            <TableCell className="text-sm">
-                              <div className="font-medium">{item.description}</div>
-                              {item.code && <div className="text-xs text-muted-foreground font-mono">Cód. {item.code}</div>}
-                            </TableCell>
-                            <TableCell className="text-right font-mono">
-                              {item.quantity}
-                              {item.unit ? ` ${item.unit}` : ""}
-                            </TableCell>
-                            <TableCell className="text-right font-mono">
-                              {item.unitValue != null ? formatCurrency(item.unitValue) : "—"}
-                            </TableCell>
-                            <TableCell className="text-right font-mono">
-                              {item.totalValue != null ? formatCurrency(item.totalValue) : "—"}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  <div className="mt-3 pt-3 border-t flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Total geral:</span>
-                    <span className="font-medium font-mono">
-                      {parsed.totalValue != null ? formatCurrency(parsed.totalValue) : "—"}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Chave de acesso — normalizada com 44 dígitos, exibição agrupada */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Chave de acesso</CardTitle>
-                <CardDescription>44 dígitos — usada para prevenir duplicidade da NF-e</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-2">
-                  <Key className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <Input
-                    value={
-                      parsed.accessKey
-                        ? parsed.accessKey.length === 44
-                          ? formatAccessKeyGrouped(parsed.accessKey)
-                          : parsed.accessKey
-                        : ""
-                    }
-                    onChange={(e) => {
-                      const digits = digitsOnly(e.target.value).slice(0, 44);
-                      setParsed((p) => (p ? { ...p, accessKey: digits } : p));
-                    }}
-                    inputMode="numeric"
-                    placeholder="Informe manualmente se o OCR não identificou"
-                    className="flex-1 font-mono text-xs tracking-wider"
-                  />
-                  {parsed.accessKey && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1"
-                      onClick={() => {
-                        navigator.clipboard.writeText(parsed.accessKey ?? "");
-                        toast.success("Chave copiada para a área de transferência.");
-                      }}
-                    >
-                      <Copy className="h-3.5 w-3.5" /> Copiar
-                    </Button>
-                  )}
-                </div>
-                <p className={`text-[10px] mt-1 ${isValidAccessKey(parsed.accessKey ?? "") ? "text-muted-foreground" : "text-amber-700"}`}>
-                  {isValidAccessKey(parsed.accessKey ?? "")
-                    ? "44 dígitos conferidos — estrutura válida, valor normalizado no banco"
-                    : `${digitsOnly(parsed.accessKey ?? "").length} de 44 dígitos — confira a chave com o documento`}
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Arquivo original — preservado junto à entrada */}
-            {parsed.rawFile && (
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Documento original</CardTitle>
-                  <CardDescription>DANFE utilizado nesta leitura — segue anexada à entrada</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-5 w-5 text-muted-foreground" />
-                    <span className="text-sm truncate">{parsed.rawFile.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      ({(parsed.rawFile.size / 1024 / 1024).toFixed(2)} MB)
-                    </span>
-                    <Button variant="outline" size="sm" className="ml-auto gap-1" asChild>
-                      <a href={URL.createObjectURL(parsed.rawFile)} target="_blank" rel="noopener noreferrer">
-                        <Eye className="h-3.5 w-3.5" /> Visualizar
-                      </a>
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Ações */}
-            <DialogFooter className="flex-col sm:flex-row gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setStep("upload");
-                  setParsed(null);
-                  setError(null);
-                }}
-              >
-                Voltar
-              </Button>
-              <Button variant="outline" onClick={onClose}>
-                Cancelar
-              </Button>
-              <Button onClick={confirmImport}>
-                Conferir na Entrada
-                <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            </DialogFooter>
-          </div>
-        )}
-
-        {/* Cadastro de fornecedor inline (§12) — reutiliza o formulário padrão */}
-        <SupplierForm
-          open={createSupplierOpen}
-          onOpenChange={setCreateSupplierOpen}
-          mode="create"
-          supplierId={null}
-          preFilled={danfePreFill}
-          onCreated={(id) => {
-            setSelectedSupplierId(id);
-            toast.success("Fornecedor criado e selecionado para esta NF-e.");
-          }}
-        />
+      <DialogContent style={{ padding: 16, overflow: "auto", maxHeight: "89vh", width: "auto", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}>
+        {renderContent()}
       </DialogContent>
+
+      {snackbarClassNotFound && (
+        <ClassNotFoundSnackbar onClose={() => setSnackbarClassNotFound(null)} />
+      )}
+      {snackbarCodeTemplate && (
+        <CodeTemplate onClose={() => setSnackbarCodeTemplate(null)} />
+      )}
     </Dialog>
   );
 }
+
+// ─── Helpers internos para merges ────────────────────────────────────────────
+
+function mergeOcrDecodedResults(results: OcrDecodedExtra[]): OcrDecodedExtra["data"] {
+  if (results.length === 0) return emptyNfeData();
+  if (results.length === 1) return results[0].data;
+
+  // Prioridade: primeiro resultado com status OK e com accessKey.
+  const withKey = results.filter((r) => r.data.accessKey != null && r.data.accessKey !== "");
+  if (withKey.length > 0) {
+    // Choose the first one with a valid access key (length 44, valid structure).
+    const best = withKey.find((r) => validateAccessKey44(r.data.accessKey!));
+    if (best) return best.data;
+    // If no valid access key structure, still return the first one with a key
+    // (the parser may still fill other fields well).
+    return withKey[0].data;
+  }
+
+  // Sem chave em nenhum resultado, usa o primeiro.
+  return results[0].data;
+}
+
+function emptyNfeData(): NfeDataFields {
+  return {
+    readingId: uuidv4(),
+    statusCode: 0,
+    statusName: "Normal",
+    scannedDocumentName: null,
+    recentUpdateDateTime: null,
+    accessKey: null,
+    nfeNumber: null,
+    emitentCnpj: null,
+    emitentLegalName: null,
+    emitentTradeName: null,
+    emitentAddress: null,
+    emitentCity: null,
+    emitentState: null,
+    emitentPostalCode: null,
+    transmiterFiscalName: undefined,
+    receiverCnpj: null,
+    receiverLegalName: null,
+    receiverTradeName: null,
+    receiverAddress: null,
+    receiverCity: null,
+    receiverState: null,
+    receiverPostalCode: null,
+    issueDate: null,
+    dueDate: undefined,
+    totalAmount: null,
+    receivedAmount: undefined,
+    noteOfCharge: null,
+    noteOfInCharge: null,
+    noteOfProtest: undefined,
+    noteOfOther: undefined,
+    noteOfCollector: undefined,
+    products: [],
+    anyCorruptionDetected: false,
+  };
+}
+
+// Omit the type-only import for `pdfjsLib` & UMD shims
+import type { PdfDocumentProxy, PdfPageProxy, TesseractWorker, HandleAbortSignal } from "@/lib/ocr/types";
