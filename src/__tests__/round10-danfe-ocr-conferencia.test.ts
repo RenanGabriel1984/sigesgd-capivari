@@ -232,13 +232,23 @@ describe("H/I/J — layout sem overflow", () => {
     expect(ENTRIES).toContain("CNPJ {formatCnpj(nfeSupplier.cnpj)}");
   });
 
-  it("J — modal da DANFE não possui overflow horizontal", () => {
-    expect(DIALOG).toContain('className="max-w-6xl gap-0 overflow-x-hidden p-0"');
-    expect(DIALOG).toContain('width: "calc(100vw - 2rem)"');
-    expect(DIALOG).toContain('maxWidth: "calc(100vw - 2rem)"');
+  it("J — modal da DANFE: 960px/85dvh, sem overflow horizontal e rodapé fixo", () => {
+    expect(DIALOG).toContain(
+      'className="w-[calc(100vw-32px)] max-w-[960px] max-h-[85dvh] flex flex-col gap-0 overflow-hidden p-0 sm:p-0"',
+    );
+    // conteúdo interno protegido; rolagem SOMENTE na área central:
     expect(DIALOG).toContain("min-w-0 max-w-full overflow-x-hidden");
-    // Conteúdo interno também protegido:
-    expect(DIALOG).toContain("px-6 pb-2 max-h-[calc(100vh-11rem)] overflow-y-auto");
+    expect(DIALOG).toContain(
+      "flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-5 pb-3 sm:px-6 space-y-3",
+    );
+    // cabeçalho e rodapé estáticos (shrink-0) — botões sempre acessíveis:
+    expect(DIALOG).toContain("min-w-0 max-w-full shrink-0");
+    expect(DIALOG).toContain(
+      "min-w-0 max-w-full shrink-0 overflow-x-hidden border-t bg-background px-5 py-3 sm:px-6",
+    );
+    // sem classes antigas de largura exagerada:
+    expect(DIALOG).not.toContain("max-w-6xl");
+    expect(DIALOG).not.toContain("max-h-[calc(100vh-11rem)]");
   });
 });
 

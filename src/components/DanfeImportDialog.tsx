@@ -17,10 +17,12 @@
  *  6. apresenta "OCR concluído · X de 10 campos identificados" e qualquer
  *     campo ausente como PENDÊNCIA de conferência — nunca como falha total.
  *
- * ─── LAYOUT (RODADA 10) ─────────────────────────────────────────────────────
- * Modal largo (max-w-6xl, calc(100vw - 2rem)), sem overflow horizontal, grid
- * de dados em grid-cols-1 sm:grid-cols-2 com células min-w-0/max-w-full/
- * overflow-hidden; a chave de acesso ocupa col-span-1 sm:col-span-2.
+ * ─── LAYOUT (RODADA 12) ─────────────────────────────────────────────────────
+ * Modal proporcional: w-[calc(100vw-32px)] com max-w-[960px] e max-h-[85dvh],
+ * centralizado; cabeçalho e rodapé fixos (shrink-0) e rolagem vertical apenas
+ * na área central; grid de dados em grid-cols-1 sm:grid-cols-2 com células
+ * min-w-0/max-w-full/overflow-hidden; a chave de acesso ocupa col-span-1
+ * sm:col-span-2. Zero overflow horizontal.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
@@ -392,10 +394,9 @@ export function DanfeImportDialog({
   return (
     <Dialog open={open} onOpenChange={(value) => { if (!value) onClose(); }}>
       <DialogContent
-        className="max-w-6xl gap-0 overflow-x-hidden p-0"
-        style={{ width: "calc(100vw - 2rem)", maxWidth: "calc(100vw - 2rem)" }}
+        className="w-[calc(100vw-32px)] max-w-[960px] max-h-[85dvh] flex flex-col gap-0 overflow-hidden p-0 sm:p-0"
       >
-        <DialogHeader className="min-w-0 max-w-full px-6 pt-6 pb-2">
+        <DialogHeader className="min-w-0 max-w-full shrink-0 px-5 pt-4 pb-2 sm:px-6 sm:pt-5">
           <DialogTitle>Importar DANFE / PDF / Imagem</DialogTitle>
           <DialogDescription>
             O documento é lido localmente no navegador. Os dados entram na conferência da
@@ -403,7 +404,7 @@ export function DanfeImportDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-w-0 max-w-full overflow-x-hidden px-6 pb-2 max-h-[calc(100vh-11rem)] overflow-y-auto space-y-4">
+        <div className="min-w-0 max-w-full flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-5 pb-3 sm:px-6 space-y-3">
           {/* ── Seleção de arquivo ── */}
           {phase === "select" && (
             <div className="space-y-3">
@@ -463,14 +464,14 @@ export function DanfeImportDialog({
               </p>
 
               {!keyValid && (
-                <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
                   Chave de acesso não identificada automaticamente. Confira a DANFE e informe a
                   chave na etapa de conferência.
                 </div>
               )}
 
               {fieldSummary.missing.length > 0 && (
-                <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                <div className="rounded-lg border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">Pendências de conferência: </span>
                   {fieldSummary.missing.join(" · ")}
                 </div>
@@ -489,10 +490,6 @@ export function DanfeImportDialog({
                   <DataCell label="UF do emissor" value={parsed?.emitterState ?? ""} />
                   <DataCell label="CEP do emissor" value={parsed?.emitterPostalCode ?? ""} />
                   <DataCell
-                    label="Valor total da NF"
-                    value={parsed?.totalValue != null ? formatCurrency(parsed.totalValue) : ""}
-                  />
-                  <DataCell
                     label="Chave de acesso"
                     value={parsed?.accessKey ? formatAccessKeyGrouped(parsed.accessKey) : ""}
                     wide
@@ -509,7 +506,7 @@ export function DanfeImportDialog({
                     <SelectValue placeholder="Selecionar fornecedor (opcional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Detectar automaticamente na conferência</SelectItem>
+                    <SelectItem value="none">Detectar automaticamente</SelectItem>
                     {suppliers.map((supplier) => (
                       <SelectItem key={supplier._id} value={supplier._id} textValue={supplier.legalName}>
                         <span className="min-w-0 truncate">{supplier.legalName}</span>
@@ -586,13 +583,13 @@ export function DanfeImportDialog({
           )}
         </div>
 
-        <DialogFooter className="min-w-0 max-w-full overflow-x-hidden px-6 pb-6 pt-2">
+        <DialogFooter className="min-w-0 max-w-full shrink-0 overflow-x-hidden border-t bg-background px-5 py-3 sm:px-6">
           <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="min-w-0 max-w-full text-xs text-muted-foreground">
               Etapa de leitura: nada é criado sem a sua confirmação — a efetivação acontece na
               conferência da Entrada.
             </p>
-            <div className="flex shrink-0 gap-2">
+            <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
               <Button
                 variant="outline"
                 onClick={() => {
