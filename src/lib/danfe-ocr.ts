@@ -92,6 +92,7 @@ export const DANFE_TRACKED_FIELDS = [
   "Itens da NF-e",
   "CEP do emitente",
   "UF do emitente",
+  "Transportador identificado",
 ] as const;
 
 const VALID_UFS = new Set([
@@ -581,6 +582,7 @@ export function danfeFieldSummary(parsed: DanfeParseResult): DanfeFieldSummary {
     "Transportador identificado": Boolean(parsed.transporterCnpj),
     "CEP do emitente": digitsOnly(parsed.emitterPostalCode ?? "").length === 8,
     "UF do emitente": VALID_UFS.has((parsed.emitterState ?? "").toUpperCase()),
+    "Transportador identificado": Boolean(parsed.transporterCnpj),
   };
   const missing: string[] = [];
   let found = 0;
