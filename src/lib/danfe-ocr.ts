@@ -174,25 +174,48 @@ export function extractAccessKey44(text: string | undefined | null): string | un
   const direct = text.match(/\d{44}/);
   if (direct && validateAccessKey44(direct[0])) return direct[0];
 
-  // 2) Blocos de 4 caracteres "semelhantes a dígitos" acumulados em ordem.
+  // Procura uma janela de 44 dígitos válidos (estrutura + DV) num fluxo.
+  const scanWindows = (value: string): string | undefined => {
+    if (value.length < 44) return undefined;
+    for (let i = 0; i + 44 <= value.length; i++) {
+      const candidate = value.slice(i, i + 44);
+      if (validateAccessKey44(candidate)) return candidate;
+    }
+    return undefined;
+  };
+
+  // 2) Monta um fluxo de dígitos por tokens: blocos de 4 com normalização de
+  //    glifos (O→0, S→5, B→8…) e execuções puras de dígitos de qualquer
+  //    tamanho. Tokens não numéricos fecham o segmento atual — assim um
+  //    número anterior (ex.: o nº da NF "2967" antes da chave) não
+  //    compromete a leitura: a janela desliza e encontra a chave.
   const tokens = text.split(/[^0-9A-Za-z]+/).filter(Boolean);
-  let buffer = "";
+  let stream = "";
+  const flushAndScan = (): string | undefined => {
+    const found = scanWindows(stream);
+    stream = "";
+    return found;
+  };
+
   for (const token of tokens) {
     const normalized = normalizeKeyToken(token);
     if (normalized) {
-      buffer += normalized;
-      if (buffer.length === 44) {
-        if (validateAccessKey44(buffer)) return buffer;
-        buffer = "";
-      } else if (buffer.length > 44) {
-        buffer = "";
-      }
+      stream += normalized;
+    } else if (/^\d+$/.test(token)) {
+      stream += token;
     } else {
-      buffer = "";
+      const found = flushAndScan();
+      if (found) return found;
+      continue;
+    }
+    if (stream.length > 128) {
+      const found = scanWindows(stream);
+      if (found) return found;
+      stream = stream.slice(-44);
     }
   }
 
-  return undefined;
+  return scanWindows(stream);
 }
 
 /** Mantido por compatibilidade com o diálogo (validação estrutural + DV). */
@@ -367,11 +390,25 @@ export function parseDanfeText(text: string | undefined | null): DanfeParseResul
       } else if (!result.emitterCnpj) {
         result.emitterCnpj = cnpjFormatted;
         prevCnpjLineIdx = idx;
+        // Razão social do emitente: linha imediatamente anterior ao CNPJ,
+        // quando parece um nome ( layouts sem rótulo "RAZÃO SOCIAL" ).
+        if (!result.emitterName) {
+          const nm = stripAccents(prevLine.toUpperCase());
+          if (
+            prevLine &&
+            prevLine.length >= 5 &&
+            !prevLine.includes(":") &&
+            /[A-ZÀ-Ú]{3,}/.test(nm) &&
+            !/CHAVE|DANFE|DADOS|NOTA|INSCRICAO|PROTOCOLO/.test(nm)
+          ) {
+            result.emitterName = prevLine;
+          }
+        }
       }
     }
 
-    // ── Razão social do emitente ──
-    if (!inReceiverSection && !result.emitterName) {
+    // ── Razão social do emitente (rótulo — tem prioridade sobre o palpite) ──
+    if (!inReceiverSection) {
       const mName = line.match(/RAZ[ÃA]O\s+SOCIAL\s*:?\s*(.+)/i);
       if (mName) result.emitterName = mName[1].trim();
     }

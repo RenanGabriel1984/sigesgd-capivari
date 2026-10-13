@@ -66,7 +66,7 @@ const TARGET_DPI = 300;
 const MIN_OCR_WIDTH = 1100;
 const OCR_LANG = "por";
 
-export type DanfeImportResult = DanfeParseResult & { supplierId?: string };
+export type DanfeImportResult = DanfeParseResult & { supplierId?: string; file?: File };
 
 export interface DanfeImportDialogProps {
   open: boolean;
@@ -77,7 +77,7 @@ export interface DanfeImportDialogProps {
    * Entrega os dados LIDOS à conferência da Entrada. O diálogo não grava
    * nada: a efetivação acontece somente após confirmação humana.
    */
-  onImport: (result: DanfeImportResult, file: File) => void;
+  onImport: (result: DanfeImportResult) => void;
 }
 
 type OcrWorker = Awaited<ReturnType<typeof createWorker>>;
@@ -265,7 +265,7 @@ export function DanfeImportDialog({
   const [phase, setPhase] = useState<Phase>("select");
   const [step, setStep] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [parsed, setParsed] = useState<DanfeParseResult | null>(null);
+  const [parsed, setParsed] = useState<DanfeImportResult | null>(null);
   const [fileName, setFileName] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
@@ -371,7 +371,7 @@ export function DanfeImportDialog({
         return;
       }
 
-      setParsed(best);
+      setParsed({ ...best, file: f });
       setPhase("review");
     } catch (err) {
       setPhase("error");
@@ -383,7 +383,7 @@ export function DanfeImportDialog({
 
   const handleImport = () => {
     if (!parsed || !file) return;
-    onImport({ ...parsed, supplierId: selectedSupplierId || undefined }, file);
+    onImport({ ...parsed, supplierId: selectedSupplierId || undefined });
   };
 
   const showNoData = phase === "review" && summary.found === 0;
@@ -521,6 +521,23 @@ export function DanfeImportDialog({
                   </SelectContent>
                 </Select>
               </section>
+
+              {/* ── Destinatário ── */}
+              {(parsed?.receiverCnpj || parsed?.receiverName) && (
+                <section className="space-y-2">
+                  <h4 className="text-sm font-semibold">Destinatário</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <DataCell
+                      label="CNPJ do destinatário"
+                      value={formatCnpj(parsed?.receiverCnpj)}
+                    />
+                    <DataCell
+                      label="Razão social do destinatário"
+                      value={parsed?.receiverName ?? ""}
+                    />
+                  </div>
+                </section>
+              )}
 
               {/* ── Itens ── */}
               <section className="space-y-2">

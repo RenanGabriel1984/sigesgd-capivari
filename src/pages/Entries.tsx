@@ -17,7 +17,7 @@ import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { toast } from "sonner";
-import { Search } from "lucide-react";
+import { Search, AlertTriangle, CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -378,8 +378,9 @@ export default function Entries() {
   //  Fluxo DANFE/OCR
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const handleDanfeImport = async (result: any, file: File) => {
+  const handleDanfeImport = async (result: any, fallbackFile?: File) => {
     setDanfeDialogOpen(false);
+    const file: File | undefined = result?.file ?? fallbackFile;
     const duplicate = findDuplicateEntry(entries ?? [], {
       accessKey: result.accessKey || undefined,
       number: result.nfeNumber,
@@ -393,17 +394,19 @@ export default function Entries() {
 
     // Documento original preservado no storage (falha não derruba o fluxo).
     let documentStorageId: string | undefined;
-    try {
-      const uploadUrl = await generateUploadUrl();
-      const response = await fetch(uploadUrl, {
-        method: "POST",
-        headers: { "Content-Type": file.type || "application/pdf" },
-        body: file,
-      });
-      const json = await response.json();
-      documentStorageId = json.storageId;
-    } catch {
-      toast.error("Falha ao salvar o DANFE original — o restante da conferência continua disponível.");
+    if (file) {
+      try {
+        const uploadUrl = await generateUploadUrl();
+        const response = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": file.type || "application/pdf" },
+          body: file,
+        });
+        const json = await response.json();
+        documentStorageId = json.storageId;
+      } catch {
+        toast.error("Falha ao salvar o DANFE original — o restante da conferência continua disponível.");
+      }
     }
 
     const converted: NfeData = {
@@ -553,8 +556,8 @@ export default function Entries() {
     // Dados fiscais extraídos do documento: o formulário padrão é o único
     // usado para cadastro — não existem dois formulários de fornecedor.
     if (!nfe || !nfe.emitterName || !nfe.emitterCnpj) return;
-    setNewSupplierName(nfe.emitterName);
-    setNewSupplierCnpj(nfe.emitterCnpj);
+    setNewSupplierName(nfe.emitterName ?? "");
+    setNewSupplierCnpj(nfe.emitterCnpj ?? "");
     setSupplierPrefill({
       legalName: nfe.emitterName,
       cnpj: digitsOnly(nfe.emitterCnpj),
@@ -644,6 +647,216 @@ export default function Entries() {
             </Button>
           </div>
         </header>
+
+        {/* ═══ Conferência da NF-e (XML ou DANFE/OCR) ═══
+            Tudo aqui é SOMENTE leitura para conferência: nada entra no estoque
+            sem a confirmação explícita (destino → entries.create + confirm). */}
+        {nfe ? (
+          <Card className="min-w-0 max-w-full overflow-x-hidden">
+            <CardHeader className="min-w-0 max-w-full">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 max-w-full">
+                  <CardTitle>Conferência da NF-e</CardTitle>
+                  <CardDescription>
+                    Confira os dados lidos no documento — a entrada só é registrada após a
+                    sua confirmação.
+                  </CardDescription>
+                </div>
+                <Badge variant="outline" className="shrink-0">
+                  {nfeSource === "danfe" ? "Lido via DANFE/OCR" : "Importado do XML"}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="min-w-0 max-w-full space-y-5 overflow-x-hidden">
+              {/* Identificação: fornecedor em célula própria — nunca invade
+                  Nº NF, Série ou Data (grid responsivo: 1 coluna no mobile). */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="min-w-0 max-w-full overflow-hidden sm:col-span-2 lg:col-span-1">
+                  <Label>Fornecedor</Label>
+                  {nfeSupplier ? (
+                    <div className="mt-1 min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/40 px-3 py-2">
+                      <p className="flex min-w-0 max-w-full items-center gap-2 text-sm font-medium">
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                        <span className="min-w-0 truncate">
+                          Fornecedor identificado: {nfeSupplier.legalName}
+                        </span>
+                      </p>
+                      <p className="min-w-0 max-w-full truncate font-mono text-xs text-muted-foreground">
+                        CNPJ {formatCnpj(nfeSupplier.cnpj)}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mt-1 min-w-0 max-w-full space-y-2 overflow-hidden rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
+                      <p className="flex min-w-0 max-w-full items-center gap-2 text-sm font-medium text-amber-900">
+                        <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+                        <span className="min-w-0 truncate">Fornecedor não cadastrado</span>
+                      </p>
+                      <p className="min-w-0 max-w-full break-words text-xs text-amber-800">
+                        Emitente: {nfe.emitterName ?? "não identificado"} · CNPJ{" "}
+                        {formatCnpj(nfe.emitterCnpj)}
+                      </p>
+                      <Button type="button" variant="outline" size="sm" onClick={openSupplierRegistration}>
+                        Cadastrar fornecedor
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="min-w-0 max-w-full overflow-hidden">
+                  <Label>Nº Nota Fiscal</Label>
+                  <p className="mt-1 min-w-0 max-w-full truncate font-mono text-sm">
+                    {nfe.number || "—"}
+                  </p>
+                </div>
+
+                <div className="min-w-0 max-w-full overflow-hidden">
+                  <Label>Série</Label>
+                  <p className="mt-1 min-w-0 max-w-full truncate font-mono text-sm">
+                    {nfe.series || "—"}
+                  </p>
+                </div>
+
+                <div className="min-w-0 max-w-full overflow-hidden">
+                  <Label>Data de emissão da NF-e</Label>
+                  <p className="mt-1 min-w-0 max-w-full truncate font-mono text-sm">
+                    {nfe.emissionDate
+                      ? new Date(`${nfe.emissionDate}T00:00:00`).toLocaleDateString("pt-BR")
+                      : "—"}
+                  </p>
+                </div>
+
+                <div className="min-w-0 max-w-full overflow-hidden sm:col-span-2 lg:col-span-2">
+                  <Label>Vincular / alterar fornecedor</Label>
+                  <Select
+                    value={cSupplierId || "none"}
+                    onValueChange={(value) => setcSupplierId(value === "none" ? "" : value)}
+                  >
+                    <SelectTrigger className="mt-1 h-10 w-full min-w-0 max-w-full">
+                      <SupplierSelectValue supplier={nfeSupplier} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— Selecionar um fornecedor —</SelectItem>
+                      {(suppliers ?? []).map((s) => (
+                        <SelectItem key={s._id} value={s._id} textValue={s.legalName}>
+                          <span className="min-w-0 truncate">{s.legalName}</span>
+                          <span className="block min-w-0 truncate text-[10px] text-muted-foreground">
+                            {`CNPJ: ${formatCnpj(s.cnpj)}`}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* AF / Processo Administrativo / Empenho — três campos distintos */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="min-w-0 max-w-full space-y-1.5">
+                  <Label htmlFor="nfe-af">Número da AF</Label>
+                  <Input
+                    id="nfe-af"
+                    value={nfeAfNumber}
+                    onChange={(e) => setNfeAfNumber(e.target.value)}
+                    placeholder="2223/2026"
+                    className="min-w-0 max-w-full"
+                  />
+                </div>
+                <div className="min-w-0 max-w-full space-y-1.5">
+                  <Label htmlFor="nfe-processo">Número do Processo Administrativo</Label>
+                  <Input
+                    id="nfe-processo"
+                    value={nfeProcessNumber}
+                    onChange={(e) => setNfeProcessNumber(e.target.value)}
+                    placeholder="4220260000000000000"
+                    className="min-w-0 max-w-full"
+                  />
+                </div>
+                <div className="min-w-0 max-w-full space-y-1.5">
+                  <Label htmlFor="nfe-empenho">Número do Empenho</Label>
+                  <Input
+                    id="nfe-empenho"
+                    value={nfeEmpenhoNumber}
+                    onChange={(e) => setNfeEmpenhoNumber(e.target.value)}
+                    placeholder="778/2026"
+                    className="min-w-0 max-w-full"
+                  />
+                </div>
+              </div>
+
+              {/* Chave de acesso: pendency de conferência — não bloqueia a leitura,
+                  mas a finalização exige chave válida (regra de duplicidade). */}
+              <div className="min-w-0 max-w-full space-y-1.5">
+                <Label htmlFor="nfe-access-key">Chave de acesso (44 dígitos)</Label>
+                <Input
+                  id="nfe-access-key"
+                  inputMode="numeric"
+                  value={nfeAccessKey}
+                  onChange={(e) => setNfeAccessKey(digitsOnly(e.target.value).slice(0, 44))}
+                  placeholder="Informe a chave da DANFE se o OCR não identificou"
+                  className="min-w-0 max-w-full font-mono text-xs tracking-wide"
+                />
+                <p
+                  className={
+                    validateAccessKey44(nfeAccessKey)
+                      ? "min-w-0 max-w-full break-words text-xs text-muted-foreground"
+                      : "min-w-0 max-w-full break-words text-xs text-amber-700"
+                  }
+                >
+                  {validateAccessKey44(nfeAccessKey)
+                    ? "44 dígitos conferidos — estrutura e dígito verificador válidos."
+                    : "Chave pendente de conferência: informe os 44 dígitos antes de finalizar a entrada."}
+                </p>
+              </div>
+
+              {/* Itens: associação manual; itens não reconhecidos ficam pendentes. */}
+              <div className="min-w-0 max-w-full space-y-1.5">
+                <Label>Itens da NF-e</Label>
+                <NfeReviewTable
+                  items={nfeItems}
+                  products={(products ?? []) as any}
+                  locations={(locations ?? []) as any}
+                  onUpdate={(index, patch) =>
+                    setNfeItems((prev) =>
+                      prev.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+                    )
+                  }
+                  onContinue={() => setDestOpen(true)}
+                  sourceLabel={nfeSource === "danfe" ? "DANFE/OCR" : "XML"}
+                />
+              </div>
+
+              {/* Total + documento original */}
+              <div className="flex min-w-0 max-w-full flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+                <span className="text-muted-foreground">Valor total da NF-e</span>
+                <span className="min-w-0 truncate font-mono font-medium">
+                  {nfe.totalValue != null ? formatCurrency(nfe.totalValue) : "—"}
+                </span>
+              </div>
+
+              <div className="min-w-0 max-w-full space-y-1 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">Documento original</p>
+                <p className="min-w-0 max-w-full break-words">
+                  {nfeSource === "danfe"
+                    ? nfeDocumentStorageId
+                      ? "DANFE/PDF/imagem anexado à entrada (armazenado com o registro)."
+                      : "DANFE lido localmente no navegador — anexe o arquivo em Documentos da NF-e, se necessário."
+                    : nfeXmlStorageId
+                      ? "XML original anexado à entrada."
+                      : "Sem documento anexado."}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={resetConference}>
+                  Descartar leitura
+                </Button>
+                <Button onClick={() => setDestOpen(true)}>
+                  Salvar e confirmar destino
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
 
         {showCreate ? (
           <Card className="min-w-0 max-w-full overflow-x-hidden">
