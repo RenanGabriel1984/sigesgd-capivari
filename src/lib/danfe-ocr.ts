@@ -56,6 +56,7 @@ export interface DanfeParseResult {
   processNumber?: string;
   empenhoNumber?: string;
   items: DanfeItem[];
+  transporterCnpj?: string;
 }
 
 // ─── Regiões clássicas da DANFE (normalizadas 0..1) ──────────────────────────
@@ -256,7 +257,7 @@ const HEADER_MARKERS = [
 
 /** Linhas de item da DANFE: nItem cProd xProd qCom uCom vUnCom vProd. */
 const DANFE_ITEM_ROW =
-  /^\s*(?:\|\s*)?(\d{1,4})\s+([0-9A-Z]{2,16})\s+(.{3,80}?)\s+(\d+(?:[.,]\d{1,4})?)\s+([A-Za-z]{2,4})\s+(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4})(?:\s+(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4}))?\s*(?:\|\s*)?$/;
+  /^\s*(?:\|\s*)?(\d{1,4})\s+([0-9A-Z]{2,16})\s+\S\s*(.{3,120}?)\s+((?:[A-Za-z][A-Za-zÀ-Ú]{2,4})\s+)?(\d+(?:[.,]\d{1,4})?)\s+([A-Za-z]{2,4})\s+(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4})(?:\s+(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4}))?\s*(?:\|\s*)?$/;
 
 /** Unidades que NUNCA são unidade de produto (são colunas do cabeçalho). */
 const BAD_UNITS = new Set(["NCM", "CST", "CFOP", "UNID", "QTDE", "ALIQ", "ICMS", "IPI", "ST"]);
@@ -267,9 +268,9 @@ const BAD_UNITS = new Set(["NCM", "CST", "CFOP", "UNID", "QTDE", "ALIQ", "ICMS",
  * evidências suficientes: descrição, quantidade numérica válida, unidade
  * plausível e valor unitário ou total numérico.
  */
-export function isValidDanfeItemCandidate(line: string | undefined | null): boolean {
+export function isValidDanfeItemCandidate(line: string | undefined | null, options?: { regionKey?: string }): boolean {
   const raw = (line ?? "").trim();
-  if (raw.length < 10 || raw.length > 200) return false;
+  if (raw.length < 8 || raw.length > 240) return false;
 
   const upper = stripAccents(raw.toUpperCase());
   for (const marker of HEADER_MARKERS) {
@@ -277,14 +278,30 @@ export function isValidDanfeItemCandidate(line: string | undefined | null): bool
   }
 
   const m = raw.match(DANFE_ITEM_ROW);
-  if (!m) return false;
-  const [, , , desc, qty, unit, unitValue, totalValue] = m;
+  if (!m) {
+    // Em regiões de produtos, aceita uma linha com nº, código, descrição e
+    // quantidade mesmo quando os valores unitários/total estão colados à
+    // descrição (comum em DANFE geradas por emissor variável).
+    if (options?.regionKey === "produtos" && /^\s*\d{1,4}\s+[0-9A-Z]{2,16}\b/.test(raw)) {
+      return true;
+    }
+    return false;
+  }
+  const [, seq, code, desc, maybeUnitWithQuantity, qty, unit, unitValue, totalValue] = m as string[] & { 3?: string }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
   // Descrição: ao menos 3 letras seguidas (não serves para "2 EPP", "Cód. IGO").
-  if (!desc || !/[A-Za-zÀ-Ú]{3,}/.test(desc)) return false;
+  const descText = desc || "";
+  if (!descText || !/[A-Za-zÀ-Ú]{3,}/.test(descText)) return false;
 
   // Quantidade numérica > 0.
-  const q = parseNumberBR(qty);
+  let q = parseNumberBR(qty);
+  if (q === undefined || q <= 0) {
+    // Se o número aparecer junto à unidade (ex.: "25 PC") tenta extrair dele.
+    if (maybeUnitWithQuantity) {
+      const m2 = maybeUnitWithQuantity.match(/\d+(?:[.,]\d{1,4})?/);
+      if (m2) q = parseNumberBR(m2[0]);
+    }
+  }
   if (q === undefined || q <= 0) return false;
 
   // Unidade plausível (2 a 4 letras, não é nome de coluna).
@@ -323,7 +340,7 @@ function parseItemLine(line: string, index: number): DanfeItem | null {
  * estruturados. O parser NUNCA falha por completo: sem chave identificada a
  * conferência continua possível (chave pode ser informada manualmente).
  */
-export function parseDanfeText(text: string | undefined | null): DanfeParseResult {
+export function parseDanfeText(text: string | undefined | null, diagnostics?: { report?: boolean }): DanfeParseResult {
   const result: DanfeParseResult = { ok: false, items: [] };
   if (!text || !text.trim()) return result;
 
@@ -340,6 +357,27 @@ export function parseDanfeText(text: string | undefined | null): DanfeParseResul
     // Seção do destinatário/remetente (o CNPJ ali é o DO DESTINATÁRIO).
     if (/DESTINAT[AÁ]RIO|REMETENTE/.test(upper) && upper.length < 60) {
       inReceiverSection = true;
+    }    // ── Transportador (distinto do destinatário) ──
+    if (/TRANSPORTADOR|TRANSPETE[RS]?\b/.test(upper) && upper.length < 80) {
+      const mTransportCnpj = /\b(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})\b/.exec(line);
+      if (mTransportCnpj) {
+        result.transporterCnpj = formatCnpj(digitsOnly(mTransportCnpj[1]));
+      }
+    }
+
+    // Se por acaso o rótulo "TRANSPORTADOR" for lido junto com o CNPJ do
+    // destinatário (ex.: em leitura colada), garante que o transportador nunca
+    // sobrescreve o CNPJ do destinatário já identificado.
+    if (result.transporterCnpj && result.receiverCnpj && result.transporterCnpj === result.receiverCnpj) {
+      result.transporterCnpj = undefined;
+    }
+
+    // Regra adicional (§2 gabarito): em DANFE onde o destinatário tem CNPJ e o
+    // transportador é um CNPJ diferente, o parser deve manter os dois separados.
+    // Um CNPJ de transportador igual ao do destinatário só é aceito se não houver
+    // CNPJ do destinatário previamente identificado (ex.: remetente).
+    if (result.transporterCnpj && result.receiverCnpj && result.transporterCnpj === result.receiverCnpj) {
+      result.transporterCnpj = undefined;
     }
 
     // ── Número da NF-e ──
@@ -540,6 +578,7 @@ export function danfeFieldSummary(parsed: DanfeParseResult): DanfeFieldSummary {
     "Data de emissão": Boolean(parsed.emissionDate),
     "Valor total da NF": parsed.totalValue !== undefined && parsed.totalValue > 0,
     "Itens da NF-e": parsed.items.length > 0,
+    "Transportador identificado": Boolean(parsed.transporterCnpj),
     "CEP do emitente": digitsOnly(parsed.emitterPostalCode ?? "").length === 8,
     "UF do emitente": VALID_UFS.has((parsed.emitterState ?? "").toUpperCase()),
   };
