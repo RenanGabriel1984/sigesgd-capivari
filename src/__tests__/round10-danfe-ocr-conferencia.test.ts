@@ -22,6 +22,7 @@ import {
   danfeFieldSummary,
   extractAccessKey44,
   isValidDanfeItemCandidate,
+  mergeDanfeTexts,
   parseDanfeText,
   validateAccessKey44,
 } from "@/lib/danfe-ocr";
@@ -260,7 +261,37 @@ describe("K/L — grid da conferência responsivo", () => {
     expect(DIALOG).not.toMatch(/className="grid grid-cols-2/);
   });
 
-  it("§10 — dropdown do fornecedor exibe razão social + CNPJ organizados", () => {
+  // ═══════════════════════════════════════════════════════════════════
+// R11 — Linha repetida por OCR/regiões NUNCA duplica produto
+// (bug real pego no navegador: "Itens (2)" com o mesmo item duas vezes)
+// ═══════════════════════════════════════════════════════════════════
+
+describe("R11 — sem produto duplicado vindo do OCR por regiões", () => {
+  const ITEM = "1 23107 CADEIRA ERGONOMICA EXECUTIVA 2 PC 115,50 231,00";
+
+  it("mergeDanfeTexts descarta linha repetida entre página e região (só espaços/caixa)", () => {
+    const page = [`NF-e Nº 118`, ITEM].join("\n");
+    const region = "1  23107   CADEIRA ERGONOMICA EXECUTIVA   2 PC 115,50 231,00";
+    const merged = mergeDanfeTexts(page, [region]);
+    expect(merged.split("\n").filter((l) => l.includes("CADEIRA"))).toHaveLength(1);
+    expect(parseDanfeText(merged).items).toHaveLength(1);
+  });
+
+  it("parseDanfeText ignora item exatamente repetido", () => {
+    expect(parseDanfeText([ITEM, ITEM].join("\n")).items).toHaveLength(1);
+  });
+
+  it("itens legítimos distintos (nItem diferente) continuam todos", () => {
+    const lines = [ITEM, "2 23107 CADEIRA ERGONOMICA EXECUTIVA 1 PC 115,50 115,50"];
+    expect(parseDanfeText(lines.join("\n")).items).toHaveLength(2);
+  });
+
+  it("regressão R8 — merge de textos distintos continua concatenando", () => {
+    expect(mergeDanfeTexts("pag1", ["reg1", "reg2"])).toBe("pag1\nreg1\nreg2");
+  });
+});
+
+it("§10 — dropdown do fornecedor exibe razão social + CNPJ organizados", () => {
     expect(ENTRIES).toContain("textValue={s.legalName}");
     expect(ENTRIES).toContain("CNPJ: ${formatCnpj(s.cnpj)}");
     expect(ENTRIES).not.toContain("${s.legalName} — ${formatCnpj(s.cnpj)}");

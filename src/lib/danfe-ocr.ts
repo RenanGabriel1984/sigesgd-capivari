@@ -486,8 +486,22 @@ export function parseDanfeText(text: string | undefined | null): DanfeParseResul
     }
 
     // ── Itens ( SOMENTE linhas que passam na validação estrutural ) ──
+    // Itens idênticos (mesma linha lida mais de uma vez por OCR/regiões)
+    // nunca duplicam produto na conferência.
     const item = parseItemLine(line, idx);
-    if (item) result.items.push(item);
+    if (item) {
+      const already = result.items.some(
+        (ex) =>
+          ex.lineNumber === item.lineNumber &&
+          ex.code === item.code &&
+          ex.description === item.description &&
+          ex.quantity === item.quantity &&
+          ex.unit === item.unit &&
+          ex.unitValue === item.unitValue &&
+          ex.totalValue === item.totalValue,
+      );
+      if (!already) result.items.push(item);
+    }
 
     prevLine = line;
   });
@@ -545,7 +559,28 @@ export function hasUsableTextLayer(text: string | null | undefined): boolean {
 }
 
 export function mergeDanfeTexts(pageText: string, regionTexts: string[]): string {
-  return [pageText, ...regionTexts].filter((t) => t && t.trim()).join("\n");
+  // O OCR por regiões relê trechos que JÁ existem na página inteira. Sem
+  // deduplicação, uma linha repetida (ex.: um item da tabela de produtos)
+  // virava um produto duplicado na conferência. A chave de comparação
+  // normaliza espaços/caixa; linhas de item carregam o nº (nItem), então duas
+  // linhas idênticas neste nível são sempre repetição de leitura — nunca dois
+  // itens legítimos da mesma DANFE.
+  const seen = new Set<string>();
+  const keyOf = (line: string): string => line.trim().replace(/\s+/g, " ").toUpperCase();
+  const out: string[] = [];
+  const pushLine = (line: string) => {
+    const key = keyOf(line);
+    if (key) {
+      if (seen.has(key)) return;
+      seen.add(key);
+    }
+    out.push(line);
+  };
+  for (const text of [pageText, ...regionTexts]) {
+    if (!text || !text.trim()) continue;
+    for (const line of text.split(/\r?\n/)) pushLine(line);
+  }
+  return out.join("\n");
 }
 
 /**
