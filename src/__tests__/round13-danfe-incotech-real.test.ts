@@ -1,5 +1,5 @@
 import { readFileSync } from "fs";
-import { parseDanfeText, extractAccessKey44, validateAccessKey44, danfeFieldSummary, isValidDanfeItemCandidate, mergeDanfeTexts } from "@/lib/danfe-ocr";
+import { parseDanfeText, extractAccessKey44, validateAccessKey44, danfeFieldSummary, isValidDanfeItemCandidate, mergeDanfeTexts, hasUsableTextLayer } from "@/lib/danfe-ocr";
 import { describe, expect, it } from "vitest";
 
 describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", () => {
@@ -12,8 +12,14 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", () => 
     }
   })();
 
+  // O fixture só vale como "documento real" quando a camada textual completa do
+  // PDF foi efetivamente extraída. Um stub/placeholder curto NÃO pode passar
+  // como leitura do documento — senão o teste "validaria" a DANFE sem tê-la lido
+  // (§6: o PDF real é obrigatório; imagem sintética não substitui).
+  const HAS_REAL_DOCUMENT_LAYER = hasUsableTextLayer(TEXT_LAYER);
+
   function baseText() {
-    if (TEXT_LAYER.trim()) return TEXT_LAYER;
+    if (HAS_REAL_DOCUMENT_LAYER) return TEXT_LAYER;
     // Fallback textual representation used only when the extracted text layer is
     // not available locally (e.g. during a non-browser test run). It reflects the
     // expected DANFE 1-page text semantically, not the gabarito fields.
@@ -93,81 +99,12 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", () => 
     expect(parsed.accessKey).toBe(GABARITO.chave);
     expect(validateAccessKey44(parsed.accessKey ?? "")).toBe(true);
 
-    // Emitente (§1 gabarito).
+    // Emitente (§1 e §2 gabarito): CNPJ, razão social, município/UF e CEP.
     expect(parsed.emitterCnpj).toBe(GABARITO.cnpjEmitente);
     expect(parsed.emitterName).toBe(GABARITO.emitente);
-
-    // Destinatário (§2 gabarito) — e NÃO confundido com o transportador.
-    expect(parsed.receiverCnpj).toBe(GABARITO.cnpjDestinatario);
-    expect(parsed.receiverName).toBe(GABARITO.destinatario);
-
-    // Transportador separado do destinatário (§2 gabarito, alerta explícito).
-    expect(parsed.transporterCnpj).toBe(GABARITO.transportadorCnpj);
-    expect(parsed.transporterCnpj).not.toBe(parsed.receiverCnpj);
-
-    // Totais (§2 gabarito).
-    expect(parsed.totalValue).toBe(GABARITO.totalNf);
-
-    // Dados adicionais (§2 gabarito) — campos distintos, um não preenche o outro.
-    expect(parsed.afNumber).toBe(GABARITO.af);
-    expect(parsed.empenhoNumber).toBe(GABARITO.empenho);
-
-    // Itens (§2 gabarito): um item estruturado com quantidade e total esperados.
-    expect(parsed.items.length).toBe(1);
-    const item = parsed.items[0];
-    expect(item.code).toBe(GABARITO.item.codigo);
-    expect(item.description).toBe(GABARITO.item.descricao);
-    expect(item.unit).toBe(GABARITO.item.unidade);
-    expect(item.quantity).toBe(GABARITO.item.quantidade);
-    expect(item.unitValue).toBe(GABARITO.item.valorUnitario);
-    expect(item.totalValue).toBe(GABARITO.item.valorTotal);
-
-    // Resumo: conta SOMENTE campos válidos, nunca valores injetados.
-    expect(summary.total).toBe(10);
-    expect(summary.found).toBeGreaterThanOrEqual(9);
-    expect(summary.missing).not.toContain("Chave de acesso");
-    expect(summary.missing).not.toContain("Número da NF-e");
-    expect(summary.missing).not.toContain("Itens da NF-e");
-  });
-
-  it("diagnosticamento: rastreia linhas candidatas a produtos e rejeições", () => {
-    const pageText = [
-      "NF-e N°: 2967",
-      "Série: 001",
-      "Emissão: 28/09/2026",
-      "INCOTECH COMPANY LTDA",
-      "CNPJ: 22.816.315/0001-44",
-      "Rua Juscelino Kubistchek, 310",
-      "Tubarão/SC",
-      "CEP 88701-600",
-      "DESTINATÁRIO",
-      "MUNICÍPIO DE CAPIVARI",
-      "CNPJ: 44.723.674/0001-90",
-      "Capivari/SP",
-      "CEP 13360-023",
-      "TRANSPORTADOR",
-      "CNPJ: 38.306.164/0001-14",
-      "1  231071  KIT TECLADO E MOUSE USB SLIM CHOCO       25 PC  52,94 1.323,50",
-      "Valor Total da NF: R$ 1.323,50",
-      "AF: 2223/2026",
-      "Empenho: 778/2026",
-    ].join("\n");
-
-    const parsed = parseDanfeText(pageText);
-    const summary = danfeFieldSummary(parsed);
-
-    // Identificação da NF (§2 gabarito).
-    expect(parsed.nfeNumber).toBe(GABARITO.numero);
-    expect(parsed.series).toBe(GABARITO.serie);
-    expect(parsed.emissionDate).toBe(GABARITO.emissao);
-
-    // Chave reconhecida e validada estruturalmente (§5).
-    expect(parsed.accessKey).toBe(GABARITO.chave);
-    expect(validateAccessKey44(parsed.accessKey ?? "")).toBe(true);
-
-    // Emitente (§1 gabarito).
-    expect(parsed.emitterCnpj).toBe(GABARITO.cnpjEmitente);
-    expect(parsed.emitterName).toBe(GABARITO.emitente);
+    expect(parsed.emitterCity).toBe(GABARITO.cidadeEmitente);
+    expect(parsed.emitterState).toBe(GABARITO.ufEmitente);
+    expect(parsed.emitterPostalCode).toBe(GABARITO.cepEmitente);
 
     // Destinatário (§2 gabarito) — e NÃO confundido com o transportador.
     expect(parsed.receiverCnpj).toBe(GABARITO.cnpjDestinatario);
@@ -238,6 +175,9 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", () => 
     }
 
     const itemLine = candidatas.find((c) => c.line.includes("231071"));
+
+    // Toda linha de item aceita tem motivo explícito; rejeições relevantes são
+    // identificáveis (§3): cabeçalhos e linhas sem estrutura de item.
     expect(itemLine).toBeDefined();
     expect(itemLine!.valid).toBe(true);
 
@@ -270,9 +210,17 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", () => 
   });
 
   it("mantém os dados reconhecidos e marca campos pendentes quando a leitura é parcial", () => {
-    const partialText = baseText().split(/\r?\n/).slice(0, 8).concat([
+    // Trecho parcial: apenas o bloco do emitente + a linha do item foram lidos
+    // (as demais regiões — chave, número, destinatário, totais — ficaram
+    // pendentes nesta leitura).
+    const partialText = [
+      "INCOTECH COMPANY LTDA",
+      "CNPJ: 22.816.315/0001-44",
+      "Rua Juscelino Kubistchek, 310",
+      "Tubarão/SC",
+      "CEP 88701-600",
       "1  231071  KIT TECLADO E MOUSE USB SLIM CHOCO       25 PC  52,94 1.323,50",
-    ]).join("\n");
+    ].join("\n");
 
     const parsed = parseDanfeText(partialText);
     const summary = danfeFieldSummary(parsed);
@@ -315,9 +263,13 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", () => 
   });
 
   it("valida a chave somente se o OCR a reconheceu (não usa o gabarito para preencher campo vazio)", () => {
-    const textoSemChave = baseText().split(/\r?\n/).slice(0, 8).concat([
+    // Leitura sem a região da chave: o campo fica pendente — o gabarito NUNCA
+    // preenche silenciosamente o que o OCR não reconheceu (§5).
+    const textoSemChave = [
+      "INCOTECH COMPANY LTDA",
+      "CNPJ: 22.816.315/0001-44",
       "1  231071  KIT TECLADO E MOUSE USB SLIM CHOCO       25 PC  52,94 1.323,50",
-    ]).join("\n");
+    ].join("\n");
 
     const parsed = parseDanfeText(textoSemChave);
     expect(parsed.accessKey).toBeUndefined();
@@ -333,10 +285,19 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", () => 
   });
 
   it("mantém a separação entre CNPJ do transportador e CNPJ do destinatário", () => {
-    const texto = baseText().split(/\r?\n/).filter((l) => /(DESTINATÁRIO|MUNICÍPIO DE CAPIVARI|CNPJ: 44\.723\.674|TRANSPORTADOR|CNPJ: 38\.306\.164)/.test(l)).join("\n");
+    const texto = [
+      "DESTINATÁRIO",
+      "MUNICÍPIO DE CAPIVARI",
+      "CNPJ: 44.723.674/0001-90",
+      "Capivari/SP",
+      "CEP 13360-023",
+      "TRANSPORTADOR",
+      "CNPJ: 38.306.164/0001-14",
+    ].join("\n");
 
     const parsed = parseDanfeText(texto);
     expect(parsed.receiverCnpj).toBe("44.723.674/0001-90");
+    expect(parsed.receiverName).toBe("MUNICÍPIO DE CAPIVARI");
     expect(parsed.transporterCnpj).toBe("38.306.164/0001-14");
     expect(parsed.receiverCnpj).not.toBe(parsed.transporterCnpj);
   });
@@ -359,11 +320,18 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", () => 
     const linhaValoresColados = "1  231071  KIT TECLADO E MOUSE USB SLIM CHOCO  25 PC  52,94 1.323,50";
     expect(isValidDanfeItemCandidate(linhaValoresColados, { regionKey: "produtos" })).toBe(true);
 
-    // Causa raiz documentada: o CNPJ do transportador NÃO é usado como destinatário.
-    const textoTransportador = baseText().split(/\r?\n/).filter((l) => /(DESTINATÁRIO|MUNICÍPIO|CNPJ: 44\.723|TRANSPORTADOR|CNPJ: 38\.306)/.test(l)).join("\n");
+    // Causa raiz documentada: o CNPJ do transportador NÃO é usado como
+    // destinatário — nem como emitente — mesmo quando o rótulo "TRANSPORTADOR"
+    // é lido na mesma linha do CNPJ (leitura colada por OCR).
+    const textoTransportador = "TRANSPORTADOR CNPJ: 38.306.164/0001-14";
     const parsed = parseDanfeText(textoTransportador);
+    expect(parsed.transporterCnpj).toBe("38.306.164/0001-14");
     expect(parsed.receiverCnpj).toBeUndefined();
-    expect(parsed.transporterCnpj).toBeUndefined();
-    expect(parsed.receiverName).toBeUndefined();
+    expect(parsed.emitterCnpj).toBeUndefined();
+
+    // A leitura da página continua rastreável (§3): o texto bruto existe e o
+    // item é encontrado entre as linhas candidatas.
+    expect(pageText.includes("231071")).toBe(true);
+    expect(mergeDanfeTexts(pageText, [])).toContain("231071");
   });
 });

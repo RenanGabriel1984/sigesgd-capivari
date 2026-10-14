@@ -92,7 +92,6 @@ export const DANFE_TRACKED_FIELDS = [
   "Itens da NF-e",
   "CEP do emitente",
   "UF do emitente",
-  "Transportador identificado",
 ] as const;
 
 const VALID_UFS = new Set([
@@ -256,9 +255,19 @@ const HEADER_MARKERS = [
   "PÁGINA",
 ];
 
-/** Linhas de item da DANFE: nItem cProd xProd qCom uCom vUnCom vProd. */
+/**
+ * Linhas de item da DANFE: nItem cProd xProd qCom uCom vUnCom vProd.
+ *
+ * Estratégia híbrida (§1 Rodada 13): a estrutura de colunas do padrão DANFE
+ * orienta a ordem dos campos, mas as fronteiras entre descrição, quantidade,
+ * unidade e valores usam `\s*` — o OCR costuma colar valores/unidades ao lado
+ * do texto (ex.: "CHOCO 25PC52,94") e variações de espaçamento/scale não podem
+ * invalidar a linha. O nº do item (nItem) e o código (cProd) exigem separação
+ * por espaço, pois ambos são numéricos/alfanuméricos e precisam de fronteira
+ * inequívoca.
+ */
 const DANFE_ITEM_ROW =
-  /^\s*(?:\|\s*)?(\d{1,4})\s+([0-9A-Z]{2,16})\s+\S\s*(.{3,120}?)\s+((?:[A-Za-z][A-Za-zÀ-Ú]{2,4})\s+)?(\d+(?:[.,]\d{1,4})?)\s+([A-Za-z]{2,4})\s+(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4})(?:\s+(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4}))?\s*(?:\|\s*)?$/;
+  /^\s*(?:\|\s*)?(\d{1,4})\s+([0-9A-Z]{2,16})\s+(.{3,120}?)\s*(\d+(?:[.,]\d{1,4})?)\s*([A-Za-z]{2,4})\s*(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4})(?:\s*(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4}))?\s*(?:\|\s*)?$/;
 
 /** Unidades que NUNCA são unidade de produto (são colunas do cabeçalho). */
 const BAD_UNITS = new Set(["NCM", "CST", "CFOP", "UNID", "QTDE", "ALIQ", "ICMS", "IPI", "ST"]);
@@ -279,30 +288,21 @@ export function isValidDanfeItemCandidate(line: string | undefined | null, optio
   }
 
   const m = raw.match(DANFE_ITEM_ROW);
-  if (!m) {
-    // Em regiões de produtos, aceita uma linha com nº, código, descrição e
-    // quantidade mesmo quando os valores unitários/total estão colados à
-    // descrição (comum em DANFE geradas por emissor variável).
-    if (options?.regionKey === "produtos" && /^\s*\d{1,4}\s+[0-9A-Z]{2,16}\b/.test(raw)) {
-      return true;
-    }
-    return false;
-  }
-  const [, seq, code, desc, maybeUnitWithQuantity, qty, unit, unitValue, totalValue] = m as string[] & { 3?: string }; // eslint-disable-line @typescript-eslint/no-explicit-any
+  // A regex do padrão DANFE já tolera valores colados à descrição; fora dela a
+  // linha não tem estrutura de item e é rejeitada explicitamente (o motivo é
+  // registrado pela instrumentação de leitura, nunca silenciosamente).
+  if (!m) return false;
+  const [, , , desc, qty, unit, unitValue, totalValue] = m;
+  // `options` mantém a assinatura dos chamadores (região semântica da página);
+  // o reconhecimento em si é estrutural + por rótulos, não por coordenadas fixas.
+  void options;
 
   // Descrição: ao menos 3 letras seguidas (não serves para "2 EPP", "Cód. IGO").
   const descText = desc || "";
   if (!descText || !/[A-Za-zÀ-Ú]{3,}/.test(descText)) return false;
 
   // Quantidade numérica > 0.
-  let q = parseNumberBR(qty);
-  if (q === undefined || q <= 0) {
-    // Se o número aparecer junto à unidade (ex.: "25 PC") tenta extrair dele.
-    if (maybeUnitWithQuantity) {
-      const m2 = maybeUnitWithQuantity.match(/\d+(?:[.,]\d{1,4})?/);
-      if (m2) q = parseNumberBR(m2[0]);
-    }
-  }
+  const q = parseNumberBR(qty);
   if (q === undefined || q <= 0) return false;
 
   // Unidade plausível (2 a 4 letras, não é nome de coluna).
@@ -347,6 +347,7 @@ export function parseDanfeText(text: string | undefined | null, diagnostics?: { 
 
   const lines = text.split(/\r?\n/);
   let inReceiverSection = false;
+  let inTransporterSection = false;
   let prevLine = "";
   let prevCnpjLineIdx = -1;
 
@@ -358,8 +359,11 @@ export function parseDanfeText(text: string | undefined | null, diagnostics?: { 
     // Seção do destinatário/remetente (o CNPJ ali é o DO DESTINATÁRIO).
     if (/DESTINAT[AÁ]RIO|REMETENTE/.test(upper) && upper.length < 60) {
       inReceiverSection = true;
-    }    // ── Transportador (distinto do destinatário) ──
+      inTransporterSection = false;
+    }    // ── Transportador (seção distinta da do destinatário) ──
     if (/TRANSPORTADOR|TRANSPETE[RS]?\b/.test(upper) && upper.length < 80) {
+      inTransporterSection = true;
+      inReceiverSection = false;
       const mTransportCnpj = /\b(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2})\b/.exec(line);
       if (mTransportCnpj) {
         result.transporterCnpj = formatCnpj(digitsOnly(mTransportCnpj[1]));
@@ -411,7 +415,11 @@ export function parseDanfeText(text: string | undefined | null, diagnostics?: { 
       mCnpjLabel?.[1] ?? mCnpjBare?.[1] ?? mCnpjDigits?.[1] ?? null;
     if (cnpjRaw) {
       const cnpjFormatted = formatCnpj(digitsOnly(cnpjRaw));
-      if (inReceiverSection) {
+      if (inTransporterSection) {
+        // CNPJ lido na seção do transportador NUNCA vira destinatário nem
+        // emitente (§2 Rodada 13 — erro clássico de leitura por regiões).
+        if (!result.transporterCnpj) result.transporterCnpj = cnpjFormatted;
+      } else if (inReceiverSection) {
         if (!result.receiverCnpj) {
           result.receiverCnpj = cnpjFormatted;
           // Nome do destinatário: linha imediatamente anterior, se parecer nome.
@@ -467,14 +475,25 @@ export function parseDanfeText(text: string | undefined | null, diagnostics?: { 
       }
       if (!result.emitterCity) {
         const mCity = line.match(/CIDADE\s*:?\s*(.+)/i);
-        if (mCity) result.emitterCity = mCity[1].trim();
-        else if (
+        if (mCity) {
+          result.emitterCity = mCity[1].trim();
+        } else if (
           result.emitterAddress &&
           idx > 0 &&
           lines[idx - 1]?.trim() === result.emitterAddress &&
           /^[A-Za-zÀ-Ú]{3,30}$/.test(line)
         ) {
           result.emitterCity = line;
+        } else if (result.emitterCnpj || result.emitterAddress) {
+          // Município/UF renderizados juntos na própria linha (ex.:
+          // "Tubarão/SC") — apresentação comum no DANFE, tolerante a
+          // variação de layout/emissor (sem coordenadas fixas).
+          const mCityUf = /^(.+?)\/([A-Za-z]{2})$/.exec(line);
+          const uf = mCityUf?.[2].toUpperCase() ?? "";
+          if (mCityUf && VALID_UFS.has(uf) && mCityUf[1].trim().length >= 3) {
+            result.emitterCity = mCityUf[1].trim();
+            if (!result.emitterState) result.emitterState = uf;
+          }
         }
       }
       if (!result.emitterState) {
@@ -581,7 +600,6 @@ export function danfeFieldSummary(parsed: DanfeParseResult): DanfeFieldSummary {
     "Itens da NF-e": parsed.items.length > 0,
     "CEP do emitente": digitsOnly(parsed.emitterPostalCode ?? "").length === 8,
     "UF do emitente": VALID_UFS.has((parsed.emitterState ?? "").toUpperCase()),
-    "Transportador identificado": Boolean(parsed.transporterCnpj),
   };
   const missing: string[] = [];
   let found = 0;

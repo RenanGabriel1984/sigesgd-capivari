@@ -536,6 +536,19 @@ export function DanfeImportDialog({
                 </section>
               )}
 
+              {/* ── Transportador (separado do destinatário — §2 Rodada 13) ── */}
+              {parsed?.transporterCnpj && (
+                <section className="space-y-2">
+                  <h4 className="text-sm font-semibold">Transportador</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <DataCell
+                      label="CNPJ do transportador"
+                      value={formatCnpj(parsed?.transporterCnpj)}
+                    />
+                  </div>
+                </section>
+              )}
+
               {/* ── Itens ── */}
               <section className="space-y-2">
                 <h4 className="text-sm font-semibold">
