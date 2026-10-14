@@ -1,10 +1,11 @@
 import { readFileSync } from "fs";
 import { parseDanfeText, extractAccessKey44, validateAccessKey44, danfeFieldSummary, isValidDanfeItemCandidate, mergeDanfeTexts } from "@/lib/danfe-ocr";
+import { describe, expect, it } from "vitest";
 
-describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", function () {
+describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", () => {
   const TEXT_LAYER = (() => {
     try {
-      const raw = require('fs').readFileSync(require('path').resolve('tmp/danfe-incotech-textlayer.txt'), 'utf8');
+      const raw = readFileSync(require("node:path").resolve("tmp/danfe-incotech-textlayer.txt"), "utf8");
       return raw;
     } catch {
       return "";
@@ -72,12 +73,12 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", functi
     empenho: "778/2026",
   };
 
-  it("valida a chave do gabarito (estrutura + DV) sem inventar valor", function () {
+  it("valida a chave do gabarito (estrutura + DV) sem inventar valor", () => {
     expect(validateAccessKey44(GABARITO.chave)).toBe(true);
     expect(extractAccessKey44(GABARITO.chave)).toBe(GABARITO.chave);
   });
 
-  it("reconhece campos do documento real a partir do texto da camada textual", function () {
+  it("reconhece campos do documento real a partir do texto da camada textual", () => {
     const pageText = baseText();
 
     const parsed = parseDanfeText(pageText);
@@ -129,7 +130,7 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", functi
     expect(summary.missing).not.toContain("Itens da NF-e");
   });
 
-  it("diagnosticamento: rastreia linhas candidatas a produtos e rejeições", function () {
+  it("diagnosticamento: rastreia linhas candidatas a produtos e rejeições", () => {
     const pageText = [
       "NF-e N°: 2967",
       "Série: 001",
@@ -201,7 +202,7 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", functi
     expect(summary.missing).not.toContain("Itens da NF-e");
   });
 
-  it("diagnosticamento: rastreia linhas candidatas a produtos e rejeições", function () {
+  it("diagnosticamento: rastreia linhas candidatas a produtos e rejeições", () => {
     const pageText = [
       "42260922816315000144550010000029671515440064",
       "NF-e N°: 2967",
@@ -252,7 +253,7 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", functi
     expect(parsed.items.length).toBeGreaterThan(0);
   });
 
-  it("separa extração de associação: item estruturado existe mesmo sem produto no cadastro", function () {
+  it("separa extração de associação: item estruturado existe mesmo sem produto no cadastro", () => {
     const pageText = [
       "1  231071  KIT TECLADO E MOUSE USB SLIM CHOCO       25 PC  52,94 1.323,50",
     ].join("\n");
@@ -263,12 +264,12 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", functi
     expect(parsed.items[0].totalValue).toBe(1323.5);
 
     // A extração funciona independentemente da associação ao catálogo.
-    // A associação é uma etapa posterior (conferência), não deste parser.
+    // A associação é uma etapa subsequente (conferência), não deste parser.
     expect(typeof parsed.items[0].code).toBe("string");
     expect(parsed.items[0].description.length).toBeGreaterThan(0);
   });
 
-  it("mantém os dados reconhecidos e marca campos pendentes quando a leitura é parcial", function () {
+  it("mantém os dados reconhecidos e marca campos pendentes quando a leitura é parcial", () => {
     const partialText = baseText().split(/\r?\n/).slice(0, 8).concat([
       "1  231071  KIT TECLADO E MOUSE USB SLIM CHOCO       25 PC  52,94 1.323,50",
     ]).join("\n");
@@ -293,7 +294,7 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", functi
     expect(parsed.ok).toBe(true);
   });
 
-  it("não cria produto automaticamente, não inventa valores e não aceita cabeçalhos como produtos", function () {
+  it("não cria produto automaticamente, não inventa valores e não aceita cabeçalhos como produtos", () => {
     const textoComCabecalho = [
       "DESCRIÇÃO DOS PRODUTOS",
       "1  231071  KIT TECLADO E MOUSE USB SLIM CHOCO       25 PC  52,94 1.323,50",
@@ -313,7 +314,7 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", functi
     expect(isValidDanfeItemCandidate("1  231071", { regionKey: "produtos" })).toBe(false);
   });
 
-  it("valida a chave somente se o OCR a reconheceu (não usa o gabarito para preencher campo vazio)", function () {
+  it("valida a chave somente se o OCR a reconheceu (não usa o gabarito para preencher campo vazio)", () => {
     const textoSemChave = baseText().split(/\r?\n/).slice(0, 8).concat([
       "1  231071  KIT TECLADO E MOUSE USB SLIM CHOCO       25 PC  52,94 1.323,50",
     ]).join("\n");
@@ -331,8 +332,8 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", functi
     expect(parsed.accessKey).toBeUndefined();
   });
 
-  it("mantém a separação entre CNPJ do transportador e CNPJ do destinatário", function () {
-    const texto = baseText().split(/\r?\n/).filter(l => /(DESTINATÁRIO|MUNICÍPIO DE CAPIVARI|CNPJ: 44.723.674|TRANSPORTADOR|CNPJ: 38.306.164)/.test(l)).join("\n");
+  it("mantém a separação entre CNPJ do transportador e CNPJ do destinatário", () => {
+    const texto = baseText().split(/\r?\n/).filter((l) => /(DESTINATÁRIO|MUNICÍPIO DE CAPIVARI|CNPJ: 44\.723\.674|TRANSPORTADOR|CNPJ: 38\.306\.164)/.test(l)).join("\n");
 
     const parsed = parseDanfeText(texto);
     expect(parsed.receiverCnpj).toBe("44.723.674/0001-90");
@@ -340,10 +341,9 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", functi
     expect(parsed.receiverCnpj).not.toBe(parsed.transporterCnpj);
   });
 
-  it("instrumentação: informa onde o item é perdido, com motivo de cada rejeição relevante", function () {
+  it("instrumentação: informa onde o item é perdido, com motivo de cada rejeição relevante", () => {
     const pageText = baseText();
 
-    const pageText = baseText();
     const itemLine = "1  231071  KIT TECLADO E MOUSE USB SLIM CHOCO       25 PC  52,94 1.323,50";
     expect(isValidDanfeItemCandidate(itemLine, { regionKey: "produtos" })).toBe(true);
 
@@ -360,7 +360,7 @@ describe("OCR Oriented DANFE — validation and diagnostics (Rodada 13)", functi
     expect(isValidDanfeItemCandidate(linhaValoresColados, { regionKey: "produtos" })).toBe(true);
 
     // Causa raiz documentada: o CNPJ do transportador NÃO é usado como destinatário.
-    const textoTransportador = baseText().split(/\r?\n/).filter(l => /(DESTINATÁRIO|MUNICÍPIO|CNPJ: 44.723|TRANSPORTADOR|CNPJ: 38.306)/.test(l)).join("\n");
+    const textoTransportador = baseText().split(/\r?\n/).filter((l) => /(DESTINATÁRIO|MUNICÍPIO|CNPJ: 44\.723|TRANSPORTADOR|CNPJ: 38\.306)/.test(l)).join("\n");
     const parsed = parseDanfeText(textoTransportador);
     expect(parsed.receiverCnpj).toBeUndefined();
     expect(parsed.transporterCnpj).toBeUndefined();

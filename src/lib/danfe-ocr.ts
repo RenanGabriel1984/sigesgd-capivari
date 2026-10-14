@@ -579,7 +579,6 @@ export function danfeFieldSummary(parsed: DanfeParseResult): DanfeFieldSummary {
     "Data de emissão": Boolean(parsed.emissionDate),
     "Valor total da NF": parsed.totalValue !== undefined && parsed.totalValue > 0,
     "Itens da NF-e": parsed.items.length > 0,
-    "Transportador identificado": Boolean(parsed.transporterCnpj),
     "CEP do emitente": digitsOnly(parsed.emitterPostalCode ?? "").length === 8,
     "UF do emitente": VALID_UFS.has((parsed.emitterState ?? "").toUpperCase()),
     "Transportador identificado": Boolean(parsed.transporterCnpj),
