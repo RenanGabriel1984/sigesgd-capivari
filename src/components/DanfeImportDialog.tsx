@@ -58,6 +58,7 @@ import {
   parseDanfeText,
   validateAccessKey44,
   type DanfeParseResult,
+  buildOcrTrace,
 } from "@/lib/danfe-ocr";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -84,6 +85,21 @@ export interface DanfeImportDialogProps {
 
 type OcrWorker = Awaited<ReturnType<typeof createWorker>>;
 type Phase = "select" | "processing" | "review" | "error";
+
+// Diagnóstico de desenvolvimento (Rodada 15) — valor somente no dev; no build
+// final pode ser ajustado para desabilitar o relatório sem mexer no pipeline.
+const ENABLE_DEV_DIAGNOSTIC =
+  typeof window !== "undefined" &&
+  (window.localStorage?.getItem("danfeDevDiagnostic") ?? "1") === "1";
+
+// Rastreio dos vetores reais do pipeline para o relatório de diagnóstico.
+let layerTextForDiag = "";
+let ocrTextForDiag = "";
+let regionTextsForDiag: string[] = [];
+let mergedOcrForDiag = "";
+let parsedLayerForDiag: DanfeParseResult | null = null;
+let parsedOcrForDiag: DanfeParseResult | null = null;
+let ocrPathForDiag: "text-layer" | "ocr" | "merged" = "merged";
 
 // ─── Canvas helpers ──────────────────────────────────────────────────────────
 
@@ -228,6 +244,108 @@ async function readPdfTextLayer(data: ArrayBuffer): Promise<string> {
 
 // ─── Célula de dado da conferência ───────────────────────────────────────────
 
+// ── Diagnóstico de desenvolvimento (Rodada 15) ──────────────────────────
+
+function OcrDiagnosticCard({ trace }: { trace: NonNullable<typeof diagnostic> }) {
+  const json = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          ...trace,
+          rawText: trace.rawText ?? "",
+          pageOcrText: trace.pageOcrText ?? "",
+          mergedOcr: trace.mergedOcr ?? "",
+        },
+        null,
+        2,
+      ),
+    [trace],
+  );
+
+  const copy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(json);
+    } catch {
+      const area = document.createElement("textarea");
+      area.value = json;
+      document.body.appendChild(area);
+      area.select();
+      try {
+        document.execCommand("copy");
+      } finally {
+        document.body.removeChild(area);
+      }
+    }
+  }, [json]);
+
+  return (
+    <section className="space-y-3 rounded-lg border bg-muted/40 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Diagnóstico de desenvolvimento (Rodada 15)
+        </span>
+        <span className="text-[10px] uppercase text-muted-foreground">{trace.path}</span>
+        <Button variant="outline" size="sm" onClick={copy} className="h-7 text-xs">
+          Copiar relatório JSON
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+        <div className="rounded border p-2">
+          <p className="font-medium text-foreground">Camada textual do PDF</p>
+          <pre className="mt-1 max-h-32 overflow-auto font-mono text-[10px]">
+            {trace.rawText}
+          </pre>
+        </div>
+        <div className="rounded border p-2">
+          <p className="font-medium text-foreground">OCR da página inteira</p>
+          <pre className="mt-1 max-h-32 overflow-auto font-mono text-[10px]">
+            {trace.mergedOcr}
+          </pre>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3">
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          parser — camada textual
+        </h5>
+        <pre className="max-h-60 overflow-auto font-mono text-[10px]">
+          {JSON.stringify(trace.parsedLayer, null, 2)}
+        </pre>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3">
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          parser — OCR (página + regiões)
+        </h5>
+        <pre className="max-h-60 overflow-auto font-mono text-[10px]">
+          {JSON.stringify(trace.parsedOcr, null, 2)}
+        </pre>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3">
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          resultado final escolhido pelo diálogo
+        </h5>
+        <pre className="max-h-60 overflow-auto font-mono text-[10px]">
+          {JSON.stringify(trace.finalBest, null, 2)}
+        </pre>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3">
+        <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          resumo X de 10 campos
+        </h5>
+        <pre className="max-h-40 overflow-auto font-mono text-[10px]">
+          {JSON.stringify(trace.fieldSummary, null, 2)}
+        </pre>
+      </div>
+    </section>
+  );
+}
+
+// ── Célula de dado da conferência ───────────────────────────────────────────
+
 function DataCell({
   label,
   value,
@@ -293,6 +411,8 @@ export function DanfeImportDialog({
     }
   }, [open]);
 
+
+
   const processFile = useCallback(async (f: File) => {
     setFile(f);
     setFileName(f.name);
@@ -312,6 +432,7 @@ export function DanfeImportDialog({
         layerText = text;
         if (hasUsableTextLayer(text)) {
           setStep("Camada de texto encontrada — rasterizando mesmo assim para comparação…");
+          void text;
         }
         setStep("Renderizando a 1.ª página a 300 DPI…");
         canvas = await rasterizePdfFirstPage(buffer);
@@ -340,11 +461,28 @@ export function DanfeImportDialog({
         regionTexts = await ocrDanfeRegions(processed, worker);
       } finally {
         await worker.terminate().catch(() => undefined);
+        void regionTexts;
       }
 
       const mergedOcr = mergeDanfeTexts(ocrText, regionTexts);
       const parsedLayer = parseDanfeText(layerText);
       const parsedOcr = parseDanfeText(mergedOcr);
+
+      // Diagnóstico de desenvolvimento (Rodada 15): rastreia os vetores reais
+      // do pipeline. Não interfere na escolha nem no comportamento do parser.
+      layerTextForDiag = layerText;
+      ocrTextForDiag = ocrText;
+      regionTextsForDiag = regionTexts;
+      mergedOcrForDiag = mergedOcr;
+      parsedLayerForDiag = parsedLayer;
+      parsedOcrForDiag = parsedOcr;
+
+      // Determina qual caminho de fato venceu na escolha semântica do diálogo.
+      if (isDanfeParseBetter(parsedOcr, parsedLayer)) {
+        ocrPathForDiag = "ocr";
+      } else {
+        ocrPathForDiag = "merged";
+      }
 
       // Comparação SEMÂNTICA: ganha quem tem MAIS campos estruturados
       // válidos. Nunca usamos só a quantidade de caracteres — um texto maior
@@ -382,6 +520,34 @@ export function DanfeImportDialog({
       );
     }
   }, []);
+
+  const offDiag = ENABLE_DEV_DIAGNOSTIC
+    ? {
+        layerText: layerTextForDiag,
+        ocrText: ocrTextForDiag,
+        regionTexts: regionTextsForDiag,
+        mergedOcr: mergedOcrForDiag,
+        parsedLayer: parsedLayerForDiag ?? { ok: false, items: [] },
+        parsedOcr: parsedOcrForDiag ?? { ok: false, items: [] },
+        path: ocrPathForDiag,
+      }
+    : null;
+
+  const diagnosticMemo = ENABLE_DEV_DIAGNOSTIC
+    ? (() => {
+        if (phase !== "review" || !parsed || !offDiag) return null;
+        return buildOcrTrace(
+          offDiag.layerText ?? "",
+          offDiag.ocrText ?? "",
+          offDiag.regionTexts,
+          offDiag.mergedOcr ?? "",
+          offDiag.parsedLayer,
+          offDiag.parsedOcr,
+          parsed,
+          offDiag.path,
+        );
+      })()
+    : null;
 
   const handleImport = () => {
     if (!parsed || !file) return;
@@ -452,6 +618,9 @@ export function DanfeImportDialog({
           {/* ── Resumo OCR (hierarquia: concluído → X de 10 → pendências) ── */}
           {showReview && (
             <>
+              {ENABLE_DEV_DIAGNOSTIC && offDiag && diagnosticMemo && (
+                <OcrDiagnosticCard trace={diagnosticMemo} />
+              )}
               <div className="flex flex-wrap items-center gap-2">
                 <Badge className="bg-emerald-100 text-emerald-800">OCR concluído</Badge>
                 <span className="text-sm font-medium">

@@ -20,6 +20,7 @@ import { resolve } from "node:path";
 import {
   DANFE_TRACKED_FIELDS,
   danfeFieldSummary,
+  buildOcrTrace,
   extractAccessKey44,
   isValidDanfeItemCandidate,
   mergeDanfeTexts,

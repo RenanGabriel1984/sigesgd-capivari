@@ -21,6 +21,48 @@ import {
   isValidCnpj,
 } from "./br-validators";
 
+// ─── Diagnóstico de desenvolvimento (RODADA 15) ──────────────────────────────
+// Utilizado pelo DanfeImportDialog.tsx quando o modo de diagnóstico está
+// habilitado. A instrumentação usa os mesmos valores da execução real do OCR
+// e da camada textual, sem executar um OCR alternativo nem alterar limites,
+// regex ou classificação de seções.
+export interface OcrFieldTrace {
+  nfeNumber?: string;
+  series?: string;
+  emissionDate?: string;
+  accessKey?: string;
+  emitterCnpj?: string;
+  emitterName?: string;
+  emitterCity?: string;
+  emitterState?: string;
+  emitterPostalCode?: string;
+  receiverCnpj?: string;
+  receiverName?: string;
+  transporterCnpj?: string;
+  totalValue?: number;
+  items: Array<{
+    lineNumber?: number;
+    code?: string;
+    description: string;
+    quantity?: number;
+    unit?: string;
+    unitValue?: number;
+    totalValue?: number;
+  }>;
+  afNumber?: string;
+  empenhoNumber?: string;
+}
+
+export interface OcrTrace {
+  path: "text-layer" | "ocr" | "merged";
+  rawText?: string;
+  mergedOcr?: string;
+  parsedLayer?: OcrFieldTrace;
+  parsedOcr?: OcrFieldTrace;
+  finalBest?: OcrFieldTrace;
+  fieldSummary: ReturnType<typeof danfeFieldSummary>;
+}
+
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
 export interface DanfeItem {
@@ -622,7 +664,7 @@ export function hasUsableTextLayer(text: string | null | undefined): boolean {
 export function mergeDanfeTexts(pageText: string, regionTexts: string[]): string {
   // O OCR por regiões relê trechos que JÁ existem na página inteira. Sem
   // deduplicação, uma linha repetida (ex.: um item da tabela de produtos)
-  // virava um produto duplicado na conferência. A chave de comparação
+  // viraria um produto duplicado na conferência. A chave de comparação
   // normaliza espaços/caixa; linhas de item carregam o nº (nItem), então duas
   // linhas idênticas neste nível são sempre repetição de leitura — nunca dois
   // itens legítimos da mesma DANFE.
@@ -645,6 +687,12 @@ export function mergeDanfeTexts(pageText: string, regionTexts: string[]): string
 }
 
 /**
+ * Devolve, em ordem de leitura no pipeline, as regiões clássicas da DANFE que
+ * foram relidas pelo OCR (útil para o diagnóstico de Rodada 14). Exportada
+ * sem mudança de comportamento.
+ */
+
+/**
  * Compara dois resultados de parse de forma SEMÂNTICA: prefere o resultado
  * com MAIS campos estruturados válidos. Nunca usa apenas quantidade de
  * caracteres — um texto maior não é automaticamente melhor.
@@ -655,3 +703,82 @@ export function isDanfeParseBetter(
 ): boolean {
   return danfeFieldSummary(candidate).found > danfeFieldSummary(current).found;
 }
+
+// ─── Diagnóstico de desenvolvimento (RODADA 15) ──────────────────────────────
+
+/**
+ * Constrói o rastro de diagnóstico a partir dos resultados já existentes na
+ * execução real do diálogo. Este utilitário não executa OCR, não altera o texto
+ * e não muda o comportamento do parser; ele apenas condensa os objetos que o
+ * DanfeImportDialog já calculou.
+ */
+export function buildOcrTrace(
+  rawText: string | undefined | null,
+  pageOcrText: string | undefined | null,
+  regionTexts: readonly string[],
+  mergedOcr: string,
+  parsedLayer: DanfeParseResult,
+  parsedOcr: DanfeParseResult,
+  finalBest: DanfeParseResult,
+  path: "text-layer" | "ocr" | "merged",
+): OcrTrace {
+  const regionTacoTexts = regionTexts.map((t, i) => {
+    const key = DANFE_REGIONS[i]?.key ?? `regiao_${i + 1}`;
+    return { key, text: t };
+  });
+  return {
+    path,
+    rawText: rawText ?? undefined,
+    pageOcrText: pageOcrText ?? undefined,
+    regionTexts: regionTacoTexts,
+    mergedOcr: mergedOcr || undefined,
+    parsedLayer: projectDiagnostic(parsedLayer),
+    parsedOcr: projectDiagnostic(parsedOcr),
+    finalBest: projectDiagnostic(finalBest),
+    fieldSummary: danfeFieldSummary(finalBest),
+  };
+}
+
+function splitDiagnosticLines(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const key = line.replace(/\s+/g, " ").toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(line);
+  }
+  return out;
+}
+
+function projectDiagnostic(p: DanfeParseResult): OcrFieldTrace {
+  return {
+    nfeNumber: p.nfeNumber,
+    series: p.series,
+    emissionDate: p.emissionDate,
+    accessKey: p.accessKey,
+    emitterCnpj: p.emitterCnpj,
+    emitterName: p.emitterName,
+    emitterCity: p.emitterCity,
+    emitterState: p.emitterState,
+    emitterPostalCode: p.emitterPostalCode,
+    receiverCnpj: p.receiverCnpj,
+    receiverName: p.receiverName,
+    transporterCnpj: p.transporterCnpj,
+    totalValue: p.totalValue,
+    items: p.items.map((item) => ({
+      lineNumber: item.lineNumber,
+      code: item.code,
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit,
+      unitValue: item.unitValue,
+      totalValue: item.totalValue,
+    })),
+    afNumber: p.afNumber,
+    empenhoNumber: p.empenhoNumber,
+  };
+}
+

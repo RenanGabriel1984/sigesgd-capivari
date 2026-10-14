@@ -1,4 +1,17 @@
-import { parseDanfeText, isValidDanfeItemCandidate, danfeFieldSummary } from "./danfe-ocr";
+import {
+  parseDanfeText,
+  isValidDanfeItemCandidate,
+  danfeFieldSummary,
+  buildOcrTrace as buildDialogOcrTrace,
+} from "./danfe-ocr";
+
+export {
+  buildDialogOcrTrace as buildOcrTrace,
+} from "./danfe-ocr";
+
+export type {
+  ItemCandidateTrace,
+} from "./danfe-ocr";
 
 export type ItemCandidateTrace = {
   line: number;
@@ -83,3 +96,4 @@ export function buildOcrTrace(rawText: string | undefined | null, pageOcrText: s
     summary,
   };
 }
+
