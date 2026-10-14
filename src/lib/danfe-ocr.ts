@@ -265,8 +265,11 @@ const HEADER_MARKERS = [
  * invalidar a linha. O nº do item (nItem) e o código (cProd) exigem separação
  * por espaço, pois ambos são numéricos/alfanuméricos e precisam de fronteira
  * inequívoca.
+ *
+ * Exportada (sem mudança de comportamento) para a ferramenta de diagnóstico
+ * de desenvolvimento exibir os grupos capturados — Rodada 14 §1.7.
  */
-const DANFE_ITEM_ROW =
+export const DANFE_ITEM_ROW =
   /^\s*(?:\|\s*)?(\d{1,4})\s+([0-9A-Z]{2,16})\s+(.{3,120}?)\s*(\d+(?:[.,]\d{1,4})?)\s*([A-Za-z]{2,4})\s*(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4})(?:\s*(\d{1,3}(?:\.\d{3})*,\d{1,4}|\d+[.,]\d{1,4}))?\s*(?:\|\s*)?$/;
 
 /** Unidades que NUNCA são unidade de produto (são colunas do cabeçalho). */
