@@ -66,16 +66,14 @@ export interface ItemCandidateTrace {
 
 export interface DanfeItem {
   index?: number;
+  lineNumber?: number;
   code: string;
   description: string;
   ncm?: string;
   quantity: number;
-  unity: string;
-  unitPrice: number;
-  totalPrice: number;
-  unit?: string;
-  unitValue?: number;
-  totalValue?: number;
+  unit: string;
+  unitValue: number;
+  totalValue: number;
 }
 
 export interface DanfeParseResult {
@@ -252,14 +250,22 @@ export function validateAccessKey44(raw: string | null | undefined): boolean {
   return isValidAccessKey44(digits);
 }
 
-export function isValidDanfeItemCandidate(line: string | null | undefined, options: { quantity?: boolean } = {}): boolean {
+export type DanfeItemCandidateOptions = {
+  quantity?: boolean;
+  regionKey?: string;
+};
+
+export function isValidDanfeItemCandidate(
+  line: string | null | undefined,
+  options: DanfeItemCandidateOptions = {},
+): boolean {
   if (!line) return false;
   const trimmed = line.trim();
   if (!trimmed) return false;
   if (/\b\d{4,}\b/.test(trimmed) || /^-?\d{1,4}(\.\d{1,2})?$/.test(trimmed)) {
     return true;
   }
-  if (options.quantity) {
+  if (options.quantity || options.regionKey !== undefined) {
     const qtyMatch = trimmed.match(/\b(\d{1,9}(\.\d{1,2})?)\b/);
     if (qtyMatch && parseFloat(qtyMatch[1]) > 0) {
       return true;
@@ -560,9 +566,9 @@ function extractItems(lines: string[]): DanfeItem[] {
       description,
       ncm: "",
       quantity: quantity || 1,
-      unity: "",
-      unitPrice,
-      totalPrice: totalPrice || unitPrice || 0,
+      unit: "",
+      unitValue: unitPrice,
+      totalValue: totalPrice || unitPrice || 0,
     });
 
     index++;
