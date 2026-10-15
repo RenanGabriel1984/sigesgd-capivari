@@ -11,10 +11,19 @@
  * Regra de ouro:
  *   NUNCA selecionamos automaticamente um resultado baseado SOMENTE na
  *   contagem de caracteres. Um texto maior não é automaticamente melhor.
+ *   Campo não reconhecido fica `undefined` (pendente de conferência) —
+ *   nunca é preenchido com gabarito, estimativa ou valor inventado.
  */
 
+/** Regiões clássicas da DANFE (frações 0..1 da página) usadas pelo OCR. */
 export const DANFE_REGIONS = [
-  { key: "chaveDeAcesso", x: 9.05, y: 14, w: 4.5, h: 0.95 },
+  { key: "cabecalho", x: 0.02, y: 0.02, w: 0.96, h: 0.1 },
+  { key: "chave", x: 0.09, y: 0.14, w: 0.45, h: 0.06 },
+  { key: "emitente", x: 0.03, y: 0.2, w: 0.45, h: 0.14 },
+  { key: "destinatario", x: 0.52, y: 0.2, w: 0.45, h: 0.14 },
+  { key: "produtos", x: 0.03, y: 0.4, w: 0.94, h: 0.3 },
+  { key: "totais", x: 0.6, y: 0.72, w: 0.37, h: 0.1 },
+  { key: "dadosAdicionais", x: 0.03, y: 0.72, w: 0.5, h: 0.22 },
 ] as const;
 
 export const DANFE_TRACKED_FIELDS = [
@@ -24,10 +33,10 @@ export const DANFE_TRACKED_FIELDS = [
   { campo: "accessKey", titulo: "Chave de acesso" },
   { campo: "emitterCnpj", titulo: "CNPJ emitente" },
   { campo: "emitterName", titulo: "Razão social emitente" },
-  { campo: "receiverCnpj", titulo: "CNPJ receptor" },
-  { campo: "receiverName", titulo: "Razão social receptor" },
+  { campo: "receiverCnpj", titulo: "CNPJ destinatário" },
+  { campo: "receiverName", titulo: "Razão social destinatário" },
   { campo: "issuerCnpj", titulo: "CNPJ expedidor" },
-  { campo: "issuerName", titulo: "Razão social expedidor" },
+  { campo: "items", titulo: "Itens da NF-e" },
 ] as const;
 
 export interface OcrFieldTrace {
@@ -76,28 +85,32 @@ export interface DanfeItem {
   totalValue: number;
 }
 
+/**
+ * Campos ausentes ficam `undefined` — a tela de conferência mostra a pência
+ * em vez de exibir valor vazio/inventado.
+ */
 export interface DanfeParseResult {
   ok: boolean;
   items: DanfeItem[];
-  nfeNumber: string;
-  series: string;
-  emissionDate: string;
-  accessKey: string;
-  emitterCnpj: string;
-  emitterName: string;
-  emitterAddress: string;
-  emitterCity: string;
-  emitterState: string;
-  emitterPostalCode: string;
-  receiverCnpj: string;
-  receiverName: string;
-  transporterCnpj: string;
-  issuerCnpj: string;
-  issuerName: string;
-  afNumber: string;
-  empenhoNumber: string;
-  processNumber: string;
-  totalValue: number;
+  nfeNumber?: string;
+  series?: string;
+  emissionDate?: string;
+  accessKey?: string;
+  emitterCnpj?: string;
+  emitterName?: string;
+  emitterAddress?: string;
+  emitterCity?: string;
+  emitterState?: string;
+  emitterPostalCode?: string;
+  receiverCnpj?: string;
+  receiverName?: string;
+  transporterCnpj?: string;
+  issuerCnpj?: string;
+  issuerName?: string;
+  afNumber?: string;
+  empenhoNumber?: string;
+  processNumber?: string;
+  totalValue?: number;
 }
 
 export interface DanfeFieldSummary {
@@ -112,7 +125,11 @@ export function danfeFieldSummary(parsed: DanfeParseResult): DanfeFieldSummary {
   const missing: string[] = [];
 
   for (const field of tracked) {
-    if (parsed[field.campo as keyof DanfeParseResult]) {
+    const value =
+      field.campo === "items"
+        ? parsed.items.length > 0
+        : Boolean(parsed[field.campo as keyof DanfeParseResult]);
+    if (value) {
       found++;
     } else {
       missing.push(field.titulo);
@@ -122,125 +139,120 @@ export function danfeFieldSummary(parsed: DanfeParseResult): DanfeFieldSummary {
   return { found, total: tracked.length, missing };
 }
 
+/**
+ * Camada textual utilizável: um trecho curto (stub/placeholder) não substitui
+ * a leitura do documento real, mas um texto longo de página é aproveitado
+ * mesmo quando o OCR não achou a chave (leitura parcial segue possível).
+ */
 export function hasUsableTextLayer(text: string | null | undefined): boolean {
   if (!text) return false;
   const trimmed = text.trim();
-  if (trimmed.length < 20) return false;
-  if (!/[0-9]{40,}/.test(trimmed)) return false;
-  return true;
+  if (trimmed.length < 100) return false;
+  return /[0-9]{4,}/.test(trimmed) || /[A-Za-zÀ-ÿ]{4,}/.test(trimmed);
 }
 
+/**
+ * Concatena a página com as regiões OCR, descartando linhas repetidas
+ * (mesma linha lida na página inteira e na região — só espaços/caixa).
+ */
 export function mergeDanfeTexts(pageText: string, regionTexts: string[]): string {
   const parts: string[] = [];
   if (pageText) parts.push(pageText);
   for (const region of regionTexts) {
     if (region) parts.push(region);
   }
-  return parts.join("\n").trim();
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const line of parts.join("\n").split(/\r?\n/)) {
+    const normalized = line.trim().replace(/\s+/g, " ");
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(normalized);
+  }
+  return out.join("\n");
 }
 
-export function parseDanfeText(text: string | null | undefined): DanfeParseResult {
-  if (!text) {
-    return {
-      ok: false,
-      items: [],
-      nfeNumber: "",
-      series: "",
-      emissionDate: "",
-      accessKey: "",
-      emitterCnpj: "",
-      emitterName: "",
-      emitterAddress: "",
-      emitterCity: "",
-      emitterState: "",
-      emitterPostalCode: "",
-      receiverCnpj: "",
-      receiverName: "",
-      transporterCnpj: "",
-      issuerCnpj: "",
-      issuerName: "",
-      afNumber: "",
-      empenhoNumber: "",
-      processNumber: "",
-      totalValue: 0,
-    };
-  }
-
-  const clean = text.replace(/[\s\S]/g, (ch) => ch).trim();
-  const lines = clean.split(/\n/).map((l) => l.trim()).filter(Boolean);
-
-  const nfeNumber = extractNfeNumber(clean);
-  const series = extractSeries(lines);
-  const emissionDate = extractEmissionDate(lines);
-  const accessKey = extractAccessKey44(clean);
-  const emitterCnpj = extractCnpj(clean, "emitente");
-  const emitterName = extractName(clean, "emitente");
-  const emitterAddress = extractAddress(lines);
-  const emitterCity = extractCity(lines);
-  const emitterState = extractState(lines);
-  const emitterPostalCode = extractPostalCode(lines);
-  const receiverCnpj = extractCnpj(clean, "receptor");
-  const receiverName = extractName(clean, "receptor");
-  const transporterCnpj = extractCnpj(clean, "transportador");
-  const issuerCnpj = extractCnpj(clean, "expedidor");
-  const issuerName = extractName(clean, "expedidor");
-  const afNumber = extractAfNumber(clean);
-  const empenhoNumber = extractEmpenhoNumber(clean);
-  const processNumber = extractProcessNumber(clean);
-  const totalValue = extractTotalValue(clean);
-
-  const ok = !!(nfeNumber && accessKey && emitterCnpj);
-
-  return {
-    ok,
-    items: extractItems(lines),
-    nfeNumber,
-    series,
-    emissionDate,
-    accessKey,
-    emitterCnpj,
-    emitterName,
-    emitterAddress,
-    emitterCity,
-    emitterState,
-    emitterPostalCode,
-    receiverCnpj,
-    receiverName,
-    transporterCnpj,
-    issuerCnpj,
-    issuerName,
-    afNumber,
-    empenhoNumber,
-    processNumber,
-    totalValue,
-  };
+function emptyResult(ok = false): DanfeParseResult {
+  return { ok, items: [] };
 }
 
-export function extractAccessKey44(text: string | null | undefined): string {
-  if (!text) return "";
-  const digitsOnly = text.replace(/\D/g, "");
-  if (digitsOnly.length < 44) return "";
+function formatCnpjLocal(digits: string): string {
+  if (digits.length !== 14) return digits;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12, 14)}`;
+}
 
-  for (let i = 0; i <= digitsOnly.length - 44; i++) {
-    const candidate = digitsOnly.slice(i, i + 44);
-    if (isValidAccessKey44(candidate)) {
-      return candidate;
-    }
+// ─── Chave de acesso ──────────────────────────────────────────────────────────
+
+/**
+ * Ruído típico de OCR dentro da chave: O→0, S→5, B→8, I/l→1. Só é aplicado
+ * em blocos de 4 caracteres separados por espaço/ponto/hífen (formato da chave),
+ * nunca em palavras do texto da DANFE.
+ */
+function normalizeKeyGlyphs(text: string): string {
+  return text.replace(
+    /[0-9OSosBIl]{4}(?:[ .\-/\r\n\t][0-9OSosBIl]{4,})+/g,
+    (block) =>
+      block
+        .replace(/[Oo]/g, "0")
+        .replace(/[Ss]/g, "5")
+        .replace(/[Bb]/g, "8")
+        .replace(/[Il]/g, "1"),
+  );
+}
+
+/** Códigos de UF válidos (os 2 primeiros dígitos da chave). */
+function isValidUfCode(code: string): boolean {
+  if (!/^\d{2}$/.test(code)) return false;
+  const n = Number(code);
+  return (
+    (n >= 11 && n <= 17) ||
+    (n >= 21 && n <= 29) ||
+    (n >= 31 && n <= 35) ||
+    (n >= 41 && n <= 49) ||
+    (n >= 50 && n <= 53)
+  );
+}
+
+/** DV módulo 11: pesos 2..9 em ciclo da direita para a esquerda (SEFAZ). */
+function accessKeyCheckDigit(base: string): string {
+  let sum = 0;
+  for (let i = 0; i < base.length; i++) {
+    const weight = 2 + ((base.length - 1 - i) % 8);
+    sum += Number(base[i]) * weight;
   }
+  const remainder = sum % 11;
+  return remainder < 2 ? "0" : String(11 - remainder);
+}
 
-  // Fallback: re-tenta achando grupos de 8 dígitos separados por não-dígitos
-  const groups = text.split(/\D+/).filter((g) => g.length >= 14);
-  if (groups.length >= 4) {
-    const joined = groups.slice(0, 4).map((g) => g.replace(/\D/g, "")).join("");
-    if (joined.length >= 44) {
-      const candidate = joined.slice(0, 44);
-      if (isValidAccessKey44(candidate)) {
-        return candidate;
-      }
-    }
+/** Estrutura (UF, AAMM, modelo 55/65) + dígito verificador. */
+function isValidAccessKey44(digits: string): boolean {
+  if (digits.length !== 44) return false;
+  if (!/^\d{44}$/.test(digits)) return false;
+  if (!isValidUfCode(digits.slice(0, 2))) return false;
+  const month = Number(digits.slice(4, 6));
+  if (!(month >= 1 && month <= 12)) return false;
+  const model = digits.slice(20, 22);
+  if (model !== "55" && model !== "65") return false;
+  return digits.slice(43) === accessKeyCheckDigit(digits.slice(0, 43));
+}
+
+/**
+ * Extrai a chave de 44 dígitos do texto. Retorna `undefined` quando o OCR não
+ * reconheceu uma chave estruturalmente válida — o campo fica pendente de
+ * conferência e NUNCA é preenchido com valor de gabarito.
+ */
+export function extractAccessKey44(text: string | null | undefined): string | undefined {
+  if (!text) return undefined;
+  const digits = normalizeKeyGlyphs(text).replace(/\D/g, "");
+  if (digits.length < 44) return undefined;
+  for (let i = 0; i <= digits.length - 44; i++) {
+    const candidate = digits.slice(i, i + 44);
+    if (isValidAccessKey44(candidate)) return candidate;
   }
-
-  return "";
+  return undefined;
 }
 
 export function validateAccessKey44(raw: string | null | undefined): boolean {
@@ -255,23 +267,108 @@ export type DanfeItemCandidateOptions = {
   regionKey?: string;
 };
 
+interface ItemLine {
+  index: number;
+  code: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  unitValue: number;
+  totalValue: number;
+}
+
+/** Unidades que são nomes de coluna — nunca a unidade de um item. */
+const FORBIDDEN_UNITS = new Set([
+  "NCM",
+  "CST",
+  "CFOP",
+  "UNID",
+  "ICMS",
+  "IPI",
+  "PIS",
+  "COFINS",
+  "ALIQ",
+  "QTDE",
+  "QUANT",
+  "TOTAL",
+  "VALOR",
+  "PRODUTO",
+  "SERVICO",
+  "DESCRICAO",
+  "MERCADORIA",
+]);
+
+const HEADER_LINE_PATTERNS = [
+  /DESCRI[ÇC][ÃA]O\s+DOS\s+PRODUTOS/i,
+  /DESCRICAO\s+DOS\s+PRODUTOS/i,
+  /VALOR\s+UNIT[ÁA]RIO/i,
+  /ALIQ\.?\s+ICMS/i,
+  /C[ÓO]D\.?\s*IGO/i,
+];
+
+function isPriceToken(token: string): boolean {
+  return /^\d{1,3}(?:\.\d{3})*,\d{2}$/.test(token) || /^\d+,\d{2}$/.test(token);
+}
+
+function parsePrice(token: string): number {
+  const value = Number(token.replace(/\./g, "").replace(",", "."));
+  return isFinite(value) ? value : 0;
+}
+
+function parseQuantity(token: string): number {
+  if (!/^\d{1,9}(?:[.,]\d{1,4})?$/.test(token)) return NaN;
+  return Number(token.replace(",", "."));
+}
+
+/**
+ * Linha de item só é aceita com evidência completa: índice, código, descrição,
+ * quantidade > 0, unidade real (não nome de coluna) e valores. Cabeçalhos,
+ * linhas curtas e ruído de OCR nunca viram produto.
+ */
+function parseItemLine(rawLine: string | null | undefined): ItemLine | null {
+  if (!rawLine) return null;
+  const line = rawLine.trim().replace(/\s+/g, " ");
+  if (!line) return null;
+  if (HEADER_LINE_PATTERNS.some((pattern) => pattern.test(line))) return null;
+
+  const tokens = line.split(" ");
+  if (tokens.length < 6) return null;
+  if (!/^\d{1,3}$/.test(tokens[0])) return null;
+  if (!/^\d{3,6}$/.test(tokens[1])) return null;
+
+  const totalToken = tokens[tokens.length - 1];
+  const unitPriceToken = tokens[tokens.length - 2];
+  const unitToken = tokens[tokens.length - 3];
+  const quantityToken = tokens[tokens.length - 4];
+
+  if (!isPriceToken(totalToken) || !isPriceToken(unitPriceToken)) return null;
+  if (!/^[A-Za-z]{1,6}$/.test(unitToken)) return null;
+  if (FORBIDDEN_UNITS.has(unitToken.toUpperCase())) return null;
+
+  const quantity = parseQuantity(quantityToken);
+  if (!isFinite(quantity) || quantity <= 0) return null;
+
+  const description = tokens.slice(2, tokens.length - 4).join(" ").trim();
+  if (description.length < 5) return null;
+  if (!/[A-Za-zÀ-ÿ]/.test(description)) return null;
+  if (HEADER_LINE_PATTERNS.some((pattern) => pattern.test(description))) return null;
+
+  return {
+    index: Number(tokens[0]),
+    code: tokens[1],
+    description,
+    quantity,
+    unit: unitToken.toUpperCase(),
+    unitValue: parsePrice(unitPriceToken),
+    totalValue: parsePrice(totalToken),
+  };
+}
+
 export function isValidDanfeItemCandidate(
   line: string | null | undefined,
-  options: DanfeItemCandidateOptions = {},
+  _options: DanfeItemCandidateOptions = {},
 ): boolean {
-  if (!line) return false;
-  const trimmed = line.trim();
-  if (!trimmed) return false;
-  if (/\b\d{4,}\b/.test(trimmed) || /^-?\d{1,4}(\.\d{1,2})?$/.test(trimmed)) {
-    return true;
-  }
-  if (options.quantity || options.regionKey !== undefined) {
-    const qtyMatch = trimmed.match(/\b(\d{1,9}(\.\d{1,2})?)\b/);
-    if (qtyMatch && parseFloat(qtyMatch[1]) > 0) {
-      return true;
-    }
-  }
-  return false;
+  return parseItemLine(line) !== null;
 }
 
 export function isDanfeParseBetter(a: DanfeParseResult, b: DanfeParseResult): boolean {
@@ -284,7 +381,293 @@ export function isDanfeParseBetter(a: DanfeParseResult, b: DanfeParseResult): bo
   if (!a.accessKey && b.accessKey) return false;
   if (a.emitterCnpj && !b.emitterCnpj) return true;
   if (!a.emitterCnpj && b.emitterCnpj) return false;
-  return a.nfeNumber.length > b.nfeNumber.length;
+  return (a.nfeNumber ?? "").length > (b.nfeNumber ?? "").length;
+}
+
+// ─── Parser principal ─────────────────────────────────────────────────────
+
+type SectionKey = "emitente" | "destinatario" | "transportador" | "expedidor";
+
+interface SectionData {
+  cnpj?: string;
+  cnpjIndex?: number;
+  name?: string;
+  city?: string;
+  uf?: string;
+  cep?: string;
+  address?: string;
+}
+
+function sectionLabelFor(line: string): SectionKey | undefined {
+  if (/TRANSPORTADOR|TRANSPORTADORA|REDESPACHO/i.test(line)) return "transportador";
+  if (/EXPEDI[ÇC][ÃA]O/i.test(line)) return "expedidor";
+  if (/DESTINAT[ÁA]RIO|REMETENTE/i.test(line)) return "destinatario";
+  if (/DADOS\s+DO\s+EMITENTE|\bEMITENTE\b/i.test(line)) return "emitente";
+  return undefined;
+}
+
+function findCnpj(line: string): string | undefined {
+  const labeled = line.match(
+    /CNPJ\s*[:\-]?\s*((?:\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})|\d{14})/i,
+  );
+  const masked = line.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/);
+  const plain = labeled ? labeled[1] : masked ? masked[0] : line.match(/\b\d{14}\b/)?.[0];
+  if (!plain) return undefined;
+  const digits = plain.replace(/\D/g, "");
+  if (digits.length !== 14) return undefined;
+  return formatCnpjLocal(digits);
+}
+
+function nameLabel(line: string): string | undefined {
+  const match = line.match(/^(?:Raz[ãa]o\s+Social|Nome\s+Do\s+Destinat[áa]rio)\s*:\s*(.+)$/i);
+  if (!match) return undefined;
+  const value = match[1].trim();
+  return value || undefined;
+}
+
+const NAME_BLACKLIST =
+  /^(DANFE|NF-?e|CHAVE|NATUREZA|PROTOCOLO|INSCRI|DATA|DESTINAT|TRANSPORT|EXPEDI|EMITENTE|VALOR|DADOS|CNPJ|CPF|CEP|FONE|DESCRI|C[ÓO]D|S[ÉE]RIE|GRUPO)/i;
+const STREET_PREFIX = /^(RUA|AVENIDA|TRAVESSA|ALAMEDA|RODOVIA|ESTRADA|PRA[ÇC]A)\b/i;
+
+function isNameCandidate(line: string | undefined): line is string {
+  if (!line) return false;
+  const value = line.trim();
+  if (value.length < 5) return false;
+  if (/\d/.test(value)) return false;
+  if (NAME_BLACKLIST.test(value)) return false;
+  if (STREET_PREFIX.test(value)) return false;
+  if (/^[A-Za-zÀ-ÿ\s'.]+\/[A-Za-z]{2}$/.test(value)) return false; // cidade/UF
+  if (!/[A-Za-zÀ-ÿ]{3,}/.test(value)) return false;
+  return true;
+}
+
+function isCityLike(line: string | undefined): boolean {
+  if (!line) return false;
+  const value = line.trim();
+  if (value.length < 3) return false;
+  if (/\d/.test(value)) return false;
+  if (value.includes(":")) return false;
+  if (NAME_BLACKLIST.test(value)) return false;
+  if (STREET_PREFIX.test(value)) return false;
+  if (/^[A-Za-zÀ-ÿ\s'.]+\/[A-Za-z]{2}$/.test(value)) return false;
+  return /[A-Za-zÀ-ÿ]{3,}/.test(value);
+}
+
+function formatCepLocal(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  if (digits.length !== 8) return value;
+  return `${digits.slice(0, 5)}-${digits.slice(5, 8)}`;
+}
+
+function extractNfeNumber(text: string): string | undefined {
+  const match =
+    text.match(/NF-?e?\s*N[ºo°]\.?\s*:?\s*(\d{1,10})/i) ||
+    text.match(/N[ºo°]\.?\s*:?\s*(\d{1,10})/i);
+  if (!match) return undefined;
+  const number = match[1].replace(/^0+(?=\d)/, "");
+  return number || undefined;
+}
+
+function extractSeries(text: string): string | undefined {
+  const match = text.match(/s[eéi]rie\s*[:.]?\s*(\d{1,3})/i);
+  return match ? match[1] : undefined;
+}
+
+function extractEmissionDate(lines: string[]): string | undefined {
+  for (const line of lines) {
+    if (!/emi/i.test(line)) continue;
+    const match = line.match(/(\d{2})[\/\-.](\d{2})[\/\-.](\d{4})/);
+    if (match) return `${match[3]}-${match[2]}-${match[1]}`;
+  }
+  return undefined;
+}
+
+function extractLabeledCode(text: string, pattern: RegExp): string | undefined {
+  const match = text.match(pattern);
+  if (!match) return undefined;
+  const value = match[1].replace(/\s+/g, "").trim();
+  return value || undefined;
+}
+
+function extractAfNumber(text: string): string | undefined {
+  return extractLabeledCode(text, /\bAF\s*[:\-]?\s*([0-9]{1,6}(?:\/[0-9]{1,4})?)/i);
+}
+
+function extractEmpenhoNumber(text: string): string | undefined {
+  return extractLabeledCode(text, /\bEMPENHO\s*[:\-]?\s*([0-9]{1,6}(?:\/[0-9]{1,4})?)/i);
+}
+
+function extractProcessNumber(text: string): string | undefined {
+  return extractLabeledCode(
+    text,
+    /\bPROCESSO(?:\s+ADMINISTRATIVO)?\s*[:\-]?\s*([0-9][0-9.\/-]{2,})/i,
+  );
+}
+
+function extractTotalValue(lines: string[]): number | undefined {
+  for (const line of lines) {
+    if (!/valor\s*total/i.test(line)) continue;
+    const match = line.match(/r\$\s*([\d.]+,\d{2})/i);
+    if (!match) continue;
+    const value = Number(match[1].replace(/\./g, "").replace(",", "."));
+    if (isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+function extractItems(lines: string[]): DanfeItem[] {
+  const items: DanfeItem[] = [];
+  const seen = new Set<string>();
+
+  lines.forEach((line, position) => {
+    const parsedLine = parseItemLine(line);
+    if (!parsedLine) return;
+    const key = line.trim().replace(/\s+/g, " ").toLowerCase();
+    if (seen.has(key)) return; // linha repetida por OCR/regiões nunca duplica produto
+    seen.add(key);
+    items.push({
+      index: parsedLine.index,
+      lineNumber: position + 1,
+      code: parsedLine.code,
+      description: parsedLine.description,
+      quantity: parsedLine.quantity,
+      unit: parsedLine.unit,
+      unitValue: parsedLine.unitValue,
+      totalValue: parsedLine.totalValue,
+    });
+  });
+
+  return items;
+}
+
+export function parseDanfeText(text: string | null | undefined): DanfeParseResult {
+  if (!text || !text.trim()) return emptyResult(false);
+
+  const clean = text.replace(/\r\n?/g, "\n").trim();
+  const lines = clean
+    .split("\n")
+    .map((line) => line.trim().replace(/\s+/g, " "))
+    .filter(Boolean);
+
+  const sections: Record<SectionKey, SectionData> = {
+    emitente: {},
+    destinatario: {},
+    transportador: {},
+    expedidor: {},
+  };
+  let section: SectionKey = "emitente";
+
+  lines.forEach((line, index) => {
+    const label = sectionLabelFor(line);
+    if (label) section = label;
+
+    const data = sections[section];
+
+    const cnpj = findCnpj(line);
+    if (cnpj && !data.cnpj) {
+      data.cnpj = cnpj;
+      data.cnpjIndex = index;
+    }
+
+    const explicitName = nameLabel(line);
+    if (explicitName && !data.name) data.name = explicitName;
+
+    const cityLabeled = line.match(/^(?:Cidade|Munic[íi]pio)\s*:\s*(.+)$/i);
+    if (cityLabeled && !data.city) data.city = cityLabeled[1].trim();
+
+    const ufLabeled = line.match(/^(?:UF|Estado)\s*:\s*([A-Za-z]{2})\b/i);
+    if (ufLabeled && !data.uf) data.uf = ufLabeled[1].toUpperCase();
+
+    const cityUf = line.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'.]{1,40})\/([A-Za-z]{2})$/);
+    if (cityUf) {
+      if (!data.city) data.city = cityUf[1].trim();
+      if (!data.uf) data.uf = cityUf[2].toUpperCase();
+    }
+
+    const cep = line.match(/\bCEP\s*[:\s]?\s*(\d{5}-?\d{3})\b/i);
+    if (cep && !data.cep) data.cep = formatCepLocal(cep[1]);
+
+    const labeledAddress = line.match(/^(?:Endere[çc]o|Endereco)\s*:\s*(.+)$/i);
+    const streetAddress = STREET_PREFIX.test(line) ? line : undefined;
+    const address = labeledAddress ? labeledAddress[1].trim() : streetAddress;
+    if (address && !data.address) data.address = address;
+
+    if (/^[A-Za-z]{2}$/.test(line) && !data.uf) {
+      data.uf = line.toUpperCase();
+      const previous = lines[index - 1];
+      if (!data.city && isCityLike(previous)) data.city = previous!.trim();
+    }
+  });
+
+  for (const key of Object.keys(sections) as SectionKey[]) {
+    const data = sections[key];
+    if (data.cnpjIndex === undefined || data.name) continue;
+    for (const position of [data.cnpjIndex - 1, data.cnpjIndex + 1]) {
+      const candidate = lines[position];
+      const value = nameLabel(candidate ?? "") ?? candidate;
+      if (isNameCandidate(value)) {
+        data.name = value.trim();
+        break;
+      }
+    }
+  }
+
+  const nfeNumber = extractNfeNumber(clean);
+  const series = extractSeries(clean);
+  const emissionDate = extractEmissionDate(lines);
+  const accessKey = extractAccessKey44(clean);
+  const totalValue = extractTotalValue(lines);
+  const items = extractItems(lines);
+  const afNumber = extractAfNumber(clean);
+  const empenhoNumber = extractEmpenhoNumber(clean);
+  const processNumber = extractProcessNumber(clean);
+
+  const emitter = sections.emitente;
+  const receiver = sections.destinatario;
+  const transporter = sections.transportador;
+  const issuer = sections.expedidor;
+
+  const ok = Boolean(
+    nfeNumber ||
+      series ||
+      emissionDate ||
+      accessKey ||
+      emitter.cnpj ||
+      emitter.name ||
+      receiver.cnpj ||
+      receiver.name ||
+      transporter.cnpj ||
+      issuer.cnpj ||
+      afNumber ||
+      empenhoNumber ||
+      processNumber ||
+      totalValue !== undefined ||
+      items.length,
+  );
+
+  return {
+    ok,
+    items,
+    nfeNumber,
+    series,
+    emissionDate,
+    accessKey,
+    emitterCnpj: emitter.cnpj,
+    emitterName: emitter.name,
+    emitterAddress: emitter.address,
+    emitterCity: emitter.city,
+    emitterState: emitter.uf,
+    emitterPostalCode: emitter.cep,
+    receiverCnpj: receiver.cnpj,
+    receiverName: receiver.name,
+    transporterCnpj: transporter.cnpj,
+    issuerCnpj: issuer.cnpj,
+    issuerName: issuer.name,
+    afNumber,
+    empenhoNumber,
+    processNumber,
+    totalValue,
+  };
 }
 
 export function buildOcrTrace(
@@ -337,18 +720,19 @@ function buildFieldTraces(
   srcLayerBlob?: string | null,
 ): OcrFieldTrace[] {
   const fields: Array<{ field: keyof DanfeParseResult; value: string }> = [
-    { field: "nfeNumber", value: parsed.nfeNumber },
-    { field: "series", value: parsed.series },
-    { field: "emissionDate", value: parsed.emissionDate },
-    { field: "accessKey", value: parsed.accessKey },
-    { field: "emitterCnpj", value: parsed.emitterCnpj },
-    { field: "emitterName", value: parsed.emitterName },
-    { field: "receiverCnpj", value: parsed.receiverCnpj },
-    { field: "receiverName", value: parsed.receiverName },
-    { field: "issuerCnpj", value: parsed.issuerCnpj },
-    { field: "issuerName", value: parsed.issuerName },
+    { field: "nfeNumber", value: parsed.nfeNumber ?? "" },
+    { field: "series", value: parsed.series ?? "" },
+    { field: "emissionDate", value: parsed.emissionDate ?? "" },
+    { field: "accessKey", value: parsed.accessKey ?? "" },
+    { field: "emitterCnpj", value: parsed.emitterCnpj ?? "" },
+    { field: "emitterName", value: parsed.emitterName ?? "" },
+    { field: "receiverCnpj", value: parsed.receiverCnpj ?? "" },
+    { field: "receiverName", value: parsed.receiverName ?? "" },
+    { field: "issuerCnpj", value: parsed.issuerCnpj ?? "" },
+    { field: "issuerName", value: parsed.issuerName ?? "" },
   ];
 
+  void srcLayerBlob;
   return fields.map(({ field, value }) => ({
     field,
     value,
@@ -359,248 +743,3 @@ function buildFieldTraces(
   }));
 }
 
-function extractNfeNumber(text: string): string {
-  const regex = /NF-?e?\s*(?:N[ºo])\s*(?:n[ºo])\s*([0-9]{6,10})/i;
-  const match = text.match(regex);
-  if (match && match[1]) {
-    return match[1];
-  }
-  const fallbacks = [
-    /nfe\s*([0-9]{6,10})/i,
-    /nº\s*([0-9]{6,10})/i,
-    /nu\s*([0-9]{6,10})/i,
-  ];
-  for (const pattern of fallbacks) {
-    const m = text.match(pattern);
-    if (m && m[1]) return m[1];
-  }
-  return "";
-}
-
-function extractSeries(lines: string[]): string {
-  for (const line of lines) {
-    if (/\bserie\b/i.test(line)) {
-      const match = line.match(/(\d{1,3})/);
-      if (match) return match[1];
-    }
-  }
-  return "";
-}
-
-function extractEmissionDate(lines: string[]): string {
-  for (const line of lines) {
-    const match = line.match(/(\d{2}[/\-.]\d{2}[/\-.]\d{4})/);
-    if (match) {
-      const parts = match[1].split(/[/\-.]/);
-      if (parts.length === 3) {
-        const day = parts[0].padStart(2, "0");
-        const month = parts[1].padStart(2, "0");
-        const year = parts[2];
-        return `${day}/${month}/${year}`;
-      }
-    }
-  }
-  return "";
-}
-
-function extractCnpj(text: string, context: string): string {
-  const patterns = [
-    new RegExp(`${context}[\\:\\s]*?(?:CNPJ|CPF|Cnpj)[\\:\\s\\-]*?([0-9]{2}\\.?[0-9]{3}\\.?[0-9]{3}\\/?[0-9]{4}\\-?[0-9]{2})`, "i"),
-    new RegExp(`${context}[\\:\\s]*?(?:CNPJ|CPF|Cnpj)[\\:\\s\\-]*?([0-9]{14})`, "i"),
-    new RegExp(`CNPJ[\\:\\s\\-]*?([0-9]{2}\\.?[0-9]{3}\\.?[0-9]{3}\\/?[0-9]{4}\\-?[0-9]{2})`, "i"),
-    new RegExp(`CNPJ[\\:\\s\\-]*?([0-9]{14})`, "i"),
-    new RegExp(`CPF[\\:\\s\\-]*?([0-9]{3}\\.?[0-9]{3}\\.?[0-9]{3}\\-?[0-9]{2})`, "i"),
-    new RegExp(`CPF[\\:\\s\\-]*?([0-9]{11})`, "i"),
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      const cleaned = match[1].replace(/\D/g, "");
-      if (cleaned.length === 14) {
-        return formatCnpj(cleaned);
-      }
-      if (cleaned.length === 11) {
-        return formatCpf(cleaned);
-      }
-    }
-  }
-  return "";
-}
-
-function extractName(text: string, context: string): string {
-  const lines = text.split(/\n/);
-  const contextIndex = lines.findIndex((line) =>
-    new RegExp(`${context}[\\:\\s]`, "i").test(line)
-  );
-
-  if (contextIndex === -1) return "";
-
-  const startLine = lines[contextIndex];
-  let namePart = startLine.split(new RegExp(`${context}[\\:\\s]`, "i"))[1] || "";
-
-  if (namePart.length < 5 && contextIndex + 1 < lines.length) {
-    const nextLine = lines[contextIndex + 1];
-    namePart = (namePart + " " + nextLine).trim();
-  }
-
-  const name = namePart
-    .replace(/\.$/, "")
-    .trim()
-    .split(/[0-9]{2}\./)[0]
-    .trim();
-
-  return name || "";
-}
-
-function extractAddress(lines: string[]): string {
-  for (const line of lines) {
-    const lower = line.toLowerCase();
-    if (/\b(rua|avenida|travessa|alameda|rodovia|estrada|outro)\b/i.test(lower)) {
-      return line.replace(/\s+(?:CEP|UF|Estado)\s*/g, "").replace(/\s+,/g, ",").trim();
-    }
-  }
-  return "";
-}
-
-function extractCity(lines: string[]): string {
-  for (const line of lines) {
-    const lower = line.toLowerCase();
-    if (/\b(cidade|município)\b/i.test(lower)) {
-      const match = line.match(/^(?:Cidade|Município)\s*:\s*(.+)/i);
-      if (match) return match[1].trim();
-      const parts = line.split(/:\s*/);
-      return parts[1]?.trim() || "";
-    }
-  }
-  return "";
-}
-
-function extractState(lines: string[]): string {
-  for (const line of lines) {
-    const lower = line.toLowerCase();
-    if (/\b(uf|estado)\b/i.test(lower)) {
-      const match = line.match(/^(?:UF|Estado)\s*:\s*([A-Z]{2})/i);
-      if (match) return match[1].trim().toUpperCase();
-      const parts = line.split(/:\s*/);
-      const code = parts[1]?.trim().toUpperCase();
-      if (/^[A-Z]{2}$/.test(code)) return code;
-    }
-  }
-  return "";
-}
-
-function extractPostalCode(lines: string[]): string {
-  for (const line of lines) {
-    const lower = line.toLowerCase();
-    if (/\bcep\b/i.test(lower)) {
-      const match = line.match(/CEP\s*[:\s]*(\d{5}[-\s]?\d{3})/i);
-      if (match) {
-        const cleaned = match[1].replace(/\D/g, "");
-        if (cleaned.length === 8) {
-          return `${cleaned.slice(0, 5)}-${cleaned.slice(5, 8)}`;
-        }
-      }
-    }
-  }
-  return "";
-}
-
-function extractAfNumber(text: string): string {
-  const match = text.match(/\bAF[:\s]*([^,\n]+)/i);
-  if (match) return match[1].trim();
-  return "";
-}
-
-function extractEmpenhoNumber(text: string): string {
-  const match = text.match(/\bEmpenho[:\s]*([^,\n]+)/i);
-  if (match) return match[1].trim();
-  return "";
-}
-
-function extractProcessNumber(text: string): string {
-  const match = text.match(/\bProcesso[:\s]*([^,\n]+)/i);
-  if (match) return match[1].trim();
-  return "";
-}
-
-function extractTotalValue(text: string | null | undefined): number {
-  if (!text) return 0;
-  const match = text.match(/Valor Total[:\s]*R\$\s*([\d.,]+)/i);
-  if (match) {
-    const cleaned = match[1].replace(/\./g, "").replace(",", ".");
-    const value = Number(cleaned);
-    return isFinite(value) ? value : 0;
-  }
-  return 0;
-}
-
-function extractItems(lines: string[]): DanfeItem[] {
-  const items: DanfeItem[] = [];
-  let index = 1;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-
-    const match = trimmed.match(/^(?:it\s*)?(?:nº\s*)?(?:[\d\.]{8,12})\s*(.+?)(?:\s{2,}|\t|$)/i);
-    if (!match) continue;
-
-    const description = match[1].trim();
-    if (description.length < 3) continue;
-    if (/\bTotal\b/i.test(description)) continue;
-    if (/\bA Montant OAB\b/i.test(description)) continue;
-
-    const quantityMatch = trimmed.match(/(\d{1,9}(?:,\d{1,2})?)\s*(?:un\.?|und\.?|kg|g|mg|un|pcs?|cxb?|vl\.?|l\.?|ml\.?)?\s*$/i);
-    const quantity = quantityMatch ? parseFloat(quantityMatch[1].replace(",", ".")) : 0;
-
-    const unitPriceMatch = trimmed.match(/(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*(?:vl\.?|r\$|unit|v\.?)?\s*$/i);
-    const unitPrice = unitPriceMatch ? parseFloat(unitPriceMatch[1].replace(/\./g, "").replace(",", ".")) : 0;
-
-    const totalPriceMatch = trimmed.match(/(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*(?:tot\.?|total|vl\.? total)?\s*$/i);
-    const totalPrice = totalPriceMatch ? parseFloat(totalPriceMatch[1].replace(/\./g, "").replace(",", ".")) : 0;
-
-    items.push({
-      index,
-      code: "",
-      description,
-      ncm: "",
-      quantity: quantity || 1,
-      unit: "",
-      unitValue: unitPrice,
-      totalValue: totalPrice || unitPrice || 0,
-    });
-
-    index++;
-  }
-
-  return items;
-}
-
-function isValidAccessKey44(digits: string): boolean {
-  if (digits.length !== 44) return false;
-  if (!/^\d{44}$/.test(digits)) return false;
-
-  const base = digits.slice(0, 43);
-  const providedDv = digits.slice(43);
-
-  const sum1 = base.split("").reduce((acc, d, i) => {
-    const peso = 44 - i;
-    return acc + parseInt(d, 10) * peso;
-  }, 0);
-
-  const dv1 = sum1 % 11;
-  const expectedDv1 = dv1 < 2 ? 0 : 11 - dv1;
-
-  return providedDv === String(expectedDv1);
-}
-
-function formatCnpj(digits: string): string {
-  if (digits.length !== 14) return digits;
-  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12, 14)}`;
-}
-
-function formatCpf(digits: string): string {
-  if (digits.length !== 11) return digits;
-  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9, 11)}`;
-}
