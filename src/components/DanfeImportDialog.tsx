@@ -1,5 +1,5 @@
-/** @jsxImportSource react */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+"use client";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { createWorker } from "tesseract.js";
@@ -23,9 +23,8 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import {
-  formatCnpj,
-  formatCurrency,
   formatAccessKeyGrouped,
+  formatCnpj,
 } from "@/lib/br-validators";
 import {
   DANFE_REGIONS,
@@ -37,14 +36,11 @@ import {
   parseDanfeText,
   validateAccessKey44,
   type DanfeParseResult,
-  buildOcrTrace,
 } from "@/lib/danfe-ocr";
+import { buildOcrTrace } from "@/lib/ocrtrace";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
-/** Resolução alvo da rasterização (PDF 72pt → 300 DPI). */
-const TARGET_DPI = 300;
-/** Nunca roda OCR em imagem pequena demais — abaixo disso é upscale. */
 const MIN_OCR_WIDTH = 1100;
 const OCR_LANG = "por";
 
@@ -56,34 +52,48 @@ export type DanfeImportResult = DanfeParseResult & {
 export interface DanfeImportDialogProps {
   open: boolean;
   onClose: () => void;
-  /** Fornecedores ativos — o usuário pode escolher qual a NF pertence. */
   suppliers: Array<{
     _id: string;
     legalName: string;
     cnpj?: string | null;
   }>;
-  /**
-   * Entrega os dados LIDOS à conferência da Entrada. O diálogo não grava
-   * nada: a efetivação acontece somente após confirmação humana.
-   */
   onImport: (result: DanfeImportResult) => void;
 }
 
 type OcrWorker = Awaited<ReturnType<typeof createWorker>>;
 type Phase = "select" | "processing" | "review" | "error";
 
-// Diagnóstico de desenvolvimento (Rodada 15) — valor somente no dev; no build
-// final pode ser ajustado para desabilitar o relatório sem mexer no pipeline.
 const ENABLE_DEV_DIAGNOSTIC =
   typeof window !== "undefined" &&
   (window.localStorage?.getItem("danfeDevDiagnostic") ?? "1") === "1";
 
-// Rastreio dos vetores reais do pipeline para o relatório de diagnóstico.
-let layerTextForDiag = "";
-let ocrTextForDiag = "";
-let regionTextsForDiag: string[] = [];
-let parsedLayerForDiag: DanfeParseResult | null = null;
-let parsedOcrForDiag: DanfeParseResult | null = null;
+let diagLayerText: string = "";
+let diagOcrText: string = "";
+let diagRegionTexts: string[] = [];
+
+export const EMPTY_RESULT: DanfeParseResult = {
+  ok: true,
+  items: [],
+  nfeNumber: "",
+  series: "",
+  emissionDate: "",
+  accessKey: "",
+  emitterCnpj: "",
+  emitterName: "",
+  emitterAddress: "",
+  emitterCity: "",
+  emitterState: "",
+  emitterPostalCode: "",
+  receiverCnpj: "",
+  receiverName: "",
+  transporterCnpj: "",
+  issuerCnpj: "",
+  issuerName: "",
+  afNumber: "",
+  empenhoNumber: "",
+  processNumber: "",
+  totalValue: 0,
+};
 
 // ─── Canvas helpers ──────────────────────────────────────────────────────────
 
@@ -164,15 +174,11 @@ function preprocessForOcr(canvas: HTMLCanvasElement): HTMLCanvasElement {
   out.height = height;
   const outCtx = out.getContext("2d");
   if (!outCtx) return canvas;
-  outCtx.putImageData(
-    new ImageData(data, width, height),
-    0,
-    0,
-  );
+  outCtx.putImageData(new ImageData(data, width, height), 0, 0);
   return out;
 }
 
-// ─── Extração da camada textual do PDF ──────────────────────────────────────
+// ─── Text layer extraction ──────────────────────────────────────────────────
 
 async function readPdfTextLayer(data: ArrayBuffer): Promise<string> {
   try {
@@ -190,87 +196,42 @@ async function readPdfTextLayer(data: ArrayBuffer): Promise<string> {
   }
 }
 
-// ─── Célula de dado da conferência ───────────────────────────────────────────
+// ─── OCR por regiões clássicas da DANFE ────────────────────────────────────
 
-function DataCell({
-  label,
-  value,
-  mono,
-  wide,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  wide?: boolean;
-}) {
-  const display =
-    value && mono ? formatAccessKeyGrouped(value) : value;
-  return (
-    <div className="min-w-0 overflow-hidden">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={cn("mt-0.5 truncate text-sm text-foreground", wide && "col-span-1 sm:col-span-2", mono && "font-mono text-xs")}>
-        {display}
-      </dd>
-    </div>
+async function ocrDanfeRegions(
+  canvas: HTMLCanvasElement,
+  regions: { key: string; box: { x: number; y: number; w: number; h: number } }[],
+): Promise<Array<{ key: string; text: string }>> {
+  const results = await Promise.all(
+    regions.map(async (region) => {
+      const { x, y, w, h } = region.box;
+      const regionCanvas = document.createElement("canvas");
+      regionCanvas.width = Math.max(1, Math.round(w));
+      regionCanvas.height = Math.max(1, Math.round(h));
+      const ctx = regionCanvas.getContext("2d");
+      if (!ctx) return { key: region.key, text: "" };
+      ctx.drawImage(
+        canvas,
+        Math.max(0, Math.round(x)),
+        Math.max(0, Math.round(y)),
+        Math.min(Math.round(canvas.width - x), Math.round(w)),
+        Math.min(Math.round(canvas.height - y), Math.round(h)),
+        0,
+        0,
+        regionCanvas.width,
+        regionCanvas.height,
+      );
+      const sized = ensureOcrWidth(regionCanvas);
+      const worker = await createWorker(OCR_LANG);
+      const { data: { text } } = await worker.recognize(sized);
+      await worker.terminate();
+      return { key: region.key, text };
+    }),
   );
+  return results;
 }
 
-// ── Diagnóstico de desenvolvimento (Rodada 15) ──────────────────────────
-
-function OcrDiagnosticCard({ trace }: { trace: NonNullable<typeof diagnostic> }) {
-  const json = useMemo(
-    () =>
-      JSON.stringify(
-        {
-          ...trace,
-          rawText: trace.rawText ?? "",
-          pageOcrText: trace.pageOcrText ?? "",
-          mergedOcr: trace.mergedOcr ?? "",
-        },
-        null,
-        2,
-      ),
-    [trace],
-  );
-
-  const copy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(json);
-    } catch {
-      const area = document.createElement("textarea");
-      area.value = json;
-      document.body.appendChild(area);
-      area.select();
-      document.execCommand("copy");
-      document.body.removeChild(area);
-    }
-  }, [json]);
-
-  const jsonDps = /^data:/.test(json);
-
-  return (
-    <div className="rounded-xl border border-muted bg-muted/40 p-4 text-xs">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-foreground">
-          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-          Diagnóstico de desenvolvimento — relatório do OCR
-        </span>
-        <div className="flex gap-2">
-          <Button
-            className="h-7 text-xs"
-            variant="outline"
-            onClick={copy}
-          >
-            Copiar JSON
-          </Button>
-        </div>
-      </div>
-      <div className="break-words whitespace-pre-wrap">{json}</div>
-    </div>
-  );
-}
-
-// ─── Diálogo ─────────────────────────────────────────────────────────────────
+// ─── Componente ─────────────────────────────────────────────────────────────
 
 export default function DanfeImportDialog({
   open,
@@ -278,12 +239,14 @@ export default function DanfeImportDialog({
   suppliers,
   onImport,
 }: DanfeImportDialogProps) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [inputRef, setInputRef] = useState<HTMLInputElement | null>(null);
   const [phase, setPhase] = useState<Phase>("select");
   const [step, setStep] = useState<string | null>(null);
   const [parsed, setParsed] = useState<DanfeParseResult | null>(null);
-  const [fieldSummary, setFieldSummary] = useState(danfeFieldSummary({ ok: true }));
+  const [fieldSummary, setFieldSummary] = useState<ReturnType<typeof danfeFieldSummary>>(
+    danfeFieldSummary(EMPTY_RESULT),
+  );
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [keyValid, setKeyValid] = useState(false);
@@ -294,17 +257,14 @@ export default function DanfeImportDialog({
     setPhase("select");
     setStep(null);
     setParsed(null);
-    setFieldSummary(danfeFieldSummary({ ok: true }));
+    setFieldSummary(danfeFieldSummary(EMPTY_RESULT));
     setSelectedSupplierId("");
     setErrorMessage(null);
     setKeyValid(false);
   }, [open]);
 
-  const startFileRef = useRef<File | null>(null);
-
   const processFile = useCallback(
     async (f: File) => {
-      startFileRef.current = f;
       setFile(f);
       setPhase("processing");
       setErrorMessage(null);
@@ -313,7 +273,6 @@ export default function DanfeImportDialog({
         let layerText = "";
         let ocrText = "";
         let regionTexts: string[] = [];
-        let ocrEndPath: "text-layer" | "ocr" | "merged" = "merged";
 
         if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) {
           setStep("Lendo camada de texto do PDF…");
@@ -331,54 +290,58 @@ export default function DanfeImportDialog({
 
             setStep("Executando OCR da página inteira…");
             const worker = await createWorker(OCR_LANG);
-            const {
-              data: { text: fullText },
-            } = await worker.recognize(sized);
+            const { data: { text: fullText } } = await worker.recognize(sized);
             await worker.terminate();
             ocrText = fullText;
 
             setStep("Executando OCR por regiões da DANFE…");
-            const regional = await ocrDanfeRegions(sized, DANFE_REGIONS);
+            const regional = await ocrDanfeRegions(sized, DANFE_REGIONS.map(
+              (region) => ({ key: region.key, box: { x: region.x, y: region.y, w: region.w, h: region.h } }),
+            ));
             regionTexts = regional.map((r) => r.text);
 
             const mergedOcr = mergeDanfeTexts(ocrText, regionTexts);
             const parsedLayer = parseDanfeText(layerText);
             const parsedOcr = parseDanfeText(mergedOcr);
 
-            // Diagnóstico de desenvolvimento (Rodada 15): rastreia os vetores reais
-            // do pipeline. Não interfere na escolha nem no comportamento do parser.
-            layerTextForDiag = layerText;
-            ocrTextForDiag = ocrText;
-            regionTextsForDiag = regionTexts;
-            parsedLayerForDiag = parsedLayer;
-            parsedOcrForDiag = parsedOcr;
+            diagLayerText = layerText;
+            diagOcrText = ocrText;
+            diagRegionTexts = regionTexts;
+            buildOcrTrace(
+              layerText ?? undefined,
+              ocrText ?? undefined,
+              regionTexts,
+              mergedOcr,
+              parsedLayer,
+              parsedOcr,
+              isDanfeParseBetter(parsedOcr, parsedLayer) ? parsedOcr : parsedLayer,
+              isDanfeParseBetter(parsedOcr, parsedLayer) ? "ocr" : "merged",
+              null,
+            );
 
-            // Determina qual caminho de fato venceu na escolha semântica do diálogo.
-            const chosenPath = isDanfeParseBetter(parsedOcr, parsedLayer)
-              ? "ocr"
-              : "merged";
-            ocrEndPath = chosenPath;
-
-            // Comparação SEMÂNTICA: ganha quem tem MAIS campos estruturados
-            // válidos. Nunca usamos só a quantidade de caracteres — um texto maior
-            // não é automaticamente melhor.
-            let best = isDanfeParseBetter(parsedOcr, parsedLayer)
+            const best = isDanfeParseBetter(parsedOcr, parsedLayer)
               ? parsedOcr
               : parsedLayer;
 
             if (!best.accessKey) {
-              // Tentativa ESPECÍFICA da chave: prioriza cabeçalho + região da chave,
-              // depois página inteira e regiões alternativas (normalização de
-              // glifos/remoção de espaços acontece dentro de extractAccessKey44).
               const keyPriority = [
                 ...regionTexts.slice(0, 2),
                 mergedOcr,
                 ocrText,
                 layerText,
-              ]
-                .join("\n");
+              ].join("\n");
               const key = extractAccessKey44(keyPriority);
-              if (key) best = { ...best, accessKey: key };
+              if (key) {
+                setParsed({
+                  ...best,
+                  accessKey: key,
+                  file: f,
+                } as DanfeParseResult & { file: File });
+                setPhase("review");
+                setFieldSummary(danfeFieldSummary({ ...best, accessKey: key }));
+                setKeyValid(true);
+                return;
+              }
             }
 
             if (!best.ok) {
@@ -389,7 +352,7 @@ export default function DanfeImportDialog({
               return;
             }
 
-            setParsed({ ...best, file: f });
+            setParsed({ ...best, file: f } as DanfeParseResult & { file: File });
             setPhase("review");
             setFieldSummary(danfeFieldSummary(best));
             setKeyValid(!!best.accessKey);
@@ -404,40 +367,54 @@ export default function DanfeImportDialog({
 
           setStep("Executando OCR da página inteira…");
           const worker = await createWorker(OCR_LANG);
-          const {
-            data: { text: fullText },
-          } = await worker.recognize(sized);
+          const { data: { text: fullText } } = await worker.recognize(sized);
           await worker.terminate();
           ocrText = fullText;
 
           setStep("Executando OCR por regiões da DANFE…");
-          const regional = await ocrDanfeRegions(sized, DANFE_REGIONS);
+          const regional = await ocrDanfeRegions(sized, DANFE_REGIONS.map(
+            (region) => ({ key: region.key, box: { x: region.x, y: region.y, w: region.w, h: region.h } }),
+          ));
           regionTexts = regional.map((r) => r.text);
 
           const mergedOcr = mergeDanfeTexts(ocrText, regionTexts);
           const parsedOcr = parseDanfeText(mergedOcr);
 
-          // Diagnóstico de desenvolvimento (Rodada 15): rastreia os vetores reais
-          // do pipeline. Não interfere na escolha nem no comportamento do parser.
-          layerTextForDiag = "";
-          ocrTextForDiag = ocrText;
-          regionTextsForDiag = regionTexts;
-          parsedLayerForDiag = null;
-          parsedOcrForDiag = parsedOcr;
+          diagLayerText = "";
+          diagOcrText = ocrText;
+          diagRegionTexts = regionTexts;
+          buildOcrTrace(
+            undefined,
+            ocrText ?? undefined,
+            regionTexts,
+            mergedOcr,
+            EMPTY_RESULT,
+            parsedOcr,
+            parsedOcr,
+            "merged",
+            null,
+          );
 
-          ocrEndPath = "merged";
-
-          let best = parsedOcr;
+          const best = parsedOcr;
 
           if (!best.accessKey) {
             const keyPriority = [
               ...regionTexts.slice(0, 2),
               mergedOcr,
               ocrText,
-            ]
-              .join("\n");
+            ].join("\n");
             const key = extractAccessKey44(keyPriority);
-            if (key) best = { ...best, accessKey: key };
+            if (key) {
+              setParsed({
+                ...best,
+                accessKey: key,
+                file: f,
+              } as DanfeParseResult & { file: File });
+              setPhase("review");
+              setFieldSummary(danfeFieldSummary({ ...best, accessKey: key }));
+              setKeyValid(true);
+              return;
+            }
           }
 
           if (!best.ok) {
@@ -448,7 +425,7 @@ export default function DanfeImportDialog({
             return;
           }
 
-          setParsed({ ...best, file: f });
+          setParsed({ ...best, file: f } as DanfeParseResult & { file: File });
           setPhase("review");
           setFieldSummary(danfeFieldSummary(best));
           setKeyValid(!!best.accessKey);
@@ -465,28 +442,6 @@ export default function DanfeImportDialog({
     },
     [],
   );
-
-  // Diagnóstico de desenvolvimento: rastreia vetores reais do pipeline para o relatório.
-  const offDiag = ENABLE_DEV_DIAGNOSTIC
-    ? {
-        layerText: layerTextForDiag,
-        ocrText: ocrTextForDiag,
-        regionTexts: regionTextsForDiag,
-        parsedLayer: parsedLayerForDiag ?? { ok: false, items: [] },
-        parsedOcr: parsedOcrForDiag ?? { ok: false, items: [] },
-      }
-    : null;
-
-  const diagnosticMemo = ENABLE_DEV_DIAGNOSTIC
-    ? (() => {
-        if (phase !== "review" || !parsed || !offDiag) return null;
-        return buildOcrTrace(
-          offDiag.layerText ?? "",
-          offDiag.ocrText ?? "",
-          offDiag.regionTexts,
-        );
-      })()
-    : null;
 
   const handleImport = () => {
     if (!parsed || !file) return;
@@ -510,18 +465,16 @@ export default function DanfeImportDialog({
         </DialogHeader>
 
         <div className="min-w-0 max-w-full flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-5 pb-3 sm:px-6 space-y-3">
-          {/* ── Seleção de arquivo ── */}
           {phase === "select" && (
             <div className="space-y-3">
               <input
-                ref={setInputRef}
+                ref={inputRef}
                 type="file"
                 accept=".pdf,image/*"
                 className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-2 file:text-sm file:font-medium hover:file:bg-accent"
                 onChange={(event) => {
                   const chosen = event.target.files?.[0];
                   event.target.value = "";
-
                   if (chosen) void processFile(chosen);
                 }}
               />
@@ -532,7 +485,6 @@ export default function DanfeImportDialog({
             </div>
           )}
 
-          {/* ── Processando ── */}
           {phase === "processing" && (
             <div className="flex items-center gap-3 rounded-lg border p-4 text-sm">
               <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
@@ -540,7 +492,6 @@ export default function DanfeImportDialog({
             </div>
           )}
 
-          {/* ── Falha total (só quando NADA foi lido) ── */}
           {(phase === "error" || showNoData) && (
             <div className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
               <p className="font-medium">Nenhum campo identificado automaticamente.</p>
@@ -555,7 +506,6 @@ export default function DanfeImportDialog({
             </div>
           )}
 
-          {/* ── Resumo OCR (hierarquia: concluído → X de 10 → pendências) ── */}
           {showReview && (
             <>
               <div className="flex flex-wrap items-center gap-2">
@@ -583,18 +533,17 @@ export default function DanfeImportDialog({
                 </div>
               )}
 
-              {/* ── Dados lidos (grid responsivo, sem overflow) ── */}
               <section className="space-y-2">
                 <h4 className="text-sm font-semibold">Dados lidos da DANFE</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <DataCell label="Número da NF-e" value={parsed?.nfeNumber ?? ""} />
                   <DataCell label="Série" value={parsed?.series ?? ""} />
                   <DataCell label="Data de emissão" value={parsed?.emissionDate ?? ""} />
-                  <DataCell label="CNPJ do emissor" value={formatCnpj(parsed?.emitterCnpj)} />
-                  <DataCell label="Razão social do emissor" value={parsed?.emitterName ?? ""} />
-                  <DataCell label="Cidade do emissor" value={parsed?.emitterCity ?? ""} />
-                  <DataCell label="UF do emissor" value={parsed?.emitterState ?? ""} />
-                  <DataCell label="CEP do emissor" value={parsed?.emitterPostalCode ?? ""} />
+                  <DataCell label="CNPJ do emitente" value={parsed?.emitterCnpj ?? ""} />
+                  <DataCell label="Razão social do emitente" value={parsed?.emitterName ?? ""} />
+                  <DataCell label="Cidade do emitente" value={parsed?.emitterCity ?? ""} />
+                  <DataCell label="UF do emitente" value={parsed?.emitterState ?? ""} />
+                  <DataCell label="CEP do emitente" value={parsed?.emitterPostalCode ?? ""} />
                   <DataCell
                     label="Chave de acesso"
                     value={parsed?.accessKey ? formatAccessKeyGrouped(parsed.accessKey) : ""}
@@ -604,7 +553,6 @@ export default function DanfeImportDialog({
                 </div>
               </section>
 
-              {/* ── Fornecedor ── */}
               <section className="space-y-2">
                 <h4 className="text-sm font-semibold">Fornecedor</h4>
                 <Select
@@ -622,117 +570,18 @@ export default function DanfeImportDialog({
                       <SelectItem
                         key={supplier._id}
                         value={supplier._id}
-                        textValue={supplier.legalName}
                       >
-                        <span className="min-w-0 truncate">{supplier.legalName}</span>
-                        <span className="block min-w-0 truncate text-[10px] text-muted-foreground">
-                          {`CNPJ: ${formatCnpj(supplier.cnpj)}`}
-                        </span>
+                        {supplier.legalName}
+                        {supplier.cnpj && (
+                          <span className="block min-w-0 truncate text-[10px] text-muted-foreground">
+                            CNPJ: {formatCnpj(supplier.cnpj)}
+                          </span>
+                        )}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </section>
-
-              {/* ── Destinatário ── */}
-              {(parsed?.receiverCnpj || parsed?.receiverName) && (
-                <section className="space-y-2">
-                  <h4 className="text-sm font-semibold">Destinatário</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <DataCell
-                      label="CNPJ do destinatário"
-                      value={formatCnpj(parsed?.receiverCnpj)}
-                    />
-                    <DataCell
-                      label="Razão social do destinatário"
-                      value={parsed?.receiverName ?? ""}
-                    />
-                  </div>
-                </section>
-              )}
-
-              {/* ── Transportador ── */}
-              {parsed?.transporterCnpj && (
-                <section className="space-y-2">
-                  <h4 className="text-sm font-semibold">Transportador</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <DataCell
-                      label="CNPJ do transportador"
-                      value={formatCnpj(parsed?.transporterCnpj)}
-                    />
-                    <DataCell label="RAZÃO SOCIAL" value={parsed?.transporterName ?? ""} />
-                  </div>
-                </section>
-              )}
-
-              {/* ── Itens ── */}
-              {parsed?.items && parsed.items.length > 0 && (
-                <section className="space-y-2">
-                  <h4 className="text-sm font-semibold">Itens identificados</h4>
-                  <div className="max-h-60 overflow-auto rounded-md border">
-                    <table className="w-full border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-muted/60">
-                          <th className="border-b px-2 py-1 text-left font-medium">Item</th>
-                          <th className="border-b px-2 py-1 text-left font-medium">Código</th>
-                          <th className="border-b px-2 py-1 text-left font-medium">Descrição</th>
-                          <th className="border-b px-2 py-1 text-right font-medium">Qtd</th>
-                          <th className="border-b px-2 py-1 text-right font-medium">Un</th>
-                          <th className="border-b px-2 py-1 text-right font-medium">Valor unit.</th>
-                          <th className="border-b px-2 py-1 text-right font-medium">Valor total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {parsed.items.map((item, index) => (
-                          <tr key={index} className="border-t">
-                            <td className="border-b px-2 py-1">{item.lineNumber ?? index + 1}</td>
-                            <td className="border-b px-2 py-1 font-mono">{item.code ?? "—"}</td>
-                            <td className="border-b px-2 py-1 truncate max-w-[220px]">
-                              {item.description}
-                            </td>
-                            <td className="border-b px-2 py-1 text-right">
-                              {item.quantity ?? "—"}
-                            </td>
-                            <td className="border-b px-2 py-1 text-right">
-                              {item.unit ?? "—"}
-                            </td>
-                            <td className="border-b px-2 py-1 text-right">
-                              {item.unitValue != null
-                                ? formatCurrency(item.unitValue)
-                                : "—"}
-                            </td>
-                            <td className="border-b px-2 py-1 text-right font-mono">
-                              {item.totalValue != null ? formatCurrency(item.totalValue) : "—"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
-              )}
-
-              {/* ── Totais ── */}
-              {(parsed?.totalValue != null || parsed?.afNumber || parsed?.empenhoNumber) && (
-                <section className="space-y-2">
-                  <h4 className="text-sm font-semibold">Totais e dados adicionais</h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <DataCell
-                      label="Valor total da NF-e"
-                      value={parsed?.totalValue != null ? formatCurrency(parsed.totalValue) : ""}
-                      mono
-                    />
-                    <DataCell
-                      label="Número da AF"
-                      value={parsed?.afNumber ?? ""}
-                    />
-                    <DataCell
-                      label="Número do empenho"
-                      value={parsed?.empenhoNumber ?? ""}
-                    />
-                  </div>
-                </section>
-              )}
             </>
           )}
         </div>
@@ -756,39 +605,24 @@ export default function DanfeImportDialog({
   );
 }
 
-// ─── OCR por regiões clássicas da DANFE ──────────────────────────────────────
-
-async function ocrDanfeRegions(
-  canvas: HTMLCanvasElement,
-  regions: Array<{ key: string; box: { x: number; y: number; w: number; h: number } }>,
-): Promise<Array<{ key: string; text: string }>> {
-  const results = await Promise.all(
-    regions.map(async (region) => {
-      const { x, y, w, h } = region.box;
-      const regionCanvas = document.createElement("canvas");
-      regionCanvas.width = Math.max(1, w);
-      regionCanvas.height = Math.max(1, h);
-      const ctx = regionCanvas.getContext("2d");
-      if (!ctx) return { key: region.key, text: "" };
-      ctx.drawImage(
-        canvas,
-        Math.max(0, x),
-        Math.max(0, y),
-        Math.min(canvas.width - x, w),
-        Math.min(canvas.height - y, h),
-        0,
-        0,
-        w,
-        h,
-      );
-      const sized = ensureOcrWidth(regionCanvas);
-      const worker = await createWorker(OCR_LANG);
-      const {
-        data: { text },
-      } = await worker.recognize(sized);
-      await worker.terminate();
-      return { key: region.key, text };
-    }),
+function DataCell({
+  label,
+  value,
+  mono,
+  wide,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  wide?: boolean;
+}) {
+  const display = value && mono ? formatAccessKeyGrouped(value) : value;
+  return (
+    <div className="min-w-0 overflow-hidden">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={cn("mt-0.5 truncate text-sm text-foreground", wide && "col-span-1 sm:col-span-2", mono && "font-mono text-xs")}>
+        {display}
+      </dd>
+    </div>
   );
-  return results;
 }

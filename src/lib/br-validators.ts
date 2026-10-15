@@ -1,334 +1,250 @@
-import { v } from "convex/values";
+// Mascaras e validações de dados brasileiros (CNPJ/CPF/telefone/CEP/chave/moeda).
 
-/**
- * Validadores e normalizadores de campos brasileiros para o SIGESGD.
- *
- * Regra geral: o backend armazena valores normalizados; a UI pode aplicar
- * máscaras visuais. Buscas por CNPJ/telefone/CEP são feitas em dígitos.
- */
+/** Retorna somente os dígitos de uma string. */
+export function digitsOnly(value: string | null | undefined): string {
+  return (value ?? "").replace(/\D/g, "");
+}
 
-/** Usa apenas dígitos de uma string. */
-export const digitsOnly = (s: string | undefined | null): string =>
-  (s ?? "").replace(/\D/g, "");
+/** Formata CNPJ para exibição: XX.XXX.XXX/XXXX-XX. */
+export function formatCnpj(value: string | null | undefined): string {
+  const digits = digitsOnly(value);
+  if (digits.length !== 14) return digits;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12, 14)}`;
+}
 
-const MAX_CNPJ_LENGTH = 14;
-const MAX_PHONE_LENGTH = 11;
-const MAX_CEP_LENGTH = 8;
+/** Formata CPF para exibição: XXX.XXX.XXX-XX. */
+export function formatCpf(value: string | null | undefined): string {
+  const digits = digitsOnly(value);
+  if (digits.length !== 11) return digits;
+  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9, 11)}`;
+}
 
-/**
- * Valida um CNPJ brasileiro pela soma de verificadores.
- * Aceita somente 14 dígitos.
- */
-export const isValidCnpj = (raw: string): boolean => {
-  const d = digitsOnly(raw);
-  if (d.length !== MAX_CNPJ_LENGTH) return false;
-  // Sequências repetidas ("00000000000000", "11111111111111", ...) não são CNPJ.
-  if (/^(\d)\1{13}$/.test(d)) return false;
+/** Formata telefone para exibição: (XX) XXXXX-XXXX ou (XX) XXXXX-XXXX com dígito extra. */
+export function formatPhone(value: string | null | undefined): string {
+  return maskPhone(value);
+}
 
-  const checkDigits = (base: string, weights: number[]): number => {
-    const sum = base.split("").reduce((acc, digit, idx) => acc + Number(digit) * weights[idx], 0);
-    const remainder = sum % 11;
-    return remainder < 2 ? 0 : 11 - remainder;
-  };
+/** Formata CEP para exibição: XXXXX-XXX. */
+export function formatCep(value: string | null | undefined): string {
+  const digits = digitsOnly(value);
+  if (digits.length !== 8) return digits;
+  return `${digits.slice(0, 5)}-${digits.slice(5, 8)}`;
+}
 
-  const base = d.slice(0, 12);
-  const first = checkDigits(base, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-  const second = checkDigits(base + String(first), [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]);
-  return d[12] === String(first) && d[13] === String(second);
-};
+/** Formata moeda para exibição: R$ X.XXX,XX. */
+export function formatCurrency(value: string | number | null | undefined): string {
+  const num = typeof value === "number" ? value : Number((value ?? "").replace(/\D/g, "").replace(/(\d{2})$/, ".$1")) || 0;
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(num);
+}
 
-/**
- * Formata CNPJ como 00.000.000/0000-00.
- * Valores não padronizados voltam como estão (legado/visual).
- */
-export const formatCnpj = (raw: string | undefined | null): string => {
-  const d = digitsOnly(raw);
-  if (d.length !== MAX_CNPJ_LENGTH) return raw ?? "";
-  return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12, 14)}`;
-};
-
-const PHONE_WEIGHTS_10 = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3];
-const PHONE_WEIGHTS_11 = [2, 3, 4, 5, 6, 7, 8, 9, 2, 3, 4];
-
-/**
- * Valida telefone brasileiro:
- *  - 10 dígitos: (XX) XXXXX-XXXX → DDD 11..99, os 8 últimos contendo digito verificador implícito
- *    no padrão de algum provedor; aceitamos somente DDD válido e 8 dígitos restantes.
- *  - 11 dígitos: (XX) 9XXXX-XXXX → DDD + 9 + 8 dígitos.
- *
- * Não aplicamos validação pesada de DDD/teledense para não bloquear
- * números de fixo celular antigos. Validação de DDD 11-99 e tamanho é suficiente.
- */
-export const isValidPhone = (raw: string): boolean => {
-  const d = digitsOnly(raw);
-  if (d.length !== 10 && d.length !== MAX_PHONE_LENGTH) return false;
-  if (d.length === 11 && d[2] !== "9") return false;
-  // Sanity: DDD 11..99
-  const ddd = Number(d.slice(0, 2));
-  if (ddd < 11 || ddd > 99) return false;
-  return true;
-};
-
-/**
- * Formata telefone:
- *  - 11 dígitos: (XX) 9XXXX-XXXX
- *  - 10 dígitos: (XX) XXXXX-XXXX
- *  - outros: retorna como estão.
- */
-export const formatPhone = (raw: string | undefined | null): string => {
-  const d = digitsOnly(raw);
-  if (!isValidPhone(d)) return raw ?? "";
-  if (d.length === MAX_PHONE_LENGTH) {
-    return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7, 11)}`;
-  }
-  return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6, 10)}`;
-};
-
-/**
- * Normaliza telefone para dígitos (sem perder o valor original caso
- * não seja um formato brasileiro reconhecido).
- */
-export const normalizePhone = (raw: string | undefined | null): string | undefined => {
-  const d = digitsOnly(raw);
-  return (d.length === 10 || d.length === MAX_PHONE_LENGTH) ? d : (raw?.trim() || undefined);
-};
-
-/**
- * Valida CEP (8 dígitos).
- */
-export const isValidCep = (raw: string): boolean => digitsOnly(raw).length === MAX_CEP_LENGTH;
-
-/**
- * Formata CEP: XXXXX-XXX.
- */
-export const formatCep = (raw: string | undefined | null): string => {
-  const d = digitsOnly(raw);
-  if (d.length !== MAX_CEP_LENGTH) return raw ?? "";
-  return `${d.slice(0, 5)}-${d.slice(5, 8)}`;
-};
-
-/**
- * Máscaras VISUAIS progressivas (digitção → exibição).
- * O valor gravado continua sendo só dígitos; estas funções servem ao `value`
- * do input, aplicando a pontuação enquanto o usuário digita:
- *   22816315000144 → 22.816.315/0001-44
- *   8330530760      → (83) 3053-0760
- *   11987654321     → (11) 98765-4321
- *   88701600        → 88701-600
- * Os separadores só aparecem quando já existe dígito depois deles — assim o
- * Backspace apaga sempre o dígito certo, sem "lutar" com a máscara.
- */
-export const maskCnpj = (raw: string | undefined | null): string => {
-  const d = digitsOnly(raw).slice(0, MAX_CNPJ_LENGTH);
-  if (d.length <= 2) return d;
-  let out = d.slice(0, 2);
-  if (d.length > 2) out += `.${d.slice(2, 5)}`;
-  if (d.length > 5) out += `.${d.slice(5, 8)}`;
-  if (d.length > 8) out += `/${d.slice(8, 12)}`;
-  if (d.length > 12) out += `-${d.slice(12, 14)}`;
-  return out;
-};
-
-export const maskPhone = (raw: string | undefined | null): string => {
-  const d = digitsOnly(raw).slice(0, MAX_PHONE_LENGTH);
-  if (d.length <= 2) return d;
-  const rest = d.slice(2);
-  // 11 dígitos → (XX) 9XXXX-XXXX (5+4); 10 → (XX) XXXX-XXXX (4+4).
-  const split = d.length === MAX_PHONE_LENGTH ? 5 : 4;
-  const body = rest.length > split ? `${rest.slice(0, split)}-${rest.slice(split)}` : rest;
-  return `(${d.slice(0, 2)}) ${body}`;
-};
-
-export const maskCep = (raw: string | undefined | null): string => {
-  const d = digitsOnly(raw).slice(0, MAX_CEP_LENGTH);
-  if (d.length <= 5) return d;
-  return `${d.slice(0, 5)}-${d.slice(5, 8)}`;
-};
-
-/**
- * Formata a chave de acesso de NF-e em grupos para facilitar conferência:
- *   xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx xxxx
- * (11 grupos de 4 dígitos). O valor no banco continua sendo os 44 dígitos.
- */
-export const formatAccessKeyGrouped = (raw: string | undefined | null): string => {
-  const d = digitsOnly(raw);
-  if (d.length !== 44) return raw ?? "";
+/** Agrupa a chave de acesso NF-e (44 dígitos) em blocos de 4 com espaços. */
+export function formatAccessKeyGrouped(value: string | null | undefined): string {
+  const digits = digitsOnly(value);
+  if (digits.length !== 44) return digits;
   const groups: string[] = [];
-  for (let i = 0; i < d.length; i += 4) {
-    groups.push(d.slice(i, i + 4));
+  for (let i = 0; i < digits.length; i += 4) {
+    groups.push(digits.slice(i, i + 4));
   }
   return groups.join(" ");
-};
+}
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CPF — máscara visual + validação dos dígitos verificadores
-// ═══════════════════════════════════════════════════════════════════════════
+// ─── Normalização ────────────────────────────────────────────────────────────
 
-const MAX_CPF_LENGTH = 11;
+/** Normaliza CNPJ para somente dígitos. */
+export const normalizeCnpj = (value: string | null | undefined): string => digitsOnly(value);
 
-/** Valida CPF pelos dois dígitos verificadores (somente 11 dígitos). */
-export const isValidCpf = (raw: string): boolean => {
-  const d = digitsOnly(raw);
-  if (d.length !== MAX_CPF_LENGTH) return false;
-  if (/^(\d)\1{10}$/.test(d)) return false;
+/** Normaliza CPF para somente dígitos. */
+export const normalizeCpf = (value: string | null | undefined): string => digitsOnly(value);
 
-  const checkDigit = (base: string): number => {
-    let sum = 0;
-    for (let i = 0; i < base.length; i++) {
-      sum += Number(base[i]) * (base.length + 1 - i);
+/** Normaliza telefone para somente dígitos. */
+export const normalizePhone = (value: string | null | undefined): string => digitsOnly(value);
+
+/** Normaliza CEP para somente dígitos. */
+export const normalizeCep = (value: string | null | undefined): string => digitsOnly(value);
+
+/** Normaliza moeda: remove tudo que não é dígito nem ponto decimal. */
+export function normalizeCurrency(value: string | null | undefined): string {
+  const cleaned = (value ?? "").replace(/\D/g, "").replace(/(\d{2})$/, ".$1");
+  const num = Number(cleaned);
+  if (!isFinite(num)) return "";
+  return String(num);
+}
+
+/** Normaliza chave de acesso NF-e para somente dígitos 44. */
+export function normalizeAccessKey(value: string | null | undefined): string {
+  const digits = digitsOnly(value);
+  return digits.slice(0, 44);
+}
+
+// ─── Validação ───────────────────────────────────────────────────────────────
+
+/** Valida CPF pelos dígitos verificadores. */
+export function isValidCpf(value: string | null | undefined): boolean {
+  const digits = digitsOnly(value);
+  if (digits.length !== 11) return false;
+  if (/^(\d)\1{10}$/.test(digits)) return false; // repetido
+  return cpfCheckDigit(digits) === digits.slice(9);
+}
+
+/** Valida CNPJ pelos dígitos verificadores. */
+export function isValidCnpj(value: string | null | undefined): boolean {
+  const digits = digitsOnly(value);
+  if (digits.length !== 14) return false;
+  if (/^(\d)\1{13}$/.test(digits)) return false; // repetido
+  return cnpjCheckDigit(digits) === digits.slice(12);
+}
+
+/** Valida chave de acesso NF-e (44 dígitos) com DV. */
+export function isValidAccessKey(value: string | null | undefined): boolean {
+  const digits = digitsOnly(value);
+  if (digits.length !== 44) return false;
+  if (!/^\d{44}$/.test(digits)) return false;
+  const base = digits.slice(0, 43);
+  const dvProvided = digits.slice(43);
+  let sum = 0;
+  for (let i = 0; i < base.length; i++) {
+    sum += Number(base[i]) * (44 - i);
+  }
+  const remainder = sum % 11;
+  const dvExpected = remainder < 2 ? "0" : String(11 - remainder);
+  return dvProvided === dvExpected;
+}
+
+// ─── Máscaras dinâmicas ──────────────────────────────────────────────────────
+
+export function maskCnpj(value: string | null | undefined): string {
+  return applyCNPJ(digitsOnly(value));
+}
+
+export function maskCpf(value: string | null | undefined): string {
+  return applyCPF(digitsOnly(value));
+}
+
+export function maskPhone(value: string | null | undefined): string {
+  const digits = digitsOnly(value);
+  // celular: 10 ou 11 dígitos
+  if (digits.length <= 10) {
+    if (digits.length < 6) return digits;
+    if (digits.length <= 6) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
     }
-    const remainder = (sum * 10) % 11;
-    return remainder === 10 ? 0 : remainder;
-  };
-
-  return (
-    Number(d[9]) === checkDigit(d.slice(0, 9)) &&
-    Number(d[10]) === checkDigit(d.slice(0, 10))
-  );
-};
-
-/** Formata CPF completo como 000.000.000-00 (valor não padronizado volta como está). */
-export const formatCpf = (raw: string | undefined | null): string => {
-  const d = digitsOnly(raw);
-  if (d.length !== MAX_CPF_LENGTH) return raw ?? "";
-  return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9, 11)}`;
-};
-
-/** Máscara progressiva de CPF (digitção → exibição; o valor gravado é só dígitos). */
-export const maskCpf = (raw: string | undefined | null): string => {
-  const d = digitsOnly(raw).slice(0, MAX_CPF_LENGTH);
-  if (d.length <= 3) return d;
-  let out = d.slice(0, 3);
-  if (d.length > 3) out += `.${d.slice(3, 6)}`;
-  if (d.length > 6) out += `.${d.slice(6, 9)}`;
-  if (d.length > 9) out += `-${d.slice(9, 11)}`;
-  return out;
-};
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Normalização — o BANCO guarda sempre o valor normalizado (sem máscara)
-// ═══════════════════════════════════════════════════════════════════════════
-
-/** CNPJ → 14 dígitos (valores legados que não são 14 dígitos voltam como estão). */
-export const normalizeCnpj = (raw: string | undefined | null): string => {
-  const d = digitsOnly(raw);
-  return d.length === MAX_CNPJ_LENGTH ? d : (raw?.trim() ?? "");
-};
-
-/** CEP → 8 dígitos. */
-export const normalizeCep = (raw: string | undefined | null): string => {
-  const d = digitsOnly(raw);
-  return d.length === MAX_CEP_LENGTH ? d : (raw?.trim() ?? "");
-};
-
-/**
- * Chave de acesso NF-e → somente dígitos, independentemente de espaços,
- * pontos, hífens ou quebras de linha inseridos pelo OCR.
- */
-export const normalizeAccessKey = (raw: string | undefined | null): string =>
-  digitsOnly(raw);
-
-/** Códigos de UF usados nos 2 primeiros dígitos da chave de acesso NF-e. */
-const NF_ACCESS_KEY_UF_CODES = new Set([
-  "11", "12", "13", "14", "15", "16", "17", "21", "22", "23", "24",
-  "25", "26", "27", "28", "29", "31", "32", "33", "35", "41", "42",
-  "43", "50", "51", "52", "53", "91",
-]);
-
-/**
- * Valida a ESTRUTURA de uma chave de acesso de 44 dígitos:
- *  • 44 dígitos;  • UF (2) válida;  • AAMM com mês plausível;
- *  • modelo da NF-e (55 = NF-e, 65 = NFC-e).
- * Não é criptografia — apenas evita aceitar uma sequência de 44 dígitos que
- * não faz sentido como chave (ex.: número de série lido por engano).
- */
-export const isValidAccessKey = (raw: string | undefined | null): boolean => {
-  const d = digitsOnly(raw);
-  if (d.length !== 44) return false;
-  if (!NF_ACCESS_KEY_UF_CODES.has(d.slice(0, 2))) return false;
-  const month = Number(d.slice(4, 6));
-  if (!(month >= 1 && month <= 12)) return false;
-  const model = d.slice(20, 22);
-  return model === "55" || model === "65";
-};
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Moeda — exibição "R$ 0,00" na tela; valor numérico normalizado no banco
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Token monetário no padrão brasileiro: opcionalmente "R$", milhar com ponto
- * e decimais com vírgula ("R$ 1.323,50") ou número com ponto decimal legado
- * ("12.5").
- */
-export const currencyRe = /^R?\$?\s*-?\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?$|^R?\$?\s*-?\d+(?:[.,]\d{1,2})?$/;
-
-/**
- * Converte qualquer representação monetária digitada/extraída para um número
- * utilizável pelo banco (string com ponto decimal, ex.: "1323.5").
- *  • "R$ 1.323,50" → "1323.5"  (vírgula = decimal, ponto = milhar)
- *  • "12.5"        → "12.5"    (sem vírgula → ponto é decimal)
- *  • "1.323"       → "1323"    (padrão de milhar brasileiro)
- */
-export const normalizeCurrency = (raw: string | number | undefined | null): string => {
-  if (raw == null) return "";
-  if (typeof raw === "number") return String(raw);
-  const clean = raw.replace(/R\$\s?/gi, "").trim();
-  if (!clean) return "";
-  if (clean.includes(",")) {
-    const value = Number(clean.replace(/\./g, "").replace(",", "."));
-    return isFinite(value) ? String(value) : "";
+    if (digits.length <= 7) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    }
+    // 8-10 dígitos: fixo
+    if (digits.length === 8) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    }
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
   }
-  if (/^-?\d{1,3}(?:\.\d{3})+$/.test(clean)) {
-    return clean.replace(/\./g, "");
+  // 11 dígitos -> celular com dígito
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
   }
-  const value = Number(clean.replace(/[^\d.-]/g, ""));
-  return isFinite(value) ? String(value) : "";
-};
+  // acima de 11 dígitos, apenas os 11 primeiros
+  return maskPhone(digits.slice(0, 11));
+}
 
-/** Formata um valor numérico/decimal como moeda brasileira: R$ 1.323,50. */
-export const formatCurrency = (value: number | string | undefined | null): string => {
-  if (value == null || value === "") return "";
-  const normalized = normalizeCurrency(value);
-  if (!normalized) return typeof value === "string" ? value : "";
-  const n = Number(normalized);
-  if (!isFinite(n)) return typeof value === "string" ? value : "";
-  const [intPart, decPart] = n.toFixed(2).split(".");
-  const int = (intPart ?? "0").replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `R$ ${int},${decPart ?? "00"}`;
-};
+export function maskCep(value: string | null | undefined): string {
+  const digits = digitsOnly(value);
+  if (digits.length <= 5) return digits;
+  if (digits.length === 6) {
+    return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+  }
+  if (digits.length === 7) {
+    return `${digits.slice(0, 5)}-${digits.slice(5, 7)}`;
+  }
+  return `${digits.slice(0, 5)}-${digits.slice(5, 8)}`;
+}
 
-/**
- * Máscara VISUAL progressiva de moeda para o campo em digitação:
- * 1323,5 → R$ 1.323,5 · 1323 → R$ 1.323 · 12.5 → R$ 12,5
- * Não inventa casas decimais: o que foi digitado é o que aparece, separador a
- * separador, para que o Backspace apague sempre o dígito certo.
- * O valor gravado continua sendo o original (normalizeCurrency no submit).
- */
-export const maskCurrency = (raw: string | undefined | null): string => {
-  const s = (raw ?? "").replace(/R\$\s?/gi, "");
-  if (!s) return "";
-  const hasComma = s.includes(",");
-  const parts = s.split(",");
-  const intRaw = parts[0] ?? "";
-  const decRaw = hasComma ? (parts.slice(1).join("").replace(/\D/g, "").slice(0, 2)) : "";
-  // Com vírgula, o ponto é separador de milhar; sem vírgula, o último ponto é
-  // decimal legado ("12.5") e os demais são milhar.
-  let intDigits: string;
-  if (hasComma) {
-    intDigits = digitsOnly(intRaw);
+export function maskCurrency(value: string | null | undefined): string {
+  const digits = (value ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  // trata o último par de dígitos como parte decimal (se já tem 2 ou mais)
+  const total = digits.length;
+  let integer, decimal;
+  if (total <= 2) {
+    integer = "";
+    decimal = digits.padEnd(2, "0");
   } else {
-    const lastDot = intRaw.lastIndexOf(".");
-    if (lastDot >= 0 && intRaw.length - lastDot - 1 !== 3) {
-      intDigits = digitsOnly(intRaw.slice(0, lastDot)) || "0";
-      const legacyDec = digitsOnly(intRaw.slice(lastDot + 1)).slice(0, 2);
-      return `R$ ${groupThousands(intDigits)}${legacyDec ? `,${legacyDec}` : ""}`;
-    }
-    intDigits = digitsOnly(intRaw);
+    decimal = digits.slice(total - 2);
+    integer = digits.slice(0, total - 2);
   }
-  const grouped = groupThousands(intDigits);
-  return `R$ ${grouped}${hasComma ? `,${decRaw}` : ""}`;
-};
+  const formatted = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ".") + (decimal ? `,${decimal}` : "");
+  return `R$ ${formatted}`;
+}
 
-const groupThousands = (digits: string): string =>
-  digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+// ─── Internos ────────────────────────────────────────────────────────────────
+
+function cpfCheckDigit(base: string): string {
+  // primeiro DV
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += Number(base[i]) * (10 - i);
+  }
+  let remainder = sum % 11;
+  const dv1 = remainder < 2 ? "0" : String(11 - remainder);
+  // segundo DV
+  sum = 0;
+  for (let i = 0; i < 10; i++) {
+    sum += Number(base[i] ?? dv1[i - 9]) * (11 - i);
+  }
+  remainder = sum % 11;
+  const dv2 = remainder < 2 ? "0" : String(11 - remainder);
+  return dv1 + dv2;
+}
+
+function cnpjCheckDigit(base: string): string {
+  const calc = (slice: string) => {
+    let sum = 0;
+    const weights = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    for (let i = 0; i < slice.length; i++) {
+      sum += Number(slice[i]) * weights[i];
+    }
+    const remainder = sum % 11;
+    return remainder < 2 ? "0" : String(11 - remainder);
+  };
+  const dv1 = calc(base);
+  return dv1 + calc(base + dv1);
+}
+
+function applyCNPJ(digits: string): string {
+  if (!digits) return "";
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 5) return `${digits.slice(0, 2)}.${digits.slice(2)}`;
+  if (digits.length <= 8) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5)}`;
+  if (digits.length <= 12) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
+  if (digits.length < 14) return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12, 14)}`;
+}
+
+function applyCPF(digits: string): string {
+  if (!digits) return "";
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
+  if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
+  if (digits.length < 11) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+  return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9, 11)}`;
+}
+
+// ─── Exportação adicional para compatibilidade com módulos importadores ──────
+
+export const DANFE_TRACKED_FIELDS = [
+  { field: "nfeNumber", label: "Número da NF-e" },
+  { field: "series", label: "Série" },
+  { field: "emissionDate", label: "Data de emissão" },
+  { field: "accessKey", label: "Chave de acesso" },
+  { field: "emitterCnpj", label: "CNPJ emitente" },
+  { field: "emitterName", label: "Razão social emitente" },
+  { field: "receiverCnpj", label: "CNPJ receptor" },
+  { field: "receiverName", label: "Razão social receptor" },
+  { field: "issuerCnpj", label: "CNPJ expedidor" },
+  { field: "issuerName", label: "Razão social expedidor" },
+] as const;
+
+export type DanfeTrackedField = typeof DANFE_TRACKED_FIELDS[number];
