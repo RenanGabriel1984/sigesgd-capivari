@@ -405,12 +405,15 @@ export function SupplierForm({ open, onOpenChange, mode, supplierId, preFilled, 
               </div>
               <div>
                 <Label>UF</Label>
-                <Input
-                  value={form.state}
-                  onChange={(e) => updateField("state", e.target.value.toUpperCase().slice(0, 2))}
-                  placeholder="SP"
-                  maxLength={2}
-                />
+                <div className="relative">
+                  <Input
+                    value={form.state.toUpperCase()}
+                    onChange={(e) => updateField("state", e.target.value.replace(/[^A-Za-z]/g, "").slice(0, 2))}
+                    placeholder="SP"
+                    maxLength={2}
+                    className="text-center font-semibold uppercase tracking-wider"
+                  />
+                </div>
               </div>
             </div>
             <p className="text-[10px] text-muted-foreground mt-1">

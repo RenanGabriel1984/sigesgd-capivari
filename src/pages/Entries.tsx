@@ -23,10 +23,11 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import { DanfeImportDialog, type DanfeImportResult } from "@/components/DanfeImportDialog";
+import { DanfeImportDialog } from "@/components/DanfeImportDialog";
 import { NfeReviewTable, type NfeReviewProduct, type NfeReviewRow } from "@/components/NfeReviewTable";
 import { NewEntryItemsEditor } from "@/components/NewEntryItemsEditor";
 import { SupplierForm } from "@/components/SupplierForm";
+import { FileUpload } from "@/components/FileUpload";
 
 import { formatCnpj, formatCurrency } from "@/lib/br-validators";
 
@@ -40,6 +41,8 @@ import {
 export type EntriesPageProps = {
   className?: string;
 };
+
+type FileId = { name: string; storageId: string };
 
 export function EntriesPage({ className }: EntriesPageProps) {
   const [search, setSearch] = useState("");
@@ -56,8 +59,8 @@ export function EntriesPage({ className }: EntriesPageProps) {
     areaId: "",
     supplierLot: "",
     observation: "",
-    nfeXmlFile: null as File | null,
-    danfeFile: null as File | null,
+    nfeXmlFile: null as FileId | null,
+    danfeFile: null as FileId | null,
   });
 
   const [newSupplierName, setNewSupplierName] = useState("");
@@ -84,25 +87,6 @@ export function EntriesPage({ className }: EntriesPageProps) {
   const handleSupplierCreated = useCallback((supplierId: string) => {
     setNewSupplierCreatedId(supplierId);
     setNewSupplierCreated(true);
-  }, []);
-
-  const handleNfeFile = useCallback((file: File) => {
-    setForm((prev) => ({ ...prev, nfeXmlFile: file }));
-  }, []);
-
-  const resetCreateForm = useCallback(() => {
-    setForm({
-      entryNumber: "",
-      invoiceNumber: "",
-      series: "001",
-      supplierId: null,
-      responsibleId: "",
-      areaId: "",
-      supplierLot: "",
-      observation: "",
-      nfeXmlFile: null,
-      danfeFile: null,
-    });
   }, []);
 
   const [reviewItems, setReviewItems] = useState<NfeReviewRow[]>([]);
@@ -222,7 +206,7 @@ export function EntriesPage({ className }: EntriesPageProps) {
             </div>
           </form>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setCreateOpen(false); resetCreateForm(); }}>
+            <Button variant="outline" onClick={() => { setCreateOpen(false); setForm((prev) => ({ ...prev, nfeXmlFile: null, danfeFile: null })); }}>
               Cancelar
             </Button>
             <Button onClick={() => { setCreateOpen(false); }}>
@@ -241,13 +225,19 @@ export function EntriesPage({ className }: EntriesPageProps) {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <Input
-              type="file"
+            <FileUpload
               accept="application/xml"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleNfeFile(file);
-              }}
+              label="Anexar XML da NF-e"
+              onUpload={(storageId) =>
+                setForm((prev) => ({
+                  ...prev,
+                  nfeXmlFile: {
+                    name: "nota-fiscal.xml",
+                    storageId,
+                  },
+                }))
+              }
+              storageId={form.nfeXmlFile?.storageId ?? undefined}
             />
             {form.nfeXmlFile && (
               <div className="rounded-md border p-4 text-sm">
@@ -262,7 +252,7 @@ export function EntriesPage({ className }: EntriesPageProps) {
             <Button variant="outline" onClick={() => setXmlOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={() => setXmlOpen(false)}>
+            <Button disabled={!form.nfeXmlFile} onClick={() => setXmlOpen(false)}>
               Importar XML
             </Button>
           </DialogFooter>

@@ -3,7 +3,6 @@ import React, { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -20,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { FileUpload } from "@/components/FileUpload";
 
 import { cn } from "@/lib/utils";
 
@@ -30,7 +30,7 @@ import { danfeFieldSummary } from "@/lib/danfe-ocr";
 
 export type DanfeImportResult = DanfeParseResult & {
   supplierId?: string;
-  file?: File;
+  file?: { name: string; storageId: string };
 };
 
 export interface DanfeImportDialogProps {
@@ -105,6 +105,7 @@ export function DanfeImportDialog({
   const [parsed, setParsed] = useState<DanfeParseResult>(EMPTY_PARSED);
   const [fieldSummary, setFieldSummary] = useState(danfeFieldSummary(EMPTY_PARSED));
   const [keyValid, setKeyValid] = useState(false);
+  const [file, setFile] = useState<{ name: string; storageId: string } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -113,13 +114,11 @@ export function DanfeImportDialog({
     setParsed(EMPTY_PARSED);
     setFieldSummary(danfeFieldSummary(EMPTY_PARSED));
     setKeyValid(false);
+    setFile(null);
   }, [open]);
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const chosen = event.target.files?.[0];
-    event.target.value = "";
-    if (!chosen) return;
-
+  useEffect(() => {
+    if (!file) return;
     const items: DanfeItem[] = [
       {
         index: 1,
@@ -160,11 +159,17 @@ export function DanfeImportDialog({
     setFieldSummary(danfeFieldSummary(parsed));
     setShowReview(true);
     setKeyValid(true);
-  };
+  }, [file]);
 
   const handleImport = () => {
     if (!parsed || !parsed.ok) return;
-    onImport({ ...parsed, supplierId: selectedSupplierId || undefined });
+    onImport({
+      ...parsed,
+      supplierId: selectedSupplierId || undefined,
+      file: file
+        ? { name: file.name, storageId: file.storageId }
+        : undefined,
+    });
   };
 
   const canImport = parsed.ok && !!parsed.accessKey;
@@ -183,10 +188,10 @@ export function DanfeImportDialog({
         <div className="space-y-3">
           {!showReview && (
             <div className="space-y-3">
-              <Input
-                type="file"
+              <FileUpload
                 accept=".pdf,image/*"
-                onChange={handleFileChange}
+                label="Anexar DANFE"
+                onUpload={(storageId) => setFile({ name: "danfe.pdf", storageId })}
               />
               <p className="text-xs text-muted-foreground">
                 Escolha um PDF com DANFE da NF-e ou uma imagem da DANFE (captura de

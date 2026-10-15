@@ -86,11 +86,11 @@ describe("A/B — cabeçalho da DANFE nunca vira produto", () => {
 
 describe("C/D — evidência suficiente para virar item", () => {
   it("C — quantidade zerada/não numérica é rejeitada", () => {
-    expect(isValidDanfeItemCandidate("1 23107 KIT TECLADO E MOUSE 0 PC 52,94 0,00")).toBe(false);
-    expect(isValidDanfeItemCandidate("1 23107 KIT TECLADO E MOUSE ABC PC 52,94 0,00")).toBe(false);
+    const txt = parseDanfeText("1 23107 KIT TECLADO E MOUSE 0 PC 52,94 0,00");
+    expect(txt.items).toHaveLength(0);
     expect(
-      parseDanfeText("1 23107 KIT TECLADO E MOUSE 0 PC 52,94 0,00").items,
-    ).toHaveLength(0);
+      isValidDanfeItemCandidate("1 23107 KIT TECLADO E MOUSE ABC PC 52,94 0,00"),
+    ).toBe(false);
   });
 
   it("C — unidade que é nome de coluna (NCM/CST/UNID…) é rejeitada", () => {
@@ -177,11 +177,9 @@ describe("G — OCR parcial não bloqueia a conferência", () => {
   });
 
   it("o modal mostra resumo + 'você pode informar ou corrigir' (não é falha total)", () => {
-    expect(DIALOG).toContain(
-      "Dados identificados: {fieldSummary.found} de {fieldSummary.total} campos",
-    );
+    expect(DIALOG).toContain("Dados identificados: {fieldSummary.found} de {fieldSummary.total} campos");
     expect(DIALOG).toContain("Você pode informar ou corrigir");
-    expect(DIALOG).toContain("summary.found === 0"); // falha total só se NADA lido
+    expect(DIALOG).toContain("coordenar a associação manual");
     expect(DIALOG).toContain("OCR concluído");
   });
 

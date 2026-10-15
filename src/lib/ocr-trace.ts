@@ -1,3 +1,3 @@
-import type { OcrTrace, ItemCandidateTrace } from "./danfe-ocr";
+export type { ItemCandidateTrace, OcrTrace } from "./danfe-ocr";
 
-export { buildOcrTrace, ItemCandidateTrace, type OcrTrace };
+export { buildOcrTrace } from "./danfe-ocr";
