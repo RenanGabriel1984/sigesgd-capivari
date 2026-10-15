@@ -1,29 +1,4 @@
-/**
- * Importador de DANFE / PDF / Imagem (OCR) — RODADA 10.
- *
- * ─── O QUE ESTE DIÁLOGO FAZ ─────────────────────────────────────────────────
- * Apenas LÊ o documento e entrega os dados à tela de conferência da Entrada.
- * Ele NÃO tem nenhuma mutation: nada é criado sem a sua confirmação.
- *
- * ─── PIPELINE ───────────────────────────────────────────────────────────────
- *  1. tenta a camada de texto do PDF (hasUsableTextLayer);
- *  2. rasteriza a 1.ª página a ~300 DPI e pré-processa (cinza + contraste);
- *  3. executa OCR da página inteira + OCR por regiões clássicas da DANFE
- *     (ocrDanfeRegions) e combina com mergeDanfeTexts;
- *  4. busca a chave de acesso com tentativa ESPECÍFICA (cabeçalho, região da
- *     chave, glifos normalizados, validação estrutural + dígito verificador);
- *  5. compara camada de texto × OCR de forma SEMÂNTICA (campos válidos),
- *     nunca apenas por quantidade de caracteres;
- *  6. apresenta "OCR concluído · X de 10 campos identificados" e qualquer
- *     campo ausente como PENDÊNCIA de conferência — nunca como falha total.
- *
- * ─── LAYOUT (RODADA 12) ─────────────────────────────────────────────────────
- * Modal proporcional: w-[calc(100vw-32px)] com max-w-[960px] e max-h-[85dvh],
- * centralizado; cabeçalho e rodapé fixos (shrink-0) e rolagem vertical apenas
- * na área central; grid de dados em grid-cols-1 sm:grid-cols-2 com células
- * min-w-0/max-w-full/overflow-hidden; a chave de acesso ocupa col-span-1
- * sm:col-span-2. Zero overflow horizontal.
- */
+/** @jsxImportSource react */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -47,7 +22,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { formatCnpj, formatCurrency, formatAccessKeyGrouped } from "@/lib/br-validators";
+import {
+  formatCnpj,
+  formatCurrency,
+  formatAccessKeyGrouped,
+} from "@/lib/br-validators";
 import {
   DANFE_REGIONS,
   danfeFieldSummary,
@@ -69,13 +48,20 @@ const TARGET_DPI = 300;
 const MIN_OCR_WIDTH = 1100;
 const OCR_LANG = "por";
 
-export type DanfeImportResult = DanfeParseResult & { supplierId?: string; file?: File };
+export type DanfeImportResult = DanfeParseResult & {
+  supplierId?: string;
+  file?: File;
+};
 
 export interface DanfeImportDialogProps {
   open: boolean;
   onClose: () => void;
   /** Fornecedores ativos — o usuário pode escolher qual a NF pertence. */
-  suppliers: Array<{ _id: string; legalName: string; cnpj?: string | null }>;
+  suppliers: Array<{
+    _id: string;
+    legalName: string;
+    cnpj?: string | null;
+  }>;
   /**
    * Entrega os dados LIDOS à conferência da Entrada. O diálogo não grava
    * nada: a efetivação acontece somente após confirmação humana.
@@ -96,10 +82,8 @@ const ENABLE_DEV_DIAGNOSTIC =
 let layerTextForDiag = "";
 let ocrTextForDiag = "";
 let regionTextsForDiag: string[] = [];
-let mergedOcrForDiag = "";
 let parsedLayerForDiag: DanfeParseResult | null = null;
 let parsedOcrForDiag: DanfeParseResult | null = null;
-let ocrPathForDiag: "text-layer" | "ocr" | "merged" = "merged";
 
 // ─── Canvas helpers ──────────────────────────────────────────────────────────
 
@@ -115,116 +99,80 @@ function scaleCanvas(source: HTMLCanvasElement, scale: number): HTMLCanvasElemen
   return canvas;
 }
 
-/** Garante largura mínima para o OCR (MIN_OCR_WIDTH). */
 function ensureOcrWidth(canvas: HTMLCanvasElement): HTMLCanvasElement {
   if (canvas.width >= MIN_OCR_WIDTH) return canvas;
-  return scaleCanvas(canvas, MIN_OCR_WIDTH / Math.max(1, canvas.width));
+  const scale = MIN_OCR_WIDTH / Math.max(1, canvas.width);
+  return scaleCanvas(canvas, scale);
 }
 
 async function loadImageCanvas(f: File): Promise<HTMLCanvasElement> {
-  const bitmap = await createImageBitmap(f);
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = () => reject(new Error("Não foi possível ler a imagem."));
+    i.src = URL.createObjectURL(f);
+  });
   const canvas = document.createElement("canvas");
-  canvas.width = bitmap.width;
-  canvas.height = bitmap.height;
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
   const ctx = canvas.getContext("2d");
-  if (ctx) ctx.drawImage(bitmap, 0, 0);
-  if (typeof bitmap.close === "function") bitmap.close();
-  return ensureOcrWidth(canvas);
-}
-
-function rotateCanvas(source: HTMLCanvasElement, degrees: number): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = source.width;
-  canvas.height = source.height;
-  const ctx = canvas.getContext("2d");
-  if (ctx) {
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.rotate((degrees * Math.PI) / 180);
-    ctx.drawImage(source, -source.width / 2, -source.height / 2);
-  }
+  if (!ctx) throw new Error("Contexto de canvas indisponível.");
+  ctx.drawImage(img, 0, 0);
+  URL.revokeObjectURL(img.src);
   return canvas;
 }
 
-/**
- * Pré-processamento para OCR: escala de cinza ponderada + normalização de
- * contraste (stretch min→max). Melhora bastante DANFE escaneada com ruído.
- */
+function rotateCanvas(
+  source: HTMLCanvasElement,
+  degrees: number,
+): HTMLCanvasElement {
+  const rad = (degrees * Math.PI) / 180;
+  const sin = Math.abs(Math.sin(rad));
+  const cos = Math.abs(Math.cos(rad));
+  const w = Math.round(source.width * cos + source.height * sin);
+  const h = Math.round(source.width * sin + source.height * cos);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return source;
+  ctx.translate(w / 2, h / 2);
+  ctx.rotate(rad);
+  ctx.drawImage(source, -source.width / 2, -source.height / 2);
+  return canvas;
+}
+
 function preprocessForOcr(canvas: HTMLCanvasElement): HTMLCanvasElement {
   const ctx = canvas.getContext("2d");
   if (!ctx) return canvas;
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-  // escala de cinza (luma ITU-R 601)
+  const { width, height } = canvas;
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = new Uint8ClampedArray(imageData.data);
   for (let i = 0; i < data.length; i += 4) {
-    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    data[i] = gray;
-    data[i + 1] = gray;
-    data[i + 2] = gray;
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+    const threshold = 150;
+    const v = gray > threshold ? 255 : 0;
+    data[i] = v;
+    data[i + 1] = v;
+    data[i + 2] = v;
   }
-  // contraste: encontra min/max e estica a faixa para 0..255
-  let min = 255;
-  let max = 0;
-  for (let i = 0; i < data.length; i += 4) {
-    if (data[i] < min) min = data[i];
-    if (data[i] > max) max = data[i];
-  }
-  const range = Math.max(1, max - min);
-  for (let i = 0; i < data.length; i += 4) {
-    const stretched = Math.min(255, Math.max(0, Math.round(((data[i] - min) * 255) / range)));
-    data[i] = stretched;
-    data[i + 1] = stretched;
-    data[i + 2] = stretched;
-  }
-  ctx.putImageData(imageData, 0, 0);
-  return canvas;
+  const out = document.createElement("canvas");
+  out.width = width;
+  out.height = height;
+  const outCtx = out.getContext("2d");
+  if (!outCtx) return canvas;
+  outCtx.putImageData(
+    new ImageData(data, width, height),
+    0,
+    0,
+  );
+  return out;
 }
 
-/**
- * OCR das regiões clássicas da DANFE (cabeçalho, chave, emitente,
- * destinatário, produtos, totais, dados adicionais) EM ADDIÇÃO à página
- * inteira — a chave de acesso ganha tratamento específico com isso.
- */
-async function ocrDanfeRegions(
-  canvas: HTMLCanvasElement,
-  worker: OcrWorker,
-): Promise<string[]> {
-  const texts: string[] = [];
-  for (const region of DANFE_REGIONS) {
-    const sx = Math.floor(region.x * canvas.width);
-    const sy = Math.floor(region.y * canvas.height);
-    const sw = Math.max(1, Math.floor(region.w * canvas.width));
-    const sh = Math.max(1, Math.floor(region.h * canvas.height));
-    const crop = document.createElement("canvas");
-    crop.width = sw;
-    crop.height = sh;
-    const ctx = crop.getContext("2d");
-    if (!ctx) continue;
-    ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
-    const processed = preprocessForOcr(crop);
-    try {
-      const { data } = await worker.recognize(processed);
-      if (data.text && data.text.trim()) texts.push(data.text);
-    } catch {
-      // região ilegível não derruba o fluxo — a página inteira já foi lida
-    }
-  }
-  return texts;
-}
-
-async function rasterizePdfFirstPage(data: ArrayBuffer): Promise<HTMLCanvasElement> {
-  const pdf = await pdfjsLib.getDocument({ data }).promise;
-  const page = await pdf.getPage(1);
-  // 300 DPI: escala = DPI / 72 (unidade padrão do PDF em pontos)
-  const viewport = page.getViewport({ scale: TARGET_DPI / 72 });
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.floor(viewport.width);
-  canvas.height = Math.floor(viewport.height);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas indisponível para rasterizar o PDF.");
-  await page.render({ canvasContext: ctx, viewport }).promise;
-  await pdf.destroy();
-  return ensureOcrWidth(canvas);
-}
+// ─── Extração da camada textual do PDF ──────────────────────────────────────
 
 async function readPdfTextLayer(data: ArrayBuffer): Promise<string> {
   try {
@@ -243,6 +191,29 @@ async function readPdfTextLayer(data: ArrayBuffer): Promise<string> {
 }
 
 // ─── Célula de dado da conferência ───────────────────────────────────────────
+
+function DataCell({
+  label,
+  value,
+  mono,
+  wide,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  wide?: boolean;
+}) {
+  const display =
+    value && mono ? formatAccessKeyGrouped(value) : value;
+  return (
+    <div className="min-w-0 overflow-hidden">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={cn("mt-0.5 truncate text-sm text-foreground", wide && "col-span-1 sm:col-span-2", mono && "font-mono text-xs")}>
+        {display}
+      </dd>
+    </div>
+  );
+}
 
 // ── Diagnóstico de desenvolvimento (Rodada 15) ──────────────────────────
 
@@ -270,266 +241,239 @@ function OcrDiagnosticCard({ trace }: { trace: NonNullable<typeof diagnostic> })
       area.value = json;
       document.body.appendChild(area);
       area.select();
-      try {
-        document.execCommand("copy");
-      } finally {
-        document.body.removeChild(area);
-      }
+      document.execCommand("copy");
+      document.body.removeChild(area);
     }
   }, [json]);
 
+  const jsonDps = /^data:/.test(json);
+
   return (
-    <section className="space-y-3 rounded-lg border bg-muted/40 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Diagnóstico de desenvolvimento (Rodada 15)
+    <div className="rounded-xl border border-muted bg-muted/40 p-4 text-xs">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-foreground">
+          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+          Diagnóstico de desenvolvimento — relatório do OCR
         </span>
-        <span className="text-[10px] uppercase text-muted-foreground">{trace.path}</span>
-        <Button variant="outline" size="sm" onClick={copy} className="h-7 text-xs">
-          Copiar relatório JSON
-        </Button>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-        <div className="rounded border p-2">
-          <p className="font-medium text-foreground">Camada textual do PDF</p>
-          <pre className="mt-1 max-h-32 overflow-auto font-mono text-[10px]">
-            {trace.rawText}
-          </pre>
-        </div>
-        <div className="rounded border p-2">
-          <p className="font-medium text-foreground">OCR da página inteira</p>
-          <pre className="mt-1 max-h-32 overflow-auto font-mono text-[10px]">
-            {trace.mergedOcr}
-          </pre>
+        <div className="flex gap-2">
+          <Button
+            className="h-7 text-xs"
+            variant="outline"
+            onClick={copy}
+          >
+            Copiar JSON
+          </Button>
         </div>
       </div>
-
-      <div className="grid grid-cols-1 gap-3">
-        <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          parser — camada textual
-        </h5>
-        <pre className="max-h-60 overflow-auto font-mono text-[10px]">
-          {JSON.stringify(trace.parsedLayer, null, 2)}
-        </pre>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3">
-        <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          parser — OCR (página + regiões)
-        </h5>
-        <pre className="max-h-60 overflow-auto font-mono text-[10px]">
-          {JSON.stringify(trace.parsedOcr, null, 2)}
-        </pre>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3">
-        <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          resultado final escolhido pelo diálogo
-        </h5>
-        <pre className="max-h-60 overflow-auto font-mono text-[10px]">
-          {JSON.stringify(trace.finalBest, null, 2)}
-        </pre>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3">
-        <h5 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          resumo X de 10 campos
-        </h5>
-        <pre className="max-h-40 overflow-auto font-mono text-[10px]">
-          {JSON.stringify(trace.fieldSummary, null, 2)}
-        </pre>
-      </div>
-    </section>
-  );
-}
-
-// ── Célula de dado da conferência ───────────────────────────────────────────
-
-function DataCell({
-  label,
-  value,
-  wide,
-  mono,
-}: {
-  label: string;
-  value: string;
-  wide?: boolean;
-  mono?: boolean;
-}) {
-  return (
-    <div
-      className={cn("min-w-0 max-w-full overflow-hidden", wide && "col-span-1 sm:col-span-2")}
-    >
-      <p className="text-[10px] uppercase tracking-wide text-muted-foreground truncate">{label}</p>
-      <p
-        className={cn(
-          "text-sm min-w-0 max-w-full overflow-hidden break-words",
-          mono && "break-all font-mono text-xs",
-        )}
-      >
-        {value || "—"}
-      </p>
+      <div className="break-words whitespace-pre-wrap">{json}</div>
     </div>
   );
 }
 
-// ─── Componente ──────────────────────────────────────────────────────────────
+// ─── Diálogo ─────────────────────────────────────────────────────────────────
 
-export function DanfeImportDialog({
+export default function DanfeImportDialog({
   open,
   onClose,
   suppliers,
   onImport,
 }: DanfeImportDialogProps) {
-  const [phase, setPhase] = useState<Phase>("select");
-  const [step, setStep] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
-  const [parsed, setParsed] = useState<DanfeImportResult | null>(null);
-  const [fileName, setFileName] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [inputRef, setInputRef] = useState<HTMLInputElement | null>(null);
+  const [phase, setPhase] = useState<Phase>("select");
+  const [step, setStep] = useState<string | null>(null);
+  const [parsed, setParsed] = useState<DanfeParseResult | null>(null);
+  const [fieldSummary, setFieldSummary] = useState(danfeFieldSummary({ ok: true }));
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [keyValid, setKeyValid] = useState(false);
 
-  const fieldSummary = useMemo(
-    () => danfeFieldSummary(parsed ?? { ok: false, items: [] }),
-    [parsed],
-  );
-  const summary = fieldSummary;
-  const keyValid = Boolean(parsed?.accessKey) && validateAccessKey44(parsed?.accessKey ?? "");
-
-  // Reinicia a cada abertura para não reaproveitar leituras antigas.
   useEffect(() => {
-    if (!open) {
-      setPhase("select");
-      setStep("");
-      setErrorMessage("");
-      setParsed(null);
-      setFile(null);
-      setFileName("");
-      setSelectedSupplierId("");
-    }
+    if (!open) return;
+    setFile(null);
+    setPhase("select");
+    setStep(null);
+    setParsed(null);
+    setFieldSummary(danfeFieldSummary({ ok: true }));
+    setSelectedSupplierId("");
+    setErrorMessage(null);
+    setKeyValid(false);
   }, [open]);
 
+  const startFileRef = useRef<File | null>(null);
 
+  const processFile = useCallback(
+    async (f: File) => {
+      startFileRef.current = f;
+      setFile(f);
+      setPhase("processing");
+      setErrorMessage(null);
 
-  const processFile = useCallback(async (f: File) => {
-    setFile(f);
-    setFileName(f.name);
-    setPhase("processing");
-    setStep("Lendo documento…");
-    setErrorMessage("");
-    try {
-      const isPdf = f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf");
-
-      let layerText = "";
-      let canvas: HTMLCanvasElement;
-
-      if (isPdf) {
-        const buffer = await f.arrayBuffer();
-        setStep("Lendo a camada de texto do PDF…");
-        const text = await readPdfTextLayer(buffer.slice(0));
-        layerText = text;
-        if (hasUsableTextLayer(text)) {
-          setStep("Camada de texto encontrada — rasterizando mesmo assim para comparação…");
-          void text;
-        }
-        setStep("Renderizando a 1.ª página a 300 DPI…");
-        canvas = await rasterizePdfFirstPage(buffer);
-      } else {
-        setStep("Carregando imagem…");
-        canvas = await loadImageCanvas(f);
-      }
-
-      setStep("Pré-processando (contraste)…");
-      const processed = preprocessForOcr(ensureOcrWidth(canvas));
-
-      setStep("OCR da página inteira…");
-      const worker = await createWorker(OCR_LANG);
-      let ocrText = "";
-      let regionTexts: string[] = [];
       try {
-        const first = await worker.recognize(processed);
-        ocrText = first.data.text ?? "";
-        if (!ocrText || ocrText.trim().length < 20) {
-          setStep("corrigindo rotação da página e tentando novamente…");
-          const rotated = rotateCanvas(processed, 180);
-          const retry = await worker.recognize(rotated);
-          ocrText = retry.data.text ?? ocrText;
+        let layerText = "";
+        let ocrText = "";
+        let regionTexts: string[] = [];
+        let ocrEndPath: "text-layer" | "ocr" | "merged" = "merged";
+
+        if (f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf")) {
+          setStep("Lendo camada de texto do PDF…");
+          const arrayBuffer = await f.arrayBuffer();
+          layerText = await readPdfTextLayer(arrayBuffer);
+
+          if (!hasUsableTextLayer(layerText)) {
+            setStep("Rasterizando página 1 para OCR…");
+            const img = await loadImageCanvas(
+              new File([arrayBuffer], "page-1.png", { type: "image/png" }),
+            );
+            const rotated = rotateCanvas(img, 0);
+            const preprocessed = preprocessForOcr(rotated);
+            const sized = ensureOcrWidth(preprocessed);
+
+            setStep("Executando OCR da página inteira…");
+            const worker = await createWorker(OCR_LANG);
+            const {
+              data: { text: fullText },
+            } = await worker.recognize(sized);
+            await worker.terminate();
+            ocrText = fullText;
+
+            setStep("Executando OCR por regiões da DANFE…");
+            const regional = await ocrDanfeRegions(sized, DANFE_REGIONS);
+            regionTexts = regional.map((r) => r.text);
+
+            const mergedOcr = mergeDanfeTexts(ocrText, regionTexts);
+            const parsedLayer = parseDanfeText(layerText);
+            const parsedOcr = parseDanfeText(mergedOcr);
+
+            // Diagnóstico de desenvolvimento (Rodada 15): rastreia os vetores reais
+            // do pipeline. Não interfere na escolha nem no comportamento do parser.
+            layerTextForDiag = layerText;
+            ocrTextForDiag = ocrText;
+            regionTextsForDiag = regionTexts;
+            parsedLayerForDiag = parsedLayer;
+            parsedOcrForDiag = parsedOcr;
+
+            // Determina qual caminho de fato venceu na escolha semântica do diálogo.
+            const chosenPath = isDanfeParseBetter(parsedOcr, parsedLayer)
+              ? "ocr"
+              : "merged";
+            ocrEndPath = chosenPath;
+
+            // Comparação SEMÂNTICA: ganha quem tem MAIS campos estruturados
+            // válidos. Nunca usamos só a quantidade de caracteres — um texto maior
+            // não é automaticamente melhor.
+            let best = isDanfeParseBetter(parsedOcr, parsedLayer)
+              ? parsedOcr
+              : parsedLayer;
+
+            if (!best.accessKey) {
+              // Tentativa ESPECÍFICA da chave: prioriza cabeçalho + região da chave,
+              // depois página inteira e regiões alternativas (normalização de
+              // glifos/remoção de espaços acontece dentro de extractAccessKey44).
+              const keyPriority = [
+                ...regionTexts.slice(0, 2),
+                mergedOcr,
+                ocrText,
+                layerText,
+              ]
+                .join("\n");
+              const key = extractAccessKey44(keyPriority);
+              if (key) best = { ...best, accessKey: key };
+            }
+
+            if (!best.ok) {
+              setPhase("error");
+              setErrorMessage(
+                "Não foi possível ler dados do documento. Se o arquivo for apenas uma foto, tente outro ângulo ou use a entrada manual.",
+              );
+              return;
+            }
+
+            setParsed({ ...best, file: f });
+            setPhase("review");
+            setFieldSummary(danfeFieldSummary(best));
+            setKeyValid(!!best.accessKey);
+            return;
+          }
+        } else {
+          setStep("Lendo imagem para OCR…");
+          const img = await loadImageCanvas(f);
+          const rotated = rotateCanvas(img, 0);
+          const preprocessed = preprocessForOcr(rotated);
+          const sized = ensureOcrWidth(preprocessed);
+
+          setStep("Executando OCR da página inteira…");
+          const worker = await createWorker(OCR_LANG);
+          const {
+            data: { text: fullText },
+          } = await worker.recognize(sized);
+          await worker.terminate();
+          ocrText = fullText;
+
+          setStep("Executando OCR por regiões da DANFE…");
+          const regional = await ocrDanfeRegions(sized, DANFE_REGIONS);
+          regionTexts = regional.map((r) => r.text);
+
+          const mergedOcr = mergeDanfeTexts(ocrText, regionTexts);
+          const parsedOcr = parseDanfeText(mergedOcr);
+
+          // Diagnóstico de desenvolvimento (Rodada 15): rastreia os vetores reais
+          // do pipeline. Não interfere na escolha nem no comportamento do parser.
+          layerTextForDiag = "";
+          ocrTextForDiag = ocrText;
+          regionTextsForDiag = regionTexts;
+          parsedLayerForDiag = null;
+          parsedOcrForDiag = parsedOcr;
+
+          ocrEndPath = "merged";
+
+          let best = parsedOcr;
+
+          if (!best.accessKey) {
+            const keyPriority = [
+              ...regionTexts.slice(0, 2),
+              mergedOcr,
+              ocrText,
+            ]
+              .join("\n");
+            const key = extractAccessKey44(keyPriority);
+            if (key) best = { ...best, accessKey: key };
+          }
+
+          if (!best.ok) {
+            setPhase("error");
+            setErrorMessage(
+              "Não foi possível ler dados do documento. Se o arquivo for apenas uma foto, tente outro ângulo ou use a entrada manual.",
+            );
+            return;
+          }
+
+          setParsed({ ...best, file: f });
+          setPhase("review");
+          setFieldSummary(danfeFieldSummary(best));
+          setKeyValid(!!best.accessKey);
+          return;
         }
-        setStep("OCR por regiões da DANFE (cabeçalho, chave, emitente…)…");
-        regionTexts = await ocrDanfeRegions(processed, worker);
-      } finally {
-        await worker.terminate().catch(() => undefined);
-        void regionTexts;
-      }
 
-      const mergedOcr = mergeDanfeTexts(ocrText, regionTexts);
-      const parsedLayer = parseDanfeText(layerText);
-      const parsedOcr = parseDanfeText(mergedOcr);
-
-      // Diagnóstico de desenvolvimento (Rodada 15): rastreia os vetores reais
-      // do pipeline. Não interfere na escolha nem no comportamento do parser.
-      layerTextForDiag = layerText;
-      ocrTextForDiag = ocrText;
-      regionTextsForDiag = regionTexts;
-      mergedOcrForDiag = mergedOcr;
-      parsedLayerForDiag = parsedLayer;
-      parsedOcrForDiag = parsedOcr;
-
-      // Determina qual caminho de fato venceu na escolha semântica do diálogo.
-      if (isDanfeParseBetter(parsedOcr, parsedLayer)) {
-        ocrPathForDiag = "ocr";
-      } else {
-        ocrPathForDiag = "merged";
-      }
-
-      // Comparação SEMÂNTICA: ganha quem tem MAIS campos estruturados
-      // válidos. Nunca usamos só a quantidade de caracteres — um texto maior
-      // não é automaticamente melhor.
-      let best = isDanfeParseBetter(parsedOcr, parsedLayer) ? parsedOcr : parsedLayer;
-
-      if (!best.accessKey) {
-        // Tentativa ESPECÍFICA da chave: prioriza cabeçalho + região da chave,
-        // depois página inteira e regiões alternativas (normalização de
-        // glifos/remoção de espaços acontece dentro de extractAccessKey44).
-        const keyPriority = [
-          ...regionTexts.slice(0, 2),
-          mergedOcr,
-          ocrText,
-          layerText,
-        ].join("\n");
-        const key = extractAccessKey44(keyPriority);
-        if (key) best = { ...best, accessKey: key };
-      }
-
-      if (!best.ok) {
+        // Nunca chegamos aqui: os dois ramos acima retornam.
+      } catch (err) {
         setPhase("error");
         setErrorMessage(
-          "Não foi possível ler dados do documento. Se o arquivo for apenas uma foto, tente outro ângulo ou use a entrada manual.",
+          err instanceof Error ? err.message : "Falha inesperada ao processar o documento.",
         );
-        return;
       }
+    },
+    [],
+  );
 
-      setParsed({ ...best, file: f });
-      setPhase("review");
-    } catch (err) {
-      setPhase("error");
-      setErrorMessage(
-        err instanceof Error ? err.message : "Falha inesperada ao processar o documento.",
-      );
-    }
-  }, []);
-
+  // Diagnóstico de desenvolvimento: rastreia vetores reais do pipeline para o relatório.
   const offDiag = ENABLE_DEV_DIAGNOSTIC
     ? {
         layerText: layerTextForDiag,
         ocrText: ocrTextForDiag,
         regionTexts: regionTextsForDiag,
-        mergedOcr: mergedOcrForDiag,
         parsedLayer: parsedLayerForDiag ?? { ok: false, items: [] },
         parsedOcr: parsedOcrForDiag ?? { ok: false, items: [] },
-        path: ocrPathForDiag,
       }
     : null;
 
@@ -540,11 +484,6 @@ export function DanfeImportDialog({
           offDiag.layerText ?? "",
           offDiag.ocrText ?? "",
           offDiag.regionTexts,
-          offDiag.mergedOcr ?? "",
-          offDiag.parsedLayer,
-          offDiag.parsedOcr,
-          parsed,
-          offDiag.path,
         );
       })()
     : null;
@@ -554,8 +493,8 @@ export function DanfeImportDialog({
     onImport({ ...parsed, supplierId: selectedSupplierId || undefined });
   };
 
-  const showNoData = phase === "review" && summary.found === 0;
-  const showReview = phase === "review" && summary.found > 0;
+  const showNoData = phase === "review" && fieldSummary.found === 0;
+  const showReview = phase === "review" && fieldSummary.found > 0;
 
   return (
     <Dialog open={open} onOpenChange={(value) => { if (!value) onClose(); }}>
@@ -575,13 +514,14 @@ export function DanfeImportDialog({
           {phase === "select" && (
             <div className="space-y-3">
               <input
-                ref={inputRef}
+                ref={setInputRef}
                 type="file"
                 accept=".pdf,image/*"
                 className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-2 file:text-sm file:font-medium hover:file:bg-accent"
                 onChange={(event) => {
                   const chosen = event.target.files?.[0];
                   event.target.value = "";
+
                   if (chosen) void processFile(chosen);
                 }}
               />
@@ -618,9 +558,6 @@ export function DanfeImportDialog({
           {/* ── Resumo OCR (hierarquia: concluído → X de 10 → pendências) ── */}
           {showReview && (
             <>
-              {ENABLE_DEV_DIAGNOSTIC && offDiag && diagnosticMemo && (
-                <OcrDiagnosticCard trace={diagnosticMemo} />
-              )}
               <div className="flex flex-wrap items-center gap-2">
                 <Badge className="bg-emerald-100 text-emerald-800">OCR concluído</Badge>
                 <span className="text-sm font-medium">
@@ -670,14 +607,23 @@ export function DanfeImportDialog({
               {/* ── Fornecedor ── */}
               <section className="space-y-2">
                 <h4 className="text-sm font-semibold">Fornecedor</h4>
-                <Select value={selectedSupplierId || "none"} onValueChange={(value) => setSelectedSupplierId(value === "none" ? "" : value)}>
+                <Select
+                  value={selectedSupplierId || "none"}
+                  onValueChange={(value) =>
+                    setSelectedSupplierId(value === "none" ? "" : value)
+                  }
+                >
                   <SelectTrigger className="h-9 w-full min-w-0">
                     <SelectValue placeholder="Selecionar fornecedor (opcional)" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Detectar automaticamente</SelectItem>
                     {suppliers.map((supplier) => (
-                      <SelectItem key={supplier._id} value={supplier._id} textValue={supplier.legalName}>
+                      <SelectItem
+                        key={supplier._id}
+                        value={supplier._id}
+                        textValue={supplier.legalName}
+                      >
                         <span className="min-w-0 truncate">{supplier.legalName}</span>
                         <span className="block min-w-0 truncate text-[10px] text-muted-foreground">
                           {`CNPJ: ${formatCnpj(supplier.cnpj)}`}
@@ -705,7 +651,7 @@ export function DanfeImportDialog({
                 </section>
               )}
 
-              {/* ── Transportador (separado do destinatário — §2 Rodada 13) ── */}
+              {/* ── Transportador ── */}
               {parsed?.transporterCnpj && (
                 <section className="space-y-2">
                   <h4 className="text-sm font-semibold">Transportador</h4>
@@ -714,79 +660,95 @@ export function DanfeImportDialog({
                       label="CNPJ do transportador"
                       value={formatCnpj(parsed?.transporterCnpj)}
                     />
+                    <DataCell label="RAZÃO SOCIAL" value={parsed?.transporterName ?? ""} />
                   </div>
                 </section>
               )}
 
               {/* ── Itens ── */}
-              <section className="space-y-2">
-                <h4 className="text-sm font-semibold">
-                  Itens ({parsed?.items.length ?? 0})
-                </h4>
-                {(parsed?.items.length ?? 0) === 0 ? (
-                  <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    Produto não identificado automaticamente. Faça a associação manual na
-                    conferência.
+              {parsed?.items && parsed.items.length > 0 && (
+                <section className="space-y-2">
+                  <h4 className="text-sm font-semibold">Itens identificados</h4>
+                  <div className="max-h-60 overflow-auto rounded-md border">
+                    <table className="w-full border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-muted/60">
+                          <th className="border-b px-2 py-1 text-left font-medium">Item</th>
+                          <th className="border-b px-2 py-1 text-left font-medium">Código</th>
+                          <th className="border-b px-2 py-1 text-left font-medium">Descrição</th>
+                          <th className="border-b px-2 py-1 text-right font-medium">Qtd</th>
+                          <th className="border-b px-2 py-1 text-right font-medium">Un</th>
+                          <th className="border-b px-2 py-1 text-right font-medium">Valor unit.</th>
+                          <th className="border-b px-2 py-1 text-right font-medium">Valor total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {parsed.items.map((item, index) => (
+                          <tr key={index} className="border-t">
+                            <td className="border-b px-2 py-1">{item.lineNumber ?? index + 1}</td>
+                            <td className="border-b px-2 py-1 font-mono">{item.code ?? "—"}</td>
+                            <td className="border-b px-2 py-1 truncate max-w-[220px]">
+                              {item.description}
+                            </td>
+                            <td className="border-b px-2 py-1 text-right">
+                              {item.quantity ?? "—"}
+                            </td>
+                            <td className="border-b px-2 py-1 text-right">
+                              {item.unit ?? "—"}
+                            </td>
+                            <td className="border-b px-2 py-1 text-right">
+                              {item.unitValue != null
+                                ? formatCurrency(item.unitValue)
+                                : "—"}
+                            </td>
+                            <td className="border-b px-2 py-1 text-right font-mono">
+                              {item.totalValue != null ? formatCurrency(item.totalValue) : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                ) : (
-                  <div className="min-w-0 max-w-full overflow-x-hidden space-y-2">
-                    {parsed?.items.map((item, index) => (
-                      <div
-                        key={`${item.lineNumber ?? index}`}
-                        className="min-w-0 max-w-full overflow-hidden rounded-lg border p-3"
-                      >
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <span className="font-mono">Item {item.lineNumber ?? index + 1}</span>
-                          {item.code && <span className="font-mono">cód. {item.code}</span>}
-                          {item.unit && <span>{item.unit}</span>}
-                        </div>
-                        <p className="text-sm font-medium break-words min-w-0 max-w-full overflow-hidden">
-                          {item.description}
-                        </p>
-                        <p className="text-xs font-mono text-muted-foreground">
-                          {item.quantity ?? "—"} × {item.unitValue != null ? formatCurrency(item.unitValue) : "—"}
-                          {item.totalValue != null && <> · total {formatCurrency(item.totalValue)}</>}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
+                </section>
+              )}
 
-              {/* ── Total + documento original ── */}
-              <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <DataCell
-                  label="Valor total da NF"
-                  value={parsed?.totalValue != null ? formatCurrency(parsed.totalValue) : ""}
-                />
-                <DataCell label="Documento original" value={fileName} />
-              </section>
+              {/* ── Totais ── */}
+              {(parsed?.totalValue != null || parsed?.afNumber || parsed?.empenhoNumber) && (
+                <section className="space-y-2">
+                  <h4 className="text-sm font-semibold">Totais e dados adicionais</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <DataCell
+                      label="Valor total da NF-e"
+                      value={parsed?.totalValue != null ? formatCurrency(parsed.totalValue) : ""}
+                      mono
+                    />
+                    <DataCell
+                      label="Número da AF"
+                      value={parsed?.afNumber ?? ""}
+                    />
+                    <DataCell
+                      label="Número do empenho"
+                      value={parsed?.empenhoNumber ?? ""}
+                    />
+                  </div>
+                </section>
+              )}
             </>
           )}
         </div>
 
-        <DialogFooter className="min-w-0 max-w-full shrink-0 overflow-x-hidden border-t bg-background px-5 py-3 sm:px-6">
-          <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="min-w-0 max-w-full text-xs text-muted-foreground">
-              Etapa de leitura: nada é criado sem a sua confirmação — a efetivação acontece na
-              conferência da Entrada.
-            </p>
-            <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  onClose();
-                }}
-              >
-                Importar NF-e XML
-              </Button>
-              {phase === "select" && (
-                <Button onClick={() => inputRef.current?.click()}>Escolher arquivo</Button>
-              )}
-              {showReview && (
-                <Button onClick={handleImport}>Conferir na Entrada</Button>
-              )}
-            </div>
+        <DialogFooter className="min-w-0 max-w-full shrink-0 border-t border-border px-5 pb-4 pt-3 sm:px-6">
+          <div className="flex w-full items-center gap-3">
+            <Button variant="outline" onClick={onClose}>
+              Fechar
+            </Button>
+            <Button
+              className="ml-auto"
+              onClick={handleImport}
+              disabled={!parsed || !file}
+            >
+              Usar na conferência
+            </Button>
           </div>
         </DialogFooter>
       </DialogContent>
@@ -794,5 +756,39 @@ export function DanfeImportDialog({
   );
 }
 
-/** Reexporta o tipo do resultado para a página da Entrada. */
-export type { DanfeParseResult, DanfeImportResult as DanfeImportPayload };
+// ─── OCR por regiões clássicas da DANFE ──────────────────────────────────────
+
+async function ocrDanfeRegions(
+  canvas: HTMLCanvasElement,
+  regions: Array<{ key: string; box: { x: number; y: number; w: number; h: number } }>,
+): Promise<Array<{ key: string; text: string }>> {
+  const results = await Promise.all(
+    regions.map(async (region) => {
+      const { x, y, w, h } = region.box;
+      const regionCanvas = document.createElement("canvas");
+      regionCanvas.width = Math.max(1, w);
+      regionCanvas.height = Math.max(1, h);
+      const ctx = regionCanvas.getContext("2d");
+      if (!ctx) return { key: region.key, text: "" };
+      ctx.drawImage(
+        canvas,
+        Math.max(0, x),
+        Math.max(0, y),
+        Math.min(canvas.width - x, w),
+        Math.min(canvas.height - y, h),
+        0,
+        0,
+        w,
+        h,
+      );
+      const sized = ensureOcrWidth(regionCanvas);
+      const worker = await createWorker(OCR_LANG);
+      const {
+        data: { text },
+      } = await worker.recognize(sized);
+      await worker.terminate();
+      return { key: region.key, text };
+    }),
+  );
+  return results;
+}

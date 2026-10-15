@@ -2,17 +2,7 @@ import {
   parseDanfeText,
   isValidDanfeItemCandidate,
   danfeFieldSummary,
-  buildOcrTrace as buildDialogOcrTrace,
 } from "./danfe-ocr";
-
-export {
-  buildDialogOcrTrace as buildOcrTrace,
-} from "./danfe-ocr";
-
-export type {
-  ItemCandidateTrace,
-} from "./danfe-ocr";
-
 export type ItemCandidateTrace = {
   line: number;
   raw: string;

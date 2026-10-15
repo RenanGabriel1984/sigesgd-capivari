@@ -53,16 +53,6 @@ export interface OcrFieldTrace {
   empenhoNumber?: string;
 }
 
-export interface OcrTrace {
-  path: "text-layer" | "ocr" | "merged";
-  rawText?: string;
-  mergedOcr?: string;
-  parsedLayer?: OcrFieldTrace;
-  parsedOcr?: OcrFieldTrace;
-  finalBest?: OcrFieldTrace;
-  fieldSummary: ReturnType<typeof danfeFieldSummary>;
-}
-
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
 export interface DanfeItem {
@@ -706,38 +696,6 @@ export function isDanfeParseBetter(
 
 // ─── Diagnóstico de desenvolvimento (RODADA 15) ──────────────────────────────
 
-/**
- * Constrói o rastro de diagnóstico a partir dos resultados já existentes na
- * execução real do diálogo. Este utilitário não executa OCR, não altera o texto
- * e não muda o comportamento do parser; ele apenas condensa os objetos que o
- * DanfeImportDialog já calculou.
- */
-export function buildOcrTrace(
-  rawText: string | undefined | null,
-  pageOcrText: string | undefined | null,
-  regionTexts: readonly string[],
-  mergedOcr: string,
-  parsedLayer: DanfeParseResult,
-  parsedOcr: DanfeParseResult,
-  finalBest: DanfeParseResult,
-  path: "text-layer" | "ocr" | "merged",
-): OcrTrace {
-  const regionTacoTexts = regionTexts.map((t, i) => {
-    const key = DANFE_REGIONS[i]?.key ?? `regiao_${i + 1}`;
-    return { key, text: t };
-  });
-  return {
-    path,
-    rawText: rawText ?? undefined,
-    pageOcrText: pageOcrText ?? undefined,
-    regionTexts: regionTacoTexts,
-    mergedOcr: mergedOcr || undefined,
-    parsedLayer: projectDiagnostic(parsedLayer),
-    parsedOcr: projectDiagnostic(parsedOcr),
-    finalBest: projectDiagnostic(finalBest),
-    fieldSummary: danfeFieldSummary(finalBest),
-  };
-}
 
 function splitDiagnosticLines(text: string): string[] {
   const seen = new Set<string>();

@@ -2,13 +2,6 @@ import {
   parseDanfeText,
   isValidDanfeItemCandidate,
   danfeFieldSummary,
-  buildOcrTrace as buildDialogOcrTrace,
-} from "./danfe-ocr";
-export {
-  buildDialogOcrTrace as buildOcrTrace,
-} from "./danfe-ocr";
-export type {
-  ItemCandidateTrace,
 } from "./danfe-ocr";
 
 export type ItemCandidateTrace = {
@@ -28,7 +21,7 @@ export type ItemCandidateTrace = {
   rejectReason?: string;
 };
 
-type OcrTrace = {
+export type OcrTrace = {
   rawTextLength: number;
   rawTextPreview: string;
   pageOcrLength: number;
@@ -39,7 +32,11 @@ type OcrTrace = {
   summary: ReturnType<typeof danfeFieldSummary>;
 };
 
-export function buildOcrTrace(rawText: string | undefined | null, pageOcrText: string | undefined | null, regionTexts: { key: string; text: string }[]): OcrTrace {
+export function buildOcrTrace(
+  rawText: string | undefined | null,
+  pageOcrText: string | undefined | null,
+  regionTexts: readonly string[],
+): OcrTrace {
   const rawLines = (rawText ?? "").split(/[\r\n]+/).filter((l) => l.trim().length > 0);
   const pageLines = (pageOcrText ?? "").split(/[\r\n]+/).filter((l) => l.trim().length > 0);
 
@@ -71,24 +68,24 @@ export function buildOcrTrace(rawText: string | undefined | null, pageOcrText: s
       rejectedReason = "linha rejeitada pela validação estrutural";
     }
     extractedItemCandidates.push({
-      line: pageLines.length,
-      raw: key.slice(0, 300),
+      line: extractedItemCandidates.length + 1,
+      raw: key,
       valid,
-      accepted: valid && structured !== null,
+      accepted: false,
       structured,
       rejectReason: rejectedReason,
     });
   }
 
-  const parsed = parseDanfeText([rawText ?? "", pageOcrText ?? "", ...regionTexts.map((r) => r.text)].join("\n"));
+  const parsed = parseDanfeText(rawText);
   const summary = danfeFieldSummary(parsed);
 
   return {
-    rawTextLength: rawLines.length,
-    rawTextPreview: rawLines.slice(0, 80).map((l) => l.trim()).join("\n"),
-    pageOcrLength: pageLines.length,
-    pageOcrPreview: pageLines.slice(0, 120).join("\n"),
-    regionTexts: regionTexts.map((r) => ({ key: r.key, length: r.text.split(/[\r\n]+/).filter((l) => l.trim().length > 0).length, preview: r.text.slice(0, 400) })),
+    rawTextLength: rawText?.length ?? 0,
+    rawTextPreview: rawText ?? "",
+    pageOcrLength: pageOcrText?.length ?? 0,
+    pageOcrPreview: pageOcrText ?? "",
+    regionTexts: [],
     extractedItemCandidates,
     parsed,
     summary,
