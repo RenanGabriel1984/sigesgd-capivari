@@ -26,6 +26,7 @@ import {
   type NfeItem,
   type ProductAssociationType,
   type ProductForMatch,
+  type ProductMatchSource,
   type ProductMatchStatus,
 } from "@/lib/nfe";
 
@@ -38,7 +39,7 @@ export type NfeReviewRow = {
   productId: string;
   matchStatus: ProductMatchStatus;
   matchScore: number;
-  matchSource?: string;
+  matchSource?: ProductMatchSource;
   matchReason?: string;
   associationType: ProductAssociationType;
   locationId?: string;

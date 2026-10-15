@@ -128,7 +128,7 @@ export function danfeFieldSummary(parsed: DanfeParseResult): DanfeFieldSummary {
     const value =
       field.campo === "items"
         ? parsed.items.length > 0
-        : Boolean(parsed[field.campo as keyof DanfeParseResult]);
+        : isFilledTrackedField(parsed, field.campo);
     if (value) {
       found++;
     } else {
@@ -137,6 +137,24 @@ export function danfeFieldSummary(parsed: DanfeParseResult): DanfeFieldSummary {
   }
 
   return { found, total: tracked.length, missing };
+}
+
+/**
+ * Conta SOMENTE valor real do campo, para o contador “X de 10 campos”
+ * refletir o estado verdadeiro da leitura:
+ *   • string: preenchida de fato (após trim) — vazio/não conta;
+ *   • número: finito (zero inclusive) — NaN/não conta;
+ *   • chave de acesso: os 44 dígitos COM dígito verificador válido;
+ *   • ausente/undefined: pendente — nunca é contado nem inventado.
+ */
+function isFilledTrackedField(parsed: DanfeParseResult, campo: string): boolean {
+  if (campo === "accessKey") {
+    return validateAccessKey44(parsed.accessKey);
+  }
+  const value = parsed[campo as keyof DanfeParseResult];
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number") return Number.isFinite(value);
+  return Boolean(value);
 }
 
 /**

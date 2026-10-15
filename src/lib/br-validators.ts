@@ -33,14 +33,39 @@ export const formatCep = (value: string | null | undefined): string => {
 
 /** Formata moeda para exibição: R$ X.XXX,XX. */
 export const formatCurrency = (value: string | number | null | undefined): string => {
-  const num = typeof value === "number" ? value : Number((value ?? "").replace(/\D/g, "").replace(/(\d{2})$/, ".$1")) || 0;
+  const num = parseCurrencyToNumber(value);
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
     currency: "BRL",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(num);
+  })
+    .format(num)
+    // Intl insere NBSP (U+00A0/U+202F) após "R$" — a tela exige espaço simples.
+    .replace(/[\u00a0\u202f]/g, " ");
 };
+
+/**
+ * Interpreta um valor monetário sem perder o separador decimal já digitado:
+ *   "R$ 1.323,50" → 1323.50 (vírgula brasileira) · "1323.5" → 1323.5 ·
+ *   "1.234.567" → 1234567 (milhar) · "132350" → 1323.50 (centavos compactos).
+ */
+function parseCurrencyToNumber(value: string | number | null | undefined): number {
+  if (typeof value === "number") return isFinite(value) ? value : 0;
+  const cleaned = (value ?? "").replace(/[^\d.,]/g, "");
+  if (!cleaned) return 0;
+  if (cleaned.includes(",")) {
+    // Formato pt-BR: pontos são milhar, vírgula é decimal.
+    return Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0;
+  }
+  if (cleaned.includes(".")) {
+    // "1.234.567" (milhar) x "1323.5" (decimal).
+    if (/^\d{1,3}(?:\.\d{3})+$/.test(cleaned)) return Number(cleaned.replace(/\./g, "")) || 0;
+    return Number(cleaned) || 0;
+  }
+  // Apenas dígitos: compacto em centavos ("132350" → 1323,50).
+  return Number(cleaned.replace(/(\d{2})$/, ".$1")) || 0;
+}
 
 /** Agrupa a chave de acesso NF-e (44 dígitos) em blocos de 4 com espaços. */
 export const formatAccessKeyGrouped = (value: string | null | undefined): string => {
@@ -67,12 +92,12 @@ export const normalizePhone = (value: string | null | undefined): string => digi
 /** Normaliza CEP para somente dígitos. */
 export const normalizeCep = (value: string | null | undefined): string => digitsOnly(value);
 
-/** Normaliza moeda: remove tudo que não é dígito nem ponto decimal. */
+/** Normaliza moeda: string numérica com ponto decimal para o banco. */
 export const normalizeCurrency = (value: string | null | undefined): string => {
-  const cleaned = (value ?? "").replace(/\D/g, "").replace(/(\d{2})$/, ".$1");
-  const num = Number(cleaned);
-  if (!isFinite(num)) return "";
-  return String(num);
+  // Mesma interpretação de formatCurrency: vírgula é decimal; ponto só é
+  // milhar no padrão 1.234.567 — assim "12.5" permanece 12.5 e "R$ 1.323,50"
+  // vira 1323.5 (sem perder o decimal digitado).
+  return String(parseCurrencyToNumber(value));
 };
 
 /** Normaliza chave de acesso NF-e para somente dígitos 44. */
@@ -96,7 +121,9 @@ export function isValidCnpj(value: string | null | undefined): boolean {
   const digits = digitsOnly(value);
   if (digits.length !== 14) return false;
   if (/^(\d)\1{13}$/.test(digits)) return false; // repetido
-  return cnpjCheckDigit(digits) === digits.slice(12);
+  // Os DVs são calculados sobre os 12 primeiros dígitos (base) — passar os 14
+  // dígitos faz os pesos estourarem e o cálculo resultar em NaN (falso negativo).
+  return cnpjCheckDigit(digits.slice(0, 12)) === digits.slice(12);
 }
 
 /**

@@ -79,6 +79,20 @@ function isDevEnvironment(): boolean {
   return Boolean(import.meta.env?.DEV);
 }
 
+/**
+ * Diagnóstico acessível da importação DANFE:
+ *   • em DESENVOLVIMENTO o botão aparece sempre, sem depender de nenhuma
+ *     condição que impeça a visualização (a dupla checagem
+ *     `DEV && flag` escondia o botão mesmo com a flag ativa);
+ *   • no build publicado (`import.meta.env.DEV === false`) ele só aparece
+ *     mediante opt-in explícito do operador
+ *     (localStorage.setItem("danfeDevDiagnostic", "1")) — sem a flag,
+ *     produção NUNCA exibe dados de diagnóstico.
+ */
+function isDiagnosticEnabled(): boolean {
+  return isDevEnvironment() || readDiagnosticFlag();
+}
+
 async function loadImageCanvas(f: File): Promise<HTMLCanvasElement> {
   const url = URL.createObjectURL(f);
   try {
@@ -238,7 +252,11 @@ async function extractPdfTextLayer(f: File): Promise<string> {
   for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
     const page = await doc.getPage(pageNumber);
     const content = await page.getTextContent();
-    pages.push(content.items.map((item: { str?: string }) => item.str ?? "").join(" "));
+    pages.push(
+      content.items
+        .map((item) => ("str" in item && typeof item.str === "string" ? item.str : ""))
+        .join(" "),
+    );
   }
   const text = pages.join("\n");
   if (!hasUsableTextLayer(text)) return "";
@@ -417,8 +435,7 @@ export function DanfeImportDialog({
 
     // Diagnóstico de desenvolvimento: flag lida continuamente para reagir a
     // localStorage.setItem("danfeDevDiagnostic", "1") feito depois da abertura.
-    const refreshDiagnostic = () =>
-      setDiagnosticEnabled(isDevEnvironment() && readDiagnosticFlag());
+    const refreshDiagnostic = () => setDiagnosticEnabled(isDiagnosticEnabled());
     refreshDiagnostic();
     const intervalId = window.setInterval(refreshDiagnostic, 1000);
     window.addEventListener("storage", refreshDiagnostic);
@@ -590,9 +607,8 @@ export function DanfeImportDialog({
 
                 {summary.found > 0 && (
                   <p className="text-xs text-muted-foreground">
-                    Você pode informar ou corrigir qualquer campo antes de seguir para a
-                    conferência. Itens não associados ficam pendentes para você coordenar a
-                    associação manual na conferência — nenhum produto é inventado.
+                    {"Você pode informar ou corrigir qualquer campo antes de seguir para a conferência. " +
+                      "Itens não associados ficam pendentes para você coordenar a associação manual na conferência — nenhum produto é inventado."}
                   </p>
                 )}
 

@@ -1,9 +1,10 @@
 "use client";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { toast } from "sonner";
+import { ClipboardCopy } from "lucide-react";
 
 import { AppShell } from "@/components/AppShell";
 import { SearchInput } from "@/components/SearchInput";
@@ -53,7 +54,13 @@ import {
 } from "@/components/ui/tooltip";
 
 import { cn } from "@/lib/utils";
-import { digitsOnly, formatCnpj, formatCurrency } from "@/lib/br-validators";
+import {
+  digitsOnly,
+  formatAccessKeyGrouped,
+  formatCnpj,
+  formatCurrency,
+} from "@/lib/br-validators";
+import { validateAccessKey44 } from "@/lib/danfe-ocr";
 import type { NfeData, NfeItem, SupplierForMatch } from "@/lib/nfe";
 import {
   buildEntryDraftFromNfe,
@@ -234,6 +241,11 @@ function LoadingSkeleton() {
 
 const OCR_ORIGIN_NOTE = "Dados extraídos por OCR de DANFE/PDF/imagem — conferir antes de confirmar.";
 
+// ── Referências da DANFE de teste Incotech (comparação — NUNCA injeção) ─────
+const INCOTECH_TEST_ACCESS_KEY =
+  "42260922816315000144550010000029671515440064";
+const INCOTECH_TEST_CNPJ = "22816315000144";
+
 export function EntriesPage({ className }: { className?: string }) {
   const entries = useQuery(api.entries.list);
   const suppliers = useQuery(api.suppliers.list);
@@ -287,6 +299,16 @@ export function EntriesPage({ className }: { className?: string }) {
   const productOptions = (products ?? []) as NfeReviewProduct[];
   const locationOptions = locations ?? [];
   const nfeSupplier = supplierOptions.find((s) => s._id === nfeSupplierId) ?? null;
+
+  // ── Conferência da chave de acesso (44 dígitos + dígito verificador) ─────
+  const nfeAccessKeyDigits = digitsOnly(nfeAccessKey);
+  const nfeAccessKeyValid = validateAccessKey44(nfeAccessKey);
+  /** Divergência entre a chave RECONHECIDA e a esperada na DANFE de teste Incotech. */
+  const nfeIncotechCheck = useMemo<boolean | null>(() => {
+    if (!nfeAccessKeyDigits) return null;
+    if (digitsOnly(nfe.emitterCnpj ?? "") !== INCOTECH_TEST_CNPJ) return null;
+    return nfeAccessKeyDigits === INCOTECH_TEST_ACCESS_KEY;
+  }, [nfeAccessKeyDigits, nfe.emitterCnpj]);
 
   const buildReviewRows = (items: NfeItem[]): NfeReviewRow[] =>
     items.map((item) => ({
@@ -417,7 +439,8 @@ export function EntriesPage({ className }: { className?: string }) {
     setNfeEmpenhoNumber(imported.empenhoNumber ?? "");
     setNfeObservation(OCR_ORIGIN_NOTE);
     setNfeItems(buildReviewRows(imported.items));
-    setNfeDocumentFile(result.file ?? null);
+    // O arquivo original (PDF/imagen) já chegou via onFile durante a leitura
+    // no diálogo — aqui só trocamos a origem (DANFE/OCR no lugar do XML).
     setNfeXmlFile(null);
 
     const duplicate = findDuplicateEntry(entries ?? [], {
@@ -433,6 +456,22 @@ export function EntriesPage({ className }: { className?: string }) {
 
     setDanfeOpen(false);
     setNfeOpen(true);
+  };
+
+  /** Copia a chave COMPLETA: 44 dígitos crus, sem agrupamento e sem reticências. */
+  const handleCopyAccessKey = async () => {
+    if (!nfeAccessKeyDigits) {
+      toast.error("Não há chave de acesso para copiar — informe os 44 dígitos lidos na DANFE.");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(nfeAccessKeyDigits);
+      toast.success(
+        `Chave de acesso copiada (${nfeAccessKeyDigits.length} dígitos, sem formatação).`,
+      );
+    } catch {
+      toast.error("Não foi possível copiar. Selecione o valor manualmente.");
+    }
   };
 
   const handleReviewContinue = () => {
@@ -974,11 +1013,64 @@ export function EntriesPage({ className }: { className?: string }) {
                   inputMode="numeric"
                   placeholder="Chave pendente de conferência"
                 />
-                <p className="mt-1 text-xs break-words text-muted-foreground">
-                  {nfeAccessKey.length === 44
-                    ? "44 dígitos informados — confira o dígito verificador antes de confirmar."
-                    : "Chave pendente de conferência — informe os 44 dígitos lidos na DANFE."}
+                {nfeAccessKeyDigits ? (
+                  <p
+                    className="mt-1 font-mono text-xs break-all text-muted-foreground"
+                    aria-label="Chave de acesso completa (44 dígitos)"
+                  >
+                    {formatAccessKeyGrouped(nfeAccessKeyDigits)}
+                  </p>
+                ) : null}
+                <p
+                  className={cn(
+                    "mt-1 text-xs break-words",
+                    nfeAccessKeyValid
+                      ? "text-emerald-700"
+                      : nfeAccessKeyDigits
+                        ? "text-amber-700"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {!nfeAccessKeyDigits
+                    ? "Chave pendente de conferência — informe os 44 dígitos lidos na DANFE."
+                    : nfeAccessKeyDigits.length !== 44
+                      ? `${nfeAccessKeyDigits.length} de 44 dígitos — informe a chave completa lida na DANFE (sem reticências).`
+                      : nfeAccessKeyValid
+                        ? "44 dígitos e dígito verificador VÁLIDOS — confira o valor impresso na DANFE antes de confirmar."
+                        : "44 dígitos informados, mas o dígito verificador NÃO confere — confira a chave impressa na DANFE."}
                 </p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 px-2 text-xs"
+                    onClick={() => void handleCopyAccessKey()}
+                  >
+                    <ClipboardCopy className="h-3 w-3" /> Copiar chave (44 dígitos)
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    {nfeAccessKeyDigits.length} de 44 dígitos
+                    {nfeAccessKeyDigits.length === 44
+                      ? nfeAccessKeyValid
+                        ? " · DV válido"
+                        : " · DV inválido"
+                      : ""}
+                  </span>
+                </div>
+                {nfeIncotechCheck === true ? (
+                  <p className="text-xs text-emerald-700">
+                    Chave reconhecida confere integralmente com a chave esperada da DANFE de teste
+                    Incotech.
+                  </p>
+                ) : null}
+                {nfeIncotechCheck === false ? (
+                  <p className="rounded-md border bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                    Divergência: a chave reconhecida não coincide com a chave esperada da DANFE de
+                    teste Incotech ({formatAccessKeyGrouped(INCOTECH_TEST_ACCESS_KEY)}). O valor
+                    reconhecido foi preservado para conferência manual.
+                  </p>
+                ) : null}
               </div>
 
               <div>
