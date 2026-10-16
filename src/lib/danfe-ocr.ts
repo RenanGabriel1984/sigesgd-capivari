@@ -202,6 +202,50 @@ function formatCnpjLocal(digits: string): string {
   return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12, 14)}`;
 }
 
+// ─── Tolerância ao ruído de OCR (glifos, rótulos e linhas adjacentes) ────────
+
+/**
+ * Glifos que o OCR troca com frequência em contexto NUMÉRICO: O→0, S→5, B→8,
+ * I/l→1, Z→2, G→6. Aplicado apenas onde se espera dígito — nunca nas palavras
+ * da descrição do produto.
+ */
+function normalizeDigitGlyphs(text: string): string {
+  return text
+    .replace(/[OoQ]/g, "0")
+    .replace(/[Il|!]/g, "1")
+    .replace(/[Ss]/g, "5")
+    .replace(/[Bb]/g, "8")
+    .replace(/[Zz]/g, "2")
+    .replace(/[Gg]/g, "6");
+}
+
+/**
+ * Dígitos de um texto lido por OCR: normaliza glifos confundíveis e mantém
+ * apenas números (descarta separadores de máscara/milhar).
+ */
+function digitsFromOcr(text: string | null | undefined): string {
+  if (!text) return "";
+  return normalizeDigitGlyphs(text).replace(/\D/g, "");
+}
+
+/**
+ * Data (dia/mês/ano) tolerando separadores inconsistentes do OCR — inclusive
+ * espaço ("28 / 09 / 2026") — normalizada para ISO (AAAA-MM-DD).
+ */
+function parseFlexibleDate(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  const match = raw.match(/(\d{1,2})\s*[/.,-]\s*(\d{1,2})\s*[/.,-]\s*(\d{2,4})/);
+  if (!match) return undefined;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  let year = Number(match[3]);
+  if (year < 100) year += 2000;
+  if (!(day >= 1 && day <= 31)) return undefined;
+  if (!(month >= 1 && month <= 12)) return undefined;
+  if (!(year >= 2000 && year <= 2100)) return undefined;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 // ─── Chave de acesso ──────────────────────────────────────────────────────────
 
 /**
@@ -289,6 +333,7 @@ interface ItemLine {
   index: number;
   code: string;
   description: string;
+  ncm?: string;
   quantity: number;
   unit: string;
   unitValue: number;
@@ -316,26 +361,183 @@ const FORBIDDEN_UNITS = new Set([
   "MERCADORIA",
 ]);
 
+/**
+ * Unidades usuais da DANFE — usadas para reconhecer a ordem [UNID QUANT] do
+ * layout clássico sem aceitar palavras quaisquer como unidade.
+ */
+const KNOWN_UNITS = new Set([
+  "PC", "PÇ", "UN", "UND", "UNID", "CX", "KG", "G", "MG", "L", "LT", "ML",
+  "MT", "M", "M2", "M3", "M²", "M³", "CM", "MM", "PAR", "PCT", "RL", "FD",
+  "DZ", "JG", "KIT", "TB", "SC", "BB", "GL", "AMP", "KWH", "MWH", "MES",
+  "TON", "T", "HR", "MIN", "DIA", "VERBA", "SERV", "PT", "FR", "GF", "LA",
+]);
+
 const HEADER_LINE_PATTERNS = [
   /DESCRI[ÇC][ÃA]O\s+DOS\s+PRODUTOS/i,
   /DESCRICAO\s+DOS\s+PRODUTOS/i,
   /VALOR\s+UNIT[ÁA]RIO/i,
   /ALIQ\.?\s+ICMS/i,
   /C[ÓO]D\.?\s*IGO/i,
+  /DADOS\s+DOS\s+PRODUTOS/i,
+  /N[ºo°]?\s*DO\s+PRODUTO/i,
 ];
 
-function isPriceToken(token: string): boolean {
-  return /^\d{1,3}(?:\.\d{3})*,\d{2}$/.test(token) || /^\d+,\d{2}$/.test(token);
+const ITEM_INDEX_RE = /^\d{1,3}$/;
+const ITEM_CODE_RE = /^\d{3,7}$/;
+const QUANTITY_TOKEN_RE = /^\d{1,9}(?:[.,]\d{1,4})?$/;
+const PRICE_TOKEN_RE = /^(?:\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2})$/;
+const ALPHA_UNIT_RE = /^[A-Za-zÀ-ÿ]{1,6}\.?$/;
+
+/**
+ * Rótulos de coluna da tabela de produtos: o OCR às vezes os cola DENTRO da
+ * linha do item ("… CHOCO NCM 84716053 CST 000 …"). São descartados na busca
+ * pela janela de valores — nunca como unidade/descrição.
+ */
+const ITEM_COLUMN_LABELS = new Set([
+  "NCM", "NCM/SH", "SH", "CST", "CSOSN", "CFOP", "UNID", "UNIDADE",
+  "QUANT", "QUANTIDADE", "QTDE", "QTD", "VU", "VT", "V.UNIT", "VUNIT",
+  "UNITARIO", "UNITÁRIO", "V.TOTAL", "VTOTAL", "ALIQ", "ICMS", "IPI",
+]);
+
+function isItemColumnLabel(token: string): boolean {
+  return ITEM_COLUMN_LABELS.has(token.toUpperCase());
+}
+
+interface ValueWindow {
+  start: number;
+  unit: string;
+  quantity: number;
+  unitValue: number;
+  totalValue: number;
 }
 
 function parsePrice(token: string): number {
-  const value = Number(token.replace(/\./g, "").replace(",", "."));
+  const hasComma = token.includes(",");
+  const value = hasComma
+    ? Number(token.replace(/\./g, "").replace(",", "."))
+    : Number(token);
   return isFinite(value) ? value : 0;
 }
 
 function parseQuantity(token: string): number {
-  if (!/^\d{1,9}(?:[.,]\d{1,4})?$/.test(token)) return NaN;
+  if (!QUANTITY_TOKEN_RE.test(token)) return NaN;
   return Number(token.replace(",", "."));
+}
+
+function normalizedUnit(token: string): string {
+  return token.replace(/[^A-Za-zÀ-ÿ]/g, "").toUpperCase();
+}
+
+/** Unidade plausível: sigla curta que NÃO é nome de coluna. */
+function isUnitToken(token: string): boolean {
+  if (!ALPHA_UNIT_RE.test(token)) return false;
+  const clean = normalizedUnit(token);
+  if (!clean) return false;
+  return !FORBIDDEN_UNITS.has(clean);
+}
+
+/** Unidade reconhecida no layout [UNID QUANT] (sigla da DANFE ou 2–3 letras). */
+function isKnownUnit(token: string): boolean {
+  if (!isUnitToken(token)) return false;
+  const clean = normalizedUnit(token);
+  if (KNOWN_UNITS.has(clean)) return true;
+  return /^[A-Z]{2,3}$/.test(token);
+}
+
+/**
+ * Localiza a JANELA de valores do item — quantidade, unidade, valor unitário e
+ * valor total — em QUALQUER posição da linha, sem depender do espaçamento nem
+ * do número de colunas entre a descrição e os valores. Aceita as duas ordens
+ * documentadas na DANFE ([QUANT UNID …] e [UNID QUANT …]), ignora colunas de
+ * ICMS/IPI coladas DEPOIS do total e pula rótulos de coluna que o OCR colou no
+ * meio da linha do item.
+ */
+function findItemValueWindow(tokens: string[]): ValueWindow | null {
+  const indexes: number[] = [];
+  const clean: string[] = [];
+  tokens.forEach((token, index) => {
+    if (isItemColumnLabel(token)) return;
+    indexes.push(index);
+    clean.push(token);
+  });
+
+  for (let i = 1; i <= clean.length - 4; i++) {
+    const first = clean[i];
+    const second = clean[i + 1];
+    const priceToken = clean[i + 2];
+    const totalToken = clean[i + 3];
+    if (!PRICE_TOKEN_RE.test(priceToken) || !PRICE_TOKEN_RE.test(totalToken)) continue;
+
+    // [quantidade] [unidade] [valor unitário] [valor total]
+    if (QUANTITY_TOKEN_RE.test(first) && isUnitToken(second)) {
+      const quantity = parseQuantity(first);
+      if (isFinite(quantity) && quantity > 0) {
+        return {
+          start: indexes[i],
+          unit: normalizedUnit(second),
+          quantity,
+          unitValue: parsePrice(priceToken),
+          totalValue: parsePrice(totalToken),
+        };
+      }
+    }
+
+    // [unidade] [quantidade] [valor unitário] [valor total]
+    if (QUANTITY_TOKEN_RE.test(second) && isKnownUnit(first)) {
+      const quantity = parseQuantity(second);
+      if (isFinite(quantity) && quantity > 0) {
+        return {
+          start: indexes[i],
+          unit: normalizedUnit(first),
+          quantity,
+          unitValue: parsePrice(priceToken),
+          totalValue: parsePrice(totalToken),
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Código de coluna da tabela de produtos (NCM/CST/CFOP) que o OCR pode ter
+ * colado ao fim da descrição. Números de 2 a 9 dígitos e NCM pontuado.
+ */
+function isTrailingColumnCode(token: string): boolean {
+  if (/^\d{2,9}$/.test(token)) return true; // CST/CFOP/NCM sem pontuação
+  if (/^\d{4}\.?\d{4}$/.test(token)) return true; // NCM pontuado (8471.6053)
+  if (/^\d{2}\.\d{3}\.\d{3}$/.test(token)) return false; // parece CNPJ parcial
+  return false;
+}
+
+/**
+ * Descrição do item a partir dos tokens entre o código e a janela de valores:
+ * códigos de coluna que vieram colados (NCM/CST/CFOP) são removidos do fim,
+ * sem mexer no texto real do produto.
+ */
+function normalizeItemDescription(tokens: string[]): { description: string; ncm?: string } {
+  let end = tokens.length;
+  let ncm: string | undefined;
+
+  while (end > 0) {
+    const token = tokens[end - 1];
+    if (isItemColumnLabel(token)) {
+      end--;
+      continue;
+    }
+    if (!isTrailingColumnCode(token)) break;
+    const digits = token.replace(/[.\s]/g, "");
+    if (!ncm && /^\d{8}$/.test(digits)) ncm = digits;
+    end--;
+  }
+
+  const description = tokens
+    .slice(0, end)
+    .join(" ")
+    .trim()
+    .replace(/[-–—]+$/, "")
+    .trim();
+  return { description, ncm };
 }
 
 /**
@@ -343,30 +545,15 @@ function parseQuantity(token: string): number {
  * quantidade > 0, unidade real (não nome de coluna) e valores. Cabeçalhos,
  * linhas curtas e ruído de OCR nunca viram produto.
  */
-function parseItemLine(rawLine: string | null | undefined): ItemLine | null {
-  if (!rawLine) return null;
-  const line = rawLine.trim().replace(/\s+/g, " ");
-  if (!line) return null;
-  if (HEADER_LINE_PATTERNS.some((pattern) => pattern.test(line))) return null;
-
-  const tokens = line.split(" ");
+function parseItemTokens(tokens: string[]): ItemLine | null {
   if (tokens.length < 6) return null;
-  if (!/^\d{1,3}$/.test(tokens[0])) return null;
-  if (!/^\d{3,6}$/.test(tokens[1])) return null;
+  if (!ITEM_INDEX_RE.test(tokens[0])) return null;
+  if (!ITEM_CODE_RE.test(tokens[1])) return null;
 
-  const totalToken = tokens[tokens.length - 1];
-  const unitPriceToken = tokens[tokens.length - 2];
-  const unitToken = tokens[tokens.length - 3];
-  const quantityToken = tokens[tokens.length - 4];
+  const window = findItemValueWindow(tokens);
+  if (!window) return null;
 
-  if (!isPriceToken(totalToken) || !isPriceToken(unitPriceToken)) return null;
-  if (!/^[A-Za-z]{1,6}$/.test(unitToken)) return null;
-  if (FORBIDDEN_UNITS.has(unitToken.toUpperCase())) return null;
-
-  const quantity = parseQuantity(quantityToken);
-  if (!isFinite(quantity) || quantity <= 0) return null;
-
-  const description = tokens.slice(2, tokens.length - 4).join(" ").trim();
+  const { description, ncm } = normalizeItemDescription(tokens.slice(2, window.start));
   if (description.length < 5) return null;
   if (!/[A-Za-zÀ-ÿ]/.test(description)) return null;
   if (HEADER_LINE_PATTERNS.some((pattern) => pattern.test(description))) return null;
@@ -375,11 +562,20 @@ function parseItemLine(rawLine: string | null | undefined): ItemLine | null {
     index: Number(tokens[0]),
     code: tokens[1],
     description,
-    quantity,
-    unit: unitToken.toUpperCase(),
-    unitValue: parsePrice(unitPriceToken),
-    totalValue: parsePrice(totalToken),
+    ncm,
+    quantity: window.quantity,
+    unit: window.unit,
+    unitValue: window.unitValue,
+    totalValue: window.totalValue,
   };
+}
+
+function parseItemLine(rawLine: string | null | undefined): ItemLine | null {
+  if (!rawLine) return null;
+  const line = rawLine.trim().replace(/\s+/g, " ");
+  if (!line) return null;
+  if (HEADER_LINE_PATTERNS.some((pattern) => pattern.test(line))) return null;
+  return parseItemTokens(line.split(" "));
 }
 
 export function isValidDanfeItemCandidate(
@@ -416,32 +612,79 @@ interface SectionData {
   address?: string;
 }
 
-function sectionLabelFor(line: string): SectionKey | undefined {
-  if (/TRANSPORTADOR|TRANSPORTADORA|REDESPACHO/i.test(line)) return "transportador";
-  if (/EXPEDI[ÇC][ÃA]O/i.test(line)) return "expedidor";
-  if (/DESTINAT[ÁA]RIO|REMETENTE/i.test(line)) return "destinatario";
-  if (/DADOS\s+DO\s+EMITENTE|\bEMITENTE\b/i.test(line)) return "emitente";
+const SECTION_PATTERNS: Array<{ key: SectionKey; re: RegExp }> = [
+  { key: "transportador", re: /TRANSPORTADOR(?:A)?|REDESPACHO/i },
+  { key: "expedidor", re: /EXPEDI[ÇC][ÃA]O/i },
+  { key: "destinatario", re: /DESTINAT[ÁA]RIO|REMETENTE|DESTINATARIO|RECEBEDOR/i },
+  { key: "emitente", re: /IDENTIFICA[ÇC][ÃA]O\s+DO\s+EMITENTE|\bEMITENTE\b/i },
+];
+
+interface SectionLabelMatch {
+  key: SectionKey;
+  index: number;
+  end: number;
+}
+
+function sectionLabelMatch(line: string): SectionLabelMatch | undefined {
+  for (const { key, re } of SECTION_PATTERNS) {
+    const found = line.match(re);
+    if (found) return { key, index: found.index ?? 0, end: (found.index ?? 0) + found[0].length };
+  }
   return undefined;
 }
 
-function findCnpj(line: string): string | undefined {
-  const labeled = line.match(
-    /CNPJ\s*[:\-]?\s*((?:\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2})|\d{14})/i,
+/** Siglas de UF válidas — evita confundir ruído de 2 letras com o estado. */
+const UF_LIST = new Set([
+  "AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS",
+  "MT", "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC",
+  "SE", "SP", "TO",
+]);
+
+/**
+ * CNPJ com tolerância ao OCR: aceita máscara com glifos trocados
+ * (O↔0, S↔5, B↔8, I↔1) e também os 14 dígitos sem pontuação. Um candidato só é
+ * aceito quando NÃO faz parte de uma sequência numérica maior — a chave de
+ * acesso de 44 dígitos, por exemplo, nunca é lida como CNPJ.
+ */
+function findCnpjCandidates(line: string): Array<{ raw: string; formatted: string }> {
+  const found: Array<{ raw: string; formatted: string }> = [];
+  const seen = new Set<string>();
+  const push = (raw: string, start: number) => {
+    const before = start > 0 ? line[start - 1] : "";
+    const after = start + raw.length < line.length ? line[start + raw.length] : "";
+    if (/[0-9A-Za-z]/.test(before) || /[0-9A-Za-z]/.test(after)) return;
+    const digits = digitsFromOcr(raw);
+    if (digits.length !== 14) return;
+    if (seen.has(digits)) return;
+    seen.add(digits);
+    found.push({ raw, formatted: formatCnpjLocal(digits) });
+  };
+
+  const glyph = "[0-9OoQIl|!SsBbZzGg]";
+  const masked = new RegExp(
+    `${glyph}{2}\\.?\\s*${glyph}{3}\\.?\\s*${glyph}{3}[/\\s]?${glyph}{4}[-.\\s]?${glyph}{2}`,
+    "g",
   );
-  const masked = line.match(/\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/);
-  const plain = labeled ? labeled[1] : masked ? masked[0] : line.match(/\b\d{14}\b/)?.[0];
-  if (!plain) return undefined;
-  const digits = plain.replace(/\D/g, "");
-  if (digits.length !== 14) return undefined;
-  return formatCnpjLocal(digits);
+  for (const match of line.matchAll(masked)) {
+    if (match.index !== undefined) push(match[0], match.index);
+  }
+
+  for (const match of line.matchAll(/\d{14}/g)) {
+    if (match.index !== undefined) push(match[0], match.index);
+  }
+
+  return found;
 }
 
-function nameLabel(line: string): string | undefined {
-  const match = line.match(/^(?:Raz[ãa]o\s+Social|Nome\s+Do\s+Destinat[áa]rio)\s*:\s*(.+)$/i);
-  if (!match) return undefined;
-  const value = match[1].trim();
-  return value || undefined;
+function formatCepLocal(value: string): string {
+  const digits = digitsFromOcr(value);
+  if (digits.length !== 8) return value;
+  return `${digits.slice(0, 5)}-${digits.slice(5, 8)}`;
 }
+
+/** Palavras de rótulo que NUNCA são razão social/nome. */
+const SECTION_WORD =
+  /^(?:REMETENTE|DESTINAT[ÁA]RIO|TRANSPORTADOR(?:A)?|EXPEDIDOR|EMITENTE|REDESPACHO|ENDERE[ÇC]O|MUNIC[ÍI]PIO|CIDADE|UF|INSCRI[ÇC][ÃA]O|FONE|CEP|DADOS|IDENTIFICA[ÇC][ÃA]O|DOCUMENTO|AUXILIAR|NATUREZA|PROTOCOLO)$/i;
 
 const NAME_BLACKLIST =
   /^(DANFE|NF-?e|CHAVE|NATUREZA|PROTOCOLO|INSCRI|DATA|DESTINAT|TRANSPORT|EXPEDI|EMITENTE|VALOR|DADOS|CNPJ|CPF|CEP|FONE|DESCRI|C[ÓO]D|S[ÉE]RIE|GRUPO)/i;
@@ -452,11 +695,40 @@ function isNameCandidate(line: string | undefined): line is string {
   const value = line.trim();
   if (value.length < 5) return false;
   if (/\d/.test(value)) return false;
+  if (SECTION_WORD.test(value)) return false;
   if (NAME_BLACKLIST.test(value)) return false;
   if (STREET_PREFIX.test(value)) return false;
   if (/^[A-Za-zÀ-ÿ\s'.]+\/[A-Za-z]{2}$/.test(value)) return false; // cidade/UF
   if (!/[A-Za-zÀ-ÿ]{3,}/.test(value)) return false;
   return true;
+}
+
+/**
+ * Nome a partir de um texto que sobrou na linha (depois do rótulo ou do CNPJ):
+ * remove resíduos de rótulo/pontuação e só aceita texto com cara de razão
+ * social — nunca um rótulo ou um número.
+ */
+function nameFromText(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const value = raw
+    .replace(/\b(?:CNPJ|CPF)\b\s*:?/gi, " ")
+    .replace(/[|/\\]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[:\-–—.,;]+/, "")
+    .trim();
+  return isNameCandidate(value) ? value : undefined;
+}
+
+/** Rótulo de razão social/nome — valor na mesma linha ou na linha seguinte. */
+function nameLabelValue(line: string, next?: string): string | undefined {
+  const match = line.match(
+    /^(?:RAZ[ÃA]O\s+SOCIAL|NOME\s+(?:DO\s+|DA\s+)?(?:DESTINAT[ÁA]RIO|EMITENTE|REMETENTE|RECEBEDOR|FORNECEDOR))\s*:?\s*(.*)$/i,
+  );
+  if (!match) return undefined;
+  const inline = nameFromText(match[1]);
+  if (inline) return inline;
+  return nameFromText(next);
 }
 
 function isCityLike(line: string | undefined): boolean {
@@ -465,37 +737,85 @@ function isCityLike(line: string | undefined): boolean {
   if (value.length < 3) return false;
   if (/\d/.test(value)) return false;
   if (value.includes(":")) return false;
+  if (SECTION_WORD.test(value)) return false;
   if (NAME_BLACKLIST.test(value)) return false;
   if (STREET_PREFIX.test(value)) return false;
   if (/^[A-Za-zÀ-ÿ\s'.]+\/[A-Za-z]{2}$/.test(value)) return false;
   return /[A-Za-zÀ-ÿ]{3,}/.test(value);
 }
 
-function formatCepLocal(value: string): string {
-  const digits = value.replace(/\D/g, "");
-  if (digits.length !== 8) return value;
-  return `${digits.slice(0, 5)}-${digits.slice(5, 8)}`;
-}
+// ─── Campos identificados por rótulo ────────────────────────────────────────
 
-function extractNfeNumber(text: string): string | undefined {
-  const match =
-    text.match(/NF-?e?\s*N[ºo°]\.?\s*:?\s*(\d{1,10})/i) ||
-    text.match(/N[ºo°]\.?\s*:?\s*(\d{1,10})/i);
+/** Número da NF-e: rótulo "NF-e Nº", "Nº" ou "Nº DA NOTA", valor na mesma linha ou na seguinte. */
+const NF_NUMBER_LABEL = /(?:NF-?E?|NOTA\s+FISCAL)?\s*N(?:[º°oO]|UM(?:ERO)?|ÚMERO)\.?\s*:?\s*(?:DA\s+)?(?:NOTA\s+FISCAL|NF-?E?|NOTA)?\.?\s*:?\s*/i;
+
+function readLeadingNumber(raw: string | undefined): string | undefined {
+  if (!raw || /^[A-Za-zÀ-ÿ]/.test(raw)) return undefined;
+  const match = raw.match(/\d[\d.\s]*\d|\d/);
   if (!match) return undefined;
-  const number = match[1].replace(/^0+(?=\d)/, "");
-  return number || undefined;
+  const digits = match[0].replace(/\D/g, "");
+  if (!digits || digits.length > 9) return undefined;
+  if (!/[1-9]/.test(digits)) return undefined;
+  return digits.replace(/^0+(?=\d)/, "");
 }
 
-function extractSeries(text: string): string | undefined {
-  const match = text.match(/s[eéi]rie\s*[:.]?\s*(\d{1,3})/i);
-  return match ? match[1] : undefined;
+function extractNfeNumber(lines: string[]): string | undefined {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const match = line.match(NF_NUMBER_LABEL);
+    if (!match) continue;
+    const rest = line.slice((match.index ?? 0) + match[0].length);
+    const sameLine = readLeadingNumber(rest);
+    if (sameLine) return sameLine;
+    // Rótulo e valor separados pelo OCR: a linha seguinte só vale quando não é
+    // a linha da série/chave/emissão (o número lido seria de outro campo).
+    const next = lines[i + 1];
+    if (!next || /S[ÉE]RIE|CHAVE|EMISS|PROTOCOLO/i.test(next)) continue;
+    const found = readLeadingNumber(next);
+    if (found) return found;
+  }
+  return undefined;
 }
+
+const SERIES_LABEL = /S[ÉE]RIE\s*\.?\s*:?\s*/i;
+
+function readSeriesDigits(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const match = raw.match(/\b\d{1,3}\b/);
+  return match ? match[0] : undefined;
+}
+
+function extractSeries(lines: string[]): string | undefined {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const match = line.match(SERIES_LABEL);
+    if (!match) continue;
+    const rest = line.slice((match.index ?? 0) + match[0].length);
+    const sameLine = readSeriesDigits(rest);
+    if (sameLine) return sameLine;
+    const found = readSeriesDigits(lines[i + 1]);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+const EMISSION_LABEL = /(?:DATA\s+(?:DE\s+|DA\s+)?)?EMISS[ÃA]O\s*\.?\s*:?\s*/i;
 
 function extractEmissionDate(lines: string[]): string | undefined {
-  for (const line of lines) {
-    if (!/emi/i.test(line)) continue;
-    const match = line.match(/(\d{2})[\/\-.](\d{2})[\/\-.](\d{4})/);
-    if (match) return `${match[3]}-${match[2]}-${match[1]}`;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const match = line.match(EMISSION_LABEL);
+    if (!match) continue;
+    const rest = line.slice((match.index ?? 0) + match[0].length);
+    const sameLine = parseFlexibleDate(rest);
+    if (sameLine) return sameLine;
+    for (let step = 1; step <= 2; step++) {
+      const next = lines[i + step];
+      if (next === undefined || EMISSION_LABEL.test(next)) break;
+      if (step === 1 && /SA[ÍI]DA|PROTOCOLO|CHAVE/i.test(next)) break;
+      const value = parseFlexibleDate(next);
+      if (value) return value;
+    }
   }
   return undefined;
 }
@@ -522,40 +842,103 @@ function extractProcessNumber(text: string): string | undefined {
   );
 }
 
+/** Rótulos do total da NF (o valor pode cair na linha seguinte, no OCR). */
+const TOTAL_VALUE_LABEL =
+  /(?:VALOR|VL)\.?\s*TOTAL(?:\s+(?:DA|DO|DE))?(?:\s+NF-?E?|\s+NOTA(?:\s+FISCAL)?|\s+PRODUTOS?)?\s*\.?\s*:?\s*/i;
+
+function readMoney(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const match = raw.match(/\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2}/);
+  if (!match) return undefined;
+  const value = parsePrice(match[0]);
+  return isFinite(value) ? value : undefined;
+}
+
 function extractTotalValue(lines: string[]): number | undefined {
-  for (const line of lines) {
-    if (!/valor\s*total/i.test(line)) continue;
-    const match = line.match(/r\$\s*([\d.]+,\d{2})/i);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const match = line.match(TOTAL_VALUE_LABEL);
     if (!match) continue;
-    const value = Number(match[1].replace(/\./g, "").replace(",", "."));
-    if (isFinite(value)) return value;
+    const rest = line.slice((match.index ?? 0) + match[0].length);
+    const sameLine = readMoney(rest);
+    if (sameLine !== undefined) return sameLine;
+    for (let step = 1; step <= 2; step++) {
+      const next = lines[i + step];
+      if (next === undefined || TOTAL_VALUE_LABEL.test(next)) break;
+      const value = readMoney(next);
+      if (value !== undefined) return value;
+    }
   }
   return undefined;
 }
 
+/**
+ * Itens da NF-e. A linha do produto é aceita com índice + código + descrição +
+ * janela de valores; quando o OCR quebra a linha do produto em duas, a junção
+ * só acontece com evidência dos DOIS lados (índice/código e descrição/valores).
+ */
 function extractItems(lines: string[]): DanfeItem[] {
   const items: DanfeItem[] = [];
   const seen = new Set<string>();
 
-  lines.forEach((line, position) => {
-    const parsedLine = parseItemLine(line);
-    if (!parsedLine) return;
+  for (let position = 0; position < lines.length; position++) {
+    const line = lines[position];
+    const tokens = line.split(" ");
+    let parsed = parseItemTokens(tokens);
+    let consumedNext = false;
+
+    if (!parsed && ITEM_INDEX_RE.test(tokens[0] ?? "") && ITEM_CODE_RE.test(tokens[1] ?? "")) {
+      const next = lines[position + 1];
+      if (next) {
+        const merged = parseItemTokens([...tokens, ...next.split(" ")]);
+        if (merged) {
+          parsed = merged;
+          consumedNext = true;
+        }
+      }
+    }
+
+    if (!parsed) continue;
     const key = line.trim().replace(/\s+/g, " ").toLowerCase();
-    if (seen.has(key)) return; // linha repetida por OCR/regiões nunca duplica produto
+    if (seen.has(key)) continue; // linha repetida por OCR/regiões nunca duplica produto
     seen.add(key);
     items.push({
-      index: parsedLine.index,
+      index: parsed.index,
       lineNumber: position + 1,
-      code: parsedLine.code,
-      description: parsedLine.description,
-      quantity: parsedLine.quantity,
-      unit: parsedLine.unit,
-      unitValue: parsedLine.unitValue,
-      totalValue: parsedLine.totalValue,
+      code: parsed.code,
+      description: parsed.description,
+      ncm: parsed.ncm,
+      quantity: parsed.quantity,
+      unit: parsed.unit,
+      unitValue: parsed.unitValue,
+      totalValue: parsed.totalValue,
     });
-  });
+    if (consumedNext) position++;
+  }
 
   return items;
+}
+
+/**
+ * Nome da seção: rótulo explícito, senão o texto com cara de razão social mais
+ * próximo do CNPJ (a linha imediatamente acima na DANFE).
+ */
+function findNameNearCnpj(lines: string[], cnpjIndex: number | undefined): string | undefined {
+  if (cnpjIndex === undefined) return undefined;
+  const from = Math.max(0, cnpjIndex - 4);
+  for (let i = cnpjIndex; i >= from; i--) {
+    const explicit = nameLabelValue(lines[i] ?? "", lines[i + 1]);
+    if (explicit) return explicit;
+  }
+  for (let i = cnpjIndex; i >= from; i--) {
+    const candidate = lines[i];
+    if (isNameCandidate(candidate)) return candidate.trim();
+  }
+  for (let i = cnpjIndex + 1; i <= cnpjIndex + 2; i++) {
+    const candidate = lines[i];
+    if (isNameCandidate(candidate)) return candidate.trim();
+  }
+  return undefined;
 }
 
 export function parseDanfeText(text: string | null | undefined): DanfeParseResult {
@@ -576,66 +959,99 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
   let section: SectionKey = "emitente";
 
   lines.forEach((line, index) => {
-    const label = sectionLabelFor(line);
-    if (label) section = label;
+    const label = sectionLabelMatch(line);
+    if (label) {
+      section = label.key;
+      const trailing = nameFromText(line.slice(label.end));
+      if (trailing && !sections[section].name) sections[section].name = trailing;
+    }
 
     const data = sections[section];
 
-    const cnpj = findCnpj(line);
-    if (cnpj && !data.cnpj) {
-      data.cnpj = cnpj;
-      data.cnpjIndex = index;
+    if (!data.cnpj) {
+      const candidates = findCnpjCandidates(line);
+      if (candidates.length) {
+        data.cnpj = candidates[0].formatted;
+        data.cnpjIndex = index;
+        // Nome lido na MESMA linha do CNPJ ("INCOTECH COMPANY LTDA CNPJ …").
+        const inline = nameFromText(line.replace(candidates[0].raw, " "));
+        if (inline && !data.name) data.name = inline;
+      }
     }
 
-    const explicitName = nameLabel(line);
+    const explicitName = nameLabelValue(line, lines[index + 1]);
     if (explicitName && !data.name) data.name = explicitName;
 
     const cityLabeled = line.match(/^(?:Cidade|Munic[íi]pio)\s*:\s*(.+)$/i);
-    if (cityLabeled && !data.city) data.city = cityLabeled[1].trim();
+    const labeledCity = cityLabeled ? nameFromText(cityLabeled[1]) : undefined;
+    if (labeledCity && !data.city) data.city = labeledCity;
 
-    const ufLabeled = line.match(/^(?:UF|Estado)\s*:\s*([A-Za-z]{2})\b/i);
-    if (ufLabeled && !data.uf) data.uf = ufLabeled[1].toUpperCase();
-
-    const cityUf = line.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'.]{1,40})\/([A-Za-z]{2})$/);
-    if (cityUf) {
-      if (!data.city) data.city = cityUf[1].trim();
-      if (!data.uf) data.uf = cityUf[2].toUpperCase();
+    const ufLabeled = line.match(/^(?:UF|Estado)\s*:?\s*([A-Za-z]{2})\b/i);
+    if (ufLabeled && !data.uf && UF_LIST.has(ufLabeled[1].toUpperCase())) {
+      data.uf = ufLabeled[1].toUpperCase();
     }
 
-    const cep = line.match(/\bCEP\s*[:\s]?\s*(\d{5}-?\d{3})\b/i);
-    if (cep && !data.cep) data.cep = formatCepLocal(cep[1]);
+    // "Cidade/UF" — pode vir sozinha, colada ao CEP ou a um complemento.
+    const cityUf = line.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'.]{1,40}?)\s*\/\s*([A-Za-z]{2})\b/);
+    if (cityUf) {
+      const city = nameFromText(cityUf[1]);
+      if (city && !data.city) data.city = city;
+      if (!data.uf && UF_LIST.has(cityUf[2].toUpperCase())) data.uf = cityUf[2].toUpperCase();
+    }
 
-    const labeledAddress = line.match(/^(?:Endere[çc]o|Endereco)\s*:\s*(.+)$/i);
+    // "CIDADE UF" em colunas separadas (o OCR perde a barra de "Cidade/UF").
+    if (!data.uf) {
+      const tokens = line.split(" ");
+      const ufToken = tokens[1] ?? "";
+      const ufCandidate = ufToken.replace(/[^A-Za-z]/g, "").toUpperCase();
+      if (
+        tokens.length >= 2 &&
+        tokens.length <= 5 &&
+        ufToken === ufToken.toUpperCase() &&
+        ufCandidate.length === 2 &&
+        UF_LIST.has(ufCandidate)
+      ) {
+        const city = nameFromText(tokens[0].replace(/[,;.]+$/, ""));
+        if (city) {
+          if (!data.city) data.city = city;
+          data.uf = ufCandidate;
+        }
+      }
+    }
+
+    const cep = line.match(/\bCEP\s*:?\s*([\dOoQIl|!SsBbZzGg]{5})[\s.-]?([\dOoQIl|!SsBbZzGg]{3})\b/i);
+    if (cep && !data.cep) {
+      const formatted = formatCepLocal(`${cep[1]}${cep[2]}`);
+      if (digitsFromOcr(formatted).length === 8) data.cep = formatted;
+    }
+
+    const labeledAddress = line.match(/^(?:Endere[çc]o|Endereco)\s*:?\s*(.+)$/i);
     const streetAddress = STREET_PREFIX.test(line) ? line : undefined;
     const address = labeledAddress ? labeledAddress[1].trim() : streetAddress;
     if (address && !data.address) data.address = address;
 
-    if (/^[A-Za-z]{2}$/.test(line) && !data.uf) {
-      data.uf = line.toUpperCase();
-      const previous = lines[index - 1];
-      if (!data.city && isCityLike(previous)) data.city = previous!.trim();
+    if (/^[A-Za-z]{2}$/.test(line)) {
+      const upper = line.toUpperCase();
+      if (!data.uf && UF_LIST.has(upper)) {
+        data.uf = upper;
+        const previous = lines[index - 1];
+        if (!data.city && isCityLike(previous)) data.city = previous!.trim();
+      }
     }
   });
 
   for (const key of Object.keys(sections) as SectionKey[]) {
     const data = sections[key];
-    if (data.cnpjIndex === undefined || data.name) continue;
-    for (const position of [data.cnpjIndex - 1, data.cnpjIndex + 1]) {
-      const candidate = lines[position];
-      const value = nameLabel(candidate ?? "") ?? candidate;
-      if (isNameCandidate(value)) {
-        data.name = value.trim();
-        break;
-      }
-    }
+    if (data.name) continue;
+    data.name = findNameNearCnpj(lines, data.cnpjIndex);
   }
 
-  const nfeNumber = extractNfeNumber(clean);
-  const series = extractSeries(clean);
+  const nfeNumber = extractNfeNumber(lines);
+  const series = extractSeries(lines);
   const emissionDate = extractEmissionDate(lines);
   const accessKey = extractAccessKey44(clean);
-  const totalValue = extractTotalValue(lines);
   const items = extractItems(lines);
+  const totalValue = extractTotalValue(lines);
   const afNumber = extractAfNumber(clean);
   const empenhoNumber = extractEmpenhoNumber(clean);
   const processNumber = extractProcessNumber(clean);

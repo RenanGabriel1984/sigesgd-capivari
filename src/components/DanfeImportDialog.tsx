@@ -1,7 +1,7 @@
 "use client";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ClipboardCopy, FileText, Loader2, ScanLine } from "lucide-react";
+import { Camera, ClipboardCopy, FileText, Loader2, ScanLine } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -77,6 +77,25 @@ function readDiagnosticFlag(): boolean {
 
 function isDevEnvironment(): boolean {
   return Boolean(import.meta.env?.DEV);
+}
+
+/**
+ * Captura direta pela câmera: oferecida em DISPOSITIVOS MÓVEIS (telefone/tablet)
+ * e em viewports estreitos. No desktop nada é alterado — o anexo de arquivo
+ * (PDF/imagem) continua sendo o caminho padrão.
+ *
+ * O input usa `capture="environment"`: quando o navegador móvel suporta, abre a
+ * câmera traseira; quando não suporta, cai automaticamente no seletor de
+ * imagens existentes — ou seja, nunca bloqueia o operador.
+ */
+function supportsCameraCapture(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent ?? "";
+  const mobileDevice = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile/i.test(ua);
+  const narrowViewport =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(max-width: 640px)").matches;
+  return mobileDevice || narrowViewport;
 }
 
 /**
@@ -392,6 +411,8 @@ export function DanfeImportDialog({
   onFile,
 }: DanfeImportDialogProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const [cameraAvailable, setCameraAvailable] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
   const [showReview, setShowReview] = useState(false);
   const [parsed, setParsed] = useState<DanfeParseResult>(EMPTY_PARSED);
@@ -439,9 +460,21 @@ export function DanfeImportDialog({
     refreshDiagnostic();
     const intervalId = window.setInterval(refreshDiagnostic, 1000);
     window.addEventListener("storage", refreshDiagnostic);
+
+    // Câmera do aparelho: reavaliada a cada abertura e quando o viewport muda
+    // (celular deitado/em pé, rotação).
+    const refreshCamera = () => setCameraAvailable(supportsCameraCapture());
+    refreshCamera();
+    const mediaQuery =
+      typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 640px)") : null;
+    mediaQuery?.addEventListener("change", refreshCamera);
+    window.addEventListener("orientationchange", refreshCamera);
+
     return () => {
       window.clearInterval(intervalId);
       window.removeEventListener("storage", refreshDiagnostic);
+      mediaQuery?.removeEventListener("change", refreshCamera);
+      window.removeEventListener("orientationchange", refreshCamera);
     };
   }, [open]);
 
@@ -527,8 +560,8 @@ export function DanfeImportDialog({
             Importar DANFE / PDF / Imagem
           </DialogTitle>
           <DialogDescription>
-            Selecione um PDF ou uma imagem da DANFE. Os campos lidos entram em uma etapa de
-            conferência — nada é criado sem a sua confirmação.
+            Fotografe a DANFE com a câmera do aparelho (celular) ou anexe um PDF/imagem.
+            Os campos lidos entram em uma etapa de conferência — nada é criado sem a sua confirmação.
           </DialogDescription>
         </div>
 
@@ -541,23 +574,49 @@ export function DanfeImportDialog({
               className="hidden"
               onChange={handleFileInput}
             />
+            {/** Câmera do aparelho (mobile): mesmo fluxo de leitura da DANFE. Se o
+             * navegador não permitir captura direta, o input abre o seletor de
+             * imagens — a alternativa de escolher uma imagem existente segue
+             * disponível no botão de anexo. */}
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleFileInput}
+            />
 
             {!showReview && (
               <div className="space-y-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="gap-2"
-                  disabled={reading}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  {reading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ScanLine className="h-4 w-4" />
+                <div className="flex flex-wrap items-center gap-2">
+                  {cameraAvailable && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-2"
+                      disabled={reading}
+                      onClick={() => cameraInputRef.current?.click()}
+                    >
+                      <Camera className="h-4 w-4" />
+                      Tirar foto da DANFE
+                    </Button>
                   )}
-                  Anexar DANFE (PDF ou imagem)
-                </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2"
+                    disabled={reading}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    {reading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ScanLine className="h-4 w-4" />
+                    )}
+                    Anexar DANFE (PDF ou imagem)
+                  </Button>
+                </div>
                 {reading && (
                   <p className="text-xs text-muted-foreground" aria-live="polite">
                     {status || "Lendo o documento…"}
@@ -570,10 +629,17 @@ export function DanfeImportDialog({
                 )}
                 <p className="text-xs text-muted-foreground">
                   O arquivo é lido localmente: camada textual do PDF (pdfjs-dist) ou OCR
-                  (tesseract.js) quando o PDF é escaneado ou o arquivo é uma imagem. Se a leitura
-                  não identificar os campos, use a entrada manual ou importe o XML — Importar NF-e
-                  XML.
+                  (tesseract.js) quando o PDF é escaneado ou o arquivo é uma imagem. Se a câmera
+                  não abrir no aparelho, use "Anexar DANFE" para escolher uma foto da galeria. Se
+                  a leitura não identificar os campos, use a entrada manual ou importe o XML —
+                  Importar NF-e XML.
                 </p>
+                {cameraAvailable && (
+                  <p className="text-xs text-muted-foreground">
+                    No celular, a câmera traseira é aberta direto para capturar a DANFE. Anexar
+                    continua aceitando PDF, foto da galeria e imagem já salva no aparelho.
+                  </p>
+                )}
               </div>
             )}
 
