@@ -31,7 +31,9 @@ import type { DanfeParseResult, OcrTrace } from "@/lib/danfe-ocr";
 import {
   DANFE_REGIONS,
   buildOcrTrace,
+  danfeFieldNotes,
   danfeFieldSummary,
+  danfeFieldWarnings,
   hasUsableTextLayer,
   isDanfeParseBetter,
   mergeDanfeTexts,
@@ -426,6 +428,10 @@ export function DanfeImportDialog({
   // Resumo SEMPRE recalculado do parse atual (nunca de um estado obsoleto).
   const fieldSummary = useMemo(() => danfeFieldSummary(parsed), [parsed]);
   const summary = fieldSummary;
+  // Rodada 18 §7: o contador conta SÓ campos validados; pendências e
+  // observações da leitura são explicadas explicitamente na interface.
+  const pendingFields = useMemo(() => danfeFieldNotes(parsed), [parsed]);
+  const readWarnings = useMemo(() => danfeFieldWarnings(parsed), [parsed]);
   const accessKeyDigits = digitsOnly(parsed.accessKey ?? "");
   const keyValid = validateAccessKey44(parsed.accessKey ?? "");
 
@@ -676,6 +682,32 @@ export function DanfeImportDialog({
                     {"Você pode informar ou corrigir qualquer campo antes de seguir para a conferência. " +
                       "Itens não associados ficam pendentes para você coordenar a associação manual na conferência — nenhum produto é inventado."}
                   </p>
+                )}
+
+                {pendingFields.length > 0 && (
+                  <div className="rounded-md border bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    <p className="font-medium">Pendente de conferência manual:</p>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                      {pendingFields.map((field) => (
+                        <li key={field.campo}>
+                          <span className="font-medium">{field.titulo}:</span> {field.note}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {readWarnings.length > 0 && (
+                  <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    <p className="font-medium">Como os campos foram obtidos:</p>
+                    <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                      {readWarnings.map((field) => (
+                        <li key={field.campo}>
+                          <span className="font-medium">{field.titulo}:</span> {field.note}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
 
                 {!keyValid && (

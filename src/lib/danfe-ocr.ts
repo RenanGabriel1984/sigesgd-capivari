@@ -13,7 +13,18 @@
  *   contagem de caracteres. Um texto maior não é automaticamente melhor.
  *   Campo não reconhecido fica `undefined` (pendente de conferência) —
  *   nunca é preenchido com gabarito, estimativa ou valor inventado.
+ *
+ * Rodada 18 — hierarquia de evidência (aprendida nos relatórios reais):
+ *   1. CHAVE DE ACESSO válida (44 dígitos + DV) é a fonte autoritativa de
+ *      modelo, série, número e AAMM — nenhum número lido de região ambígua
+ *      prevalece sobre ela;
+ *   2. rótulos da DANFE (NOME, CNPJ/CPF, VALOR TOTAL DA NOTA…) com valor na
+ *      mesma linha ou na adjacente, dentro da seção correta;
+ *   3. contexto estrutural (bloco cidade/UF/CEP, janela de valores do item).
+ *   Linhas de chave (sequências longas de dígitos) NUNCA são fonte de CNPJ;
+ *   CNPJ só é aceito com dígito verificador válido.
  */
+import { isValidCnpj } from "./br-validators";
 
 /** Regiões clássicas da DANFE (frações 0..1 da página) usadas pelo OCR. */
 export const DANFE_REGIONS = [
@@ -111,6 +122,13 @@ export interface DanfeParseResult {
   empenhoNumber?: string;
   processNumber?: string;
   totalValue?: number;
+  /**
+   * Observações por campo: origem da escolha, conflito com a chave de acesso e
+   * motivo de pendência. Exibidas no diálogo e no relatório de diagnóstico.
+   */
+  notes?: Record<string, string>;
+  /** Confiança por campo (0..100), usada para marcar baixa confiança. */
+  confidence?: Record<string, number>;
 }
 
 export interface DanfeFieldSummary {
@@ -119,42 +137,187 @@ export interface DanfeFieldSummary {
   missing: string[];
 }
 
+/** Resultado da validação de um campo (Rodada 18 §7). */
+export interface DanfeFieldValidation {
+  campo: string;
+  titulo: string;
+  ok: boolean;
+  note: string;
+  confidence: number;
+}
+
+/** Tolerância entre quantidade × valor unitário e o total do item. */
+const ITEM_TOTAL_TOLERANCE = 0.05;
+
+function itemIsCoherent(item: DanfeItem): boolean {
+  if (!(item.quantity > 0)) return false;
+  if (!(item.unitValue >= 0) || !(item.totalValue > 0)) return false;
+  if (!/[A-Za-zÀ-ÿ]/.test(item.description) || item.description.trim().length < 5) return false;
+  if (!/^\d{3,7}$/.test(item.code)) return false;
+  const expected = item.quantity * item.unitValue;
+  const tolerance = Math.max(ITEM_TOTAL_TOLERANCE, expected * 0.01);
+  return Math.abs(expected - item.totalValue) <= tolerance;
+}
+
+function isValidDateString(value: string | undefined): boolean {
+  if (!value) return false;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return year >= 2000 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+function looksLikeLegalName(value: string | undefined): boolean {
+  if (!value) return false;
+  const trimmed = value.trim();
+  return (
+    trimmed.length >= 5 &&
+    !/\d/.test(trimmed) &&
+    /[A-Za-zÀ-ÿ]{3,}/.test(trimmed) &&
+    !HEADER_LINE_PATTERNS.some((pattern) => pattern.test(trimmed)) &&
+    !LABEL_START_TOKEN.test(trimmed)
+  );
+}
+
+/**
+ * Validação campo a campo (Rodada 18 §7): um campo só conta como identificado
+ * quando passa na validação ESPECÍFICA dele — número/série coerentes com a
+ * chave válida, data realmente válida, CNPJ com DV válido, item com total
+ * coerente com quantidade × valor unitário.
+ */
+export function validateDanfeFields(parsed: DanfeParseResult): DanfeFieldValidation[] {
+  const keyParts = parseAccessKey44(parsed.accessKey);
+  const notes = parsed.notes ?? {};
+  const confidence = parsed.confidence ?? {};
+
+  const build = (
+    campo: string,
+    titulo: string,
+    ok: boolean,
+    fallbackNote: string,
+  ): DanfeFieldValidation => ({
+    campo,
+    titulo,
+    ok,
+    note: ok ? (notes[campo] ?? "") : (notes[campo] || fallbackNote),
+    confidence: ok ? (confidence[campo] ?? 80) : Math.min(confidence[campo] ?? 0, 40),
+  });
+
+  const nfeNumberMatchesKey = keyParts ? parsed.nfeNumber === keyParts.number : true;
+  const seriesMatchesKey = keyParts ? parsed.series === keyParts.series : true;
+  const dateMatchesKey = (() => {
+    if (!keyParts || !parsed.emissionDate) return true;
+    const [year, month] = parsed.emissionDate.split("-").map(Number);
+    return year === keyParts.year && month === keyParts.month;
+  })();
+  const coherentItems = parsed.items.filter(itemIsCoherent);
+
+  return [
+    build(
+      "nfeNumber",
+      "Número da NF-e",
+      Boolean(parsed.nfeNumber && /^\d{1,9}$/.test(parsed.nfeNumber) && nfeNumberMatchesKey),
+      keyParts ? "Número conflita ou diverge da chave de acesso válida." : "Número não identificado.",
+    ),
+    build(
+      "series",
+      "Série",
+      Boolean(parsed.series && /^\d{1,3}$/.test(parsed.series) && seriesMatchesKey),
+      keyParts ? "Série conflita ou diverge da chave de acesso válida." : "Série não identificada.",
+    ),
+    build(
+      "emissionDate",
+      "Data de emissão",
+      isValidDateString(parsed.emissionDate) && dateMatchesKey,
+      keyParts
+        ? "Data ausente, inválida ou em conflito com o AAMM da chave de acesso."
+        : "Data ausente ou inválida.",
+    ),
+    build(
+      "accessKey",
+      "Chave de acesso",
+      validateAccessKey44(parsed.accessKey),
+      "Chave de 44 dígitos não reconhecida ou com dígito verificador inválido.",
+    ),
+    build(
+      "emitterCnpj",
+      "CNPJ emitente",
+      Boolean(parsed.emitterCnpj && isValidCnpj(parsed.emitterCnpj)),
+      "CNPJ do emitente ausente ou com dígito verificador inválido.",
+    ),
+    build(
+      "emitterName",
+      "Razão social emitente",
+      looksLikeLegalName(parsed.emitterName),
+      "Razão social do emitente não identificada na região do fornecedor.",
+    ),
+    build(
+      "receiverCnpj",
+      "CNPJ destinatário",
+      Boolean(parsed.receiverCnpj && isValidCnpj(parsed.receiverCnpj)),
+      "CNPJ do destinatário ausente ou com dígito verificador inválido.",
+    ),
+    build(
+      "receiverName",
+      "Razão social destinatário",
+      looksLikeLegalName(parsed.receiverName),
+      "Razão social do destinatário não identificada na seção DESTINATÁRIO/REMETENTE.",
+    ),
+    build(
+      "issuerCnpj",
+      "CNPJ expedidor",
+      Boolean(parsed.issuerCnpj && isValidCnpj(parsed.issuerCnpj)),
+      "Sem evidência do expedidor no documento.",
+    ),
+    build(
+      "items",
+      "Itens da NF-e",
+      coherentItems.length > 0,
+      parsed.items.length
+        ? "Item lido sem coerência entre quantidade, valor unitário e total."
+        : "Nenhum item identificado com segurança.",
+    ),
+  ];
+}
+
+/**
+ * Contador “X de 10 campos”: conta SOMENTE campos que passaram na validação
+ * específica — não basta ter algum texto preenchido.
+ */
 export function danfeFieldSummary(parsed: DanfeParseResult): DanfeFieldSummary {
-  const tracked = DANFE_TRACKED_FIELDS;
+  const validations = validateDanfeFields(parsed);
+  const byField = new Map(validations.map((validation) => [validation.campo, validation]));
   let found = 0;
   const missing: string[] = [];
 
-  for (const field of tracked) {
-    const value =
-      field.campo === "items"
-        ? parsed.items.length > 0
-        : isFilledTrackedField(parsed, field.campo);
-    if (value) {
+  for (const field of DANFE_TRACKED_FIELDS) {
+    const validation = byField.get(field.campo);
+    if (validation?.ok) {
       found++;
     } else {
       missing.push(field.titulo);
     }
   }
 
-  return { found, total: tracked.length, missing };
+  return { found, total: DANFE_TRACKED_FIELDS.length, missing };
 }
 
 /**
- * Conta SOMENTE valor real do campo, para o contador “X de 10 campos”
- * refletir o estado verdadeiro da leitura:
- *   • string: preenchida de fato (após trim) — vazio/não conta;
- *   • número: finito (zero inclusive) — NaN/não conta;
- *   • chave de acesso: os 44 dígitos COM dígito verificador válido;
- *   • ausente/undefined: pendente — nunca é contado nem inventado.
+ * Pendências para a interface: campos que NÃO passaram na validação (com o
+ * motivo: conflito com a chave, DV inválido, ausência de evidência…).
  */
-function isFilledTrackedField(parsed: DanfeParseResult, campo: string): boolean {
-  if (campo === "accessKey") {
-    return validateAccessKey44(parsed.accessKey);
-  }
-  const value = parsed[campo as keyof DanfeParseResult];
-  if (typeof value === "string") return value.trim().length > 0;
-  if (typeof value === "number") return Number.isFinite(value);
-  return Boolean(value);
+export function danfeFieldNotes(parsed: DanfeParseResult): DanfeFieldValidation[] {
+  return validateDanfeFields(parsed).filter((validation) => !validation.ok);
+}
+
+/**
+ * Observações informativas: campos válidos cuja origem merece registro (por
+ * exemplo, número/série que vieram da chave de acesso porque o OCR conflitou).
+ */
+export function danfeFieldWarnings(parsed: DanfeParseResult): DanfeFieldValidation[] {
+  return validateDanfeFields(parsed).filter((validation) => validation.ok && validation.note);
 }
 
 /**
@@ -194,7 +357,7 @@ export function mergeDanfeTexts(pageText: string, regionTexts: string[]): string
 }
 
 function emptyResult(ok = false): DanfeParseResult {
-  return { ok, items: [] };
+  return { ok, items: [], notes: {}, confidence: {} };
 }
 
 function formatCnpjLocal(digits: string): string {
@@ -324,13 +487,79 @@ export function validateAccessKey44(raw: string | null | undefined): boolean {
   return isValidAccessKey44(digits);
 }
 
+export interface AccessKeyParts {
+  /** Código IBGE da UF do emitente (2 dígitos). */
+  ufCode: string;
+  /** Ano de emissão (4 dígitos, derivado do AAMM). */
+  year: number;
+  /** Mês de emissão (1..12, derivado do AAMM). */
+  month: number;
+  /** CNPJ do emitente em dígitos. */
+  emitterCnpjDigits: string;
+  /** Modelo do documento: 55 (NF-e) ou 65 (NFC-e). */
+  model: string;
+  /** Série como impressa na chave (3 dígitos). */
+  series: string;
+  /** Número da NF-e sem zeros à esquerda. */
+  number: string;
+}
+
+/**
+ * Decomposição PADRONIZADA da chave de acesso (layout oficial):
+ *   cUF(2) AAMM(4) CNPJ(14) mod(2) série(3) nNF(9) cNF(8) cDV(1).
+ *
+ * Só devolve partes quando a chave tem 44 dígitos e passa no DV — assim o
+ * número/série derivados dela são evidência forte (não leitura ambígua) para
+ * confrontar com o que o OCR devolveu.
+ */
+export function parseAccessKey44(raw: string | null | undefined): AccessKeyParts | undefined {
+  if (!raw) return undefined;
+  const digits = normalizeDigitGlyphs(raw).replace(/\D/g, "");
+  if (digits.length !== 44) return undefined;
+  if (!isValidAccessKey44(digits)) return undefined;
+  const number = digits.slice(25, 34).replace(/^0+(?=\d)/, "");
+  if (!number) return undefined;
+  return {
+    ufCode: digits.slice(0, 2),
+    year: 2000 + Number(digits.slice(2, 4)),
+    month: Number(digits.slice(4, 6)),
+    emitterCnpjDigits: digits.slice(6, 20),
+    model: digits.slice(20, 22),
+    series: digits.slice(22, 25),
+    number,
+  };
+}
+
+/**
+ * Maior sequência de dígitos de uma linha, ignorando separadores de máscara.
+ * Linhas com sequências longas (chave de acesso, protocolo) não podem ser
+ * fonte de CNPJ/valores de coluna — o OCR lê a chave como um bloco numérico.
+ */
+function longestDigitRun(text: string): number {
+  const compact = text.replace(/[\s.,/\-]/g, "");
+  let best = 0;
+  let run = 0;
+  for (const char of compact) {
+    if (char >= "0" && char <= "9") {
+      run++;
+      if (run > best) best = run;
+    } else {
+      run = 0;
+    }
+  }
+  return best;
+}
+
+/** Limite a partir do qual a linha é considerada bloco numérico (chave/nº). */
+const LONG_DIGIT_RUN = 20;
+
 export type DanfeItemCandidateOptions = {
   quantity?: boolean;
   regionKey?: string;
 };
 
 interface ItemLine {
-  index: number;
+  index?: number;
   code: string;
   description: string;
   ncm?: string;
@@ -378,7 +607,9 @@ const HEADER_LINE_PATTERNS = [
   /VALOR\s+UNIT[ÁA]RIO/i,
   /ALIQ\.?\s+ICMS/i,
   /C[ÓO]D\.?\s*IGO/i,
-  /DADOS\s+DOS\s+PRODUTOS/i,
+  // "DADOS DO PRODUTO/SERVIÇO" (singular — como sai no OCR real) e variantes.
+  /DADOS\s+DO(?:S)?\s+PRODUTOS?/i,
+  /PRODUTO(?:S)?\s*\/\s*SERVI[ÇC]OS?/i,
   /N[ºo°]?\s*DO\s+PRODUTO/i,
 ];
 
@@ -410,6 +641,9 @@ interface ValueWindow {
   unitValue: number;
   totalValue: number;
 }
+
+/** Código de produto aceitável SEM o número do item (linha consolidada do OCR). */
+const ITEM_CODE_NO_INDEX_RE = /^\d{4,7}$/;
 
 function parsePrice(token: string): number {
   const hasComma = token.includes(",");
@@ -534,33 +768,58 @@ function normalizeItemDescription(tokens: string[]): { description: string; ncm?
   const description = tokens
     .slice(0, end)
     .join(" ")
+    // Separadores de coluna que o OCR colou na descrição ("… CHOCO | 84716053")
+    // nunca fazem parte do nome do produto.
+    .replace(/[|/\\]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim()
-    .replace(/[-–—]+$/, "")
+    .replace(/^[-–—:;,.]+|[-–—:;,.]+$/g, "")
     .trim();
   return { description, ncm };
 }
 
 /**
- * Linha de item só é aceita com evidência completa: índice, código, descrição,
- * quantidade > 0, unidade real (não nome de coluna) e valores. Cabeçalhos,
- * linhas curtas e ruído de OCR nunca viram produto.
+ * Linha de item: aceita duas formas com evidência completa
+ *   • [nº do item] [código] descrição … [janela de valores]
+ *   • [código] descrição … [janela de valores]  (linha consolidada do OCR,
+ *     que perde o número do item e às vezes parte das colunas)
+ * Cabeçalhos, linhas curtas e ruído de OCR nunca viram produto.
  */
-function parseItemTokens(tokens: string[]): ItemLine | null {
-  if (tokens.length < 6) return null;
-  if (!ITEM_INDEX_RE.test(tokens[0])) return null;
-  if (!ITEM_CODE_RE.test(tokens[1])) return null;
+function parseItemTokens(
+  tokens: string[],
+  options: { allowNoIndex?: boolean } = {},
+): ItemLine | null {
+  if (tokens.length < 5) return null;
+
+  let index: number | undefined;
+  let code: string;
+  let descriptionFrom: number;
+
+  if (ITEM_INDEX_RE.test(tokens[0]) && ITEM_CODE_RE.test(tokens[1] ?? "")) {
+    index = Number(tokens[0]);
+    code = tokens[1];
+    descriptionFrom = 2;
+  } else if (options.allowNoIndex && ITEM_CODE_NO_INDEX_RE.test(tokens[0] ?? "")) {
+    code = tokens[0];
+    descriptionFrom = 1;
+  } else {
+    return null;
+  }
 
   const window = findItemValueWindow(tokens);
-  if (!window) return null;
+  if (!window || window.start <= descriptionFrom) return null;
 
-  const { description, ncm } = normalizeItemDescription(tokens.slice(2, window.start));
+  const { description, ncm } = normalizeItemDescription(
+    tokens.slice(descriptionFrom, window.start),
+  );
   if (description.length < 5) return null;
   if (!/[A-Za-zÀ-ÿ]/.test(description)) return null;
   if (HEADER_LINE_PATTERNS.some((pattern) => pattern.test(description))) return null;
+  if (SECTION_WORD_TOKEN.test(description)) return null;
 
   return {
-    index: Number(tokens[0]),
-    code: tokens[1],
+    index,
+    code,
     description,
     ncm,
     quantity: window.quantity,
@@ -575,7 +834,9 @@ function parseItemLine(rawLine: string | null | undefined): ItemLine | null {
   const line = rawLine.trim().replace(/\s+/g, " ");
   if (!line) return null;
   if (HEADER_LINE_PATTERNS.some((pattern) => pattern.test(line))) return null;
-  return parseItemTokens(line.split(" "));
+  return (
+    parseItemTokens(line.split(" ")) ?? parseItemTokens(line.split(" "), { allowNoIndex: true })
+  );
 }
 
 export function isValidDanfeItemCandidate(
@@ -595,6 +856,11 @@ export function isDanfeParseBetter(a: DanfeParseResult, b: DanfeParseResult): bo
   if (!a.accessKey && b.accessKey) return false;
   if (a.emitterCnpj && !b.emitterCnpj) return true;
   if (!a.emitterCnpj && b.emitterCnpj) return false;
+  // Item reconhecido é evidência forte: o texto consolidado (com o código
+  // completo) ganha da região que perdeu os primeiros dígitos.
+  if (a.items.length !== b.items.length) return a.items.length > b.items.length;
+  if (a.receiverCnpj && !b.receiverCnpj) return true;
+  if (!a.receiverCnpj && b.receiverCnpj) return false;
   return (a.nfeNumber ?? "").length > (b.nfeNumber ?? "").length;
 }
 
@@ -610,6 +876,12 @@ interface SectionData {
   uf?: string;
   cep?: string;
   address?: string;
+}
+
+interface CityUfCep {
+  city?: string;
+  uf?: string;
+  cep?: string;
 }
 
 const SECTION_PATTERNS: Array<{ key: SectionKey; re: RegExp }> = [
@@ -642,11 +914,19 @@ const UF_LIST = new Set([
 
 /**
  * CNPJ com tolerância ao OCR: aceita máscara com glifos trocados
- * (O↔0, S↔5, B↔8, I↔1) e também os 14 dígitos sem pontuação. Um candidato só é
- * aceito quando NÃO faz parte de uma sequência numérica maior — a chave de
- * acesso de 44 dígitos, por exemplo, nunca é lida como CNPJ.
+ * (O↔0, S↔5, B↔8, I↔1) e separadores virando vírgula/ponto/espaço
+ * ("44,723.674/0001-90") e também os 14 dígitos sem pontuação.
+ *
+ * Duas travas estruturais:
+ *   • linhas com sequência numérica longa (chave de acesso/protocolo) são
+ *     descartadas ANTES de procurar CNPJ — é assim que a chave virava
+ *     "55.001.000/0029-67" (modelo+série+número da própria chave);
+ *   • o dígito verificador é validado: CNPJ inválido não é aceito como campo
+ *     reconhecido (fica pendente para conferência manual).
  */
 function findCnpjCandidates(line: string): Array<{ raw: string; formatted: string }> {
+  if (longestDigitRun(line) >= LONG_DIGIT_RUN) return [];
+
   const found: Array<{ raw: string; formatted: string }> = [];
   const seen = new Set<string>();
   const push = (raw: string, start: number) => {
@@ -657,12 +937,14 @@ function findCnpjCandidates(line: string): Array<{ raw: string; formatted: strin
     if (digits.length !== 14) return;
     if (seen.has(digits)) return;
     seen.add(digits);
+    if (!isValidCnpj(digits)) return; // DV obrigatório
     found.push({ raw, formatted: formatCnpjLocal(digits) });
   };
 
   const glyph = "[0-9OoQIl|!SsBbZzGg]";
+  const separator = "[.,\\s]?";
   const masked = new RegExp(
-    `${glyph}{2}\\.?\\s*${glyph}{3}\\.?\\s*${glyph}{3}[/\\s]?${glyph}{4}[-.\\s]?${glyph}{2}`,
+    `${glyph}{2}${separator}${glyph}{3}${separator}${glyph}{3}[./\\s]?${glyph}{4}[-.,\\s]?${glyph}{2}`,
     "g",
   );
   for (const match of line.matchAll(masked)) {
@@ -682,23 +964,41 @@ function formatCepLocal(value: string): string {
   return `${digits.slice(0, 5)}-${digits.slice(5, 8)}`;
 }
 
-/** Palavras de rótulo que NUNCA são razão social/nome. */
-const SECTION_WORD =
-  /^(?:REMETENTE|DESTINAT[ÁA]RIO|TRANSPORTADOR(?:A)?|EXPEDIDOR|EMITENTE|REDESPACHO|ENDERE[ÇC]O|MUNIC[ÍI]PIO|CIDADE|UF|INSCRI[ÇC][ÃA]O|FONE|CEP|DADOS|IDENTIFICA[ÇC][ÃA]O|DOCUMENTO|AUXILIAR|NATUREZA|PROTOCOLO)$/i;
+/**
+ * Linha que COMEÇA com rótulo/coluna da DANFE nunca é razão social — cobre os
+ * falsos positivos reais: "REMETENTE ne", "CONTROLE DO FISCO", cabeçalho da
+ * tabela de produtos ("DESCRIÇÃO DO PRODUTO/SERVIÇO ..."), "MODELO", "SÉRIE".
+ * A regra é por INÍCIO da linha (e não por qualquer palavra) justamente para
+ * não descartar razões sociais legítimas como "MUNICÍPIO DE CAPIVARI" ou
+ * "DISTRIBUIDORA DE PRODUTOS …".
+ */
+const LABEL_START_TOKEN =
+  /^(?:REMETENTE|DESTINAT[ÁA]RIO|TRANSPORTADOR(?:A)?|EXPEDIDOR|EMITENTE|REDESPACHO|CONTROLE|FISCO|DANFE|CHAVE|NATUREZA|PROTOCOLO|INSCRI[ÇC][ÃA]O|FONE|FAX|MODELO|M[ÓO]DULO|S[ÉE]RIE|N[ÚU]MERO|DATA|DADOS|CNPJ|CPF|CEP|DESCRI[ÇC][ÃA]O|C[ÓO]D(?:IGO)?\b|GRUPO|PRODUTO|PRODUTOS|SERVI[ÇC]O|SERVI[ÇC]OS|QUANT|QTDE|VALOR|UNIT[ÁA]RIO|TOTAL|ALIQ|ICMS|IPI|PIS|COFINS|CST|CFOP|NCM|UNID(?:ADE)?|ENDERE[ÇC]O|MUNIC[ÍI]PIO\s*:|CIDADE\s*:|UF\s*:|ESTADO\s*:|PEDIDO|EMPENHO\s*:|AF\s*:|BASE\s+DE|VENDEDOR|VIA\b|NOME)\b/i;
+
+/** Palavras de rótulo que aparecem como UMA linha inteira (nada de valor). */
+const SECTION_WORD_TOKEN =
+  /(?:^|\s)(?:REMETENTE|DESTINAT[ÁA]RIO|TRANSPORTADOR(?:A)?|EXPEDIDOR|EMITENTE|REDESPACHO)(?:\s|$)/i;
 
 const NAME_BLACKLIST =
-  /^(DANFE|NF-?e|CHAVE|NATUREZA|PROTOCOLO|INSCRI|DATA|DESTINAT|TRANSPORT|EXPEDI|EMITENTE|VALOR|DADOS|CNPJ|CPF|CEP|FONE|DESCRI|C[ÓO]D|S[ÉE]RIE|GRUPO)/i;
+  /^(DANFE|NF-?e|CHAVE|NATUREZA|PROTOCOLO|INSCRI|DATA|DESTINAT|TRANSPORT|EXPEDI|EMITENTE|VALOR|DADOS|CNPJ|CPF|CEP|FONE|DESCRI|C[ÓO]D|S[ÉE]RIE|GRUPO|MODELO|CONTROLE)/i;
 const STREET_PREFIX = /^(RUA|AVENIDA|TRAVESSA|ALAMEDA|RODOVIA|ESTRADA|PRA[ÇC]A)\b/i;
+
+/** Sufixos que indicam razão social (usados só para PREFERIR um candidato). */
+const CORPORATE_HINT =
+  /\b(LTDA|ME|MEI|EPP|EIRELI|S\.?A\.?|S\s?\/\s?A|COMPANY|COMPANHIA|CIA\b|COM[ÉE]RCIO|IND[ÚU]STRIA|DISTRIBUIDORA|PREFEITURA|MUNIC[ÍI]PIO|FUNDA[ÇC][ÃA]O|SECRETARIA)/i;
 
 function isNameCandidate(line: string | undefined): line is string {
   if (!line) return false;
   const value = line.trim();
   if (value.length < 5) return false;
   if (/\d/.test(value)) return false;
-  if (SECTION_WORD.test(value)) return false;
+  if (SECTION_WORD_TOKEN.test(value)) return false;
   if (NAME_BLACKLIST.test(value)) return false;
   if (STREET_PREFIX.test(value)) return false;
+  if (HEADER_LINE_PATTERNS.some((pattern) => pattern.test(value))) return false;
+  if (LABEL_START_TOKEN.test(value)) return false;
   if (/^[A-Za-zÀ-ÿ\s'.]+\/[A-Za-z]{2}$/.test(value)) return false; // cidade/UF
+  if (/[|]/.test(value)) return false; // colunas coladas por OCR
   if (!/[A-Za-zÀ-ÿ]{3,}/.test(value)) return false;
   return true;
 }
@@ -737,7 +1037,7 @@ function isCityLike(line: string | undefined): boolean {
   if (value.length < 3) return false;
   if (/\d/.test(value)) return false;
   if (value.includes(":")) return false;
-  if (SECTION_WORD.test(value)) return false;
+  if (SECTION_WORD_TOKEN.test(value)) return false;
   if (NAME_BLACKLIST.test(value)) return false;
   if (STREET_PREFIX.test(value)) return false;
   if (/^[A-Za-zÀ-ÿ\s'.]+\/[A-Za-z]{2}$/.test(value)) return false;
@@ -854,28 +1154,98 @@ function readMoney(raw: string | undefined): number | undefined {
   return isFinite(value) ? value : undefined;
 }
 
-function extractTotalValue(lines: string[]): number | undefined {
+/** Linha essencialmente numérica — a coluna de valores de uma tabela de totais. */
+function isValueOnlyLine(line: string): boolean {
+  return line.replace(/R\s*\$/gi, " ").replace(/[0-9.,\s]/g, "").trim().length === 0;
+}
+
+interface TotalCandidate {
+  value: number;
+  index: number;
+  source: string;
+}
+
+/**
+ * Todos os candidatos de total associados ao rótulo correto (VALOR TOTAL DA
+ * NOTA/NF), na mesma linha ou nas linhas de VALORES logo abaixo — sem somar
+ * ocorrências repetidas do texto consolidado nem valores de ICMS/IPI.
+ * Valores zerados são descartados: total 0 nunca é um total válido.
+ */
+function collectTotalCandidates(lines: string[]): TotalCandidate[] {
+  const candidates: TotalCandidate[] = [];
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const match = line.match(TOTAL_VALUE_LABEL);
     if (!match) continue;
+
     const rest = line.slice((match.index ?? 0) + match[0].length);
     const sameLine = readMoney(rest);
-    if (sameLine !== undefined) return sameLine;
-    for (let step = 1; step <= 2; step++) {
+    if (sameLine !== undefined && sameLine > 0) {
+      candidates.push({ value: sameLine, index: i, source: "rótulo do total (mesma linha)" });
+      continue;
+    }
+
+    // Coluna de valores: o OCR costuma despejar os rótulos de todos os quadros
+    // e SÓ DEPOIS os números. Pulamos as linhas de rótulo (com letras) e
+    // aceitamos as linhas que são apenas valor — sem atravessar outra seção.
+    for (let step = 1; step <= 6; step++) {
       const next = lines[i + step];
-      if (next === undefined || TOTAL_VALUE_LABEL.test(next)) break;
+      if (next === undefined) break;
+      if (SECTION_PATTERNS.some(({ re }) => re.test(next))) break;
+      if (/(?:DADOS\s+ADICIONAIS|CONTROLE\s+DO\s+FISCO|OBSERVA[ÇC][ÕO]ES|TRANSPORTADOR)/i.test(next)) break;
+      if (!isValueOnlyLine(next)) continue;
       const value = readMoney(next);
-      if (value !== undefined) return value;
+      if (value !== undefined && value > 0) {
+        candidates.push({
+          value,
+          index: i + step,
+          source: `coluna de valores ${step} linha(s) abaixo do rótulo do total`,
+        });
+        break;
+      }
     }
   }
-  return undefined;
+
+  return candidates;
 }
 
 /**
- * Itens da NF-e. A linha do produto é aceita com índice + código + descrição +
- * janela de valores; quando o OCR quebra a linha do produto em duas, a junção
- * só acontece com evidência dos DOIS lados (índice/código e descrição/valores).
+ * Escolha do total: candidato contextualizado pelo rótulo; quando a soma dos
+ * itens é conhecida e coincide com um dos candidatos, ele é o preferido (é a
+ * única evidência cruzada disponível). A origem da escolha é registrada.
+ */
+function extractTotalValue(
+  lines: string[],
+  items: DanfeItem[],
+): { value?: number; source?: string } {
+  const candidates = collectTotalCandidates(lines);
+  if (candidates.length === 0) return {};
+
+  const itemsSum = items.reduce(
+    (sum, item) => sum + (Number.isFinite(item.totalValue) ? item.totalValue : 0),
+    0,
+  );
+  if (itemsSum > 0) {
+    const match = candidates.find((candidate) => Math.abs(candidate.value - itemsSum) < 0.011);
+    if (match) {
+      return {
+        value: match.value,
+        source: `${match.source} — confere com a soma dos itens`,
+      };
+    }
+  }
+
+  return { value: candidates[0].value, source: candidates[0].source };
+}
+
+/**
+ * Itens da NF-e, a partir do texto CONSOLIDADO (página + regiões):
+ *   • linha com nº do item + código OU linha consolidada começando pelo código;
+ *   • quando o OCR quebra o produto em duas linhas, a junção só acontece com
+ *     evidência dos DOIS lados e nunca “rouba” a linha de outro item;
+ *   • código truncado na região ("742" para "231742") é unificado no código
+ *     mais completo, sem duplicar o produto.
  */
 function extractItems(lines: string[]): DanfeItem[] {
   const items: DanfeItem[] = [];
@@ -884,13 +1254,22 @@ function extractItems(lines: string[]): DanfeItem[] {
   for (let position = 0; position < lines.length; position++) {
     const line = lines[position];
     const tokens = line.split(" ");
-    let parsed = parseItemTokens(tokens);
+    let parsed = parseItemTokens(tokens) ?? parseItemTokens(tokens, { allowNoIndex: true });
     let consumedNext = false;
 
-    if (!parsed && ITEM_INDEX_RE.test(tokens[0] ?? "") && ITEM_CODE_RE.test(tokens[1] ?? "")) {
+    const startsLikeItem =
+      ITEM_INDEX_RE.test(tokens[0] ?? "") && ITEM_CODE_RE.test(tokens[1] ?? "");
+
+    if (!parsed && startsLikeItem) {
       const next = lines[position + 1];
-      if (next) {
-        const merged = parseItemTokens([...tokens, ...next.split(" ")]);
+      const nextTokens = next ? next.split(" ") : null;
+      const nextIsOwnItem =
+        nextTokens !== null &&
+        (parseItemTokens(nextTokens) !== null ||
+          parseItemTokens(nextTokens, { allowNoIndex: true }) !== null);
+      // Junta só quando a linha seguinte NÃO é um item por si só.
+      if (nextTokens && !nextIsOwnItem) {
+        const merged = parseItemTokens([...tokens, ...nextTokens]);
         if (merged) {
           parsed = merged;
           consumedNext = true;
@@ -916,28 +1295,134 @@ function extractItems(lines: string[]): DanfeItem[] {
     if (consumedNext) position++;
   }
 
-  return items;
+  return mergeTruncatedItems(items);
 }
 
 /**
- * Nome da seção: rótulo explícito, senão o texto com cara de razão social mais
- * próximo do CNPJ (a linha imediatamente acima na DANFE).
+ * A leitura regional costuma perder os PRIMEIROS dígitos do código. Quando duas
+ * linhas descrevem o mesmo produto e um código é sufixo do outro, mantemos o
+ * código mais completo — sem criar item novo nem duplicar quantidade.
  */
-function findNameNearCnpj(lines: string[], cnpjIndex: number | undefined): string | undefined {
-  if (cnpjIndex === undefined) return undefined;
-  const from = Math.max(0, cnpjIndex - 4);
-  for (let i = cnpjIndex; i >= from; i--) {
-    const explicit = nameLabelValue(lines[i] ?? "", lines[i + 1]);
+function mergeTruncatedItems(items: DanfeItem[]): DanfeItem[] {
+  const out: DanfeItem[] = [];
+  for (const item of items) {
+    const twin = out.find(
+      (candidate) =>
+        candidate.code !== item.code &&
+        (candidate.code.endsWith(item.code) || item.code.endsWith(candidate.code)) &&
+        candidate.description === item.description &&
+        candidate.quantity === item.quantity &&
+        Math.abs(candidate.totalValue - item.totalValue) < 0.011,
+    );
+    if (twin) {
+      if (item.code.length > twin.code.length) {
+        twin.code = item.code;
+        if (twin.index === undefined) twin.index = item.index;
+      }
+      continue;
+    }
+    out.push({ ...item });
+  }
+  return out;
+}
+
+/**
+ * Bloco endereço do emitente: cidade, UF e CEP a partir de contexto coerente
+ * ("Tubarão/SC", "Tubarao - SC - CEP: 88701-600", "Cidade: …", "UF: SC").
+ * Sigla isolada NUNCA é aceita sem esse contexto — era daí que vinha "RR".
+ */
+function parseCityUfCep(line: string): CityUfCep {
+  const result: CityUfCep = {};
+
+  const cep = line.match(
+    /\bCEP\s*[:\-]?\s*([\dOoQIl|!SsBbZzGg]{5})[\s.\-]?([\dOoQIl|!SsBbZzGg]{3})\b/i,
+  );
+  if (cep) {
+    const digits = digitsFromOcr(`${cep[1]}${cep[2]}`);
+    if (digits.length === 8) result.cep = `${digits.slice(0, 5)}-${digits.slice(5, 8)}`;
+  }
+
+  const labeledCity = line.match(/^(?:Cidade|Munic[íi]pio)\s*:\s*(.+)$/i);
+  if (labeledCity) {
+    const city = nameFromText(labeledCity[1]);
+    if (city) result.city = city;
+  }
+
+  const labeledUf = line.match(/^(?:UF|Estado)\s*:?\s*([A-Za-z]{2})\b/i);
+  if (labeledUf && UF_LIST.has(labeledUf[1].toUpperCase())) {
+    result.uf = labeledUf[1].toUpperCase();
+  }
+
+  // "Cidade/UF" (com barra) — pode vir colada ao CEP ou a um complemento.
+  const slash = line.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'.]{1,40}?)\s*\/\s*([A-Za-z]{2})\b/);
+  if (slash) {
+    const city = nameFromText(slash[1]);
+    if (city) result.city = result.city ?? city;
+    if (UF_LIST.has(slash[2].toUpperCase())) result.uf = result.uf ?? slash[2].toUpperCase();
+  }
+
+  // "Cidade - UF" (hífen) — endereço do emitente na DANFE real.
+  const dashed = line.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'.]{1,40}?)\s*[-–]\s*([A-Za-z]{2})\b/);
+  if (dashed) {
+    const city = nameFromText(dashed[1]);
+    if (city) result.city = result.city ?? city;
+    if (UF_LIST.has(dashed[2].toUpperCase())) result.uf = result.uf ?? dashed[2].toUpperCase();
+  }
+
+  return result;
+}
+
+/** Ruído de OCR/seções que nunca faz parte do endereço. */
+const ADDRESS_NOISE =
+  /\b(?:CONTROLE\s+DO\s+FISCO|FISCO|DANFE|DOCUMENTO\s+AUXILIAR|AUXILIAR|ELETR[ÔO]NICA?|VIA|MODELO|S[ÉE]RIE|N[ÚU]MERO|DATA\s+DE\s+EMISS[ÃA]O|CHAVE\s+DE\s+ACESSO)\b/gi;
+
+function cleanAddress(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const cleaned = value
+    .replace(ADDRESS_NOISE, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,;.-]+/, "")
+    .replace(/[\s,;-]+$/, "")
+    .trim();
+  return cleaned.length >= 6 ? cleaned : undefined;
+}
+
+/**
+ * Nome da seção: rótulo explícito, senão o candidato a razão social dentro da
+ * PRÓPRIA seção — priorizando quem está logo ACIMA do CNPJ e quem tem sufixo de
+ * razão social (LTDA/COMPANY/MUNICÍPIO…). Nunca cruza para outra seção.
+ */
+function findNameNearCnpj(
+  lines: string[],
+  cnpjIndex: number | undefined,
+  sectionIndexes: number[],
+): string | undefined {
+  if (cnpjIndex === undefined || sectionIndexes.length === 0) return undefined;
+
+  for (const index of sectionIndexes) {
+    const explicit = nameLabelValue(lines[index] ?? "", lines[index + 1]);
     if (explicit) return explicit;
   }
-  for (let i = cnpjIndex; i >= from; i--) {
-    const candidate = lines[i];
-    if (isNameCandidate(candidate)) return candidate.trim();
+
+  const anchor = sectionIndexes.indexOf(cnpjIndex);
+  const limit = anchor >= 0 ? anchor : sectionIndexes.length - 1;
+  const above: string[] = [];
+  for (let position = limit; position >= Math.max(0, limit - 5); position--) {
+    const candidate = lines[sectionIndexes[position]];
+    if (isNameCandidate(candidate)) above.push(candidate.trim());
   }
-  for (let i = cnpjIndex + 1; i <= cnpjIndex + 2; i++) {
-    const candidate = lines[i];
-    if (isNameCandidate(candidate)) return candidate.trim();
+  if (above.length) {
+    const corporate = above.find((candidate) => CORPORATE_HINT.test(candidate));
+    return corporate ?? above[0];
   }
+
+  for (let position = limit + 1; position <= limit + 2 && position < sectionIndexes.length; position++) {
+    const candidate = lines[sectionIndexes[position]];
+    if (isNameCandidate(candidate) && CORPORATE_HINT.test(candidate.trim())) {
+      return candidate.trim();
+    }
+  }
+
   return undefined;
 }
 
@@ -956,6 +1441,12 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
     transportador: {},
     expedidor: {},
   };
+  const sectionIndexes: Record<SectionKey, number[]> = {
+    emitente: [],
+    destinatario: [],
+    transportador: [],
+    expedidor: [],
+  };
   let section: SectionKey = "emitente";
 
   lines.forEach((line, index) => {
@@ -967,6 +1458,7 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
     }
 
     const data = sections[section];
+    sectionIndexes[section].push(index);
 
     if (!data.cnpj) {
       const candidates = findCnpjCandidates(line);
@@ -982,76 +1474,99 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
     const explicitName = nameLabelValue(line, lines[index + 1]);
     if (explicitName && !data.name) data.name = explicitName;
 
-    const cityLabeled = line.match(/^(?:Cidade|Munic[íi]pio)\s*:\s*(.+)$/i);
-    const labeledCity = cityLabeled ? nameFromText(cityLabeled[1]) : undefined;
-    if (labeledCity && !data.city) data.city = labeledCity;
+    const block = parseCityUfCep(line);
+    if (block.city && !data.city) data.city = block.city;
+    if (block.uf && !data.uf) data.uf = block.uf;
+    if (block.cep && !data.cep) data.cep = block.cep;
 
-    const ufLabeled = line.match(/^(?:UF|Estado)\s*:?\s*([A-Za-z]{2})\b/i);
-    if (ufLabeled && !data.uf && UF_LIST.has(ufLabeled[1].toUpperCase())) {
-      data.uf = ufLabeled[1].toUpperCase();
-    }
-
-    // "Cidade/UF" — pode vir sozinha, colada ao CEP ou a um complemento.
-    const cityUf = line.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s'.]{1,40}?)\s*\/\s*([A-Za-z]{2})\b/);
-    if (cityUf) {
-      const city = nameFromText(cityUf[1]);
-      if (city && !data.city) data.city = city;
-      if (!data.uf && UF_LIST.has(cityUf[2].toUpperCase())) data.uf = cityUf[2].toUpperCase();
-    }
-
-    // "CIDADE UF" em colunas separadas (o OCR perde a barra de "Cidade/UF").
-    if (!data.uf) {
-      const tokens = line.split(" ");
-      const ufToken = tokens[1] ?? "";
-      const ufCandidate = ufToken.replace(/[^A-Za-z]/g, "").toUpperCase();
-      if (
-        tokens.length >= 2 &&
-        tokens.length <= 5 &&
-        ufToken === ufToken.toUpperCase() &&
-        ufCandidate.length === 2 &&
-        UF_LIST.has(ufCandidate)
-      ) {
-        const city = nameFromText(tokens[0].replace(/[,;.]+$/, ""));
-        if (city) {
-          if (!data.city) data.city = city;
-          data.uf = ufCandidate;
-        }
+    // Cidade e UF em DUAS linhas: só vale com o bloco cidade/UF/CEP montado
+    // (a linha da UF seguida do CEP) — sigla solta em região duvidosa é ruído.
+    if (/^[A-Z]{2}$/.test(line) && !data.uf && UF_LIST.has(line)) {
+      const previous = lines[index - 1];
+      const nextHasCep = /CEP/i.test(lines[index + 1] ?? "");
+      if (nextHasCep && isCityLike(previous)) {
+        data.uf = line;
+        if (!data.city) data.city = previous!.trim();
       }
-    }
-
-    const cep = line.match(/\bCEP\s*:?\s*([\dOoQIl|!SsBbZzGg]{5})[\s.-]?([\dOoQIl|!SsBbZzGg]{3})\b/i);
-    if (cep && !data.cep) {
-      const formatted = formatCepLocal(`${cep[1]}${cep[2]}`);
-      if (digitsFromOcr(formatted).length === 8) data.cep = formatted;
     }
 
     const labeledAddress = line.match(/^(?:Endere[çc]o|Endereco)\s*:?\s*(.+)$/i);
     const streetAddress = STREET_PREFIX.test(line) ? line : undefined;
-    const address = labeledAddress ? labeledAddress[1].trim() : streetAddress;
+    const address = cleanAddress(labeledAddress ? labeledAddress[1] : streetAddress);
     if (address && !data.address) data.address = address;
-
-    if (/^[A-Za-z]{2}$/.test(line)) {
-      const upper = line.toUpperCase();
-      if (!data.uf && UF_LIST.has(upper)) {
-        data.uf = upper;
-        const previous = lines[index - 1];
-        if (!data.city && isCityLike(previous)) data.city = previous!.trim();
-      }
-    }
   });
 
   for (const key of Object.keys(sections) as SectionKey[]) {
     const data = sections[key];
     if (data.name) continue;
-    data.name = findNameNearCnpj(lines, data.cnpjIndex);
+    data.name = findNameNearCnpj(lines, data.cnpjIndex, sectionIndexes[key]);
   }
 
-  const nfeNumber = extractNfeNumber(lines);
-  const series = extractSeries(lines);
-  const emissionDate = extractEmissionDate(lines);
   const accessKey = extractAccessKey44(clean);
+  const keyParts = parseAccessKey44(accessKey);
   const items = extractItems(lines);
-  const totalValue = extractTotalValue(lines);
+  const totalResult = extractTotalValue(lines, items);
+
+  // ─── Número, série e emissão: a chave válida é a fonte autoritativa ────
+  const notes: Record<string, string> = {};
+  const confidence: Record<string, number> = {};
+
+  const ocrNumber = extractNfeNumber(lines);
+  const ocrSeries = extractSeries(lines);
+  const ocrDate = extractEmissionDate(lines);
+
+  let nfeNumber = ocrNumber;
+  if (keyParts) {
+    if (ocrNumber && ocrNumber !== keyParts.number) {
+      notes.nfeNumber = `Leitura do OCR (${ocrNumber}) conflita com a chave de acesso; prevalece o número da chave (${keyParts.number}).`;
+      confidence.nfeNumber = 60;
+    } else {
+      confidence.nfeNumber = ocrNumber ? 95 : 90;
+      if (!ocrNumber) notes.nfeNumber = "Número derivado da chave de acesso validada.";
+    }
+    nfeNumber = keyParts.number;
+  } else if (ocrNumber) {
+    confidence.nfeNumber = 75;
+  }
+
+  let series = ocrSeries;
+  if (keyParts) {
+    if (ocrSeries && ocrSeries !== keyParts.series) {
+      notes.series = `Leitura do OCR (${ocrSeries}) conflita com a chave de acesso; prevalece a série da chave (${keyParts.series}).`;
+      confidence.series = 60;
+    } else {
+      confidence.series = ocrSeries ? 95 : 90;
+      if (!ocrSeries) notes.series = "Série derivada da chave de acesso validada.";
+    }
+    series = keyParts.series;
+  } else if (ocrSeries) {
+    confidence.series = 70;
+  }
+
+  type EmissionResult = { value?: string; note?: string };
+  const emission = ((): EmissionResult => {
+    if (keyParts && ocrDate) {
+      const [year, month] = ocrDate.split("-").map(Number);
+      if (year === keyParts.year && month === keyParts.month) {
+        return { value: ocrDate, note: "Data confere com o AAMM da chave de acesso." };
+      }
+      return {
+        note: `Data lida pelo OCR (${ocrDate}) conflita com o AAMM da chave (${keyParts.month}/${keyParts.year}) — pendente de conferência manual.`,
+      };
+    }
+    if (ocrDate) return { value: ocrDate, note: "Data lida do rótulo de emissão." };
+    if (keyParts) {
+      return { note: `Somente o mês/ano constam da chave (${keyParts.month}/${keyParts.year}) — informe a data completa.` };
+    }
+    return {};
+  })();
+  const emissionDate = emission.value;
+  if (emission.note) notes.emissionDate = emission.note;
+  confidence.emissionDate = emissionDate ? 90 : 0;
+
+  const totalValue = totalResult.value;
+  if (totalResult.source) notes.totalValue = `Origem: ${totalResult.source}.`;
+
   const afNumber = extractAfNumber(clean);
   const empenhoNumber = extractEmpenhoNumber(clean);
   const processNumber = extractProcessNumber(clean);
@@ -1060,6 +1575,17 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
   const receiver = sections.destinatario;
   const transporter = sections.transportador;
   const issuer = sections.expedidor;
+
+  if (emitter.cnpj && keyParts && digitsFromOcr(emitter.cnpj) === keyParts.emitterCnpjDigits) {
+    notes.emitterCnpj = "CNPJ do emitente confere com o emitente da chave de acesso.";
+    confidence.emitterCnpj = 95;
+  } else if (emitter.cnpj) {
+    confidence.emitterCnpj = 80;
+  }
+  if (receiver.cnpj) confidence.receiverCnpj = 85;
+  if (emitter.name) confidence.emitterName = 80;
+  if (receiver.name) confidence.receiverName = 80;
+  if (items.length) confidence.items = 85;
 
   const ok = Boolean(
     nfeNumber ||
@@ -1101,6 +1627,8 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
     empenhoNumber,
     processNumber,
     totalValue,
+    notes,
+    confidence,
   };
 }
 
@@ -1145,35 +1673,45 @@ function countValid(parsed: DanfeParseResult): number {
   if (parsed.receiverName) count++;
   if (parsed.issuerCnpj) count++;
   if (parsed.issuerName) count++;
+  // Item reconhecido conta como evidência (é o que distingue o texto
+  // consolidado — com o código completo — da região truncada).
+  if (parsed.items.length) count++;
   return count;
 }
 
+/**
+ * Trilha de auditoria por campo, alinhada com a validação (§7): `isValid` só é
+ * verdadeiro quando o campo passa na validação específica; a nota registra a
+ * origem da escolha, o conflito com a chave e a pendência de conferência.
+ */
 function buildFieldTraces(
   parsed: DanfeParseResult,
   source: string,
   srcLayerBlob?: string | null,
 ): OcrFieldTrace[] {
-  const fields: Array<{ field: keyof DanfeParseResult; value: string }> = [
-    { field: "nfeNumber", value: parsed.nfeNumber ?? "" },
-    { field: "series", value: parsed.series ?? "" },
-    { field: "emissionDate", value: parsed.emissionDate ?? "" },
-    { field: "accessKey", value: parsed.accessKey ?? "" },
-    { field: "emitterCnpj", value: parsed.emitterCnpj ?? "" },
-    { field: "emitterName", value: parsed.emitterName ?? "" },
-    { field: "receiverCnpj", value: parsed.receiverCnpj ?? "" },
-    { field: "receiverName", value: parsed.receiverName ?? "" },
-    { field: "issuerCnpj", value: parsed.issuerCnpj ?? "" },
-    { field: "issuerName", value: parsed.issuerName ?? "" },
-  ];
-
   void srcLayerBlob;
-  return fields.map(({ field, value }) => ({
-    field,
-    value,
+  const values: Record<string, string> = {
+    nfeNumber: parsed.nfeNumber ?? "",
+    series: parsed.series ?? "",
+    emissionDate: parsed.emissionDate ?? "",
+    accessKey: parsed.accessKey ?? "",
+    emitterCnpj: parsed.emitterCnpj ?? "",
+    emitterName: parsed.emitterName ?? "",
+    receiverCnpj: parsed.receiverCnpj ?? "",
+    receiverName: parsed.receiverName ?? "",
+    issuerCnpj: parsed.issuerCnpj ?? "",
+    issuerName: parsed.issuerName ?? "",
+    items: parsed.items.map((item) => item.code).join(", "),
+    totalValue: parsed.totalValue !== undefined ? String(parsed.totalValue) : "",
+  };
+
+  return validateDanfeFields(parsed).map((validation) => ({
+    field: validation.campo as keyof DanfeParseResult,
+    value: values[validation.campo] ?? "",
     source,
-    confidence: value ? 85 : 0,
-    isValid: Boolean(value),
-    notes: value ? "" : "Não encontrado",
+    confidence: validation.confidence,
+    isValid: validation.ok,
+    notes: validation.note,
   }));
 }
 
