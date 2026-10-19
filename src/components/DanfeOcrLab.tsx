@@ -6,11 +6,16 @@
  * importação (`src/lib/danfe-ocr.ts` → `parseDanfeText`), comparando o
  * resultado com os dados de referência do documento.
  *
+ * RODADA 21 — preservação dos relatórios originais: o rascunho colado fica
+ * apenas no localStorage DESTE navegador (nunca em banco) para não se perder
+ * ao recarregar, e o botão "Exportar" gera o .json que vira fixture versionada
+ * em `src/__tests__/fixtures/`.
+ *
  * SEGURANÇA:
  *   • nenhuma mutation do Convex, nenhum acesso a banco — a tela roda 100%
  *     no navegador sobre texto colado;
- *   • nada é gravado (nem em banco, nem em storage): o conteúdo existe só
- *     durante a sessão da página;
+ *   • o único armazenamento é o localStorage local deste navegador
+ *     (chave `sigesgd-danfe-lab-relatorio`), para preservar o relatório colado;
  *   • o parser não é alterado — a tela apenas o executa.
  */
 import { useMemo, useState } from "react";
@@ -226,9 +231,34 @@ function statusBadge(status: RowStatus) {
   }
 }
 
+/** Rascunho local (apenas neste navegador — nenhum banco é tocado). */
+const STORAGE_KEY = "sigesgd-danfe-lab-relatorio";
+const STORAGE_NAME_KEY = `${STORAGE_KEY}:nome`;
+
+function readDraft(): { raw: string; name?: string } {
+  try {
+    return {
+      raw: localStorage.getItem(STORAGE_KEY) ?? "",
+      name: localStorage.getItem(STORAGE_NAME_KEY) || undefined,
+    };
+  } catch {
+    return { raw: "", name: undefined };
+  }
+}
+
+function saveDraft(raw: string, name?: string): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, raw);
+    if (name) localStorage.setItem(STORAGE_NAME_KEY, name);
+  } catch {
+    /* storage indisponível — o rascunho fica só na memória da página */
+  }
+}
+
 export default function DanfeOcrLab() {
-  const [raw, setRaw] = useState("");
-  const [fileName, setFileName] = useState<string | undefined>();
+  const [draft] = useState(readDraft);
+  const [raw, setRaw] = useState(draft.raw);
+  const [fileName, setFileName] = useState<string | undefined>(draft.name);
   const [error, setError] = useState<string | undefined>();
   const [runToken, setRunToken] = useState(0);
 
@@ -273,14 +303,30 @@ export default function DanfeOcrLab() {
     const text = await file.text();
     setFileName(file.name);
     setRaw(text);
+    saveDraft(text, file.name);
     setError(undefined);
     setRunToken((token) => token + 1);
   };
 
   const analyze = () => {
-    setFileName((name) => name);
+    saveDraft(raw, fileName);
     setError(undefined);
     setRunToken((token) => token + 1);
+  };
+
+  /** Baixa o relatório colado para versionar como fixture no repositório. */
+  const exportar = () => {
+    const blob = new Blob([raw], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = /\.(json|txt)$/i.test(fileName ?? "")
+      ? fileName!
+      : "danfe-ocr-relatorio.json";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   };
 
   const success = analysis && "results" in analysis ? analysis : undefined;
@@ -294,7 +340,8 @@ export default function DanfeOcrLab() {
         <h1 className="text-2xl font-semibold">Laboratório do OCR da DANFE</h1>
         <p className="text-sm text-muted-foreground">
           Ferramenta temporária de desenvolvimento: cola/carrega o relatório JSON do OCR e
-          executa o parser real do diálogo de importação, sem gravar nada.
+          executa o parser real do diálogo de importação — nada é gravado no banco (o
+          rascunho fica apenas neste navegador).
         </p>
       </div>
 
@@ -305,6 +352,12 @@ export default function DanfeOcrLab() {
             Cole o JSON completo (objeto único, array com os dois relatórios ou o recorte com
             <code> rastreio.pageOcrText / regionTexts / mergedOcr</code>) — ou carregue o
             arquivo <code>.json</code>. Texto OCR puro também é aceito.
+            <br />
+            O rascunho fica salvo neste navegador (localStorage) e o botão
+            <strong> Exportar relatório (.json) </strong>
+            gera o arquivo a versionar como
+            <code> src/__tests__/fixtures/incotech-company-pdf.report.json </code>
+            (ou <code>…-png.report.json</code>) pela interface de edição do projeto.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -320,6 +373,9 @@ export default function DanfeOcrLab() {
             <Button onClick={analyze} disabled={!raw.trim()}>
               Analisar contra o parser real
             </Button>
+            <Button variant="outline" onClick={exportar} disabled={!raw.trim()}>
+              Exportar relatório (.json)
+            </Button>
             <label className="cursor-pointer text-sm text-muted-foreground underline underline-offset-4">
               Carregar arquivo .json
               <input
@@ -332,7 +388,7 @@ export default function DanfeOcrLab() {
             </label>
             {fileName && <span className="text-xs text-muted-foreground">{fileName}</span>}
             <Badge variant="outline" className="ml-auto">
-              somente leitura — nenhuma gravação
+              somente leitura — nada vai ao banco
             </Badge>
           </div>
           {failure && (
