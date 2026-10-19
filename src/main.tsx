@@ -49,6 +49,7 @@ const PrintersPage = lazy(() => import("./pages/Printers.tsx"));
 const Reports = lazy(() => import("./pages/Reports.tsx"));
 const Audit = lazy(() => import("./pages/Audit.tsx"));
 const Settings = lazy(() => import("./pages/Settings.tsx"));
+const DanfeOcrLab = lazy(() => import("./components/DanfeOcrLab.tsx"));
 const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 function RouteLoading() {
@@ -155,6 +156,8 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/reports" element={<RequireAuth><RequirePermission><Reports /></RequirePermission></RequireAuth>} />
               <Route path="/audit" element={<RequireAuth><RequirePermission><Audit /></RequirePermission></RequireAuth>} />
               <Route path="/settings" element={<RequireAuth><RequirePermission><Settings /></RequirePermission></RequireAuth>} />
+              {/* Rodada 20: laboratório temporário de OCR (somente leitura, sem mutation) */}
+              <Route path="/dev/danfe-lab" element={<RequireAuth><DanfeOcrLab /></RequireAuth>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
