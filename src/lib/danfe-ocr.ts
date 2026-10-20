@@ -586,25 +586,6 @@ interface ItemLine {
 }
 
 /** Unidades que são nomes de coluna — nunca a unidade de um item. */
-const FORBIDDEN_UNITS = new Set([
-  "NCM",
-  "CST",
-  "CFOP",
-  "UNID",
-  "ICMS",
-  "IPI",
-  "PIS",
-  "COFINS",
-  "ALIQ",
-  "QTDE",
-  "QUANT",
-  "TOTAL",
-  "VALOR",
-  "PRODUTO",
-  "SERVICO",
-  "DESCRICAO",
-  "MERCADORIA",
-]);
 
 /**
  * Unidades usuais da DANFE — usadas para reconhecer a ordem [UNID QUANT] do
@@ -686,40 +667,13 @@ function findSplitPriceInItemLine(tokens: string[]): ValueWindow | null {
 }
 
 /** Unidades que são nomes de coluna — nunca a unidade de um item. */
-const FORBIDDEN_UNITS = new Set([
-  "NCM",
-  "CST",
-  "CFOP",
-  "UNID",
-  "ICMS",
-  "IPI",
-  "PIS",
-  "COFINS",
-  "ALIQ",
-  "QTDE",
-  "QUANT",
-  "TOTAL",
-  "VALOR",
-  "PRODUTO",
-  "SERVICO",
-  "DESCRICAO",
-  "MERCADORIA",
-]);
 
 /**
  * Rótulos de coluna da tabela de produtos: o OCR às vezes os cola DENTRO da
  * linha do item ("… CHOCO NCM 84716053 CST 000 …"). São descartados na busca
  * pela janela de valores — nunca como unidade/descrição.
  */
-const ITEM_COLUMN_LABELS = new Set([
-  "NCM", "NCM/SH", "SH", "CST", "CSOSN", "CFOP", "UNID", "UNIDADE",
-  "QUANT", "QUANTIDADE", "QTDE", "QTD", "VU", "VT", "V.UNIT", "VUNIT",
-  "UNITARIO", "UNITÁRIO", "V.TOTAL", "VTOTAL", "ALIQ", "ICMS", "IPI",
-]);
 
-function isItemColumnLabel(token: string): boolean {
-  return ITEM_COLUMN_LABELS.has(token.toUpperCase());
-}
 
 interface ValueWindow {
   start: number;
@@ -842,6 +796,9 @@ function findItemValueWindow(tokens: string[]): ValueWindow | null {
   return candidates;
 }
 
+  // Se não encontramos janela coerente mas identificamos "1.323,50" partida
+  // ("1.323,\"+\"50\"), reconstruímos o total a partir dos primeiros
+  // valores reais da linha (evitamos a coluna de valor falsa "Le323,50").
   if (candidates.length === 0 && findSplitPriceInItemLine(tokens)) {
     const splitCandidate = findSplitPriceInItemLine(tokens);
     if (splitCandidate) candidates.push(splitCandidate);
@@ -865,6 +822,7 @@ function findItemValueWindow(tokens: string[]): ValueWindow | null {
  * Código de coluna da tabela de produtos (NCM/CST/CFOP) que o OCR pode ter
  * colado ao fim da descrição. Números de 2 a 9 dígitos e NCM pontuado.
  */
+function isTrailingColumnCode//
 function isTrailingColumnCode(token: string): boolean {
   if (/^\d{2,9}$/.test(token)) return true; // CST/CFOP/NCM sem pontuação
   if (/^\d{4}\.?\d{4}$/.test(token)) return true; // NCM pontuado (8471.6053)
@@ -887,6 +845,12 @@ function normalizeItemDescription(tokens: string[]): { description: string; ncm?
       end--;
       continue;
     }
+
+    if (!isTrailingColumnCode(token)) break;
+    const digits = token.replace(/[.\s]/g, "");
+    if (!ncm && /^\d{8}$/.test(digits)) ncm = digits;
+    end--;
+  }
     if (!isTrailingColumnCode(token)) break;
     const digits = token.replace(/[.\s]/g, "");
     if (!ncm && /^\d{8}$/.test(digits)) ncm = digits;
