@@ -840,9 +840,9 @@ function findItemValueWindow(tokens: string[]): ValueWindow | null {
   }
 
   return candidates;
-}  // Se não encontramos janela coerente mas identificamos "1.323,50" partida
-  // ("1.323,\"+\"50\"), reconstruímos o total a partir dos primeiros
-  // valores reais da linha (evitamos a coluna de valor falsa "Le323,50").  if (candidates.length === 0 && findSplitPriceInItemLine(tokens)) {
+}
+
+  if (candidates.length === 0 && findSplitPriceInItemLine(tokens)) {
     const splitCandidate = findSplitPriceInItemLine(tokens);
     if (splitCandidate) candidates.push(splitCandidate);
   }
