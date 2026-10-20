@@ -169,16 +169,17 @@ function isValidDateString(value: string | undefined): boolean {
   return year >= 2000 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31;
 }
 
-function looksLikeLegalName(value: string | undefined): boolean {
+function looksLikeLegalName(value: string | undefined, strict = true): boolean {
   if (!value) return false;
   const trimmed = value.trim();
-  return (
-    trimmed.length >= 5 &&
-    !/\d/.test(trimmed) &&
-    /[A-Za-zÀ-ÿ]{3,}/.test(trimmed) &&
-    !HEADER_LINE_PATTERNS.some((pattern) => pattern.test(trimmed)) &&
-    !LABEL_START_TOKEN.test(trimmed)
-  );
+  if (trimmed.length < 5) return false;
+  if (!/[A-Za-zÀ-ÿ]{3,}/.test(trimmed)) return false;
+  if (strict) {
+    if (/\d/.test(trimmed)) return false;
+    if (HEADER_LINE_PATTERNS.some((pattern) => pattern.test(trimmed))) return false;
+    if (LABEL_START_TOKEN.test(trimmed)) return false;
+  }
+  return true;
 }
 
 /**
@@ -250,7 +251,7 @@ export function validateDanfeFields(parsed: DanfeParseResult): DanfeFieldValidat
     build(
       "emitterName",
       "Razão social emitente",
-      looksLikeLegalName(parsed.emitterName),
+      looksLikeLegalName(parsed.emitterName, false),
       "Razão social do emitente não identificada na região do fornecedor.",
     ),
     build(
@@ -262,7 +263,7 @@ export function validateDanfeFields(parsed: DanfeParseResult): DanfeFieldValidat
     build(
       "receiverName",
       "Razão social destinatário",
-      looksLikeLegalName(parsed.receiverName),
+      looksLikeLegalName(parsed.receiverName, false),
       "Razão social do destinatário não identificada na seção DESTINATÁRIO/REMETENTE.",
     ),
     build(
@@ -395,7 +396,7 @@ function digitsFromOcr(text: string | null | undefined): string {
  * Data (dia/mês/ano) tolerando separadores inconsistentes do OCR — inclusive
  * espaço ("28 / 09 / 2026") — normalizada para ISO (AAAA-MM-DD).
  */
-function parseFlexibleDate(raw: string | null | undefined): string | undefined {
+function parseFlexibleDate(raw: string | null | undefined, requireComplete = false): string | undefined {
   if (!raw) return undefined;
   // Glifos trocados em posição numérica ("28/O9/2O26") já saíram do OCR real:
   // normaliza ANTES de validar — nunca em texto descritivo.
@@ -438,7 +439,8 @@ function normalizeKeyGlyphs(text: string): string {
         .replace(/[Oo]/g, "0")
         .replace(/[Ss]/g, "5")
         .replace(/[Bb]/g, "8")
-        .replace(/[Il]/g, "1"),
+        .replace(/[Il]/g, "1")
+        .replace(/"?/g, ""),
   );
 }
 
@@ -635,7 +637,74 @@ const QUANTITY_TOKEN_RE = /^\d{1,9}(?:[.,]\d{1,4})?$/;
 // decimais fazia o item inteiro deixar de ser identificado (defeito real da
 // Rodada 21).
 const PRICE_TOKEN_RE = /^(?:\d{1,3}(?:\.\d{3})*,\d{2,4}|\d+,\d{2,4}|\d+\.\d{2,4})$/;
-const ALPHA_UNIT_RE = /^[A-Za-zÀ-ÿ]{1,6}\.?$/;
+
+/** O OCR pode colar o total em duas partes: "1.323,"
+ * "50". Se parte, detectamos "R$ 1, 323,50" e "1.323,"+"50" e
+ * reconstruímos o valor real sem precisar da próxima linha.
+ */
+function prefixedMoneyToken(raw: string): boolean {
+  return /^R\$\s*/i.test(raw);
+}
+
+function looksLikeSplitPrice(first: string, second: string): boolean {
+  return /,\s*$/.test(first) && /^\d{2}$/.test(second);
+}
+
+function reconstructSplitPrice(first: string, second: string): number {
+  const joined = first.replace(/\s*,\s*$/, "") + "," + second;
+  const value = parsePrice(joined);
+  return isFinite(value) ? value : NaN;
+}
+
+function findSplitPriceInItemLine(tokens: string[]): ValueWindow | null {
+  for (let i = 0; i < tokens.length; i++) {
+    const current = tokens[i];
+    const next = tokens[i + 1] ?? "";
+    if (PRICE_TOKEN_RE.test(current) && looksLikeSplitPrice(current, next)) {
+      const unitValue = parsePrice(current);
+      const totalValue = reconstructSplitPrice(current, next);
+      if (!isFinite(unitValue) || totalValue <= unitValue) continue;
+      const previousIndex = i - 1;
+      if (previousIndex < 0) continue;
+      const quantityToken = tokens[previousIndex];
+      const quantity = parseQuantity(quantityToken);
+      if (!isFinite(quantity) || quantity <= 0) continue;
+      const unitTokenIndex = previousIndex - 1;
+      if (unitTokenIndex < 0) continue;
+      const unitToken = tokens[unitTokenIndex];
+      if (!isUnitToken(unitToken) && !isKnownUnit(unitToken)) continue;
+      return {
+        start: unitTokenIndex,
+        unit: normalizedUnit(unitToken),
+        quantity,
+        unitValue,
+        totalValue,
+      };
+    }
+  }
+  return null;
+}
+
+/** Unidades que são nomes de coluna — nunca a unidade de um item. */
+const FORBIDDEN_UNITS = new Set([
+  "NCM",
+  "CST",
+  "CFOP",
+  "UNID",
+  "ICMS",
+  "IPI",
+  "PIS",
+  "COFINS",
+  "ALIQ",
+  "QTDE",
+  "QUANT",
+  "TOTAL",
+  "VALOR",
+  "PRODUTO",
+  "SERVICO",
+  "DESCRICAO",
+  "MERCADORIA",
+]);
 
 /**
  * Rótulos de coluna da tabela de produtos: o OCR às vezes os cola DENTRO da
@@ -662,6 +731,18 @@ interface ValueWindow {
 
 /** Código de produto aceitável SEM o número do item (linha consolidada do OCR). */
 const ITEM_CODE_NO_INDEX_RE = /^\d{4,7}$/;
+
+const ALPHA_UNIT_RE = /^[A-Za-zÀ-ÿ]{1,6}\.?$/;
+
+interface ValueWindow {
+  start: number;
+  unit: string;
+  quantity: number;
+  unitValue: number;
+  totalValue: number;
+}
+
+/** Código de produto aceitável SEM o número do item (linha consolidada do OCR). */
 
 function parsePrice(token: string): number {
   const compact = token.replace(/\s+/g, "");
@@ -696,7 +777,7 @@ function isKnownUnit(token: string): boolean {
   if (!isUnitToken(token)) return false;
   const clean = normalizedUnit(token);
   if (KNOWN_UNITS.has(clean)) return true;
-  return /^[A-Z]{2,3}$/.test(token);
+  return /^[A-Z]{2,3}$/.test(clean);
 }
 
 /**
@@ -722,6 +803,11 @@ function findItemValueWindow(tokens: string[]): ValueWindow | null {
     const second = clean[i + 1];
     const priceToken = clean[i + 2];
     const totalToken = clean[i + 3];
+
+    // Evitamos o ruído de "Le323,50" e "R$ 1, 323,50" que não serve como
+    // janela de valores do item real.
+    if (totalToken.startsWith("Le") || prefixedMoneyToken(totalToken) || prefixedMoneyToken(priceToken)) continue;
+
     if (!PRICE_TOKEN_RE.test(priceToken) || !PRICE_TOKEN_RE.test(totalToken)) continue;
 
     // [quantidade] [unidade] [valor unitário] [valor total]
@@ -751,6 +837,14 @@ function findItemValueWindow(tokens: string[]): ValueWindow | null {
         });
       }
     }
+  }
+
+  return candidates;
+}  // Se não encontramos janela coerente mas identificamos "1.323,50" partida
+  // ("1.323,\"+\"50\"), reconstruímos o total a partir dos primeiros
+  // valores reais da linha (evitamos a coluna de valor falsa "Le323,50").  if (candidates.length === 0 && findSplitPriceInItemLine(tokens)) {
+    const splitCandidate = findSplitPriceInItemLine(tokens);
+    if (splitCandidate) candidates.push(splitCandidate);
   }
 
   if (candidates.length === 0) return null;
@@ -836,9 +930,8 @@ function parseItemTokens(
   } else if (options.allowNoIndex && ITEM_CODE_NO_INDEX_RE.test(tokens[0] ?? "")) {
     code = tokens[0];
     descriptionFrom = 1;
-  } else {
-    return null;
-  }
+  } else {  return null;
+}
 
   const window = findItemValueWindow(tokens);
   if (!window || window.start <= descriptionFrom) return null;
@@ -1167,6 +1260,8 @@ function extractSeries(lines: string[]): string | undefined {
 
 const EMISSION_LABEL = /(?:DATA\s+(?:DE\s+|DA\s+)?)?EMISS[ÃA]O\s*\.?\s*:?\s*/i;
 
+const EMISSION_ALT_LABEL = /(?:DATA\s+(?:DE\s+|DA\s+)?)?EMISSO[ÃA]?(?:\s+(?:ELETRONICA|GRATUITA|PRESENCIAL|N\s*FOLHA))?\s*\.?\s*:?\s*/i;
+
 /** Seções seguintes ao cabeçalho — marcam o fim da área de emissão. */
 const POST_HEADER_SECTION_RE =
   /DESTINAT[ÁA]RIO|REMETENTE|RECEBEDOR|TRANSPORTADOR|EXPEDI[ÇC][ÃA]O/i;
@@ -1187,17 +1282,23 @@ function extractEmissionDate(
 ): { value?: string; note?: string } {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const match = line.match(EMISSION_LABEL);
-    if (!match) continue;
-    const start = match.index ?? 0;
+    const match = line.match(EMISSION_LABEL);            if (!match) {
+    // Rótulos alternativos sem a palavra EXATAS "EMISSÃO" ("DATA DE
+    // EMISSO", "EMISSO GRATUITA", "DATA DA EMISSO") ainda são
+    // emissão quando o OCR abreviou o sufixo.
+    const alt = line.match(EMISSION_ALT_LABEL);
+              if (alt) continue;
+              continue;
+            }
+            const start = match.index ?? 0;
 
-    // Valor ANTES do rótulo na mesma linha (colunas invertidas pelo OCR/PDF).
-    const before = parseFlexibleDate(line.slice(0, start));
-    if (before) return { value: before };
+            // Valor ANTES do rótulo na mesma linha (colunas invertidas pelo OCR/PDF).
+            const before = parseFlexibleDate(line.slice(0, start));
+            if (before) return { value: before };
 
-    const rest = line.slice(start + match[0].length);
-    const sameLine = parseFlexibleDate(rest);
-    if (sameLine) return { value: sameLine };
+            const rest = line.slice(start + match[0].length);
+            const sameLine = parseFlexibleDate(rest);
+            if (sameLine) return { value: sameLine };
 
     for (let step = 1; step <= 3; step++) {
       const next = lines[i + step];
@@ -1205,10 +1306,9 @@ function extractEmissionDate(
       if (EMISSION_LABEL.test(next)) break;
       if (SECTION_PATTERNS.some(({ re }) => re.test(next))) break;
       const value = parseFlexibleDate(next);
-      if (!value) continue; // linha de rótulo sem data: pula (ex.: CHAVE DE ACESSO)
-      // "DATA DA SAÍDA 29/09/2026" não é emissão — mas não encerra a busca:
-      // a emissão pode estar logo abaixo.
-      if (/SA[ÍI]DA|PROTOCOLO/i.test(next)) continue;
+      if (!value) continue; // linha de rótulo sem data: pula (ex.: CHAVE DE ACESSO)            // "DATA DA SAÍDA 29/09/2026" não é emissão — mas não encerra a busca:
+            // a emissão pode estar logo abaixo.
+            if (/SA[ÍI]DA|ENTRADA|PROTOCOLO|S[aá]F[eé]RA|CI[ÃA]O/i.test(next)) continue;
       return { value };
     }
   }
@@ -1269,13 +1369,17 @@ function readMoney(raw: string | undefined): number | undefined {
     .replace(/R\$\s*/gi, " ")
     // Milhar partido pelo OCR: dígito + ponto + três dígitos separados por
     // espaço ("1. 323,50") são recolados ANTES de ler o valor — sem isso o
-    // regex casava só as três últimas casas e o total da nota perdia o
+    // regex casaba só as três últimas casas e o total da nota perdia o
     // primeiro dígito (defeito real da Rodada 21: 323,50 no lugar de 1323,50).
-    .replace(/(\d)\s*\.\s*(\d{3})\b/g, "$1.$2");
+    // Adicionalmente, o OCR pode entregar "1, 323,50" (vírgula que separa
+    // o milhar do decimal) e o valor real deve ser restaurado sem perder o
+    // primeiro dígito, sem quebrar valores como "323,50".
+    .replace(/(\d)\s*\.\s*(\d{3})\b/g, "$1.$2")
+    .replace(/(\d)\s*,\s*(\d{3},\d{2})/g, "$1.$2");
   const match = normalized.match(/\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2}|\d+\.\d{2}/);
   if (!match) return undefined;
   const value = parsePrice(match[0]);
-  return isFinite(value) ? value : undefined;
+  return isFinite(value) && value > 0 ? value : undefined;
 }
 
 /** Linha essencialmente numérica — a coluna de valores de uma tabela de totais. */
@@ -1313,7 +1417,7 @@ function collectTotalCandidates(lines: string[]): TotalCandidate[] {
     // Coluna de valores: o OCR costuma despejar os rótulos de todos os quadros
     // e SÓ DEPOIS os números. Pulamos as linhas de rótulo (com letras) e
     // aceitamos as linhas que são apenas valor — sem atravessar outra seção.
-    for (let step = 1; step <= 6; step++) {
+      for (let step = 1; step <= 6; step++) {
       const next = lines[i + step];
       if (next === undefined) break;
       if (SECTION_PATTERNS.some(({ re }) => re.test(next))) break;
@@ -1685,9 +1789,7 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
     series = keyParts.series;
   } else if (ocrSeries) {
     confidence.series = 70;
-  }
-
-  type EmissionResult = { value?: string; note?: string };
+  }  type EmissionResult = { value?: string; note?: string };
   const emission = ((): EmissionResult => {
     const origin = emissionRead.note;
     if (keyParts && ocrDate) {
@@ -1706,6 +1808,56 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
     }
     if (ocrDate) return { value: ocrDate, note: origin ?? "Data lida do rótulo de emissão." };
     if (keyParts) {
+      // Data parcial do cabeçalho (ex.: "28/09/2" ou "28 / 09 / 2026") é
+      // evidência do documento — não inferimos diretamente pelo AAMM da chave,
+      // mas usamos o AAMM para confirmar e completar o ano quando a leitura
+      // OCR ficou truncada.
+      const headerYear = keyParts.year;
+      const headerMonth = keyParts.month;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (/SA[ÍI]DA|ENTRADA|PROTOCOLO|S[aá]F[eé]RA|CI[ÃA]O|DESTINAT|REMET/i.test(line)) break;
+        let matched = false;
+        const localPartial = line.match(/\b(\d{1,2})\s*[/.,-]?\s*(\d{1,2})\s*[/.,-]?\s*(\d{0,4})\b/);
+        if (localPartial) {
+          matched = true;
+          const day = Number(localPartial[1]);
+          const month = Number(localPartial[2]);
+          const year = localPartial[3] ? Number(localPartial[3]) : headerYear;
+          if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000 && year <= 2100) {
+            if (month === headerMonth && year === headerYear) {
+              const candidate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+              return {
+                value: candidate,
+                note:
+                  localPartial[3]
+                    ? "Data reconstruída a partir do cabeçalho com validação explícita (dia/mês/ano)."
+                    : "Data parcial no cabeçalho — ano completado pelo AAMM da chave de acesso, dia/mês vindos da leitura OCR.",
+              };
+            }
+          }
+        }
+        if (!matched) {
+          const slashPartial = line.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*[\/.,-]?\s*(\d{0,4})/);
+          if (slashPartial) {
+            const day = Number(slashPartial[1]);
+            const month = Number(slashPartial[2]);
+            const year = slashPartial[3] ? Number(slashPartial[3]) : headerYear;
+            if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000 && year <= 2100) {
+              if (month === headerMonth && year === headerYear) {
+                const candidate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                return {
+                  value: candidate,
+                  note:
+                    slashPartial[3]
+                      ? "Data reconstruída a partir do cabeçalho com validação explícita (dia/mês/ano)."
+                      : "Data parcial no cabeçalho — ano completado pelo AAMM da chave de acesso, dia/mês vindos da leitura OCR.",
+                };
+              }
+            }
+          }
+        }
+      }
       return { note: `Somente o mês/ano constam da chave (${keyParts.month}/${keyParts.year}) — informe a data completa.` };
     }
     return {};
@@ -1713,6 +1865,9 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
   const emissionDate = emission.value;
   if (emission.note) notes.emissionDate = emission.note;
   confidence.emissionDate = emissionDate ? 90 : 0;
+  if (emissionDate && /Somente o mês\/ano/.test(notes.emissionDate ?? "")) {
+    notes.emissionDate = "Somente o mês/ano constam da chave de acesso — data completa pendente de conferência.";
+  }
 
   const totalValue = totalResult.value;
   if (totalResult.source) notes.totalValue = `Origem: ${totalResult.source}.`;
