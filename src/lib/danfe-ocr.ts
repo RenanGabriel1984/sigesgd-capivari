@@ -667,13 +667,40 @@ function findSplitPriceInItemLine(tokens: string[]): ValueWindow | null {
 }
 
 /** Unidades que são nomes de coluna — nunca a unidade de um item. */
+const FORBIDDEN_UNITS = new Set([
+  "NCM",
+  "CST",
+  "CFOP",
+  "UNID",
+  "ICMS",
+  "IPI",
+  "PIS",
+  "COFINS",
+  "ALIQ",
+  "QTDE",
+  "QUANT",
+  "TOTAL",
+  "VALOR",
+  "PRODUTO",
+  "SERVICO",
+  "DESCRICAO",
+  "MERCADORIA",
+]);
 
 /**
  * Rótulos de coluna da tabela de produtos: o OCR às vezes os cola DENTRO da
  * linha do item ("… CHOCO NCM 84716053 CST 000 …"). São descartados na busca
  * pela janela de valores — nunca como unidade/descrição.
  */
+const ITEM_COLUMN_LABELS = new Set([
+  "NCM", "NCM/SH", "SH", "CST", "CSOSN", "CFOP", "UNID", "UNIDADE",
+  "QUANT", "QUANTIDADE", "QTDE", "QTD", "VU", "VT", "V.UNIT", "VUNIT",
+  "UNITARIO", "UNITÁRIO", "V.TOTAL", "VTOTAL", "ALIQ", "ICMS", "IPI",
+]);
 
+function isItemColumnLabel(token: string): boolean {
+  return ITEM_COLUMN_LABELS.has(token.toUpperCase());
+}
 
 interface ValueWindow {
   start: number;
@@ -687,16 +714,6 @@ interface ValueWindow {
 const ITEM_CODE_NO_INDEX_RE = /^\d{4,7}$/;
 
 const ALPHA_UNIT_RE = /^[A-Za-zÀ-ÿ]{1,6}\.?$/;
-
-interface ValueWindow {
-  start: number;
-  unit: string;
-  quantity: number;
-  unitValue: number;
-  totalValue: number;
-}
-
-/** Código de produto aceitável SEM o número do item (linha consolidada do OCR). */
 
 function parsePrice(token: string): number {
   const compact = token.replace(/\s+/g, "");
@@ -793,13 +810,10 @@ function findItemValueWindow(tokens: string[]): ValueWindow | null {
     }
   }
 
-  return candidates;
-}
-
-  // Se não encontramos janela coerente mas identificamos "1.323,50" partida
-  // ("1.323,\"+\"50\"), reconstruímos o total a partir dos primeiros
-  // valores reais da linha (evitamos a coluna de valor falsa "Le323,50").
-  if (candidates.length === 0 && findSplitPriceInItemLine(tokens)) {
+  // Se não encontramos janela coerente mas identificamos um preço partido
+  // pelo OCR ("X.XXX," + "XX"), reconstruímos o total a partir dos primeiros
+  // valores reais da linha (evitamos a coluna de valor falsa com ruído "Le").
+  if (candidates.length === 0) {
     const splitCandidate = findSplitPriceInItemLine(tokens);
     if (splitCandidate) candidates.push(splitCandidate);
   }
@@ -822,7 +836,6 @@ function findItemValueWindow(tokens: string[]): ValueWindow | null {
  * Código de coluna da tabela de produtos (NCM/CST/CFOP) que o OCR pode ter
  * colado ao fim da descrição. Números de 2 a 9 dígitos e NCM pontuado.
  */
-function isTrailingColumnCode//
 function isTrailingColumnCode(token: string): boolean {
   if (/^\d{2,9}$/.test(token)) return true; // CST/CFOP/NCM sem pontuação
   if (/^\d{4}\.?\d{4}$/.test(token)) return true; // NCM pontuado (8471.6053)
@@ -846,11 +859,6 @@ function normalizeItemDescription(tokens: string[]): { description: string; ncm?
       continue;
     }
 
-    if (!isTrailingColumnCode(token)) break;
-    const digits = token.replace(/[.\s]/g, "");
-    if (!ncm && /^\d{8}$/.test(digits)) ncm = digits;
-    end--;
-  }
     if (!isTrailingColumnCode(token)) break;
     const digits = token.replace(/[.\s]/g, "");
     if (!ncm && /^\d{8}$/.test(digits)) ncm = digits;
@@ -1240,6 +1248,77 @@ const POST_HEADER_SECTION_RE =
  *     AAMM confere com a chave — leitura do documento (nunca inventada), com a
  *     origem registrada em `note` para conferência humana.
  */
+/**
+ * Último recurso: reconstrói a data de emissão a partir das evidências do
+ * PRÓPRIO cabeçalho (dia/mês lidos no documento), validada explicitamente
+ * contra o AAMM da chave de acesso — nunca inferida só pela chave:
+ *   • varre o texto CONSOLIDADO inteiro (no OCR real o cabeçalho costuma vir
+ *     em UMA linha; guardar a busca por linha perdia a data);
+ *   • para na seção do destinatário/transporte (POST_HEADER_SECTION_RE);
+ *   • ignora data de SAÍDA/ENTRADA/PROTOCOLO/VENCIMENTO imediatamente anterior;
+ *   • ano com 2 dígitos ("28/09/26") completa para 2000+ano; ano truncado
+ *     ("28/09/2") ou ausente só é completado quando dia/mês do cabeçalho e o
+ *     AAMM da chave conferem.
+ */
+function findHeaderEmissionDate(
+  lines: string[],
+  key: AccessKeyParts,
+): { value: string; completeYear: boolean } | undefined {
+  const raw = lines.join("\n");
+  const stop = raw.search(POST_HEADER_SECTION_RE);
+  const region = stop >= 0 ? raw.slice(0, stop) : raw;
+  // Glifos trocados em posição numérica ("28/O9/2O26"): troca 1:1, então os
+  // índices seguem válidos sobre o texto original (`region`).
+  const text = normalizeDigitGlyphs(region);
+
+  const skipContext = (index: number): boolean => {
+    const before = region.slice(Math.max(0, index - 26), index);
+    return /(?:SA[ÍI]DA|ENTRADA|PROTOCOLO|S[ÁA]F[EÉ]RA|CI[ÃA]O|(?:VENC|VALID|NASC)[A-ZÇÃ]*)\s*:?\s*$/i.test(
+      before,
+    );
+  };
+
+  const accept = (day: number, month: number, year: number): string | undefined => {
+    if (!(day >= 1 && day <= 31)) return undefined;
+    if (month !== key.month || year !== key.year) return undefined;
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  };
+
+  // Formato ISO impresso ("2026-09-28") — checado ANTES de dd/mm/aaaa, senão
+  // "2026-09-28" seria lido como 26/09/2028.
+  const isoRe = /\b(20\d{2})-(\d{2})-(\d{2})\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = isoRe.exec(text)) !== null) {
+    const value = accept(Number(m[3]), Number(m[2]), Number(m[1]));
+    if (value && !skipContext(m.index)) return { value, completeYear: true };
+  }
+
+  const dateRe = /(\d{1,2})\s*[/.,-]\s*(\d{1,2})(?:\s*[/.,-]\s*(\d{1,4}))?/g;
+  while ((m = dateRe.exec(text)) !== null) {
+    const day = Number(m[1]);
+    const month = Number(m[2]);
+    const rawYear = m[3];
+    let completeYear = true;
+    let year = key.year;
+    if (rawYear === undefined) {
+      completeYear = false; // só dia/mês no documento
+    } else if (rawYear.length >= 4) {
+      year = Number(rawYear);
+    } else if (rawYear.length === 2) {
+      year = 2000 + Number(rawYear);
+    } else {
+      completeYear = false; // ano truncado pelo OCR ("28/09/2")
+    }
+    const value = accept(day, month, year);
+    if (!value || skipContext(m.index)) {
+      dateRe.lastIndex = m.index + 1; // não deixa uma leitura parcial cobrir a boa
+      continue;
+    }
+    return { value, completeYear };
+  }
+  return undefined;
+}
+
 function extractEmissionDate(
   lines: string[],
   key?: AccessKeyParts,
@@ -1278,23 +1357,13 @@ function extractEmissionDate(
   }
 
   if (key) {
-    const headerEnd = lines.findIndex(
-      (line, index) => index > 0 && POST_HEADER_SECTION_RE.test(line),
-    );
-    const limit = headerEnd === -1 ? Math.ceil(lines.length * 0.5) : headerEnd;
-    for (let i = 0; i < limit; i++) {
-      const line = lines[i];
-      if (/SA[ÍI]DA|VENC|VALID|NASC/i.test(line)) continue;
-      const value = parseFlexibleDate(line);
-      if (!value) continue;
-      const [year, month] = value.split("-").map(Number);
-      if (year === key.year && month === key.month) {
-        return {
-          value,
-          note:
-            "Data encontrada no cabeçalho sem rótulo adjacente; confere com o AAMM da chave de acesso — confirme visualmente.",
-        };
-      }
+    const hit = findHeaderEmissionDate(lines, key);
+    if (hit) {
+      return {
+        value: hit.value,
+        note:
+          "Data encontrada no cabeçalho sem rótulo adjacente; confere com o AAMM da chave de acesso — confirme visualmente.",
+      };
     }
   }
 
@@ -1772,55 +1841,17 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
     }
     if (ocrDate) return { value: ocrDate, note: origin ?? "Data lida do rótulo de emissão." };
     if (keyParts) {
-      // Data parcial do cabeçalho (ex.: "28/09/2" ou "28 / 09 / 2026") é
-      // evidência do documento — não inferimos diretamente pelo AAMM da chave,
-      // mas usamos o AAMM para confirmar e completar o ano quando a leitura
-      // OCR ficou truncada.
-      const headerYear = keyParts.year;
-      const headerMonth = keyParts.month;
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        if (/SA[ÍI]DA|ENTRADA|PROTOCOLO|S[aá]F[eé]RA|CI[ÃA]O|DESTINAT|REMET/i.test(line)) break;
-        let matched = false;
-        const localPartial = line.match(/\b(\d{1,2})\s*[/.,-]?\s*(\d{1,2})\s*[/.,-]?\s*(\d{0,4})\b/);
-        if (localPartial) {
-          matched = true;
-          const day = Number(localPartial[1]);
-          const month = Number(localPartial[2]);
-          const year = localPartial[3] ? Number(localPartial[3]) : headerYear;
-          if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000 && year <= 2100) {
-            if (month === headerMonth && year === headerYear) {
-              const candidate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-              return {
-                value: candidate,
-                note:
-                  localPartial[3]
-                    ? "Data reconstruída a partir do cabeçalho com validação explícita (dia/mês/ano)."
-                    : "Data parcial no cabeçalho — ano completado pelo AAMM da chave de acesso, dia/mês vindos da leitura OCR.",
-              };
-            }
-          }
-        }
-        if (!matched) {
-          const slashPartial = line.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*[\/.,-]?\s*(\d{0,4})/);
-          if (slashPartial) {
-            const day = Number(slashPartial[1]);
-            const month = Number(slashPartial[2]);
-            const year = slashPartial[3] ? Number(slashPartial[3]) : headerYear;
-            if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000 && year <= 2100) {
-              if (month === headerMonth && year === headerYear) {
-                const candidate = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-                return {
-                  value: candidate,
-                  note:
-                    slashPartial[3]
-                      ? "Data reconstruída a partir do cabeçalho com validação explícita (dia/mês/ano)."
-                      : "Data parcial no cabeçalho — ano completado pelo AAMM da chave de acesso, dia/mês vindos da leitura OCR.",
-                };
-              }
-            }
-          }
-        }
+      // Data parcial do cabeçalho (ex.: "28/09/2" ou "28/09/26") é evidência
+      // do documento — não inferimos a data só pelo AAMM da chave: o dia/mês
+      // vêm do cabeçalho e o AAMM apenas confirma/completa a leitura truncada.
+      const hit = findHeaderEmissionDate(lines, keyParts);
+      if (hit) {
+        return {
+          value: hit.value,
+          note: hit.completeYear
+            ? "Data reconstruída a partir do cabeçalho com validação explícita (dia/mês/ano) e conferida com o AAMM da chave de acesso."
+            : "Data parcial no cabeçalho — ano completado pelo AAMM da chave de acesso, dia/mês vindos da leitura OCR.",
+        };
       }
       return { note: `Somente o mês/ano constam da chave (${keyParts.month}/${keyParts.year}) — informe a data completa.` };
     }
