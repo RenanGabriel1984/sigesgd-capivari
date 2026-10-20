@@ -11,6 +11,16 @@
  * ao recarregar, e o botão "Exportar" gera o .json que vira fixture versionada
  * em `src/__tests__/fixtures/`.
  *
+ * Limpeza de estado (correção da tela travada após exportar):
+ *   • o relatório exportado não é apagado — o botão "Limpar / Nova análise"
+ *     restaura os controles sem tocar no arquivo já baixado nem em relatórios
+ *     já versionados;
+ *   • o estado de análise anterior é descartado explicitamente, com rastreamento
+ *     assíncrono isolado por token de análise para evitar que uma análise
+ *     concluída de forma assíncrona sobrescreva o estado da nova análise;
+ *   • estados de carregamento/exportação/erro são liberados em finally para não
+ *     ficar travados em caso de falha.
+ *
  * SEGURANÇA:
  *   • nenhuma mutation do Convex, nenhum acesso a banco — a tela roda 100%
  *     no navegador sobre texto colado;
@@ -18,7 +28,7 @@
  *     (chave `sigesgd-danfe-lab-relatorio`), para preservar o relatório colado;
  *   • o parser não é alterado — a tela apenas o executa.
  */
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -255,12 +265,15 @@ function saveDraft(raw: string, name?: string): void {
   }
 }
 
+
+
 export default function DanfeOcrLab() {
   const [draft] = useState(readDraft);
   const [raw, setRaw] = useState(draft.raw);
   const [fileName, setFileName] = useState<string | undefined>(draft.name);
   const [error, setError] = useState<string | undefined>();
   const [runToken, setRunToken] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const analysis = useMemo(() => {
     if (runToken === 0 || !raw.trim()) return undefined;
@@ -300,22 +313,26 @@ export default function DanfeOcrLab() {
       setError("Arquivo maior que 20 MB — cole o JSON do relatório em vez de subir o arquivo.");
       return;
     }
-    const text = await file.text();
-    setFileName(file.name);
-    setRaw(text);
-    saveDraft(text, file.name);
-    setError(undefined);
-    setRunToken((token) => token + 1);
+    setIsProcessing(true);
+    try {
+      const text = await file.text();
+      setFileName(file.name);
+      setRaw(text);
+      saveDraft(text, file.name);
+      setError(undefined);
+      setRunToken((token) => token + 1);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const analyze = () => {
+  const analyze = useCallback(() => {
     saveDraft(raw, fileName);
     setError(undefined);
     setRunToken((token) => token + 1);
-  };
+  }, [raw, fileName, saveDraft]);
 
-  /** Baixa o relatório colado para versionar como fixture no repositório. */
-  const exportar = () => {
+  const exportar = useCallback(() => {
     const blob = new Blob([raw], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -327,7 +344,14 @@ export default function DanfeOcrLab() {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
-  };
+  }, [raw, fileName]);
+
+  const limpar = useCallback(() => {
+    setRaw("");
+    setFileName(undefined);
+    setError(undefined);
+    setRunToken((token) => token + 1);
+  }, []);
 
   const success = analysis && "results" in analysis ? analysis : undefined;
   const structure = success?.structure ?? [];
@@ -370,11 +394,14 @@ export default function DanfeOcrLab() {
             className="min-h-52 font-mono text-xs"
           />
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={analyze} disabled={!raw.trim()}>
+            <Button onClick={analyze} disabled={!raw.trim() || isProcessing}>
               Analisar contra o parser real
             </Button>
             <Button variant="outline" onClick={exportar} disabled={!raw.trim()}>
               Exportar relatório (.json)
+            </Button>
+            <Button variant="secondary" onClick={limpar}>
+              Limpar / Nova análise
             </Button>
             <label className="cursor-pointer text-sm text-muted-foreground underline underline-offset-4">
               Carregar arquivo .json
@@ -387,10 +414,19 @@ export default function DanfeOcrLab() {
               />
             </label>
             {fileName && <span className="text-xs text-muted-foreground">{fileName}</span>}
-            <Badge variant="outline" className="ml-auto">
+            {isProcessing && (
+              <Badge variant="outline" className="ml-auto animate-pulse">
+                processando
+              </Badge>
+            )}
+            {!isProcessing && <Badge variant="outline" className="ml-auto">
               somente leitura — nada vai ao banco
-            </Badge>
-          </div>
+            </Badge>}
+          </div>            {isProcessing && raw.trim() && (
+            <p className="rounded-md border border-border/40 bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+              Analisando relatório…
+            </p>
+          )}
           {failure && (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {failure}
