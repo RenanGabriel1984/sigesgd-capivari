@@ -69,6 +69,8 @@ export interface DanfeParseResult {
   emitterPostalCode: string;
   receiverCnpj: string;
   receiverName: string;
+  receiverPendingName?: string;
+  emitterPendingName?: string;
   transporterCnpj: string;
   afNumber: string;
   empenhoNumber: string;

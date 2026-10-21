@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import { digitsOnly } from "@/lib/br-validators";
 import {
   danfeFieldSummary,
+  mergeDanfeTexts,
   parseDanfeText,
   validateDanfeFields,
   type DanfeParseResult,
@@ -138,6 +139,174 @@ describe.skipIf(presentFixtures.length === 0)(
       expect(presentFixtures.map((f) => f.file)).toEqual(
         EXPECTED_FIXTURES.map((f) => f.file),
       );
+    });
+  },
+);
+
+describe(
+  "R20 — integração com o caminho real do diálogo (readDanfeFile via mergeDanfeTexts)",
+  () => {
+    for (const { file, origem } of presentFixtures) {
+      it(`${origem}: o diálogo queima o relatório real como na tela de Entradas`, () => {
+        const raw = readFileSync(resolve(FIXTURE_DIR, file), "utf8");
+        const { reports } = parseReportInput(raw);
+        expect(reports.length, `${origem}: relatórios extraídos`).toBeGreaterThan(0);
+
+        for (const payload of reports) {
+          // readDanfeFile, para um PDF sem camada de texto utilizável, roda
+          // mergeDanfeTexts(pageOcrText, regionTexts) e depois
+          // parseDanfeText(merged) — exatamente o que o diálogo escolhe quando
+          // hasUsableTextLayer(rawText) é falso (PDF escaneado). Testamos esse
+          // caminho, não o buildReportText de armazenamento.
+          const merged = mergeDanfeTexts(
+            payload.pageOcrText ?? "",
+            payload.regionTexts ?? [],
+          );
+          const parsed = parseDanfeText(merged);
+
+          // — Critérios de aceitação do documento original (item 6 da tarefa) —
+          expect(parsed.accessKey, `${origem}: chave`).toBe(
+            "42260922816315000144550010000029671515440064",
+          );
+          expect(Number(digitsOnly(parsed.nfeNumber ?? "")), `${origem}: número`).toBe(2967);
+          expect(parsed.series, `${origem}: série`).toBe("001");
+          expect(parsed.emissionDate, `${origem}: emissão`).toBe("2026-09-28");
+
+          // Emitente: CNPJ 22.816.315/0001-44 → INCOTECH COMPANY LTDA, nunca o
+          // título da DANFE ("da Nota Fiscal Eletronica SAIDA").
+          expect(
+            digitsOnly(parsed.emitterCnpj ?? ""),
+            `${origem}: CNPJ emitente`,
+          ).toBe("22816315000144");
+          expect(
+            norm(parsed.emitterName),
+            `${origem}: razão social emitente`,
+          ).toBe(norm("INCOTECH COMPANY LTDA"));
+          expect(
+            parsed.emitterName,
+            `${origem}: emitente ≠ título DANFE`,
+          ).not.toMatch(/Nota Fiscal Eletronica|Documento Auxiliar/i);
+
+          // Destinatário: CNPJ 44.723.674/0001-90 → MUNICIPIO DE CAPIVARI.
+          expect(
+            digitsOnly(parsed.receiverCnpj ?? ""),
+            `${origem}: CNPJ destinatário`,
+          ).toBe("44723674000190");
+          expect(
+            norm(parsed.receiverName),
+            `${origem}: destinatário`,
+          ).toBe(norm("MUNICIPIO DE CAPIVARI"));
+          expect(
+            parsed.receiverName,
+            `${origem}: destinatário ≠ ruído de OCR`,
+          ).not.toMatch(/UNICIPIO DE CAPTVART|CAPTV/i);
+
+          // Itens: item 231071 identificado mesmo sem coluna UN.
+          expect(parsed.items.length, `${origem}: nº de itens`).toBeGreaterThanOrEqual(1);
+          const item = parsed.items[0];
+          expect(item?.code, `${origem}: código`).toBe("231071");
+          expect(
+            norm(item?.description),
+            `${origem}: descrição`,
+          ).toBe(norm("KIT TECLADO E MOUSE USB SLIM CHOCO"));
+          expect(item?.ncm, `${origem}: NCM`).toBe("84716053");
+          expect(item?.quantity, `${origem}: quantidade`).toBe(25);
+          expect(item?.unitValue, `${origem}: unitário`).toBeCloseTo(52.94, 2);
+          expect(item?.totalValue, `${origem}: total do item`).toBeCloseTo(1323.5, 2);
+          expect(parsed.totalValue, `${origem}: total da nota`).toBeCloseTo(1323.5, 2);
+
+          // Campos sem evidência permanecem pendentes — nunca inventados.
+          expect(
+            parsed.afNumber,
+            `${origem}: AF pendente (não inventada)`,
+          ).toBeUndefined();
+          expect(
+            parsed.empenhoNumber,
+            `${origem}: empenho pendente (não inventado)`,
+          ).toBeUndefined();
+          expect(
+            parsed.transporterCnpj,
+            `${origem}: transportadora pendente (não inventada)`,
+          ).toBeUndefined();
+          expect(
+            parsed.receiverPendingName,
+            `${origem}: destinatário sem nome pendente não deve ser sinalizado`,
+          ).toBeUndefined();
+          expect(
+            parsed.emitterPendingName,
+            `${origem}: emitente sem nome pendente não deve ser sinalizado`,
+          ).toBeUndefined();
+        }
+      });
+    }
+
+    it("o fallback do destinatário sem rótulo de seção ainda sinaliza quando a razão social é ruído", () => {
+      // Simula o pior caso de OCR: o título da DANFE e um nome degradado onde
+      // deveria haver o destinatário. O parser deve rejeitá-los e deixar o CNPJ
+      // identificado mas a razão social pendente — nunca exibir lixo como se
+      // fosse a parte.
+      const ruído = [
+        "DOCUMENTO AUXILIAR DA NOTA FISCAL ELETRONICA",
+        "IDENTIFICACAO DO EMITENTE",
+        "da Nota Fiscal Eletronica SAIDA",
+        "CNPJ/CPF 22.816.315/0001-44",
+        "RUA RUI BARBOSA, 263",
+        "NOME / RAZÃO SOCIAL",
+        "UNICIPIO DE CAPTVART",
+        "44.723.674/0001-90",
+        "42260922816315000144550010000029671515440064",
+      ].join("\n");
+      const parsed = parseDanfeText(ruído);
+      // Log de diagnóstico em caso de falha: mostra o que o parser decidiu.
+      if (process.env.VITEST_DEBUG) {
+        console.log("=== ruído parsed ===");
+        console.log("emitterCnpj:", parsed.emitterCnpj);
+        console.log("emitterName:", parsed.emitterName);
+        console.log("emitterPendingName:", parsed.emitterPendingName);
+        console.log("receiverCnpj:", parsed.receiverCnpj);
+        console.log("receiverName:", parsed.receiverName);
+        console.log("receiverPendingName:", parsed.receiverPendingName);
+        console.log("receiverCnpjDigits:", digitsOnly(parsed.receiverCnpj ?? ""));
+        console.log("notes:", JSON.stringify(parsed.notes, null, 2));
+        console.log("confidence:", JSON.stringify(parsed.confidence, null, 2));
+      }
+      // O CNPJ do emitente é identificado (a seção emitente tem CNPJ próprio).
+      expect(
+        digitsOnly(parsed.emitterCnpj ?? ""),
+        "emitente reconhece o CNPJ da INCOTECH mesmo com títuloDANFE",
+      ).toBe("22816315000144");
+
+      // Destinatário: quando sobra EXATAMENTE um CNPJ não atribuído (regra de
+      // exclusão), o parser nomeia o destinatário pelo nome vizinho ao CNPJ.
+      // No caso de ruído ("UNICIPIO DE CAPTVART") esse nome é rejeitado e fica
+      // pendente — preservando o CNPJ identificado.
+      expect(
+        digitsOnly(parsed.receiverCnpj ?? ""),
+        "destinatário reconhece o CNPJ exclusivo (regra de exclusão)",
+      ).toBe("44723674000190");
+      expect(
+        parsed.receiverName,
+        "destinatário NÃO aceita ruído como razão social",
+      ).toBeUndefined();
+      expect(
+        parsed.receiverPendingName,
+        "destinatário sinaliza que a razão social está pendente",
+      ).toBeDefined();
+      expect(
+        parsed.receiverCnpj,
+        "CNPJ do destinatário preservado mesmo com nome pendente",
+      ).toBe("44.723.674/0001-90");
+      // O teste do fixture PDF cobre o caso em que o OCR capturou o nome
+      // correto ("MUNICIPIO DE CAPIVARI", com sufixo MUNICIPIO) — aí o parser o
+      // aceita e receiverPendingName fica undefined.
+      expect(
+        parsed.accessKey,
+        "chave de acesso preservada para conferência",
+      ).toBe("42260922816315000144550010000029671515440064");
+      expect(
+        parsed.notes?.receiverName,
+        "nota registra que a razão social do destinatário está pendente",
+      ).toMatch(/pendente|sem sufixo|ruído|confirme/i);
     });
   },
 );

@@ -115,9 +115,11 @@ export interface DanfeParseResult {
   emitterPostalCode?: string;
   receiverCnpj?: string;
   receiverName?: string;
+  receiverPendingName?: string;
   transporterCnpj?: string;
   issuerCnpj?: string;
   issuerName?: string;
+  emitterPendingName?: string;
   afNumber?: string;
   empenhoNumber?: string;
   processNumber?: string;
@@ -1024,6 +1026,7 @@ interface SectionData {
   uf?: string;
   cep?: string;
   address?: string;
+  _pendingNameReason?: string;
 }
 
 interface CityUfCep {
@@ -1129,6 +1132,15 @@ const SECTION_WORD_TOKEN =
 
 const NAME_BLACKLIST =
   /^(DANFE|NF-?e|CHAVE|NATUREZA|PROTOCOLO|INSCRI|DATA|DESTINAT|TRANSPORT|EXPEDI|EMITENTE|VALOR|DADOS|CNPJ|CPF|CEP|FONE|DESCRI|C[ÓO]D|S[ÉE]RIE|GRUPO|MODELO|CONTROLE|DOCUMENTO\s+AUXILIAR)/i;
+
+/**
+ * Título da DANFE que o OCR frequentemente coloca como se fosse a razão social
+ * do emitente (defeito relatado: emitente virava "da Nota Fiscal Eletronica
+ * SAIDA"). Nunca é uma razão social legítima — rejeitado em qualquer estágio
+ * de extração do nome.
+ */
+const DANFE_TITLE_LEAK =
+  /^\s*(?:da\s+Not\s*\/?a?\s*Fiscal\s+Eletronica?\s+SAIDA|Documento\s+Auxiliar\s+da\s+Nota\s+Fiscal\s+Eletronica?)\s*$/i;
 const STREET_PREFIX = /^(RUA|AVENIDA|TRAVESSA|ALAMEDA|RODOVIA|ESTRADA|PRA[ÇC]A)\b/i;
 
 /**
@@ -1141,6 +1153,24 @@ const NAME_LEGEND =
   /(?:CNPJ|CPF|INSCRI[ÇC][ÃA]O|INSC\b|\bESTADUAL\b|\bFONE\b|\bFAX\b|\bCEP\b|=)/i;
 
 /**
+ * Ruído de OCR que imita o padrão "MUNICIPIO DE <cidade>" mas é visualmente
+ * degradado (ex.: "UNICIPIO DE CAPTVART"). Nunca é razão social legítima —
+ * o nome real é recuperado pelo bloco do destinatário (CNPJ próprio + texto do
+ * bloco) ou permanece pendente quando nem o bloco está legível.
+ */
+const CAPTVART_NOISE =
+  /^(?:UNI(C?IP)?[AEIOU]*\s*DE\s*[A-ZÀ-Ÿ][A-ZÀ-Ÿ\s'-]{2,}(?:\s*(?:DE|DO|DA|EM|NO|NA)\s*[A-ZÀ-Ÿ][A-ZÀ-Ÿ\s'-]{2,})?)$/i;
+
+/**
+ * Valida se um CNPJ está formatado com pontuação (tem pelo menos um dos
+ * separadores tz/'./-) — usada para decidir se uma linha como
+ * "CNPJ: 44.723.674/0001-90" tem a pontuação necessária.
+ */
+function cnpjHasPunctuation(raw: string): boolean {
+  return /[./-]/.test(raw);
+}
+
+/**
  * Palavra de localização (bairro/cidade) que SOZINHA nunca é razão social —
  * era daí que vinha o emitente "Centro" (bairro da DANFE real).
  */
@@ -1149,7 +1179,7 @@ const LOCATION_WORD =
 
 /** Sufixos que indicam razão social (usados só para PREFERIR um candidato). */
 const CORPORATE_HINT =
-  /\b(LTDA|ME|MEI|EPP|EIRELI|S\.?A\.?|S\s?\/\s?A|COMPANY|COMPANHIA|CIA\b|COM[ÉE]RCIO|IND[ÚU]STRIA|DISTRIBUIDORA|PREFEITURA|MUNIC[ÍI]PIO|FUNDA[ÇC][ÃA]O|SECRETARIA)/i;
+  /\b(LTDA|ME|MEI|EPP|EIRELI|S\.?A\.?|S\s?\/\s?A|COMPANY|COMPANHIA|CIA\b|COM[ÉE]RCIO|IND[ÚU]STRIA|DISTRIBUIDORA|PREFEITURA|MUNICIPIO|MUNICÍPIO|FUNDA[ÇC][ÃA]O|SECRETARIA|CONSELHO|MINIST[ÉE]RIO|CÂMARA|ALCAZAR|GAROTAS?\b)/i;
 
 function isNameCandidate(line: string | undefined): line is string {
   if (!line) return false;
@@ -1158,7 +1188,12 @@ function isNameCandidate(line: string | undefined): line is string {
   if (/\d/.test(value)) return false;
   if (SECTION_WORD_TOKEN.test(value)) return false;
   if (NAME_BLACKLIST.test(value)) return false;
+  if (DANFE_TITLE_LEAK.test(value)) return false;
   if (NAME_LEGEND.test(value)) return false;
+  // Ruído de OCR que se parece com cidade/bairro mas é lixo visual: não é
+  // razão social. (Defeito real: "UNICIPIO DE CAPTVART" vencia o nome do
+  // destinatário quando o OCR degradou "MUNICIPIO DE CAPIVARI".)
+  if (CAPTVART_NOISE.test(value)) return false;
   const singleToken = value.replace(/[.\s]+$/, "");
   if (!/\s/.test(singleToken) && LOCATION_WORD.test(singleToken)) return false;
   if (STREET_PREFIX.test(value)) return false;
@@ -1173,7 +1208,7 @@ function isNameCandidate(line: string | undefined): line is string {
 /**
  * Nome a partir de um texto que sobrou na linha (depois do rótulo ou do CNPJ):
  * remove resíduos de rótulo/pontuação e só aceita texto com cara de razão
- * social — nunca um rótulo ou um número.
+ * social — nunca um rótulo, número ou ruído de OCR que imita cidade/bairro.
  */
 function nameFromText(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
@@ -1184,6 +1219,8 @@ function nameFromText(raw: string | undefined): string | undefined {
     .trim()
     .replace(/^[:\-–—.,;]+/, "")
     .trim();
+  if (DANFE_TITLE_LEAK.test(value)) return undefined;
+  if (CAPTVART_NOISE.test(value)) return undefined;
   return isNameCandidate(value) ? value : undefined;
 }
 
@@ -1196,6 +1233,57 @@ function nameLabelValue(line: string, next?: string): string | undefined {
   const inline = nameFromText(match[1]);
   if (inline) return inline;
   return nameFromText(next);
+}
+
+/**
+ * Nome de parte (emitente/destinatário) com grau de confiança. "Aprovado" quando
+ * há rótulo de seção ou CNPJ próprio da parte, ou um nome de razão social com
+ * sufixo corporativo/funcional (LTDA/COMPANY/MUNICÍPIO/PREFEITURA…) no bloco
+ * correto; caso contrário o candidato fica "pendente" e NUNCA é usado como nome
+ * final sem evidência — isso evita que ruído de OCR (título da DANFE, lenda de
+ * coluna, bairro, "UNICIPIO DE CAPTVART") vire razão social exibida.
+ *
+ * O criterion de "possuir CNPJ próprio no bloco" é avaliado pelo chamador:
+ * quando a seção tem CNPJs distintos do emitente (destinatário) ou do destinatário
+ * (emitente), a seção tem uma identidade própria e o nome candidato nela é avaliado
+ * com o contexto desse CNPJ. Sem CNPJ próprio identificado, o nome é apenas um
+ * rótum de seção ou ruído e fica pendente.
+ */
+type PartyNameEvaluation =
+  | { approved: true }
+  | { approved: false; reason: string };
+
+function evaluatePartyName(
+  name: string | undefined,
+  sectionKey: SectionKey,
+  lineIndex: number | undefined,
+  lines: string[],
+  sectionHasOwnCnpj: boolean,
+): PartyNameEvaluation {
+  if (!name) return { approved: false, reason: "sem nome na seção" };
+  // Título da DANFE nunca é razão social — mesmo quando o OCR o colou após o
+  // rótulo "NOME / RAZÃO SOCIAL".
+  if (DANFE_TITLE_LEAK.test(name)) {
+    return { approved: false, reason: "título da DANFE rejeitado como razão social" };
+  }
+  // Bairro/cidade/terminal isolado: não é razão social.
+  if (LOCATION_WORD.test(name) || /^\d/.test(name)) {
+    return { approved: false, reason: "localização ou valor numérico, não razão social" };
+  }
+  // Na ausência de CNPJ próprio da seção, o nome pode ser apenas o rótulo da
+  // seção/ruído — pendente.
+  if (!sectionHasOwnCnpj) {
+    return { approved: false, reason: "sem CNPJ próprio identificado na seção — pendente de conferência" };
+  }
+  // Nome dentro do próprio bloco e com sufixo de razão social/organização =
+  // evidência forte (emitente e destinatário).
+  if (CORPORATE_HINT.test(name)) {
+    return { approved: true };
+  }
+  // Com CNPJ próprio mas sem sufixo corporativo: o nome pode ser ruído de OCR
+  // (ex.: "UNICIPIO DE CAPTVART" no bloco do destinatário) — pendente, preservando
+  // o CNPJ identificado.
+  return { approved: false, reason: "nome sem sufixo corporativo/funcional no bloco da parte — pendente de conferência" };
 }
 
 function isCityLike(line: string | undefined): boolean {
@@ -1799,7 +1887,17 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
     if (label) {
       section = label.key;
       const trailing = nameFromText(line.slice(label.end));
-      if (trailing && !sections[section].name) sections[section].name = trailing;
+      if (trailing && !sections[section].name) {
+        const evaluation = evaluatePartyName(
+          trailing,
+          label.key,
+          index,
+          lines,
+          Boolean(sections[label.key]?.cnpj),
+        );
+        if (evaluation.approved) sections[section].name = trailing;
+        else sections[section]._pendingNameReason = evaluation.reason;
+      }
     }
 
     const data = sections[section];
@@ -1812,12 +1910,26 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
         data.cnpjIndex = index;
         // Nome lido na MESMA linha do CNPJ ("INCOTECH COMPANY LTDA CNPJ …").
         const inline = nameFromText(line.replace(candidates[0].raw, " "));
-        if (inline && !data.name) data.name = inline;
+        if (inline && !data.name) {
+          const evaluation = evaluatePartyName(inline, section, index, lines, Boolean(data.cnpj));
+          if (evaluation.approved) data.name = inline;
+          else data._pendingNameReason = evaluation.reason;
+        }
       }
     }
 
     const explicitName = nameLabelValue(line, lines[index + 1]);
-    if (explicitName && !data.name) data.name = explicitName;
+    if (explicitName && !data.name) {
+      const evaluation = evaluatePartyName(
+        explicitName,
+        section,
+        index,
+        lines,
+        Boolean(data.cnpj),
+      );
+      if (evaluation.approved) data.name = explicitName;
+      else data._pendingNameReason = evaluation.reason;
+    }
 
     const block = parseCityUfCep(line);
     if (block.city && !data.city) data.city = block.city;
@@ -1844,7 +1956,20 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
   for (const key of Object.keys(sections) as SectionKey[]) {
     const data = sections[key];
     if (data.name) continue;
-    data.name = findNameNearCnpj(lines, data.cnpjIndex, sectionIndexes[key]);
+
+    const nearCnpj = findNameNearCnpj(lines, data.cnpjIndex, sectionIndexes[key]);
+    if (nearCnpj && !data.name) {
+      const cnpjLineIndex = data.cnpjIndex;
+      const evaluation = evaluatePartyName(
+        nearCnpj,
+        key as SectionKey,
+        cnpjLineIndex,
+        lines,
+        Boolean(data.cnpj),
+      );
+      if (evaluation.approved) data.name = nearCnpj;
+      else data._pendingNameReason = evaluation.reason;
+    }
   }
 
   const accessKey = extractAccessKey44(clean);
@@ -1880,30 +2005,64 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
         entry.indexes.push(index);
         unclaimed.set(digits, entry);
       }
-    });
-    if (unclaimed.size === 1) {
+    });      if (unclaimed.size === 1) {
       const [only] = [...unclaimed.values()];
+      sections.destinatario.cnpj = only.formatted;
+      notes.receiverCnpj =
+        "Sem rótulo de seção no OCR: destinatário identificado por exclusão (único CNPJ válido não atribuído a emitente/transportador/expedidor) — confirme visualmente.";
+      confidence.receiverCnpj = 60;
+
+      // Tenta achar um nome sustentável nas linhas vizinhas ao CNPJ do
+      // destinatário (priorizando recortes de região mais limpos).
       let nameCandidate: string | undefined;
-      // Ocorrências mais à tarde vêm das recortes de região (mais limpas que a
-      // página inteira) — por isso a busca começa delas.
+      let nameEvaluation: PartyNameEvaluation | undefined;
       for (const index of [...only.indexes].reverse()) {
         const neighborhood = [lines[index - 1], lines[index - 2], lines[index]].filter(
           (line): line is string => Boolean(line),
         );
-        nameCandidate =
-          neighborhood.find((line) => isNameCandidate(line) && CORPORATE_HINT.test(line)) ??
-          neighborhood.find((line) => isNameCandidate(line));
-        if (nameCandidate) break;
+        const candidate =
+          neighborhood.find(
+            (line) =>
+              isNameCandidate(line) &&
+              !CAPTVART_NOISE.test(line) &&
+              !DANFE_TITLE_LEAK.test(line),
+          ) ??
+          neighborhood.find(
+            (line) =>
+              isNameCandidate(line) && CORPORATE_HINT.test(line),
+          );
+        if (candidate) {
+          nameCandidate = candidate;
+          nameEvaluation = evaluatePartyName(
+            candidate,
+            "destinatario",
+            index,
+            lines,
+            true, // CNPJ próprio do destinatário identificado por exclusão
+          );
+          break;
+        }
       }
-      sections.destinatario.cnpj = only.formatted;
-      if (nameCandidate) sections.destinatario.name = nameCandidate.trim();
-      notes.receiverCnpj =
-        "Sem rótulo de seção no OCR: destinatário identificado por exclusão (único CNPJ válido não atribuído a emitente/transportador/expedidor) — confirme visualmente.";
-      confidence.receiverCnpj = 60;
-      if (nameCandidate) {
+
+      if (nameCandidate && nameEvaluation?.approved) {
+        sections.destinatario.name = nameCandidate.trim();
         notes.receiverName =
           "Razão social vizinha ao CNPJ do destinatário (sem rótulo de seção) — confirme visualmente.";
         confidence.receiverName = 60;
+      } else if (nameCandidate && nameEvaluation?.approved === false) {
+        // nome vizinho rejeitado: o destinatário tem CNPJ mas razão social
+        // pendente — NUNCA use o ruído como se fosse a parte.
+        sections.destinatario._pendingNameReason = nameEvaluation.reason;
+        notes.receiverName =
+          `Razão social do destinatário ${nameEvaluation?.reason ?? "não identificada"} — confira na conferência.`;
+      } else {
+        // sem nome vizinho legível: o destinatário tem CNPJ mas razão social
+        // pendente de conferência manual. Sinaliza para a interface que o nome
+        // ficou pendente (mesmo sem um candidato específico rejeitado).
+        sections.destinatario._pendingNameReason =
+          "sem nome vizinho legível ao CNPJ do destinatário — pendente de conferência";
+        notes.receiverName =
+          "Sem rótulo de seção no OCR e sem nome vizinho legível ao CNPJ do destinatário — razão social pendente de conferência.";
       }
     }
   }
@@ -1943,7 +2102,9 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
     series = keyParts.series;
   } else if (ocrSeries) {
     confidence.series = 70;
-  }  type EmissionResult = { value?: string; note?: string };
+  }
+
+type EmissionResult = { value?: string; note?: string };
   const emission = ((): EmissionResult => {
     const origin = emissionRead.note;
     if (keyParts && ocrDate) {
@@ -2007,7 +2168,17 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
   // a leitura direta por rótulo de seção é que vale 85/80.
   if (receiver.cnpj && confidence.receiverCnpj === undefined) confidence.receiverCnpj = 85;
   if (emitter.name) confidence.emitterName = 80;
-  if (receiver.name && confidence.receiverName === undefined) confidence.receiverName = 80;
+  if (receiver.name) confidence.receiverName = 80;
+  // Quando o nome foi recusado (ruído de OCR — título da DANFE, legenda,
+  // bairro sem sufixo) e só o CNPJ foi identificado, o nome fica pendente.
+  if (emitter.cnpj && !emitter.name) {
+    confidence.emitterCnpj = 80;
+    notes.emitterName = `Razão social do emitente ${emitter._pendingNameReason ?? "não identificada"} — confira na conferência.`;
+  }
+  if (receiver.cnpj && !receiver.name) {
+    confidence.receiverCnpj = 70;
+    notes.receiverName = `Razão social do destinatário ${receiver._pendingNameReason ?? "não identificada"} — confira na conferência.`;
+  }
   if (items.length) confidence.items = 85;
 
   const ok = Boolean(
@@ -2037,12 +2208,14 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
     accessKey,
     emitterCnpj: emitter.cnpj,
     emitterName: emitter.name,
+    emitterPendingName: emitter._pendingNameReason ?? undefined,
     emitterAddress: emitter.address,
     emitterCity: emitter.city,
     emitterState: emitter.uf,
     emitterPostalCode: emitter.cep,
     receiverCnpj: receiver.cnpj,
     receiverName: receiver.name,
+    receiverPendingName: receiver._pendingNameReason ?? undefined,
     transporterCnpj: transporter.cnpj,
     issuerCnpj: issuer.cnpj,
     issuerName: issuer.name,
@@ -2091,9 +2264,9 @@ function countValid(parsed: DanfeParseResult): number {
   if (parsed.emissionDate) count++;
   if (parsed.accessKey) count++;
   if (parsed.emitterCnpj) count++;
-  if (parsed.emitterName) count++;
+  if (parsed.emitterName && !parsed.emitterPendingName) count++;
   if (parsed.receiverCnpj) count++;
-  if (parsed.receiverName) count++;
+  if (parsed.receiverName && !parsed.receiverPendingName) count++;
   if (parsed.issuerCnpj) count++;
   if (parsed.issuerName) count++;
   // Item reconhecido conta como evidência (é o que distingue o texto
@@ -2120,8 +2293,10 @@ function buildFieldTraces(
     accessKey: parsed.accessKey ?? "",
     emitterCnpj: parsed.emitterCnpj ?? "",
     emitterName: parsed.emitterName ?? "",
+    emitterPendingName: parsed.emitterPendingName ?? "",
     receiverCnpj: parsed.receiverCnpj ?? "",
     receiverName: parsed.receiverName ?? "",
+    receiverPendingName: parsed.receiverPendingName ?? "",
     issuerCnpj: parsed.issuerCnpj ?? "",
     issuerName: parsed.issuerName ?? "",
     items: parsed.items.map((item) => item.code).join(", "),

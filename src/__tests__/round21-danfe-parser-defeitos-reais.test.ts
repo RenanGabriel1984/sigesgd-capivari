@@ -17,16 +17,18 @@
  *
  * Segurança: testes puros sobre texto — nenhuma mutation, nenhum banco.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { digitsOnly } from "@/lib/br-validators";
 import {
   danfeFieldSummary,
+  mergeDanfeTexts,
   parseDanfeText,
   validateDanfeFields,
 } from "@/lib/danfe-ocr";
+import { parseReportInput } from "@/lib/ocr-report";
 
 const CHAVE = "42260922816315000144550010000029671515440064";
 
@@ -297,22 +299,112 @@ describe("R21 §5 — itens: ruído de OCR não quebra a janela de valores", () 
   });
 });
 
-describe("R21 — bloqueio declarado: relatórios reais ainda não versionados", () => {
-  it("sem fixtures, os critérios de aceitação do documento real NÃO são declarados cumpridos", () => {
-    const fixtures = [
-      "src/__tests__/fixtures/incotech-company-pdf.report.json",
-      "src/__tests__/fixtures/incotech-company-png.report.json",
-    ].filter((rel) => existsSync(resolve(__dirname, "..", "..", rel)));
+describe("R21 — validação contra os relatórios reais versionados", () => {
+  const pdfFixture = resolve(
+    __dirname,
+    "..",
+    "..",
+    "src/__tests__/fixtures/incotech-company-pdf.report.json",
+  );
+  const pngFixture = resolve(
+    __dirname,
+    "..",
+    "..",
+    "src/__tests__/fixtures/incotech-company-png.report.json",
+  );
 
-    if (fixtures.length === 0) {
-      console.warn(
-        "[R21] Relatórios reais AUSENTES — correções validadas apenas contra " +
-          "reconstruções dos sintomas. Exporte-os em /dev/danfe-lab (botão " +
-          "\"Exportar relatório (.json)\") para src/__tests__/fixtures/.",
-      );
-      expect(fixtures).toHaveLength(0);
-    } else {
-      expect(fixtures.length).toBe(2);
-    }
+  it("os dois relatórios reais (PDF e PNG) estão versionados", () => {
+    expect(existsSync(pdfFixture)).toBe(true);
+    expect(existsSync(pngFixture)).toBe(true);
   });
+
+  for (const { path: rel, origem } of [
+    { path: pdfFixture, origem: "Incotech Company.pdf" },
+    { path: pngFixture, origem: "Incotech Company.png" },
+  ] as const) {
+    it(`${origem}: o relatório real sustenta os critérios de aceitação`, () => {
+      const raw = readFileSync(rel, "utf8");
+      const { reports } = parseReportInput(raw);
+      expect(reports.length, `${origem}: relatórios extraídos`).toBeGreaterThan(0);
+
+      for (const payload of reports) {
+        const merged = mergeDanfeTexts(
+          payload.pageOcrText ?? "",
+          payload.regionTexts ?? [],
+        );
+        const parsed = parseDanfeText(merged);
+
+        expect(parsed.accessKey, `${origem}: chave`).toBe(
+          "42260922816315000144550010000029671515440064",
+        );
+        expect(
+          Number(digitsOnly(parsed.nfeNumber ?? "")),
+          `${origem}: número`,
+        ).toBe(2967);
+        expect(parsed.series, `${origem}: série`).toBe("001");
+        expect(parsed.emissionDate, `${origem}: emissão`).toBe("2026-09-28");
+
+        expect(
+          digitsOnly(parsed.emitterCnpj ?? ""),
+          `${origem}: CNPJ emitente`,
+        ).toBe("22816315000144");
+        expect(
+          norm(parsed.emitterName),
+          `${origem}: razão social emitente`,
+        ).toBe(norm("INCOTECH COMPANY LTDA"));
+        expect(
+          parsed.emitterName,
+          `${origem}: emitente ≠ título DANFE`,
+        ).not.toMatch(/Nota Fiscal Eletronica|Documento Auxiliar/i);
+
+        expect(
+          digitsOnly(parsed.receiverCnpj ?? ""),
+          `${origem}: CNPJ destinatário`,
+        ).toBe("44723674000190");
+        expect(
+          norm(parsed.receiverName),
+          `${origem}: destinatário`,
+        ).toBe(norm("MUNICIPIO DE CAPIVARI"));
+        expect(
+          parsed.receiverName,
+          `${origem}: destinatário ≠ ruído de OCR`,
+        ).not.toMatch(/UNICIPIO DE CAPTVART|CAPTV/i);
+
+        expect(parsed.items.length, `${origem}: nº de itens`).toBeGreaterThanOrEqual(1);
+        const item = parsed.items[0];
+        expect(item?.code, `${origem}: código`).toBe("231071");
+        expect(
+          norm(item?.description),
+          `${origem}: descrição`,
+        ).toBe(norm("KIT TECLADO E MOUSE USB SLIM CHOCO"));
+        expect(item?.ncm, `${origem}: NCM`).toBe("84716053");
+        expect(item?.quantity, `${origem}: quantidade`).toBe(25);
+        expect(item?.unitValue, `${origem}: unitário`).toBeCloseTo(52.94, 2);
+        expect(item?.totalValue, `${origem}: total do item`).toBeCloseTo(1323.5, 2);
+        expect(parsed.totalValue, `${origem}: total da nota`).toBeCloseTo(1323.5, 2);
+
+        // Sem evidência: pendente, nunca inventado.
+        expect(
+          parsed.afNumber,
+          `${origem}: AF pendente (não inventada)`,
+        ).toBeUndefined();
+        expect(
+          parsed.empenhoNumber,
+          `${origem}: empenho pendente (não inventado)`,
+        ).toBeUndefined();
+        expect(
+          parsed.transporterCnpj,
+          `${origem}: transportadora pendente (não inventada)`,
+        ).toBeUndefined();
+        expect(
+          parsed.receiverPendingName,
+          `${origem}: destinatário sinalizado?`,
+        ).toBeUndefined();
+        expect(
+          parsed.emitterPendingName,
+          `${origem}: emitente sinalizado?`,
+        ).toBeUndefined();
+      }
+    });
+  }
 });
