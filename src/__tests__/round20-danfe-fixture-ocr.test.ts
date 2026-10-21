@@ -44,7 +44,12 @@ const norm = (value: string | undefined): string =>
     .toUpperCase()
     .trim();
 
-/** @brown[20] Referência do documento (item 2 da Rodada 20) — falha = divergência real. */
+/** @brown[20] Referência do documento (item 2 da Rodada 20) — falha = divergência real.
+ *
+ * As expectativas vêm EXCLUSIVAMENTE do que os relatórios reais sustentam.
+ * Campos que o OCR destes relatórios não contém (unidade, AF, empenho,
+ * transportadora) são exigidos como PENDENTES: o parser sinaliza revisão
+ * manual em vez de inventar ou confirmar valor sintético (§6). */
 function assertIncotech(p: DanfeParseResult, origem: string): void {
   const item = p.items[0];
   const validations = validateDanfeFields(p);
@@ -73,6 +78,7 @@ function assertIncotech(p: DanfeParseResult, origem: string): void {
     "44723674000190",
   );
   expect(norm(p.receiverName), `${origem}: destinatário`).toBe(norm("MUNICIPIO DE CAPIVARI"));
+  expect(digitsOnly(p.emitterCnpj ?? "")).not.toBe(digitsOnly(p.receiverCnpj ?? ""));
 
   expect(p.items.length, `${origem}: nº de itens`).toBeGreaterThanOrEqual(1);
   expect(item?.code, `${origem}: código do item`).toBe("231071");
@@ -80,27 +86,35 @@ function assertIncotech(p: DanfeParseResult, origem: string): void {
     norm("KIT TECLADO E MOUSE USB SLIM CHOCO"),
   );
   expect(item?.ncm, `${origem}: NCM`).toBe("84716053");
-  expect(item?.unit, `${origem}: unidade`).toBe("PC");
   expect(item?.quantity, `${origem}: quantidade`).toBe(25);
   expect(item?.unitValue, `${origem}: valor unitário`).toBeCloseTo(52.94, 2);
   expect(item?.totalValue, `${origem}: total do item`).toBeCloseTo(1323.5, 2);
   expect(p.totalValue, `${origem}: total da nota`).toBeCloseTo(1323.5, 2);
 
-  expect(p.afNumber, `${origem}: AF`).toBe("2223/2026");
-  expect(p.empenhoNumber, `${origem}: empenho (conferir visualmente)`).toBe("7718/2026");
+  // A coluna UN não foi lida pelo OCR destes relatórios: a unidade NÃO pode
+  // virar "PC" de gabarito — fica vazia e sinalizada para conferência manual.
+  expect(item?.unit, `${origem}: unidade não inventada`).toBe("");
+  expect(p.notes?.items, `${origem}: unidade pendente sinalizada`).toMatch(/unidade/i);
 
-  // Transportadora nunca pode virar emitente nem destinatário.
-  const cnpjTransportadora = digitsOnly(p.transporterCnpj ?? "");
-  expect(cnpjTransportadora, `${origem}: CNPJ transportadora`).toBe("38306164000114");
-  expect(cnpjTransportadora).not.toBe(digitsOnly(p.emitterCnpj ?? ""));
-  expect(cnpjTransportadora).not.toBe(digitsOnly(p.receiverCnpj ?? ""));
-  expect(digitsOnly(p.emitterCnpj ?? "")).not.toBe(digitsOnly(p.receiverCnpj ?? ""));
+  // Total da nota sem rótulo no OCR: aceito apenas por conferir com a soma
+  // dos itens, com origem registrada para conferência visual.
+  expect(p.notes?.totalValue, `${origem}: origem do total registrada`).toMatch(
+    /soma dos itens/i,
+  );
+
+  // AF, empenho e transportadora NÃO constam destes relatórios reais:
+  // permanecem pendentes — nunca preenchidos com valores de gabarito.
+  expect(p.afNumber, `${origem}: AF pendente (não inventada)`).toBeUndefined();
+  expect(p.empenhoNumber, `${origem}: empenho pendente (não inventado)`).toBeUndefined();
+  expect(p.transporterCnpj, `${origem}: transportadora pendente (não inventada)`).toBeUndefined();
 
   // Validação estrutural: campos sem evidência ficam pendentes, nunca inventados.
   expect(ok("nfeNumber"), `${origem}: validação número`).toBe(true);
   expect(ok("series"), `${origem}: validação série`).toBe(true);
   expect(ok("accessKey"), `${origem}: validação chave`).toBe(true);
   expect(ok("items"), `${origem}: validação itens`).toBe(true);
+  expect(ok("emitterCnpj"), `${origem}: validação CNPJ emitente`).toBe(true);
+  expect(ok("receiverCnpj"), `${origem}: validação CNPJ destinatário`).toBe(true);
   expect(danfeFieldSummary(p).found).toBeGreaterThan(0);
 }
 

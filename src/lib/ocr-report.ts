@@ -10,7 +10,7 @@
  * único, array de dois relatórios ou texto puro), então a extração é feita
  * com varredura profunda, tolerante a aninhamento e a ordem de chaves.
  */
-import { mergeDanfeTexts } from "./danfe-ocr";
+import { isDanfeParseBetter, mergeDanfeTexts, parseDanfeText } from "./danfe-ocr";
 
 /** Textos de OCR de UM documento (PDF ou PNG). */
 export interface OcrReportPayload {
@@ -128,26 +128,43 @@ export function collectOcrReports(input: unknown): OcrReportPayload[] {
 
 /**
  * Monta o texto que o PRÓPRIO aplicativo alimentaria no parser:
- *   • usa `mergedOcr` gravado no relatório (resultado de `mergeDanfeTexts`);
- *   • sem ele, recalcula exatamente como `DanfeImportDialog`
- *     (`mergeDanfeTexts(página, regiões)`).
+ *   • compara o `mergedOcr` gravado no relatório com o merge RECALCULADO
+ *     exatamente como o `DanfeImportDialog` faz (`mergeDanfeTexts(página,
+ *     regiões)`) e devolve a leitura melhor segundo o MESMO comparador do
+ *     parser (`isDanfeParseBetter`) — nunca por tamanho de texto;
+ *   • isso espelha a tela de entradas: um mergedOcr gravado degradado (ex.:
+ *     tudo em uma linha só, sem seções) não esconde os campos que as regiões
+ *     originais ainda sustentam.
  */
 export function buildReportText(payload: OcrReportPayload): {
   text: string;
   source: string;
 } {
   const stored = payload.mergedOcr?.trim();
-  if (stored) {
-    return { text: payload.mergedOcr!, source: "mergedOcr (gravado no relatório)" };
-  }
   const page = payload.rawText ?? payload.pageOcrText ?? "";
-  const merged = mergeDanfeTexts(page, payload.regionTexts);
-  if (merged.trim()) {
-    return {
+  const merged = mergeDanfeTexts(page, payload.regionTexts).trim();
+
+  const options: Array<{ text: string; source: string }> = [];
+  if (stored) {
+    options.push({ text: payload.mergedOcr!, source: "mergedOcr (gravado no relatório)" });
+  }
+  if (merged && merged !== stored) {
+    options.push({
       text: merged,
       source: "mergeDanfeTexts(página/camada + regiões) — recalculado",
-    };
+    });
   }
+
+  if (options.length === 2) {
+    const [storedOption, mergedOption] = options;
+    const better = isDanfeParseBetter(
+      parseDanfeText(mergedOption.text),
+      parseDanfeText(storedOption.text),
+    );
+    return better ? mergedOption : storedOption;
+  }
+  if (options.length === 1) return options[0];
+
   const fallback = (payload.pageOcrText ?? payload.rawText ?? "").trim();
   if (fallback) return { text: fallback, source: "pageOcrText" };
   return { text: "", source: "nenhum" };

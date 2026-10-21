@@ -818,6 +818,42 @@ function findItemValueWindow(tokens: string[]): ValueWindow | null {
     if (splitCandidate) candidates.push(splitCandidate);
   }
 
+  // Janela SEM unidade: no OCR real das regiões a coluna UN frequentemente
+  // sai vazia (sobra quantidade, valor unitário e total, sem a sigla entre
+  // eles — defeito real de OCR da DANFE da Rodada 20). Só é aceita com DUAS
+  // evidências do próprio documento: um código de coluna NUMÉRICO (NCM/CST/
+  // CFOP) imediatamente antes da quantidade, E coerência exata quantidade ×
+  // valor unitário ≈ total. A unidade fica vazia — pendente de conferência,
+  // nunca inventada.
+  if (candidates.length === 0) {
+    for (let i = 2; i <= clean.length - 3; i++) {
+      const previous = clean[i - 1];
+      const quantityToken = clean[i];
+      const priceToken = clean[i + 1];
+      const totalToken = clean[i + 2];
+      if (!/^\d{3,8}(?:\.\d{2,4})?$/.test(previous)) continue;
+      if (prefixedMoneyToken(priceToken) || prefixedMoneyToken(totalToken)) continue;
+      if (totalToken.startsWith("Le") || priceToken.startsWith("Le")) continue;
+      if (!QUANTITY_TOKEN_RE.test(quantityToken)) continue;
+      if (!PRICE_TOKEN_RE.test(priceToken) || !PRICE_TOKEN_RE.test(totalToken)) continue;
+      const quantity = parseQuantity(quantityToken);
+      const unitValue = parsePrice(priceToken);
+      const totalValue = parsePrice(totalToken);
+      if (!isFinite(quantity) || quantity <= 0) continue;
+      if (!(unitValue > 0) || !(totalValue > unitValue)) continue;
+      const expected = quantity * unitValue;
+      const tolerance = Math.max(ITEM_TOTAL_TOLERANCE, expected * 0.01);
+      if (Math.abs(expected - totalValue) > tolerance) continue;
+      candidates.push({
+        start: indexes[i],
+        unit: "",
+        quantity,
+        unitValue,
+        totalValue,
+      });
+    }
+  }
+
   if (candidates.length === 0) return null;
   // Colunas numéricas vizinhas podem casar MAIS de uma janela (ex.: "5102 PC
   // 25,0000 52,94" — CFOP + quantidade parecem uma janela falsa). A janela
@@ -1493,7 +1529,36 @@ function extractTotalValue(
   items: DanfeItem[],
 ): { value?: number; source?: string } {
   const candidates = collectTotalCandidates(lines);
-  if (candidates.length === 0) return {};
+  if (candidates.length === 0) {
+    // Evidência SEM rótulo (relatório real da Rodada 20): o rótulo "VALOR
+    // TOTAL DA NOTA" não foi lido pelo OCR, mas o documento tem uma linha
+    // APENAS de valor que confere exatamente com a soma dos itens. É a ÚNICA
+    // situação sem rótulo aceita — com registro de origem pendente de
+    // conferência visual. Sem itens, ou com valores divergentes, o campo
+    // permanece pendente: nada é inventado.
+    const itemsSum = items.reduce(
+      (sum, item) => sum + (Number.isFinite(item.totalValue) ? item.totalValue : 0),
+      0,
+    );
+    if (itemsSum > 0) {
+      const lastItemLine = Math.max(0, ...items.map((item) => (item.lineNumber ?? 1) - 1));
+      const matchedValues: number[] = [];
+      for (let i = lastItemLine; i < lines.length; i++) {
+        if (!isValueOnlyLine(lines[i])) continue;
+        const value = readMoney(lines[i]);
+        if (value !== undefined && Math.abs(value - itemsSum) < 0.011) matchedValues.push(value);
+      }
+      const distinct = new Set(matchedValues);
+      if (matchedValues.length > 0 && distinct.size === 1) {
+        return {
+          value: itemsSum,
+          source:
+            "linha de valores sem rótulo do total — confere com a soma dos itens (confirme visualmente)",
+        };
+      }
+    }
+    return {};
+  }
 
   const itemsSum = items.reduce(
     (sum, item) => sum + (Number.isFinite(item.totalValue) ? item.totalValue : 0),
@@ -1791,6 +1856,62 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
   const notes: Record<string, string> = {};
   const confidence: Record<string, number> = {};
 
+  // ─── Destinatário sem rótulo de seção (OCR real das regiões) ────────────
+  // No OCR das regiões o rótulo "DESTINATÁRIO/REMETENTE" frequentemente NÃO
+  // é lido, mas os dados do destinatário estão no documento (relatório real
+  // Rodada 20). Regra com evidência coerente: quando sobra
+  // EXATAMENTE UM CNPJ válido não atribuído a nenhuma seção (nem emitente —
+  // confirmado pela chave, nem transportador, nem expedidor) e um nome de
+  // razão social aparece nas linhas vizinhas, ele é o destinatário. Com mais
+  // de um candidato (ou sem nome vizinho) o campo fica PENDENTE de revisão
+  // manual — nada é inventado.
+  if (!sections.destinatario.cnpj) {
+    const claimed = new Set(
+      [sections.emitente.cnpj, sections.transportador.cnpj, sections.expedidor.cnpj]
+        .filter((value): value is string => Boolean(value))
+        .map((value) => digitsFromOcr(value)),
+    );
+    const unclaimed = new Map<string, { formatted: string; indexes: number[] }>();
+    lines.forEach((line, index) => {
+      for (const candidate of findCnpjCandidates(line)) {
+        const digits = digitsFromOcr(candidate.raw);
+        if (claimed.has(digits)) continue;
+        const entry = unclaimed.get(digits) ?? { formatted: candidate.formatted, indexes: [] };
+        entry.indexes.push(index);
+        unclaimed.set(digits, entry);
+      }
+    });
+    if (unclaimed.size === 1) {
+      const [only] = [...unclaimed.values()];
+      let nameCandidate: string | undefined;
+      // Ocorrências mais à tarde vêm das recortes de região (mais limpas que a
+      // página inteira) — por isso a busca começa delas.
+      for (const index of [...only.indexes].reverse()) {
+        const neighborhood = [lines[index - 1], lines[index - 2], lines[index]].filter(
+          (line): line is string => Boolean(line),
+        );
+        nameCandidate =
+          neighborhood.find((line) => isNameCandidate(line) && CORPORATE_HINT.test(line)) ??
+          neighborhood.find((line) => isNameCandidate(line));
+        if (nameCandidate) break;
+      }
+      sections.destinatario.cnpj = only.formatted;
+      if (nameCandidate) sections.destinatario.name = nameCandidate.trim();
+      notes.receiverCnpj =
+        "Sem rótulo de seção no OCR: destinatário identificado por exclusão (único CNPJ válido não atribuído a emitente/transportador/expedidor) — confirme visualmente.";
+      confidence.receiverCnpj = 60;
+      if (nameCandidate) {
+        notes.receiverName =
+          "Razão social vizinha ao CNPJ do destinatário (sem rótulo de seção) — confirme visualmente.";
+        confidence.receiverName = 60;
+      }
+    }
+  }
+
+  if (items.some((item) => !item.unit)) {
+    notes.items = "Item(ns) lido(s) sem a coluna UN do OCR — confirme a unidade na conferência.";
+  }
+
   const ocrNumber = extractNfeNumber(lines);
   const ocrSeries = extractSeries(lines);
   const emissionRead = extractEmissionDate(lines, keyParts);
@@ -1882,9 +2003,11 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
   } else if (emitter.cnpj) {
     confidence.emitterCnpj = 80;
   }
-  if (receiver.cnpj) confidence.receiverCnpj = 85;
+  // A exclusão por CNPJ não atribuído já registrou confiança menor (60) —
+  // a leitura direta por rótulo de seção é que vale 85/80.
+  if (receiver.cnpj && confidence.receiverCnpj === undefined) confidence.receiverCnpj = 85;
   if (emitter.name) confidence.emitterName = 80;
-  if (receiver.name) confidence.receiverName = 80;
+  if (receiver.name && confidence.receiverName === undefined) confidence.receiverName = 80;
   if (items.length) confidence.items = 85;
 
   const ok = Boolean(
