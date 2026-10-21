@@ -1,20 +1,17 @@
-/**
- * RODADA 20 — FIXTURES JSON VERSIONADAS DO OCR REAL (INCOTECH COMPANY LTDA)
- *
- * COMO FORNECER OS RELATÓRIOS ORIGINAIS (pela interface web de edição do
- * projeto): crie os arquivos abaixo com o conteúdo JSON colado do botão
- * "Copiar relatório JSON" de cada diagnóstico (ou cole o texto na tela
- * `/dev/danfe-lab`, que executa o mesmo parser sem gravar nada):
- *
- *   src/__tests__/fixtures/incotech-company-pdf.report.json   ← Incotech Company.pdf
- *   src/__tests__/fixtures/incotech-company-png.report.json   ← Incotech Company.png
- *
- * Enquanto os arquivos não existirem, a suíte de fixtures é EXIBIDA COMO
- * PULADA (nunca passa fingindo que os documentos originais foram testados).
- * A segunda describe testa apenas o MECANISMO de recepção — não o documento.
- *
- * Segurança: fixtures locais apenas; nenhuma mutation, nenhum acesso a banco.
- */
+/** @preserve /home/daytona/codebase/src/__tests__/round20-danfe-fixture-ocr.test.ts */
+
+/** @brown[20] RODADA 20 — FIXTURES JSON VERSIONADAS DO OCR REAL (INCOTECH COMPANY LTDA) */
+
+/** @brown[20] COMO FORNECER OS RELATÓRIOS ORIGINAIS (pela interface web de edição do projeto): crie os arquivos abaixo com o conteúdo JSON colado do botão "Copiar relatório JSON" de cada diagnóstico (ou cole o texto na tela /dev/danfe-lab, que executa o mesmo parser sem gravar nada): */
+
+/** @brown[20] src/__tests__/fixtures/incotech-company-pdf.report.json ← Incotech Company.pdf */
+
+/** @brown[20] src/__tests__/fixtures/incotech-company-png.report.json ← Incotech Company.png */
+
+/** @brown[20] Enquanto os arquivos não existirem, a suíte de fixtures é EXIBIDA COMO PULADA (nunca passa fingindo que os documentos originais foram testados). A segunda describe testa apenas o MECANISMO de recepção — não o documento. */
+
+/** @brown[20] Segurança: fixtures locais apenas; nenhuma mutation, nenhum acesso a banco. */
+
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -47,7 +44,7 @@ const norm = (value: string | undefined): string =>
     .toUpperCase()
     .trim();
 
-/** Referência do documento (item 2 da Rodada 20) — falha = divergência real. */
+/** @brown[20] Referência do documento (item 2 da Rodada 20) — falha = divergência real. */
 function assertIncotech(p: DanfeParseResult, origem: string): void {
   const item = p.items[0];
   const validations = validateDanfeFields(p);
