@@ -548,6 +548,11 @@ export function parseAccessKey44(raw: string | null | undefined): AccessKeyParts
   };
 }
 
+/** AAMM da chave em formato legível (MM/AAAA) — nunca "9/26" nas mensagens da interface. */
+function formatAamm(parts: AccessKeyParts): string {
+  return `${String(parts.month).padStart(2, "0")}/${parts.year}`;
+}
+
 /**
  * Maior sequência de dígitos de uma linha, ignorando separadores de máscara.
  * Linhas com sequências longas (chave de acesso, protocolo) não podem ser
@@ -1036,10 +1041,20 @@ interface CityUfCep {
 }
 
 const SECTION_PATTERNS: Array<{ key: SectionKey; re: RegExp }> = [
+  // O cabeçalho canônico da DANFE é "IDENTIFICAÇÃO DO EMITENTE / REMETENTE" —
+  // ele é a seção do EMITENTE e precisa vencer o próprio "REMETENTE" do
+  // título (defeito real: o bloco do emitente era classificado como
+  // destinatário e os CNPJs saíam trocados na conferência). O rótulo solto
+  // "REMETENTE" continua sendo destinatário (vem depois na lista).
+  // "EMITENTE" só vale como rótulo NO INÍCIO da linha: "FRETE: 0-EMITENTE"
+  // (transportador) nunca pode trocar a seção — outro defeito real.
+  {
+    key: "emitente",
+    re: /IDENTIFICA[ÇC][ÃA]O\s+D[OA]\s+EMITENTE|^\s*(?:\d{1,2}\s*\.\s*)?EMITENTE\b/i,
+  },
   { key: "transportador", re: /TRANSPORTADOR(?:A)?|REDESPACHO/i },
   { key: "expedidor", re: /EXPEDI[ÇC][ÃA]O/i },
   { key: "destinatario", re: /DESTINAT[ÁA]RIO|REMETENTE|DESTINATARIO|RECEBEDOR/i },
-  { key: "emitente", re: /IDENTIFICA[ÇC][ÃA]O\s+DO\s+EMITENTE|\bEMITENTE\b/i },
 ];
 
 interface SectionLabelMatch {
@@ -1224,10 +1239,16 @@ function nameFromText(raw: string | undefined): string | undefined {
   return isNameCandidate(value) ? value : undefined;
 }
 
-/** Rótulo de razão social/nome — valor na mesma linha ou na linha seguinte. */
+/**
+ * Rótulo de razão social/nome — valor na mesma linha ou na linha seguinte.
+ * Formas reais de rótulo: "RAZÃO SOCIAL:", "NOME / RAZAO SOCIAL: X"
+ * (DANFE em texto do PDF), "NOME/RAZÃO SOCIAL" e "NOME: X" (destinatário e
+ * transportador). O valor aceito ainda passa por `evaluatePartyName` — o
+ * rótulo sozinho nunca aprova um nome.
+ */
 function nameLabelValue(line: string, next?: string): string | undefined {
   const match = line.match(
-    /^(?:RAZ[ÃA]O\s+SOCIAL|NOME\s+(?:DO\s+|DA\s+)?(?:DESTINAT[ÁA]RIO|EMITENTE|REMETENTE|RECEBEDOR|FORNECEDOR))\s*:?\s*(.*)$/i,
+    /^(?:(?:NOME\s*(?:\/|E)\s*)?RAZ[ÃA]O\s+SOCIAL|NOME\s+(?:DO\s+|DA\s+)?(?:DESTINAT[ÁA]RIO|EMITENTE|REMETENTE|RECEBEDOR|FORNECEDOR)|NOME)\s*:?\s*(.*)$/i,
   );
   if (!match) return undefined;
   const inline = nameFromText(match[1]);
@@ -1548,6 +1569,8 @@ interface TotalCandidate {
   value: number;
   index: number;
   source: string;
+  /** Prioridade do RÓTULO: 2 = "VALOR TOTAL DA NOTA/NF-e" (autoritativo), 1 = subtotal de PRODUTOS, 0 = genérico. */
+  priority: number;
 }
 
 /**
@@ -1564,10 +1587,13 @@ function collectTotalCandidates(lines: string[]): TotalCandidate[] {
     const match = line.match(TOTAL_VALUE_LABEL);
     if (!match) continue;
 
+    const label = match[0];
+    const priority = /NOTA|NF/i.test(label) ? 2 : /PRODUTOS/i.test(label) ? 1 : 0;
+
     const rest = line.slice((match.index ?? 0) + match[0].length);
     const sameLine = readMoney(rest);
     if (sameLine !== undefined && sameLine > 0) {
-      candidates.push({ value: sameLine, index: i, source: "rótulo do total (mesma linha)" });
+      candidates.push({ value: sameLine, index: i, source: "rótulo do total (mesma linha)", priority });
       continue;
     }
 
@@ -1592,11 +1618,13 @@ function collectTotalCandidates(lines: string[]): TotalCandidate[] {
                 value: joined,
                 index: i + step,
                 source: `coluna de valores ${step} linha(s) abaixo do rótulo — milhar reconstruído`,
+                priority,
               }
             : {
                 value,
                 index: i + step,
                 source: `coluna de valores ${step} linha(s) abaixo do rótulo do total`,
+                priority,
               },
         );
         break;
@@ -1652,6 +1680,24 @@ function extractTotalValue(
     (sum, item) => sum + (Number.isFinite(item.totalValue) ? item.totalValue : 0),
     0,
   );
+
+  // O rótulo "VALOR TOTAL DA NOTA/NF-e" é o total AUTORITATIVO do documento:
+  // ele nunca é substituído pelo subtotal de PRODUTOS por bater com a soma dos
+  // itens. A conferência com a soma dos itens acontece DENTRO do rótulo
+  // prioritário; divergências são sinalizadas depois, sem correção silenciosa.
+  const topPriority = Math.max(...candidates.map((candidate) => candidate.priority));
+  if (topPriority >= 2) {
+    const top = candidates.filter((candidate) => candidate.priority === topPriority);
+    const bySum = itemsSum > 0
+      ? top.find((candidate) => Math.abs(candidate.value - itemsSum) < 0.011)
+      : undefined;
+    const chosen = bySum ?? top[0];
+    return {
+      value: chosen.value,
+      source: bySum ? `${chosen.source} — confere com a soma dos itens` : chosen.source,
+    };
+  }
+
   if (itemsSum > 0) {
     const match = candidates.find((candidate) => Math.abs(candidate.value - itemsSum) < 0.011);
     if (match) {
@@ -2112,13 +2158,20 @@ type EmissionResult = { value?: string; note?: string };
       if (year === keyParts.year && month === keyParts.month) {
         return {
           value: ocrDate,
-          note: [origin, "Data confere com o AAMM da chave de acesso."]
+          // A chave de acesso codifica APENAS ano e mês (AAMM) — o dia vem da
+          // leitura do documento e a chave NÃO pode validá-lo. A nota deixa
+          // isso explícito para a conferência (nunca declara data integralmente
+          // validada pela chave).
+          note: [
+            origin,
+            `Data lida no documento; a data confere com o AAMM da chave (${formatAamm(keyParts)}) — apenas ano e mês; o dia não é codificado pela chave, confira-o visualmente.`,
+          ]
             .filter(Boolean)
             .join(" "),
         };
       }
       return {
-        note: `Data lida pelo OCR (${ocrDate}) conflita com o AAMM da chave (${keyParts.month}/${keyParts.year}) — pendente de conferência manual.`,
+        note: `Data lida pelo OCR (${ocrDate}) conflita com o AAMM da chave (${formatAamm(keyParts)}) — pendente de conferência manual.`,
       };
     }
     if (ocrDate) return { value: ocrDate, note: origin ?? "Data lida do rótulo de emissão." };
@@ -2135,7 +2188,7 @@ type EmissionResult = { value?: string; note?: string };
             : "Data parcial no cabeçalho — ano completado pelo AAMM da chave de acesso, dia/mês vindos da leitura OCR.",
         };
       }
-      return { note: `Somente o mês/ano constam da chave (${keyParts.month}/${keyParts.year}) — informe a data completa.` };
+      return { note: `Somente o mês/ano constam da chave (${formatAamm(keyParts)}) — informe a data completa.` };
     }
     return {};
   })();
@@ -2148,6 +2201,23 @@ type EmissionResult = { value?: string; note?: string };
 
   const totalValue = totalResult.value;
   if (totalResult.source) notes.totalValue = `Origem: ${totalResult.source}.`;
+  // Divergência entre o total impresso e a SOMA dos itens lidos: sinalizada
+  // para conferência — o documento NUNCA é corrigido silenciosamente e o
+  // total da nota NÃO substitui os itens discriminados.
+  if (totalValue !== undefined && items.length > 0) {
+    const itemsSum = items.reduce(
+      (sum, item) => sum + (Number.isFinite(item.totalValue) ? item.totalValue : 0),
+      0,
+    );
+    if (itemsSum > 0 && Math.abs(itemsSum - totalValue) > Math.max(0.011, itemsSum * 0.005)) {
+      notes.totalValue = [
+        notes.totalValue,
+        `Divergência: o total da nota (${totalValue.toFixed(2)}) não confere com a soma dos itens lidos (${itemsSum.toFixed(2)}) — confira o documento; nada foi corrigido automaticamente.`,
+      ]
+        .filter(Boolean)
+        .join(" ");
+    }
+  }
 
   const afNumber = extractAfNumber(clean);
   const empenhoNumber = extractEmpenhoNumber(clean);

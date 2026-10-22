@@ -71,6 +71,20 @@ function formatMoney(value: number | undefined | null): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 }
 
+/**
+ * Estado de associação dos itens — regra pura testável.
+ * `allAssociated` é verdadeiro SOMENTE quando existe pelo menos UM item e
+ * todos estão associados: lista vazia NUNCA pode exibir
+ * "Todos os itens associados" (zero itens ≠ tudo associado).
+ */
+export function nfeItemsAssociationState(
+  items: ReadonlyArray<{ matchStatus: ProductMatchStatus }>,
+): { total: number; pendingCount: number; allAssociated: boolean } {
+  const total = items.length;
+  const pendingCount = items.filter((row) => row.matchStatus !== "found").length;
+  return { total, pendingCount, allAssociated: total > 0 && pendingCount === 0 };
+}
+
 export function NfeReviewTable({
   items,
   products,
@@ -80,7 +94,7 @@ export function NfeReviewTable({
   onContinue,
   sourceLabel,
 }: NfeReviewTableProps) {
-  const pendingCount = items.filter((row) => row.matchStatus !== "found").length;
+  const { pendingCount, allAssociated } = nfeItemsAssociationState(items);
   const hasInvalidQuantity = items.some((row) => !(Number(row.item.quantity) > 0));
 
   return (
@@ -89,10 +103,17 @@ export function NfeReviewTable({
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <Badge className="bg-muted text-foreground">{items.length} item(ns) da NF-e</Badge>
         {sourceLabel && <Badge variant="outline">Fonte: {sourceLabel}</Badge>}
-        {pendingCount === 0 && (
+        {allAssociated && (
           <Badge className="bg-emerald-100 text-emerald-800">Todos os itens associados</Badge>
         )}
       </div>
+
+      {items.length === 0 && (
+        <div className="rounded-md border bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Nenhum item identificado na NF-e — a lista está vazia, nenhum item foi associado.
+          Informe os itens na conferência antes de continuar.
+        </div>
+      )}
 
       {pendingCount > 0 && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">

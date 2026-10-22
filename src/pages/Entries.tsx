@@ -990,10 +990,23 @@ export function EntriesPage({ className }: { className?: string }) {
                   suppliers={supplierOptions}
                 />
                 {nfeSupplier ? (
-                  <p className="text-sm">
-                    Fornecedor identificado: {nfeSupplier.legalName}
-                    <span className="text-muted-foreground"> CNPJ {formatCnpj(nfeSupplier.cnpj)}</span>
-                  </p>
+                  // Nome e CNPJ em LINHAS separadas: o CNPJ nunca fica colado
+                  // ao nome do fornecedor na conferência (defeito real da
+                  // importação DANFE — texto concatenado sem separação visual).
+                  <div className="flex min-w-0 flex-col leading-tight">
+                    <p className="text-sm min-w-0 max-w-full break-words">
+                      Fornecedor identificado: {nfeSupplier.legalName}
+                    </p>
+                    {nfeSupplier.cnpj ? (
+                      <p className="font-mono text-xs text-muted-foreground">
+                        CNPJ {formatCnpj(nfeSupplier.cnpj)}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        CNPJ pendente de conferência
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm text-amber-700">Fornecedor não cadastrado</span>

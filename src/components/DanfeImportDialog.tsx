@@ -28,6 +28,7 @@ import {
 } from "@/lib/br-validators";
 
 import type { DanfeParseResult, OcrTrace } from "@/lib/danfe-ocr";
+import { reconstructPdfTextLines, extractTextFromPdfStreams } from "@/lib/pdf-text-layer";
 import {
   DANFE_REGIONS,
   buildOcrTrace,
@@ -273,13 +274,26 @@ async function extractPdfTextLayer(f: File): Promise<string> {
   for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
     const page = await doc.getPage(pageNumber);
     const content = await page.getTextContent();
-    pages.push(
-      content.items
-        .map((item) => ("str" in item && typeof item.str === "string" ? item.str : ""))
-        .join(" "),
+    // Linhas visuais reconstruídas por coordenada Y: o parser é orientado a
+    // linhas (seções, razões sociais e itens). Colar os fragmentos em UMA
+    // linha por página perdia emitente/destinatário e itens — só os campos
+    // numéricos sobreviviam (regressão real da DANFE Incotech no PDF).
+    const positioned = content.items.flatMap((item) =>
+      "str" in item && typeof item.str === "string" && item.str
+        ? [{ str: item.str, x: item.transform?.[4] ?? 0, y: item.transform?.[5] ?? 0 }]
+        : [],
     );
+    pages.push(reconstructPdfTextLines(positioned));
   }
-  const text = pages.join("\n");
+  let text = pages.join("\n");
+  if (!hasUsableTextLayer(text)) {
+    // PDFs com operadores de conteúdo malformados (Tm/Tf inválidos) fazem o
+    // pdfjs devolver ZERO itens mesmo com camada de texto completa no arquivo.
+    // Fallback: os próprios operadores de texto (Tj/TJ) dos fluxos de conteúdo
+    // são lidos diretamente — só o que está literalmente no documento.
+    const raw = await extractTextFromPdfStreams(new Uint8Array(data));
+    if (hasUsableTextLayer(raw)) text = raw;
+  }
   if (!hasUsableTextLayer(text)) return "";
   return text;
 }
@@ -336,10 +350,20 @@ async function readDanfeFile(
   }
 
   const hasLayer = hasUsableTextLayer(rawText);
-  if (!hasLayer) {
+  const parsedLayer = parseDanfeText(rawText || "");
+  // Camada textual NUMÉRICA sem nomes nem itens (texto parcial de PDF): o OCR
+  // complementar é executado TAMBÉM e os dois parses entram na comparação —
+  // um parse pobre da camada nunca descarta dados válidos que o OCR conseguiu
+  // ler, e a camada permanece disponível como alternativa.
+  const layerMissingCore =
+    hasLayer && parsedLayer.items.length === 0 && !parsedLayer.emitterName && !parsedLayer.receiverName;
+  const needsOcr = !hasLayer || layerMissingCore;
+  if (needsOcr) {
     onStatus(
       isPdf
-        ? "PDF escaneado — rasterizando a 300 DPI e executando OCR (tesseract.js)…"
+        ? layerMissingCore
+          ? "Camada de texto sem itens/razões sociais — executando OCR complementar (tesseract.js)…"
+          : "PDF escaneado — rasterizando a 300 DPI e executando OCR (tesseract.js)…"
         : "Imagem da DANFE — executando OCR (tesseract.js)…",
     );
     const canvases = isPdf
@@ -351,8 +375,7 @@ async function readDanfeFile(
     }
   }
 
-  const mergedOcr = mergeDanfeTexts(hasLayer ? rawText : pageOcrText, regionTexts);
-  const parsedLayer = parseDanfeText(rawText || "");
+  const mergedOcr = mergeDanfeTexts(hasLayer && !layerMissingCore ? rawText : pageOcrText, regionTexts);
   const parsedOcr = parseDanfeText(mergedOcr);
   const best = isDanfeParseBetter(parsedOcr, parsedLayer) ? parsedOcr : parsedLayer;
   const trace = buildOcrTrace(
@@ -847,13 +870,25 @@ export function DanfeImportDialog({
                     <SelectContent>
                       <SelectItem value="none">Detectar automaticamente</SelectItem>
                       {suppliers.map((supplier) => (
-                        <SelectItem key={supplier._id} value={supplier._id}>
-                          {supplier.legalName}
-                          {supplier.cnpj ? (
-                            <span className="float-right text-xs text-muted-foreground">
-                              {formatCnpj(supplier.cnpj)}
-                            </span>
-                          ) : null}
+                        <SelectItem
+                          key={supplier._id}
+                          value={supplier._id}
+                          textValue={supplier.legalName}
+                        >
+                          {/* Nome e CNPJ em linhas separadas — o CNPJ nunca é
+                              colado ao nome do fornecedor. */}
+                          <span className="flex min-w-0 flex-col leading-tight">
+                            <span className="min-w-0 truncate">{supplier.legalName}</span>
+                            {supplier.cnpj ? (
+                              <span className="text-xs text-muted-foreground">
+                                CNPJ {formatCnpj(supplier.cnpj)}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                CNPJ pendente de conferência
+                              </span>
+                            )}
+                          </span>
                         </SelectItem>
                       ))}
                     </SelectContent>
