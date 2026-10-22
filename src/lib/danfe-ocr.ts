@@ -2239,6 +2239,7 @@ export function buildOcrTrace(
   source: string,
   srcLayerBlob?: string | null,
 ): OcrTrace {
+  void srcLayerBlob;
   return {
     rawText: rawText ?? "",
     pageOcrText: pageOcrText ?? "",
@@ -2249,7 +2250,11 @@ export function buildOcrTrace(
     best,
     source,
     srcLayerBlob: srcLayerBlob ?? null,
-    fieldTraces: buildFieldTraces(best, source, srcLayerBlob),
+    // Trilha por campo, alinhada com a validação (§7): só o resultado melhor
+    // (best) é quem recebe a trilha de validação — caso contrário o relatório
+    // emitiria o campo vazio do perdedor e a conferência perderia o rastro do
+    // valor que a interface vai exibir.
+    fieldTraces: buildFieldTraces(best, source),
     comparison: {
       layerValid: countValid(parsedLayer),
       ocrValid: countValid(parsedOcr),
@@ -2283,9 +2288,8 @@ function countValid(parsed: DanfeParseResult): number {
 function buildFieldTraces(
   parsed: DanfeParseResult,
   source: string,
-  srcLayerBlob?: string | null,
+  _srcLayerBlob?: string | null,
 ): OcrFieldTrace[] {
-  void srcLayerBlob;
   const values: Record<string, string> = {
     nfeNumber: parsed.nfeNumber ?? "",
     series: parsed.series ?? "",
