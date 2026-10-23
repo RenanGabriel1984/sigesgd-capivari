@@ -31,7 +31,23 @@ describe("R24 — extração real do diálogo sobre o PDF da DANFE Incotech", ()
     const bytes = readFileSync(PDF_FIXTURE);
     const file = new File([bytes], "Incotech Company.pdf", { type: "application/pdf" });
 
-    const text = await extractPdfTextLayer(file);
+    const { text, stage } = await extractPdfTextLayer(file);
+
+    // Estágio real da extração (alimenta o “Diagnóstico técnico” da tela).
+    // No vitest (node) o pdf.js daqui falha ao montar o worker e o erro real é
+    // registrado no estágio; no navegador/bun ele executa. Em qualquer caso o
+    // fallback precisa ter recuperado o texto.
+    expect(
+      stage.pdfjsExecutado || Boolean(stage.erroPdfjs),
+      "pdf.js executado ou erro real registrado",
+    ).toBe(true);
+    expect(stage.itensTextoPdfjs ?? 0, "pdf.js devolveu zero itens neste PDF").toBe(0);
+    expect(typeof stage.bufferDisponivelAposPdfjs, "disponibilidade do buffer medida").toBe(
+      "boolean",
+    );
+    expect(stage.fallbackExecutado, "fallback executado").toBe(true);
+    expect(stage.fallbackCaracteres ?? 0, "fallback com texto real").toBeGreaterThan(100);
+    expect(stage.fonteDoTexto, "fonte do texto").toBe("fluxos-de-conteudo");
 
     // Camada recuperada (antes da correção: 0 caracteres — buffer desanexado).
     expect(text.length, "camada de texto não pode ser descartada").toBeGreaterThan(100);
@@ -64,6 +80,8 @@ describe("R24 — extração real do diálogo sobre o PDF da DANFE Incotech", ()
     const broken = new File([new Uint8Array([1, 2, 3, 4])], "quebrado.pdf", {
       type: "application/pdf",
     });
-    await expect(extractPdfTextLayer(broken)).resolves.toBe("");
+    const leitura = await extractPdfTextLayer(broken);
+    expect(leitura.text).toBe("");
+    expect(leitura.stage.fonteDoTexto).toBe("nenhuma");
   });
 });

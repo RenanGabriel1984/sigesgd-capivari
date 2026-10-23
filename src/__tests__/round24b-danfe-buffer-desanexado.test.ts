@@ -59,7 +59,16 @@ describe("R24b — buffer desanexado pelo pdf.js", () => {
       type: "application/pdf",
     });
 
-    const text = await extractPdfTextLayer(file);
+    const { text, stage } = await extractPdfTextLayer(file);
+
+    // O double do pdf.js desanexa o buffer: o diagnóstico registra isso.
+    expect(stage.itensTextoPdfjs, "pdf.js devolveu zero itens").toBe(0);
+    expect(stage.bufferDisponivelAposPdfjs, "buffer desanexado detectado").toBe(false);
+    expect(stage.fallbackExecutado, "fallback executado").toBe(true);
+    expect(stage.fallbackCaracteres ?? 0, "fallback leu os fluxos de conteúdo").toBeGreaterThan(
+      1000,
+    );
+    expect(stage.fonteDoTexto).toBe("fluxos-de-conteudo");
 
     expect(text.length, "camada não pode ser perdida pelo desanexo").toBeGreaterThan(100);
     expect(text).toMatch(/INCOTECH/i);
@@ -77,6 +86,8 @@ describe("R24b — buffer desanexado pelo pdf.js", () => {
     const broken = new File([new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])], "quebrado.pdf", {
       type: "application/pdf",
     });
-    await expect(extractPdfTextLayer(broken)).resolves.toBe("");
+    const leitura = await extractPdfTextLayer(broken);
+    expect(leitura.text).toBe("");
+    expect(leitura.stage.fonteDoTexto).toBe("nenhuma");
   });
 });

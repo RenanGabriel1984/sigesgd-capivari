@@ -27,11 +27,19 @@ import {
   formatCnpj,
 } from "@/lib/br-validators";
 
-import type { DanfeParseResult, OcrTrace } from "@/lib/danfe-ocr";
+import type { DanfeParseResult } from "@/lib/danfe-ocr";
 import { reconstructPdfTextLines, extractTextFromPdfStreams } from "@/lib/pdf-text-layer";
 import {
+  APP_VERSION,
+  buildDanfeDiagnostic,
+  countTextLines,
+  trechoDe,
+  type DanfeDiagnostic,
+  type DanfeDiagnosticIdentificacao,
+  type PdfLayerStage,
+} from "@/lib/danfe-diagnostics";
+import {
   DANFE_REGIONS,
-  buildOcrTrace,
   danfeFieldNotes,
   danfeFieldSummary,
   danfeFieldWarnings,
@@ -70,16 +78,27 @@ const TARGET_DPI = 300;
 const MIN_OCR_WIDTH = 1200;
 const MAX_PDF_PAGES = 3;
 
-function readDiagnosticFlag(): boolean {
-  try {
-    return window.localStorage.getItem("danfeDevDiagnostic") === "1";
-  } catch {
-    return false;
-  }
-}
-
 function isDevEnvironment(): boolean {
   return Boolean(import.meta.env?.DEV);
+}
+
+/**
+ * Identificação da execução do diagnóstico: correlaciona o JSON copiado com a
+ * revisão do build servido e com a leitura específica (id único por importação).
+ */
+function identificacaoDiagnostico(): DanfeDiagnosticIdentificacao {
+  const bundle =
+    typeof document !== "undefined"
+      ? (document.querySelector('script[src^="/assets/index-"]')?.getAttribute("src") ?? null)
+      : null;
+  return {
+    diagnosticoId: `danfe-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    geradoEm: new Date().toISOString(),
+    versaoApp: APP_VERSION,
+    modo: isDevEnvironment() ? "desenvolvimento" : "producao",
+    bundleEntrada: bundle,
+    userAgent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+  };
 }
 
 /**
@@ -102,18 +121,14 @@ function supportsCameraCapture(): boolean {
 }
 
 /**
- * Diagnóstico acessível da importação DANFE:
- *   • em DESENVOLVIMENTO o botão aparece sempre, sem depender de nenhuma
- *     condição que impeça a visualização (a dupla checagem
- *     `DEV && flag` escondia o botão mesmo com a flag ativa);
- *   • no build publicado (`import.meta.env.DEV === false`) ele só aparece
- *     mediante opt-in explícito do operador
- *     (localStorage.setItem("danfeDevDiagnostic", "1")) — sem a flag,
- *     produção NUNCA exibe dados de diagnóstico.
+ * Diagnóstico técnico da importação (seção “Diagnóstico técnico” do diálogo):
+ * montado a partir dos valores REAIS de cada etapa desta leitura — pdf.js,
+ * fallback dos fluxos de conteúdo, OCR, combinação de textos, parses e objeto
+ * final. Sempre disponível na importação (era restrito a uma flag de
+ * desenvolvimento e o usuário não conseguia gerar o JSON para correlação).
+ * Local e descritivo: nada é gravado nem enviado; texto integral e binário
+ * ficam de fora (apenas contagens e trechos limitados).
  */
-function isDiagnosticEnabled(): boolean {
-  return isDevEnvironment() || readDiagnosticFlag();
-}
 
 async function loadImageCanvas(f: File): Promise<HTMLCanvasElement> {
   const url = URL.createObjectURL(f);
@@ -261,8 +276,25 @@ async function ocrDanfeRegions(
  * Extração da camada de texto de um PDF anexado — função EXPORTADA para o
  * teste de regressão exercitar exatamente o código que roda na tela (o pdf.js
  * desanexa o ArrayBuffer; uma reimplementação no teste não pega esse defeito).
+ * Devolve também o estágio REAL da extração para o “Diagnóstico técnico”.
  */
-export async function extractPdfTextLayer(f: File): Promise<string> {
+export async function extractPdfTextLayer(
+  f: File,
+): Promise<{ text: string; stage: PdfLayerStage }> {
+  const stage: PdfLayerStage = {
+    pdfjsExecutado: false,
+    paginas: null,
+    itensTextoPdfjs: null,
+    bufferDisponivelAposPdfjs: null,
+    erroPdfjs: null,
+    fallbackExecutado: false,
+    fallbackCaracteres: null,
+    fallbackLinhas: null,
+    fallbackErro: null,
+    fonteDoTexto: "nenhuma",
+    camadaCaracteres: 0,
+    camadaLinhas: 0,
+  };
   const pdfjs = await import("pdfjs-dist");
   try {
     pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -284,12 +316,17 @@ export async function extractPdfTextLayer(f: File): Promise<string> {
   // A cópia é feita ANTES de entregar o buffer ao pdf.js.
   const snapshot = new Uint8Array(data.slice(0));
   let text = "";
+  let pdfjsUtilizavel = false;
   try {
     const doc = await pdfjs.getDocument({ data }).promise;
+    stage.pdfjsExecutado = true;
+    stage.paginas = doc.numPages;
     const pages: string[] = [];
+    let itensTexto = 0;
     for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
       const page = await doc.getPage(pageNumber);
       const content = await page.getTextContent();
+      itensTexto += content.items.length;
       // Linhas visuais reconstruídas por coordenada Y: o parser é orientado a
       // linhas (seções, razões sociais e itens). Colar os fragmentos em UMA
       // linha por página perdia emitente/destinatário e itens — só os campos
@@ -301,23 +338,48 @@ export async function extractPdfTextLayer(f: File): Promise<string> {
       );
       pages.push(reconstructPdfTextLines(positioned));
     }
+    stage.itensTextoPdfjs = itensTexto;
+    // Disponibilidade do buffer ORIGINAL após a chamada ao pdf.js (no navegador
+    // o worker consome o ArrayBuffer; o diagnóstico registra o valor real).
+    stage.bufferDisponivelAposPdfjs = data.byteLength > 0;
     text = pages.join("\n");
-  } catch {
+    pdfjsUtilizavel = hasUsableTextLayer(text);
+  } catch (err) {
     // pdf.js não conseguiu ler (PDF corrompido/instalado incompleto): o
     // fallback dos fluxos de conteúdo abaixo continua tentando — o texto que
     // está literalmente no arquivo não é descartado por falha do pdf.js.
+    stage.erroPdfjs = String(err);
+    try {
+      stage.bufferDisponivelAposPdfjs = data.byteLength > 0;
+    } catch {
+      stage.bufferDisponivelAposPdfjs = null;
+    }
     text = "";
   }
-  if (!hasUsableTextLayer(text)) {
+  if (!pdfjsUtilizavel) {
     // PDFs com operadores de conteúdo malformados (Tm/Tf inválidos) fazem o
     // pdfjs devolver ZERO itens mesmo com camada de texto completa no arquivo.
     // Fallback: os próprios operadores de texto (Tj/TJ) dos fluxos de conteúdo
     // são lidos diretamente — só o que está literalmente no documento.
-    const raw = await extractTextFromPdfStreams(snapshot);
-    if (hasUsableTextLayer(raw)) text = raw;
+    stage.fallbackExecutado = true;
+    try {
+      const raw = await extractTextFromPdfStreams(snapshot);
+      stage.fallbackCaracteres = raw.length;
+      stage.fallbackLinhas = countTextLines(raw);
+      if (hasUsableTextLayer(raw)) {
+        text = raw;
+        stage.fonteDoTexto = "fluxos-de-conteudo";
+      }
+    } catch (err) {
+      stage.fallbackErro = String(err);
+    }
+  } else {
+    stage.fonteDoTexto = "camada-pdfjs";
   }
-  if (!hasUsableTextLayer(text)) return "";
-  return text;
+  if (stage.fonteDoTexto === "nenhuma") text = "";
+  stage.camadaCaracteres = text.length;
+  stage.camadaLinhas = countTextLines(text);
+  return { text, stage };
 }
 
 async function rasterizePdfPages(f: File): Promise<HTMLCanvasElement[]> {
@@ -351,68 +413,171 @@ async function rasterizePdfPages(f: File): Promise<HTMLCanvasElement[]> {
   return canvases;
 }
 
-type DanfeReadResult = { parsed: DanfeParseResult; trace: OcrTrace };
+export type DanfeReadResult = { parsed: DanfeParseResult; diagnostic: DanfeDiagnostic };
 
-async function readDanfeFile(
+/** Falha na leitura que preserva o diagnóstico parcial das etapas executadas. */
+export class DanfeReadError extends Error {
+  readonly diagnostic: DanfeDiagnostic;
+  constructor(message: string, diagnostic: DanfeDiagnostic) {
+    super(message);
+    this.name = "DanfeReadError";
+    this.diagnostic = diagnostic;
+  }
+}
+
+/**
+ * Leitura de um DANFE anexada — EXPORTADA para os testes cobrirem o caminho
+ * real da tela, inclusive a montagem do “Diagnóstico técnico”.
+ */
+export async function readDanfeFile(
   f: File,
   onStatus: (status: string) => void,
 ): Promise<DanfeReadResult> {
   const isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
+  const formato: "pdf" | "imagem" | "desconhecido" = isPdf
+    ? "pdf"
+    : /^image\//.test(f.type || "")
+      ? "imagem"
+      : "desconhecido";
   let rawText = "";
   let pageOcrText = "";
   const regionTexts: string[] = [];
+  const erros: string[] = [];
+  let layerStage: PdfLayerStage | null = null;
+  let hasLayer = false;
+  let parsedLayer: DanfeParseResult | undefined;
+  let parsedOcr: DanfeParseResult | undefined;
+  let final: DanfeParseResult | undefined;
+  let escolhido: "camada" | "ocr" | null = null;
+  let mergedOcr = "";
+  let needsOcr = false;
+  let motivoDecisaoOcr = "Decisão de OCR ainda não registrada.";
 
-  if (isPdf) {
-    onStatus("Lendo a camada de texto do PDF…");
-    try {
-      rawText = await extractPdfTextLayer(f);
-    } catch {
-      rawText = "";
+  const somaDosTextos = (parts: readonly string[]) => ({
+    caracteres: parts.reduce((n, t) => n + t.length, 0),
+    linhas: parts.reduce((n, t) => n + countTextLines(t), 0),
+  });
+
+  /** Diagnóstico das etapas REALMENTE executadas até aqui (sucesso ou falha). */
+  const montarDiagnostico = (): DanfeDiagnostic =>
+    buildDanfeDiagnostic({
+      identificacao: identificacaoDiagnostico(),
+      arquivo: {
+        nome: f.name,
+        tipo: f.type || "(sem tipo informado)",
+        tamanhoBytes: f.size,
+        formato,
+      },
+      pdf: layerStage ?? undefined,
+      imagem:
+        formato === "imagem"
+          ? {
+              ocrExecutado: needsOcr,
+              motivoDecisao: motivoDecisaoOcr,
+              textoPaginaCaracteres: pageOcrText.length,
+              textoPaginaLinhas: countTextLines(pageOcrText),
+              regioesQuantidade: regionTexts.length,
+              regioesCaracteres: somaDosTextos(regionTexts).caracteres,
+              regioesLinhas: somaDosTextos(regionTexts).linhas,
+            }
+          : undefined,
+      decisaoOcr: { executado: needsOcr, motivo: motivoDecisaoOcr },
+      fontesTexto: [
+        {
+          nome: isPdf
+            ? "camada de texto do PDF (pdf.js + fallback dos fluxos de conteúdo)"
+            : "texto da página (fonte inexistente em imagem)",
+          caracteres: rawText.length,
+          linhas: countTextLines(rawText),
+          ...trechoDe(rawText),
+        },
+        {
+          nome: "OCR página inteira (tesseract.js)",
+          caracteres: pageOcrText.length,
+          linhas: countTextLines(pageOcrText),
+          ...trechoDe(pageOcrText),
+        },
+        {
+          nome: "OCR regiões da DANFE (tesseract.js)",
+          ...somaDosTextos(regionTexts),
+          ...trechoDe(regionTexts.join("\n")),
+        },
+        {
+          nome: "texto combinado (mergeDanfeTexts) — entrada do parse",
+          caracteres: mergedOcr.length,
+          linhas: countTextLines(mergedOcr),
+          ...trechoDe(mergedOcr),
+        },
+      ],
+      textoUtilizadoPor: hasLayer && !needsOcr ? "camada" : mergedOcr ? "ocr" : "nenhuma",
+      parses: { camada: parsedLayer, ocr: parsedOcr, escolhido },
+      final,
+      estadoInterface: {
+        transformacoes: [
+          "Nenhuma transformação: o parse final é exibido sem alteração (setParsed) e enviado em onImport como {...parsed, supplierId}.",
+        ],
+      },
+      erros,
+    });
+
+  try {
+    if (isPdf) {
+      onStatus("Lendo a camada de texto do PDF…");
+      try {
+        const leitura = await extractPdfTextLayer(f);
+        rawText = leitura.text;
+        layerStage = leitura.stage;
+      } catch (err) {
+        // Falha da extração (ex.: pdf.js indisponível) é registrada com a
+        // mensagem real e o fluxo segue para OCR — nunca mascarada.
+        erros.push(`Extração da camada de texto falhou: ${String(err)}`);
+        rawText = "";
+      }
     }
-  }
 
-  const hasLayer = hasUsableTextLayer(rawText);
-  const parsedLayer = parseDanfeText(rawText || "");
-  // Camada textual NUMÉRICA sem nomes nem itens (texto parcial de PDF): o OCR
-  // complementar é executado TAMBÉM e os dois parses entram na comparação —
-  // um parse pobre da camada nunca descarta dados válidos que o OCR conseguiu
-  // ler, e a camada permanece disponível como alternativa.
-  const layerMissingCore =
-    hasLayer && parsedLayer.items.length === 0 && !parsedLayer.emitterName && !parsedLayer.receiverName;
-  const needsOcr = !hasLayer || layerMissingCore;
-  if (needsOcr) {
-    onStatus(
-      isPdf
-        ? layerMissingCore
-          ? "Camada de texto sem itens/razões sociais — executando OCR complementar (tesseract.js)…"
-          : "PDF escaneado — rasterizando a 300 DPI e executando OCR (tesseract.js)…"
-        : "Imagem da DANFE — executando OCR (tesseract.js)…",
-    );
-    const canvases = isPdf
-      ? await rasterizePdfPages(f)
-      : [preprocessForOcr(await loadImageCanvas(f))];
-    for (const canvas of canvases) {
-      pageOcrText += `\n${await ocrPageWithRotationRetry(canvas, onStatus)}`;
-      regionTexts.push(...(await ocrDanfeRegions(canvas, onStatus)));
+    hasLayer = hasUsableTextLayer(rawText);
+    parsedLayer = parseDanfeText(rawText || "");
+    // Camada textual NUMÉRICA sem nomes nem itens (texto parcial de PDF): o OCR
+    // complementar é executado TAMBÉM e os dois parses entram na comparação —
+    // um parse pobre da camada nunca descarta dados válidos que o OCR conseguiu
+    // ler, e a camada permanece disponível como alternativa.
+    const layerMissingCore =
+      hasLayer && parsedLayer.items.length === 0 && !parsedLayer.emitterName && !parsedLayer.receiverName;
+    needsOcr = !hasLayer || layerMissingCore;
+    motivoDecisaoOcr = !hasLayer
+      ? isPdf
+        ? "Camada de texto ausente ou não utilizável no PDF — OCR executado sobre a página rasterizada."
+        : "Arquivo de imagem: OCR é a única fonte de texto."
+      : layerMissingCore
+        ? "Camada presente, mas sem itens e sem razões sociais — OCR complementar executado para não descartar dados."
+        : "Camada de texto com itens/razões sociais utilizáveis — OCR não executado.";
+    if (needsOcr) {
+      onStatus(
+        isPdf
+          ? layerMissingCore
+            ? "Camada de texto sem itens/razões sociais — executando OCR complementar (tesseract.js)…"
+            : "PDF escaneado — rasterizando a 300 DPI e executando OCR (tesseract.js)…"
+          : "Imagem da DANFE — executando OCR (tesseract.js)…",
+      );
+      const canvases = isPdf
+        ? await rasterizePdfPages(f)
+        : [preprocessForOcr(await loadImageCanvas(f))];
+      for (const canvas of canvases) {
+        pageOcrText += `\n${await ocrPageWithRotationRetry(canvas, onStatus)}`;
+        regionTexts.push(...(await ocrDanfeRegions(canvas, onStatus)));
+      }
     }
+
+    mergedOcr = mergeDanfeTexts(hasLayer && !layerMissingCore ? rawText : pageOcrText, regionTexts);
+    parsedOcr = parseDanfeText(mergedOcr);
+    final = isDanfeParseBetter(parsedOcr, parsedLayer) ? parsedOcr : parsedLayer;
+    escolhido = final === parsedOcr ? "ocr" : "camada";
+
+    return { parsed: final, diagnostic: montarDiagnostico() };
+  } catch (err) {
+    erros.push(String(err));
+    throw new DanfeReadError(String(err), montarDiagnostico());
   }
-
-  const mergedOcr = mergeDanfeTexts(hasLayer && !layerMissingCore ? rawText : pageOcrText, regionTexts);
-  const parsedOcr = parseDanfeText(mergedOcr);
-  const best = isDanfeParseBetter(parsedOcr, parsedLayer) ? parsedOcr : parsedLayer;
-  const trace = buildOcrTrace(
-    rawText || undefined,
-    pageOcrText || undefined,
-    regionTexts,
-    mergedOcr,
-    parsedLayer,
-    parsedOcr,
-    best,
-    hasLayer ? "camada-texto" : "ocr",
-    null,
-  );
-
-  return { parsed: best, trace };
 }
 
 const EMPTY_PARSED: DanfeParseResult = { ok: false, items: [] };
@@ -422,6 +587,92 @@ function formatCurrencyStable(value: number): string {
     style: "currency",
     currency: "BRL",
   }).format(value);
+}
+
+/**
+ * Seção “Diagnóstico técnico” — temporária, local e colapsável. Registra as
+ * etapas REAIS da leitura (pdf.js, fallback dos fluxos, OCR, combinação de
+ * textos, parses antes/depois da comparação e objeto final) e permite
+ * exibir/copiar o JSON para correlação do problema. Nada é gravado no banco nem
+ * enviado a serviços; o conteúdo binário do arquivo e o texto integral do
+ * documento ficam de fora (somente contagens e trechos limitados).
+ */
+function DiagnosticoTecnicoSecao({
+  diagnostic,
+  onCopy,
+}: {
+  diagnostic: DanfeDiagnostic;
+  onCopy: (json: string) => void;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const [mostrarJson, setMostrarJson] = useState(false);
+  const json = useMemo(() => JSON.stringify(diagnostic, null, 2), [diagnostic]);
+
+  return (
+    <section className="min-w-0 max-w-full space-y-2 rounded-md border border-dashed p-3">
+      <button
+        type="button"
+        aria-expanded={aberto}
+        className="flex w-full items-center justify-between gap-2 text-left text-xs font-semibold uppercase text-muted-foreground"
+        onClick={() => setAberto((value) => !value)}
+      >
+        <span>Diagnóstico técnico</span>
+        <span className="font-normal normal-case">{aberto ? "Recolher" : "Expandir"}</span>
+      </button>
+
+      {aberto && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            {diagnostic.etapas.decisaoOcr.executado ? "OCR executado" : "OCR não executado"} ·
+            fonte do texto do parser: {diagnostic.etapas.textoUtilizadoPor} · campos finais:{" "}
+            {diagnostic.estadoInterface.camposNoObjetoFinal} de {diagnostic.resultadoFinal.camposTotais}{" "}
+            · itens: {diagnostic.estadoInterface.itensNoObjetoFinal} · execução{" "}
+            {diagnostic.identificacao.diagnosticoId} · versão {diagnostic.identificacao.versaoApp} (
+            {diagnostic.identificacao.modo})
+            {diagnostic.identificacao.bundleEntrada
+              ? ` · bundle ${diagnostic.identificacao.bundleEntrada}`
+              : ""}
+            . Diagnóstico local e temporário: nada é gravado no banco nem enviado; o conteúdo
+            binário do arquivo e o texto integral do documento ficam de fora.
+          </p>
+
+          {diagnostic.erros.length > 0 && (
+            <ul className="space-y-0.5 text-xs text-red-800">
+              {diagnostic.erros.map((erro, index) => (
+                <li key={index}>Erro registrado: {erro}</li>
+              ))}
+            </ul>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setMostrarJson((value) => !value)}
+            >
+              {mostrarJson ? "Ocultar JSON" : "Exibir JSON"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => onCopy(json)}
+            >
+              <ClipboardCopy className="h-3.5 w-3.5" /> Copiar JSON
+            </Button>
+          </div>
+
+          {mostrarJson && (
+            <pre className="max-h-64 min-w-0 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/40 p-2 text-[10px] leading-4">
+              {json}
+            </pre>
+          )}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function DataCell({
@@ -463,12 +714,11 @@ export function DanfeImportDialog({
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
   const [showReview, setShowReview] = useState(false);
   const [parsed, setParsed] = useState<DanfeParseResult>(EMPTY_PARSED);
-  const [trace, setTrace] = useState<OcrTrace | null>(null);
   const [fileName, setFileName] = useState("");
   const [status, setStatus] = useState("");
   const [reading, setReading] = useState(false);
   const [error, setError] = useState("");
-  const [diagnosticEnabled, setDiagnosticEnabled] = useState(false);
+  const [diagnostic, setDiagnostic] = useState<DanfeDiagnostic | null>(null);
 
   // Resumo SEMPRE recalculado do parse atual (nunca de um estado obsoleto).
   const fieldSummary = useMemo(() => danfeFieldSummary(parsed), [parsed]);
@@ -492,25 +742,18 @@ export function DanfeImportDialog({
 
   useEffect(() => {
     if (!open) {
-      setDiagnosticEnabled(false);
+      setDiagnostic(null);
       return;
     }
     setSelectedSupplierId("");
     setShowReview(false);
     setParsed(EMPTY_PARSED);
-    setTrace(null);
     setFileName("");
     setStatus("");
     setReading(false);
     setError("");
+    setDiagnostic(null);
     onFile?.(null);
-
-    // Diagnóstico de desenvolvimento: flag lida continuamente para reagir a
-    // localStorage.setItem("danfeDevDiagnostic", "1") feito depois da abertura.
-    const refreshDiagnostic = () => setDiagnosticEnabled(isDiagnosticEnabled());
-    refreshDiagnostic();
-    const intervalId = window.setInterval(refreshDiagnostic, 1000);
-    window.addEventListener("storage", refreshDiagnostic);
 
     // Câmera do aparelho: reavaliada a cada abertura e quando o viewport muda
     // (celular deitado/em pé, rotação).
@@ -522,8 +765,6 @@ export function DanfeImportDialog({
     window.addEventListener("orientationchange", refreshCamera);
 
     return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener("storage", refreshDiagnostic);
       mediaQuery?.removeEventListener("change", refreshCamera);
       window.removeEventListener("orientationchange", refreshCamera);
     };
@@ -536,9 +777,12 @@ export function DanfeImportDialog({
     setFileName(file.name);
     onFile?.(file);
     try {
-      const { parsed: result, trace: ocrTrace } = await readDanfeFile(file, setStatus);
+      const {
+        parsed: result,
+        diagnostic: diagnosticoDaLeitura,
+      } = await readDanfeFile(file, setStatus);
       setParsed(result);
-      setTrace(ocrTrace);
+      setDiagnostic(diagnosticoDaLeitura);
       setShowReview(true);
       if (danfeFieldSummary(result).found === 0) {
         setError(
@@ -546,7 +790,10 @@ export function DanfeImportDialog({
             "use a entrada manual ou volte e importe o XML (Importar NF-e XML).",
         );
       }
-    } catch {
+    } catch (err) {
+      // O diagnóstico parcial (etapas já executadas + erro real, sem máscara)
+      // fica disponível para o operador copiar na seção “Diagnóstico técnico”.
+      if (err instanceof DanfeReadError) setDiagnostic(err.diagnostic);
       setError(
         "Não foi possível ler o arquivo selecionado — nada foi perdido: use a entrada manual ou " +
           "importe o XML (Importar NF-e XML) e confira os campos manualmente.",
@@ -571,24 +818,6 @@ export function DanfeImportDialog({
     } catch {
       toast.error("Não foi possível copiar. Selecione o valor manualmente.");
     }
-  };
-
-  const copyDiagnosticReport = async () => {
-    const report = {
-      geradoEm: new Date().toISOString(),
-      arquivo: fileName || null,
-      resumo: fieldSummary,
-      chave: {
-        valor: parsed.accessKey ?? null,
-        digitos: accessKeyDigits.length,
-        digitoVerificadorValido: keyValid,
-        referenciaIncotech: INCOTECH_TEST_ACCESS_KEY,
-        confereComReferencia: incotechCheck,
-      },
-      campos: parsed,
-      rastreio: trace,
-    };
-    await copyToClipboard(JSON.stringify(report, null, 2), "Relatório JSON copiado");
   };
 
   const handleImport = () => {
@@ -701,17 +930,6 @@ export function DanfeImportDialog({
                   <span className="text-sm">
                     Dados identificados: {fieldSummary.found} de {fieldSummary.total} campos
                   </span>
-                  {diagnosticEnabled && trace && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="ml-auto gap-2"
-                      onClick={() => void copyDiagnosticReport()}
-                    >
-                      <ClipboardCopy className="h-3.5 w-3.5" /> Copiar relatório JSON
-                    </Button>
-                  )}
                 </div>
 
                 {summary.found === 0 && (
@@ -927,6 +1145,13 @@ export function DanfeImportDialog({
                   </p>
                 </section>
               </>
+            )}
+
+            {diagnostic && (
+              <DiagnosticoTecnicoSecao
+                diagnostic={diagnostic}
+                onCopy={(json) => void copyToClipboard(json, "Diagnóstico técnico copiado (JSON)")}
+              />
             )}
           </div>
         </div>
