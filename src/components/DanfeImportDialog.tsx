@@ -257,7 +257,12 @@ async function ocrDanfeRegions(
   return texts;
 }
 
-async function extractPdfTextLayer(f: File): Promise<string> {
+/**
+ * Extração da camada de texto de um PDF anexado — função EXPORTADA para o
+ * teste de regressão exercitar exatamente o código que roda na tela (o pdf.js
+ * desanexa o ArrayBuffer; uma reimplementação no teste não pega esse defeito).
+ */
+export async function extractPdfTextLayer(f: File): Promise<string> {
   const pdfjs = await import("pdfjs-dist");
   try {
     pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -269,29 +274,46 @@ async function extractPdfTextLayer(f: File): Promise<string> {
   }
 
   const data = await f.arrayBuffer();
-  const doc = await pdfjs.getDocument({ data }).promise;
-  const pages: string[] = [];
-  for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
-    const page = await doc.getPage(pageNumber);
-    const content = await page.getTextContent();
-    // Linhas visuais reconstruídas por coordenada Y: o parser é orientado a
-    // linhas (seções, razões sociais e itens). Colar os fragmentos em UMA
-    // linha por página perdia emitente/destinatário e itens — só os campos
-    // numéricos sobreviviam (regressão real da DANFE Incotech no PDF).
-    const positioned = content.items.flatMap((item) =>
-      "str" in item && typeof item.str === "string" && item.str
-        ? [{ str: item.str, x: item.transform?.[4] ?? 0, y: item.transform?.[5] ?? 0 }]
-        : [],
-    );
-    pages.push(reconstructPdfTextLines(positioned));
+  // DEFEITO REAL COMPROVADO: o pdf.js TRANSFERE o ArrayBuffer para o worker
+  // (navegador e bun) e o buffer original fica DESANEXADO — após
+  // getTextContent(), data.byteLength === 0 e "new Uint8Array(data)" chega a
+  // lançar "Buffer is already detached". O fallback lia esse buffer vazio,
+  // devolvia 0 caracteres e a camada de texto do PDF era DESCARTADA: o fluxo
+  // caía todo no OCR, que devolve só os campos numéricos (6/10, razões
+  // sociais em branco e zero itens — o sintoma real da DANFE Incotech).
+  // A cópia é feita ANTES de entregar o buffer ao pdf.js.
+  const snapshot = new Uint8Array(data.slice(0));
+  let text = "";
+  try {
+    const doc = await pdfjs.getDocument({ data }).promise;
+    const pages: string[] = [];
+    for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber++) {
+      const page = await doc.getPage(pageNumber);
+      const content = await page.getTextContent();
+      // Linhas visuais reconstruídas por coordenada Y: o parser é orientado a
+      // linhas (seções, razões sociais e itens). Colar os fragmentos em UMA
+      // linha por página perdia emitente/destinatário e itens — só os campos
+      // numéricos sobreviviam (regressão real da DANFE Incotech no PDF).
+      const positioned = content.items.flatMap((item) =>
+        "str" in item && typeof item.str === "string" && item.str
+          ? [{ str: item.str, x: item.transform?.[4] ?? 0, y: item.transform?.[5] ?? 0 }]
+          : [],
+      );
+      pages.push(reconstructPdfTextLines(positioned));
+    }
+    text = pages.join("\n");
+  } catch {
+    // pdf.js não conseguiu ler (PDF corrompido/instalado incompleto): o
+    // fallback dos fluxos de conteúdo abaixo continua tentando — o texto que
+    // está literalmente no arquivo não é descartado por falha do pdf.js.
+    text = "";
   }
-  let text = pages.join("\n");
   if (!hasUsableTextLayer(text)) {
     // PDFs com operadores de conteúdo malformados (Tm/Tf inválidos) fazem o
     // pdfjs devolver ZERO itens mesmo com camada de texto completa no arquivo.
     // Fallback: os próprios operadores de texto (Tj/TJ) dos fluxos de conteúdo
     // são lidos diretamente — só o que está literalmente no documento.
-    const raw = await extractTextFromPdfStreams(new Uint8Array(data));
+    const raw = await extractTextFromPdfStreams(snapshot);
     if (hasUsableTextLayer(raw)) text = raw;
   }
   if (!hasUsableTextLayer(text)) return "";
