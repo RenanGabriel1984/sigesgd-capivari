@@ -1,0 +1,9 @@
+# publicação do diagnóstico da DANFE
+## tentativa 1 @ 13:52:50
+--- isolado ---
+isolo vazio/ausente
+/assets/index-BegjdwCd.js
+## tentativa 2 @ 13:54:20
+--- isolado ---
+isolo vazio/ausente
+/assets/index-BegjdwCd.js
