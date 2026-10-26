@@ -3,5 +3,8 @@
   "functions": "src/convex/",
   "aiFiles": {
     "enabled": false
+  },
+  "codegen": {
+    "fileType": "ts"
   }
 }
