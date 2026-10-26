@@ -772,7 +772,9 @@ function findItemValueWindow(tokens: string[]): ValueWindow | null {
   tokens.forEach((token, index) => {
     if (isItemColumnLabel(token)) return;
     indexes.push(index);
-    clean.push(token);
+    // Pontuação residual de OCR nas bordas (colchetes/parênteses colados ao
+    // valor) não pode invalidar um preço legível antes de PRICE_TOKEN_RE.
+    clean.push(stripEdgeResidue(token));
   });
 
   const candidates: ValueWindow[] = [];
@@ -1196,6 +1198,108 @@ const LOCATION_WORD =
 const CORPORATE_HINT =
   /\b(LTDA|ME|MEI|EPP|EIRELI|S\.?A\.?|S\s?\/\s?A|COMPANY|COMPANHIA|CIA\b|COM[ÉE]RCIO|IND[ÚU]STRIA|DISTRIBUIDORA|PREFEITURA|MUNICIPIO|MUNICÍPIO|FUNDA[ÇC][ÃA]O|SECRETARIA|CONSELHO|MINIST[ÉE]RIO|CÂMARA|ALCAZAR|GAROTAS?\b)/i;
 
+/**
+ * Pontuação residual de OCR nas BORDAS de um token numérico ("]", ")", ":",
+ * etc). Só remove pontuação — nunca letras — para que um resíduo adjacente não
+ * invalide um preço legível ("12.345,67]" → "12.345,67") sem mascarar ruído
+ * alfanumérico como "Le323,50" (que continua rejeitado).
+ */
+const EDGE_RESIDUE_RE =
+  /^[\])}>|"'`´^~*#%&@!?:;<=.,\\/-]+|[\])}>|"'`´^~*#%&@!?:;<=.,\\/-]+$/g;
+
+function stripEdgeResidue(token: string): string {
+  return token.replace(EDGE_RESIDUE_RE, "");
+}
+
+/**
+ * Rótulos de coluna da DANFE: quando o OCR cola colunas vizinhas no MESMO
+ * campo ("NOME MUNICIPIO DE CAPIVARI MUNICIPIO Capivari - SP CEP 13360-023"),
+ * o valor do campo termina ANTES do rótulo da coluna seguinte.
+ */
+const COLUMN_BOUNDARY_TOKEN =
+  /^(?:MUNIC[ÍI]PIO|CIDADE|BAIRRO|DISTRITO|ENDERE[ÇC]O|CEP|FONE|FAX|INSCRI[ÇC][ÃA]O(?:\s+ESTADUAL)?|CNPJ|CPF|UF|ESTADO|PA[ÍI]S|NOME|RAZ[ÃA]O\s+SOCIAL|FANTASIA)$/i;
+
+/** Preposição que liga valor e rótulo ("PREFEITURA DO MUNICÍPIO"): não corta. */
+const COLUMN_BOUNDARY_KEEP = /^(?:DE|DO|DA|DOS|DAS|NO|NA|NOS|NAS|EM)$/i;
+
+function cutAtColumnBoundary(value: string): string {
+  const tokens = value.split(/\s+/);
+  for (let index = 1; index < tokens.length; index++) {
+    const token = tokens[index].replace(/[:;,]+$/, "");
+    if (!COLUMN_BOUNDARY_TOKEN.test(token)) continue;
+    if (COLUMN_BOUNDARY_KEEP.test(tokens[index - 1])) continue;
+    return tokens.slice(0, index).join(" ").trim();
+  }
+  return value;
+}
+
+/** Marcadores de ruído que encerram o valor do campo ("dt 28/09/26"). */
+const NAME_NOISE_TOKEN = /^(?:dt|data|emiss\w*|hora|n[ºo°]\.?|nr\.?|ref\.?|cnpj|cpf)$/i;
+
+/**
+ * Corta o resíduo numérico posterior ao nome ("INCOTECH COMPANY LTDA 00002267
+ * dt 28/09/26" → prefixo antes do primeiro número; "... LTDA dt 28/09/26" →
+ * antes do marcador de ruído). Quando o corte pelo marcador deixa um prefixo
+ * curto, cai para o corte pelo número — nunca devolve texto com dígitos.
+ */
+function cutAtNumericNoise(value: string): string {
+  const tokens = value.split(/\s+/);
+  const firstDigit = tokens.findIndex((token) => /\d/.test(token));
+  const firstNoise = tokens.findIndex((token) => NAME_NOISE_TOKEN.test(token));
+  const join = (end: number) =>
+    tokens
+      .slice(0, end)
+      .join(" ")
+      .replace(/[\s,;:.]+$/, "")
+      .trim();
+
+  if (firstNoise > 0 && (firstDigit < 0 || firstNoise < firstDigit)) {
+    const prefix = join(firstNoise);
+    if (prefix.split(/\s+/).length >= 2 && !/\d/.test(prefix)) return prefix;
+  }
+  if (firstDigit > 0) return join(firstDigit);
+  return value;
+}
+
+/**
+ * Nome de parte a partir de uma linha de OCR, em três passadas conservadoras:
+ *  1. remove o rótulo do campo ("NOME", "RAZÃO SOCIAL");
+ *  2. corta nas fronteiras de coluna coladas pelo OCR (o campo NOME termina
+ *     antes do rótulo da coluna seguinte);
+ *  3. corta o ruído numérico posterior, aceitando o prefixo SÓ quando ele tem
+ *     evidência textual suficiente (duas palavras + sufixo corporativo) e
+ *     continua passando em todas as validações de `isNameCandidate`.
+ * Um corte que não produz um nome defensível devolve `undefined` — nunca um
+ * rótulo, bairro, número ou texto ilegível.
+ */
+function candidateNameFromLine(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let value = raw.trim().replace(/\s+/g, " ");
+  if (!value) return undefined;
+
+  // 1) Rótulo do campo nunca faz parte do valor.
+  value = value
+    .replace(/^(?:(?:NOME\s*(?:\/|E)\s*)?RAZ[ÃA]O\s+SOCIAL|NOME)\s*[:/]?[ ]*/i, "")
+    .trim();
+  if (!value) return undefined;
+
+  // 2) Colunas coladas: o valor do campo termina antes da coluna seguinte.
+  const withoutColumns = cutAtColumnBoundary(value);
+  if (withoutColumns !== value) {
+    return isNameCandidate(withoutColumns) ? withoutColumns : undefined;
+  }
+
+  // 3) Ruído numérico posterior: prefixo só com evidência suficiente.
+  const withoutNoise = cutAtNumericNoise(value);
+  if (withoutNoise !== value) {
+    if (withoutNoise.split(/\s+/).length < 2) return undefined;
+    if (!CORPORATE_HINT.test(withoutNoise)) return undefined;
+    return isNameCandidate(withoutNoise) ? withoutNoise : undefined;
+  }
+
+  return isNameCandidate(value) ? value : undefined;
+}
+
 function isNameCandidate(line: string | undefined): line is string {
   if (!line) return false;
   const value = line.trim();
@@ -1236,7 +1340,7 @@ function nameFromText(raw: string | undefined): string | undefined {
     .trim();
   if (DANFE_TITLE_LEAK.test(value)) return undefined;
   if (CAPTVART_NOISE.test(value)) return undefined;
-  return isNameCandidate(value) ? value : undefined;
+  return candidateNameFromLine(value);
 }
 
 /**
@@ -1887,8 +1991,8 @@ function findNameNearCnpj(
   // CNPJ (endereço/bairro/CEP/telefone no meio) e a proximidade estreita escolhia
   // o bairro "CENTRO" como emitente.
   for (let position = limit; position >= Math.max(0, limit - 12); position--) {
-    const candidate = lines[sectionIndexes[position]];
-    if (isNameCandidate(candidate)) above.push(candidate.trim());
+    const candidate = candidateNameFromLine(lines[sectionIndexes[position]]);
+    if (candidate) above.push(candidate);
   }
   if (above.length) {
     const corporate = above.find((candidate) => CORPORATE_HINT.test(candidate));
@@ -1896,9 +2000,9 @@ function findNameNearCnpj(
   }
 
   for (let position = limit + 1; position <= limit + 2 && position < sectionIndexes.length; position++) {
-    const candidate = lines[sectionIndexes[position]];
-    if (isNameCandidate(candidate) && CORPORATE_HINT.test(candidate.trim())) {
-      return candidate.trim();
+    const candidate = candidateNameFromLine(lines[sectionIndexes[position]]);
+    if (candidate && CORPORATE_HINT.test(candidate)) {
+      return candidate;
     }
   }
 
@@ -1941,8 +2045,13 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
           lines,
           Boolean(sections[label.key]?.cnpj),
         );
-        if (evaluation.approved) sections[section].name = trailing;
-        else sections[section]._pendingNameReason = evaluation.reason;
+        if (evaluation.approved) {
+          sections[section].name = trailing;
+          // Nome aprovado limpa a pendência anterior (o rótulo foi avaliado
+          // antes de o CNPJ da seção ser lido — a aprovação posterior é que
+          // vale, e um resíduo de pendência faria o campo contar como inválido).
+          sections[section]._pendingNameReason = undefined;
+        } else sections[section]._pendingNameReason = evaluation.reason;
       }
     }
 
@@ -1958,8 +2067,10 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
         const inline = nameFromText(line.replace(candidates[0].raw, " "));
         if (inline && !data.name) {
           const evaluation = evaluatePartyName(inline, section, index, lines, Boolean(data.cnpj));
-          if (evaluation.approved) data.name = inline;
-          else data._pendingNameReason = evaluation.reason;
+        if (evaluation.approved) {
+          data.name = inline;
+          data._pendingNameReason = undefined;
+        } else data._pendingNameReason = evaluation.reason;
         }
       }
     }
@@ -1973,8 +2084,10 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
         lines,
         Boolean(data.cnpj),
       );
-      if (evaluation.approved) data.name = explicitName;
-      else data._pendingNameReason = evaluation.reason;
+      if (evaluation.approved) {
+        data.name = explicitName;
+        data._pendingNameReason = undefined;
+      } else data._pendingNameReason = evaluation.reason;
     }
 
     const block = parseCityUfCep(line);
@@ -2013,8 +2126,10 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
         lines,
         Boolean(data.cnpj),
       );
-      if (evaluation.approved) data.name = nearCnpj;
-      else data._pendingNameReason = evaluation.reason;
+      if (evaluation.approved) {
+        data.name = nearCnpj;
+        data._pendingNameReason = undefined;
+      } else data._pendingNameReason = evaluation.reason;
     }
   }
 
@@ -2066,17 +2181,9 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
         const neighborhood = [lines[index - 1], lines[index - 2], lines[index]].filter(
           (line): line is string => Boolean(line),
         );
-        const candidate =
-          neighborhood.find(
-            (line) =>
-              isNameCandidate(line) &&
-              !CAPTVART_NOISE.test(line) &&
-              !DANFE_TITLE_LEAK.test(line),
-          ) ??
-          neighborhood.find(
-            (line) =>
-              isNameCandidate(line) && CORPORATE_HINT.test(line),
-          );
+        const candidate = neighborhood
+          .map((line) => candidateNameFromLine(line))
+          .find((name): name is string => Boolean(name));
         if (candidate) {
           nameCandidate = candidate;
           nameEvaluation = evaluatePartyName(
@@ -2092,6 +2199,7 @@ export function parseDanfeText(text: string | null | undefined): DanfeParseResul
 
       if (nameCandidate && nameEvaluation?.approved) {
         sections.destinatario.name = nameCandidate.trim();
+        sections.destinatario._pendingNameReason = undefined;
         notes.receiverName =
           "Razão social vizinha ao CNPJ do destinatário (sem rótulo de seção) — confirme visualmente.";
         confidence.receiverName = 60;
