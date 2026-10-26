@@ -136,6 +136,40 @@ function extractOperatorsFromContent(content: string): string[] {
   return lines;
 }
 
+/** Limite de bytes inflados por fluxo (proteção contra payloads absurdos). */
+const MAX_FLATE_PAYLOAD = 2_000_000;
+
+/** Comprimento do terminador `endstream`. */
+const ENDSTREAM_LENGTH = "endstream".length;
+
+/**
+ * Cabeçalho zlib válido — é o que o `FlateDecode` do PDF empacota (RFC 1950):
+ * CM = 8 (deflate) no primeiro byte e `(CMF<<8|FLG) % 31 === 0` no FCHECK.
+ * Aceita qualquer CINFO (janela 256B…32K), não só o 0x78 mais comum.
+ */
+function hasZlibHeader(bytes: Uint8Array, offset: number): boolean {
+  if (offset + 1 >= bytes.length) return false;
+  const cmf = bytes[offset];
+  const flg = bytes[offset + 1];
+  return (cmf & 0x0f) === 8 && ((cmf << 8) | flg) % 31 === 0;
+}
+
+function isStreamBoundaryByte(byte: number): boolean {
+  return byte === 0x09 || byte === 0x0a || byte === 0x0d || byte === 0x20;
+}
+
+/**
+ * Posição do cabeçalho zlib dentro do fluxo. O EOL/ESPAÇO inicial é do
+ * delimitador `stream\n` (geradores escrevem linha em branco antes dos bytes)
+ * e nenhum byte inicial desse tipo pode abrir um stream zlib legítimo — CM
+ * com baixo nibble 8 nunca é 0x09/0x0A/0x0D/0x20.
+ */
+function zlibHeaderOffset(bytes: Uint8Array): number {
+  let i = 0;
+  while (i < bytes.length && isStreamBoundaryByte(bytes[i])) i += 1;
+  return hasZlibHeader(bytes, i) ? i : -1;
+}
+
 /** Infla um fluxo zlib (FlateDecode) para texto Latin-1; sem suporte nativo, devolve null. */
 async function inflateToLatin1(bytes: Uint8Array): Promise<string | null> {
   if (typeof DecompressionStream === "undefined") return null;
@@ -152,29 +186,56 @@ async function inflateToLatin1(bytes: Uint8Array): Promise<string | null> {
  * Fallback de leitura: recupera os operadores de texto dos fluxos de conteúdo
  * do PDF (com inflação FlateDecode quando aplicável). Usada SOMENTE quando o
  * pdfjs não devolve texto utilizável — nunca substitui a leitura normal.
+ *
+ * Cuidados de delimitação (defeito real da DANFE Incotech):
+ *  - `end` é o início do terminador `endstream`, e o terminador CONTÉM a
+ *    palavra `stream`. Repositionar o cursor em `end` faz a próxima varredura
+ *    casar o `stream` de dentro do próprio terminador: o `start` seguinte nasce
+ *    no dicionário do próximo objeto, o conteúdo fica com `<< /Length … >>`
+ *    na frente, o teste de cabeçalho zlib falha e o fluxo comprimido seguinte
+ *    é engolido (0 caracteres). O cursor avança `end + "endstream".length`.
+ *  - O keyword `stream` só é aceito precedido de espaço/quebra de linha ou de
+ *    `>>` (fim do dicionário) — em `endstream` o caractere anterior é `d`,
+ *    então o terminador nunca vira início de fluxo.
+ *  - Um fluxo truncado (`endstream` ausente) interrompe a varredura sem
+ *    lançar: o que já foi lido é preservado e o chamador segue para o OCR.
  */
 export async function extractTextFromPdfStreams(bytes: Uint8Array): Promise<string> {
   const latin = bytesToLatin1(bytes);
-  const streamRe = /stream[ \t]*\r?\n?/g;
+  const streamRe = /(?:^|[\s>])stream[ \t]*\r?\n?/g;
   const lines: string[] = [];
   let match: RegExpExecArray | null;
 
   while ((match = streamRe.exec(latin)) !== null) {
+    // `stream` de `endstream` não é início de fluxo (defesa extra ao cursor).
+    if (match.index >= 3 && latin.slice(match.index - 3, match.index) === "end") continue;
+
     const start = match.index + match[0].length;
     const end = latin.indexOf("endstream", start);
     if (end < 0) break;
 
     let content = latin.slice(start, end);
-    // Cabeçalho zlib (0x78) ⇒ fluxo comprimido — infla antes de varrer.
-    if (content.length > 2 && content.charCodeAt(0) === 0x78) {
-      const inflated = await inflateToLatin1(
-        bytes.subarray(start, Math.min(end, start + 2_000_000)),
-      );
+    // Cabeçalho zlib (FlateDecode) ⇒ infla antes de varrer; sem suporte nativo
+    // ou inflação inválida, mantém os bytes crus (fluxo sem compressão).
+    const payload = bytes.subarray(start, Math.min(end, start + MAX_FLATE_PAYLOAD));
+    const headerAt = zlibHeaderOffset(payload);
+    if (headerAt >= 0) {
+      const zstream = headerAt > 0 ? payload.subarray(headerAt) : payload;
+      let inflated = await inflateToLatin1(zstream);
+      if (inflated === null) {
+        // O EOL que separa os bytes do `endstream` não pertence ao stream zlib:
+        // os infladores rejeitam "trailing junk". Só então tenta sem o EOL final.
+        let tail = zstream.length;
+        while (tail > 0 && isStreamBoundaryByte(zstream[tail - 1])) tail -= 1;
+        if (tail < zstream.length) inflated = await inflateToLatin1(zstream.subarray(0, tail));
+      }
       if (inflated !== null) content = inflated;
     }
 
     lines.push(...extractOperatorsFromContent(content));
-    streamRe.lastIndex = end;
+    // `end` marca o INÍCIO do terminador: parar em `end` reencontraria o
+    // `stream` interno e faria a próxima fatia engolir o fluxo seguinte.
+    streamRe.lastIndex = end + ENDSTREAM_LENGTH;
   }
 
   return lines.join("\n");

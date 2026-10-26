@@ -12,8 +12,13 @@ build/
 .env.test.local
 .env.production.local
 
-# Convex generated files
-src/convex/_generated/
+# Convex generated files are versioned on purpose: a clean clone must be able
+# to typecheck and build without running `convex codegen`.
+# Only api.ts / dataModel.ts / server.ts live here (type + proxy stubs, no secrets).
+# Never ignore them.
+
+# Local recovery backups (never committed)
+.recovery-backup/
 
 # IDE / Editor
 .vscode/
