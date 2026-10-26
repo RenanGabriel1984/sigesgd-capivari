@@ -452,7 +452,6 @@ export async function readDanfeFile(
   let final: DanfeParseResult | undefined;
   let escolhido: "camada" | "ocr" | null = null;
   let mergedOcr = "";
-  let hasLayer = false;
   let layerMissingCore = false;
   let needsOcr = false;
   let comparisonBetter = false;
@@ -561,7 +560,7 @@ export async function readDanfeFile(
     // um parse pobre da camada nunca descarta dados válidos que o OCR conseguiu
     // ler, e a camada permanece disponível como alternativa.
     layerMissingCore =
-      hasLayer && parsedLayer.items.length === 0 && !parsedLayer.emitterName && !parsedLayer.receiverName;
+      !hasLayer || (parsedLayer.items.length === 0 && !parsedLayer.emitterName && !parsedLayer.receiverName);
     needsOcr = !hasLayer || layerMissingCore;
     motivoDecisaoOcr = !hasLayer
       ? isPdf

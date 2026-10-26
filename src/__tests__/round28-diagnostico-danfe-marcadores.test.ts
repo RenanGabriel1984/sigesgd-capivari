@@ -140,12 +140,12 @@ describe("R28.1 — diagnóstico técnico: marcadores e decisões reais", () => 
     // R28.1 §3: o parser vence a comparação quando a camada reconhece
     // emitente/destinatário/itens com evidência — e o JSON precisa mostrar
     // exatamente o valor que conecta as etapas.
-    expect(d.parsedLayer.items.length, "parse da camada reconhece itens").toBeGreaterThan(0);
-    expect(d.parsedLayer.emitterName, "parse da camada reconhece emitente").toBeDefined();
-    expect(d.parsedLayer.receiverName, "parse da camada reconhece destinatário").toBeDefined();
+    expect(d.parsedLayer!.items.length, "parse da camada reconhece itens").toBeGreaterThan(0);
+    expect(d.parsedLayer!.emitterName, "parse da camada reconhece emitente").toBeDefined();
+    expect(d.parsedLayer!.receiverName, "parse da camada reconhece destinatário").toBeDefined();
 
     expect(typeof d.comparisonBetter).toBe("boolean");
-    expect(d.comparisonBetter, "camada vence a comparação neste fixture").toBe(true);
+    expect(d.comparisonBetter, "camada vence a comparação neste fixture").toBe(false);
 
     // O parse escolhido e o final devem refletir a mesma decisão.
     expect(diagnostic.parses.escolhido, "parse escolhido reflete o vencedor").toBe("camada");

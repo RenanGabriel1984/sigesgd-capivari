@@ -59,7 +59,7 @@ export interface DanfeTextSourceStat {
   linhas: number;
   trecho: string;
   trechoTruncado: boolean;
-  marcadores: Array<{ marcador: string; linhas: string[] }>;
+  marcadores?: Array<{ marcador: string; linhas: string[] }>;
 }
 
 export interface DanfeItemDiagnostic {
@@ -155,6 +155,31 @@ export interface DanfeDiagnostic {
     decisaoOcr: DanfeDiagnosticInput["decisaoOcr"];
     textoUtilizadoPor: DanfeDiagnosticInput["textoUtilizadoPor"];
     fontesTexto: DanfeTextSourceStat[];
+    fontesDetalhadas: {
+      camadaCaracteres: number | null;
+      camadaMarcadores: Array<{ marcador: string; linhas: string[] }>;
+      pageOcrCaracteres: number | null;
+      pageOcrMarcadores: Array<{ marcador: string; linhas: string[] }>;
+      regionOcr: Array<{
+        indiceRegiao: number;
+        caracteres: number;
+        marcadores: Array<{ marcador: string; linhas: string[] }>;
+      }>;
+      mergedOcrCaracteres: number | null;
+      mergedOcrMarcadores: Array<{ marcador: string; linhas: string[] }>;
+      linhasPorFonte: Array<{
+        nome: string;
+        linhas: Array<{ marcador: string; linhas: string[] }>;
+      }>;
+    };
+    decisoesConectoras: {
+      hasLayer: boolean | null;
+      layerMissingCore: boolean | null;
+      needsOcr: boolean | null;
+      parsedLayer: DanfeParseResult | undefined;
+      parsedOcr: DanfeParseResult | undefined;
+      comparisonBetter: boolean | null;
+    };
   };
   parses: {
     camada: DanfeParseSummary;
@@ -199,6 +224,8 @@ export function trechoDe(
   if (texto.length <= limite) return { trecho: texto, trechoTruncado: false };
   return { trecho: texto.slice(0, limite), trechoTruncado: true };
 }
+
+const marcadoresDaFonte = linhasRelevantesDe;
 
 const MARCADORES_DANFE = [
   "INCOTECH",
@@ -382,24 +409,32 @@ export function buildDanfeDiagnostic(input: DanfeDiagnosticInput): DanfeDiagnost
         const pageOcr = input.fontesTextoCompletas?.pageOcr ?? null;
         const regionOcr = input.fontesTextoCompletas?.regionOcr ?? [];
         const mergedOcr = input.fontesTextoCompletas?.mergedOcr ?? null;
+
+        const camadaMarcadores = marcadoresDaFonte(camada);
+        const pageOcrMarcadores = marcadoresDaFonte(pageOcr);
+        const mergedOcrMarcadores = marcadoresDaFonte(mergedOcr);
+
         return {
-          camada,
-          pageOcr,
-          regionOcr,
-          mergedOcr,
-          linhasPorFonte: {
-            /** Camada textual do PDF. */
-            camada: marcadoresDaFonte(camada),
-            /** OCR da página inteira. */
-            pageOcr: marcadoresDaFonte(pageOcr),
-            /** Cada região OCR identificada pelo seu índice na página. */
-            regionOcr: regionOcr.map((texto, index) => ({
-              indiceRegiao: index,
+          camadaCaracteres: camada?.length ?? null,
+          camadaMarcadores,
+          pageOcrCaracteres: pageOcr?.length ?? null,
+          pageOcrMarcadores,
+          regionOcr: regionOcr.map((texto, index) => ({
+            indiceRegiao: index,
+            caracteres: texto?.length ?? 0,
+            marcadores: linhasRelevantesDe(texto),
+          })),
+          mergedOcrCaracteres: mergedOcr?.length ?? null,
+          mergedOcrMarcadores,
+          linhasPorFonte: [
+            { nome: "camada", linhas: camadaMarcadores },
+            { nome: "pageOcr", linhas: pageOcrMarcadores },
+            ...regionOcr.map((texto, index) => ({
+              nome: `regionOcr[${index}]`,
               linhas: linhasRelevantesDe(texto),
             })),
-            /** Texto efetivamente passado a parseDanfeText (mergedOcr). */
-            mergedOcr: marcadoresDaFonte(mergedOcr),
-          },
+            { nome: "mergedOcr", linhas: mergedOcrMarcadores },
+          ],
         };
       })(),
       /** Decisões que conectam as etapas (R28.1 §3) — registradas com os
