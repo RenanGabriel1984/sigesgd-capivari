@@ -39,12 +39,14 @@ import {
   type PdfLayerStage,
 } from "@/lib/danfe-diagnostics";
 import {
+  isDanfeParseBetter,
+} from "@/lib/danfe-ocr";
+import {
   DANFE_REGIONS,
   danfeFieldNotes,
   danfeFieldSummary,
   danfeFieldWarnings,
   hasUsableTextLayer,
-  isDanfeParseBetter,
   mergeDanfeTexts,
   parseDanfeText,
   validateAccessKey44,
@@ -450,7 +452,10 @@ export async function readDanfeFile(
   let final: DanfeParseResult | undefined;
   let escolhido: "camada" | "ocr" | null = null;
   let mergedOcr = "";
+  let hasLayer = false;
+  let layerMissingCore = false;
   let needsOcr = false;
+  let comparisonBetter = false;
   let motivoDecisaoOcr = "Decisão de OCR ainda não registrada.";
 
   const somaDosTextos = (parts: readonly string[]) => ({
@@ -509,8 +514,22 @@ export async function readDanfeFile(
           ...trechoDe(mergedOcr),
         },
       ],
+      fontesTextoCompletas: {
+        camada: rawText || null,
+        pageOcr: pageOcrText || null,
+        regionOcr: regionTexts.length ? regionTexts.map((t) => t ?? null) : [],
+        mergedOcr: mergedOcr || null,
+      },
       textoUtilizadoPor: hasLayer && !needsOcr ? "camada" : mergedOcr ? "ocr" : "nenhuma",
       parses: { camada: parsedLayer, ocr: parsedOcr, escolhido },
+      decisoesConectoras: {
+        hasLayer,
+        layerMissingCore,
+        needsOcr,
+        parsedLayer,
+        parsedOcr,
+        comparisonBetter,
+      },
       final,
       estadoInterface: {
         transformacoes: [
@@ -541,7 +560,7 @@ export async function readDanfeFile(
     // complementar é executado TAMBÉM e os dois parses entram na comparação —
     // um parse pobre da camada nunca descarta dados válidos que o OCR conseguiu
     // ler, e a camada permanece disponível como alternativa.
-    const layerMissingCore =
+    layerMissingCore =
       hasLayer && parsedLayer.items.length === 0 && !parsedLayer.emitterName && !parsedLayer.receiverName;
     needsOcr = !hasLayer || layerMissingCore;
     motivoDecisaoOcr = !hasLayer
@@ -570,7 +589,8 @@ export async function readDanfeFile(
 
     mergedOcr = mergeDanfeTexts(hasLayer && !layerMissingCore ? rawText : pageOcrText, regionTexts);
     parsedOcr = parseDanfeText(mergedOcr);
-    final = isDanfeParseBetter(parsedOcr, parsedLayer) ? parsedOcr : parsedLayer;
+    comparisonBetter = isDanfeParseBetter(parsedOcr, parsedLayer);
+    final = comparisonBetter ? parsedOcr : parsedLayer;
     escolhido = final === parsedOcr ? "ocr" : "camada";
 
     return { parsed: final, diagnostic: montarDiagnostico() };
@@ -635,6 +655,29 @@ function DiagnosticoTecnicoSecao({
             . Diagnóstico local e temporário: nada é gravado no banco nem enviado; o conteúdo
             binário do arquivo e o texto integral do documento ficam de fora.
           </p>
+
+          {diagnostic.etapas.decisoesConectoras && (
+            <div className="rounded-md border bg-muted/40 p-2 text-xs">
+              <p className="font-semibold uppercase">Decisões que conectam as etapas</p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                <li>
+                  camada legível: {diagnostic.etapas.decisoesConectoras.hasLayer !== null
+                    ? String(diagnostic.etapas.decisoesConectoras.hasLayer)
+                    : "não registrado"}
+                </li>
+                <li>
+                  camada sem núcleo (itens/razões sociais): {diagnostic.etapas.decisoesConectoras.layerMissingCore !== null
+                    ? String(diagnostic.etapas.decisoesConectoras.layerMissingCore)
+                    : "não registrado"}
+                </li>
+                <li>
+                  OCR necessário: {diagnostic.etapas.decisoesConectoras.needsOcr !== null
+                    ? String(diagnostic.etapas.decisoesConectoras.needsOcr)
+                    : "não registrado"}
+                </li>
+              </ul>
+            </div>
+          )}
 
           {diagnostic.erros.length > 0 && (
             <ul className="space-y-0.5 text-xs text-red-800">

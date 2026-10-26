@@ -59,6 +59,7 @@ export interface DanfeTextSourceStat {
   linhas: number;
   trecho: string;
   trechoTruncado: boolean;
+  marcadores: Array<{ marcador: string; linhas: string[] }>;
 }
 
 export interface DanfeItemDiagnostic {
@@ -104,7 +105,27 @@ export interface DanfeDiagnosticInput {
     regioesLinhas: number;
   };
   decisaoOcr: { executado: boolean; motivo: string };
+  /**
+   * Estatísticas das fontes de texto REAIS (trecho limitado + contagens).
+   * O diagnóstico converte as fontes completas (rawText, pageOcrText,
+   * regionTexts, mergedOcr) em estatísticas antes de montar a saída, e as
+   * fontes completas nunca deixam a memória do diálogo.
+   */
   fontesTexto: DanfeTextSourceStat[];
+  /** Versão resumida das fontes completas — usada apenas para expandir o
+   * diagnóstico com linhas relevantes de cada estágio. Não embute o texto
+   * integral do documento; somente o necessário para localizar marcadores.
+   */
+  fontesTextoCompletas?: {
+    /** Camada textual do PDF (pdf.js ou fallback dos fluxos de conteúdo). */
+    camada?: string | null;
+    /** OCR da página inteira (tesseract.js). */
+    pageOcr?: string | null;
+    /** Cada região OCR, identificada pelo seu índice na página. */
+    regionOcr?: (string | null)[];
+    /** Texto efetivamente passado a parseDanfeText (mergedOcr). */
+    mergedOcr?: string | null;
+  };
   textoUtilizadoPor: "camada" | "ocr" | "nenhuma";
   parses?: {
     camada?: DanfeParseResult;
@@ -112,6 +133,15 @@ export interface DanfeDiagnosticInput {
     escolhido?: "camada" | "ocr" | null;
   };
   final?: DanfeParseResult;
+  /** Decisões que conectam as etapas (R28.1 §3). */
+  decisoesConectoras?: {
+    hasLayer?: boolean;
+    layerMissingCore?: boolean;
+    needsOcr?: boolean;
+    parsedLayer?: DanfeParseResult | undefined;
+    parsedOcr?: DanfeParseResult | undefined;
+    comparisonBetter?: boolean | null;
+  };
   estadoInterface: { transformacoes: string[] };
   erros: string[];
 }
@@ -168,6 +198,58 @@ export function trechoDe(
   if (!texto) return { trecho: "", trechoTruncado: false };
   if (texto.length <= limite) return { trecho: texto, trechoTruncado: false };
   return { trecho: texto.slice(0, limite), trechoTruncado: true };
+}
+
+const MARCADORES_DANFE = [
+  "INCOTECH",
+  "22.816.315",
+  "NOME",
+  "RAZAO SOCIAL",
+  "CAPIVARI",
+  "44.723.674",
+  "DESTINATARIO",
+  "231071",
+  "84716053",
+  "25.0000",
+  "52.94",
+  "1323.50",
+  "1.323,50",
+] as const;
+
+/**
+ * Linhas relevantes de um texto para os marcadores da DANFE — sem armazenar
+ * o texto integral do documento. Só as linhas que contêm um marcador (e no
+ * máximo uma linha vizinha de contexto) são mantidas na saída.
+ */
+export function linhasRelevantesDe(
+  texto: string | null | undefined,
+  contextoVizinha: number = 1,
+): Array<{ marcador: string; linhas: string[] }> {
+  if (!texto) return [];
+  const lines = texto.split(/\r?\n/);
+  const resultado: Array<{ marcador: string; linhas: string[] }> = [];
+
+  for (const marcador of MARCADORES_DANFE) {
+    const indices: number[] = [];
+    const alvo = marcador.toLowerCase();
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].toLowerCase().includes(alvo)) indices.push(i);
+    }
+    if (!indices.length) continue;
+
+    const conjunto = new Set<number>();
+    for (const i of indices) {
+      conjunto.add(i);
+      const inicio = Math.max(0, i - contextoVizinha);
+      const fim = Math.min(lines.length - 1, i + contextoVizinha);
+      for (let j = inicio; j <= fim; j++) conjunto.add(j);
+    }
+    const linhas = Array.from(conjunto)
+      .sort((a, b) => a - b)
+      .map((i) => lines[i]);
+    resultado.push({ marcador, linhas });
+  }
+  return resultado;
 }
 
 function redonda(value: number): number {
@@ -288,7 +370,48 @@ export function buildDanfeDiagnostic(input: DanfeDiagnosticInput): DanfeDiagnost
       imagem: input.imagem ?? null,
       decisaoOcr: input.decisaoOcr,
       textoUtilizadoPor: input.textoUtilizadoPor,
-      fontesTexto: input.fontesTexto,
+      fontesTexto: input.fontesTexto.map((fonte) => ({
+        ...fonte,
+        marcadores: marcadoresDaFonte(fonte.trecho),
+      })),
+      /** Textos completos das etapas REAIS — usados SOMENTE para localizar
+       * marcadores, nunca para embular o documento. Cada fonte registra
+       * apenas as linhas relevantes nos marcadores da DANFE. */
+      fontesDetalhadas: (() => {
+        const camada = input.fontesTextoCompletas?.camada ?? null;
+        const pageOcr = input.fontesTextoCompletas?.pageOcr ?? null;
+        const regionOcr = input.fontesTextoCompletas?.regionOcr ?? [];
+        const mergedOcr = input.fontesTextoCompletas?.mergedOcr ?? null;
+        return {
+          camada,
+          pageOcr,
+          regionOcr,
+          mergedOcr,
+          linhasPorFonte: {
+            /** Camada textual do PDF. */
+            camada: marcadoresDaFonte(camada),
+            /** OCR da página inteira. */
+            pageOcr: marcadoresDaFonte(pageOcr),
+            /** Cada região OCR identificada pelo seu índice na página. */
+            regionOcr: regionOcr.map((texto, index) => ({
+              indiceRegiao: index,
+              linhas: linhasRelevantesDe(texto),
+            })),
+            /** Texto efetivamente passado a parseDanfeText (mergedOcr). */
+            mergedOcr: marcadoresDaFonte(mergedOcr),
+          },
+        };
+      })(),
+      /** Decisões que conectam as etapas (R28.1 §3) — registradas com os
+       * valores REAIS dessa execução, sem inferência. */
+      decisoesConectoras: {
+        hasLayer: input.decisoesConectoras?.hasLayer ?? null,
+        layerMissingCore: input.decisoesConectoras?.layerMissingCore ?? null,
+        needsOcr: input.decisoesConectoras?.needsOcr ?? null,
+        parsedLayer: input.decisoesConectoras?.parsedLayer ?? undefined,
+        parsedOcr: input.decisoesConectoras?.parsedOcr ?? undefined,
+        comparisonBetter: input.decisoesConectoras?.comparisonBetter ?? null,
+      },
     },
     parses: {
       camada: describeDanfeParse("parse da camada de texto", input.parses?.camada),
