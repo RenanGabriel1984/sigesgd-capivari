@@ -22,7 +22,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { extractPdfTextLayer } from "@/components/DanfeImportDialog";
-import { parseDanfeText, danfeFieldSummary } from "@/lib/danfe-ocr";
+import { parseDanfeText, danfeFieldSummary, validateDanfeFields } from "@/lib/danfe-ocr";
 
 const PDF_FIXTURE = resolve(__dirname, "fixtures", "danfe-incotech-2967-original.pdf");
 
@@ -70,6 +70,17 @@ describe("R24 — extração real do diálogo sobre o PDF da DANFE Incotech", ()
     expect(parsed.items, "um item identificado").toHaveLength(1);
     expect(parsed.items[0].code).toContain("231071");
     expect(parsed.items[0].description).toContain("KIT TECLADO E MOUSE USB SLIM CHOCO");
+    expect(parsed.items[0].quantity, "quantidade").toBe(25);
+    expect(parsed.items[0].unitValue, "valor unitário").toBeCloseTo(52.94, 2);
+    expect(parsed.items[0].totalValue, "valor total do item").toBeCloseTo(1323.5, 2);
+    expect(parsed.totalValue, "valor total da NF").toBeCloseTo(1323.5, 2);
+
+    // A chave confirma APENAS ano/mês (AAMM 2609): o dia 28 vem do documento
+    // e a validação deixa explícito que a chave não valida o dia.
+    expect(
+      validateDanfeFields(parsed).find((v) => v.campo === "emissionDate")?.note ?? "",
+      "nota da data de emissão",
+    ).toMatch(/o dia não é codificado pela chave/i);
 
     // CNPJ do expedidor não consta do documento: continua pendente (não inventado).
     expect(summary.found).toBeGreaterThanOrEqual(9);
