@@ -73,6 +73,7 @@ import {
   canContinueNfeReview,
   findDuplicateEntry,
   findSupplierMatch,
+  mapNfeUnit,
   parseNfeXml,
   reconcileNfeReviewMatches,
   extractNfeProductHints,
@@ -251,7 +252,6 @@ const OCR_ORIGIN_NOTE = "Dados extraídos por OCR de DANFE/PDF/imagem — confer
 export function EntriesPage({ className }: { className?: string }) {
   const entries = useQuery(api.entries.list);
   const suppliers = useQuery(api.suppliers.list);
-  const products = useQuery(api.products.listActive);
   const locations = useQuery(api.storageLocations.listActive);
   const areas = useQuery(api.stockAreas.listActive);
   const nfeAliases = useQuery(api.nfeProductAliases.list);
@@ -275,12 +275,11 @@ export function EntriesPage({ className }: { className?: string }) {
   const createProduct = useMutation(api.products.create);
   const createCategory = useMutation(api.categories.create);
   const categories = useQuery(api.categories.listActive);
-  const products = useQuery(api.products.listActive);
   const upsertNfeProductAlias = useMutation(api.nfeProductAliases.upsert);
-
-  const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
-  const createEntry = useMutation(api.entries.create);
-  const confirmEntry = useMutation(api.entries.confirm);
+  const products = useQuery(api.products.listActive);
+  const productOptions = (products ?? []) as NfeReviewProduct[];
+  const products = useQuery(api.products.listActive);
+  const productOptions = (products ?? []) as NfeReviewProduct[];
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -1158,7 +1157,6 @@ export function EntriesPage({ className }: { className?: string }) {
                 sourceLabel={nfeSourceLabel}
               />
 
-              {/* Abre o modal de cadastro rápido sem fechar a conferência da NF-e. */}
               {/* Botão de cadastro rápido de produto: abre o modal sem fechar a
                   conferência da NF-e e pré-preenche a partir do primeiro item
                   pendente da nota (R31 §1). */}
@@ -1170,14 +1168,13 @@ export function EntriesPage({ className }: { className?: string }) {
                 onClick={() => {
                   if (nfeItems.length === 0) return;
                   const item = nfeItems[0].item;
-                  const hints = extractNfeProductHints(item);
                   setQuickProductForm({
                     name: item.description || "",
                     description: item.description || "",
                     categoryId: "",
-                    unitOfMeasure: hints.unitOfMeasure ?? "un",
-                    brand: hints.brand ?? "",
-                    model: hints.model ?? "",
+                    unitOfMeasure: mapNfeUnit(item.unit),
+                    brand: "",
+                    model: "",
                     specification: "",
                   });
                   setQuickProductItemIndex(0);
@@ -1215,7 +1212,9 @@ export function EntriesPage({ className }: { className?: string }) {
                   setQuickProductItemIndex(null);
                   resetQuickProductForm();
                 }}
-              />              {/* ── Criação rápida de categoria sem perder o contexto da conferência (R31 §1) ─ */}
+              />
+
+              {/* ── Criação rápida de categoria sem perder o contexto da conferência (R31 §1) ─ */}
               <QuickCategoryForm
                 open={quickProductCategoryOpen}
                 onOpenChange={setQuickProductCategoryOpen}
@@ -1235,10 +1234,10 @@ export function EntriesPage({ className }: { className?: string }) {
                   setQuickProductNewCategoryName("");
                 }}
               />
-           </div>
-         </div>
+            </div>
+          </div>
 
-       <DialogFooter>
+          <DialogFooter>
          <Button variant="outline" onClick={() => setNfeOpen(false)}>
            Cancelar
          </Button>
@@ -1271,7 +1270,7 @@ export function EntriesPage({ className }: { className?: string }) {
   );
 }
 
-// ── Handlers do cadastro rápido de produto (R31 §1) ──────────────────────────────
+// ── Cadastro rápido de produto a partir da conferência da NF-e (R31 §1) ────────────
 
 type QuickProductFormState = {
   name: string;
@@ -1296,6 +1295,219 @@ const emptyQuickProductForm = (): QuickProductFormState => ({
 function resetQuickProductForm() {
   // Estado encapsulado na página; a ação de cancelamento delega o reset
   // através dos setters já disponíveis na página.
+}
+
+function QuickProductForm({
+  open,
+  onOpenChange,
+  categories,
+  form,
+  loading,
+  onFormChange,
+  onCategoryCreateRequest,
+  onCancel,
+  onSave,
+}: {
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
+  categories: Array<{ _id: string; name: string; category?: { name: string } | null }>;
+  form: QuickProductFormState;
+  loading: boolean;
+  onFormChange: (patch: Partial<QuickProductFormState>) => void;
+  onCategoryCreateRequest: () => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Cadastrar novo produto</DialogTitle>
+          <DialogDescription>
+            Crie o produto diretamente aqui — a conferência da NF-e permanece aberta.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="min-w-0 max-w-full overflow-hidden">
+              <Label className="text-muted-foreground">Nome</Label>
+              <Input
+                className="mt-1 h-10 w-full min-w-0"
+                value={form.name}
+                onChange={(event) => onFormChange({ name: event.target.value })}
+                placeholder="Nome do produto"
+              />
+            </div>
+            <div className="min-w-0 max-w-full overflow-hidden">
+              <Label className="text-muted-foreground">Descrição fiscal</Label>
+              <Input
+                className="mt-1 h-10 w-full min-w-0"
+                value={form.description}
+                onChange={(event) => onFormChange({ description: event.target.value })}
+                placeholder="Descrição fiscal (sem NCM/CST concatenados)"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="min-w-0 max-w-full overflow-hidden">
+              <Label className="text-muted-foreground">Categoria</Label>
+              <Select
+                value={form.categoryId || "none"}
+                onValueChange={(value) => onFormChange({ categoryId: value === "none" ? "" : value })}
+              >
+                <SelectTrigger className="mt-1 h-10 w-full min-w-0">
+                  <SelectValue placeholder="Selecione a categoria" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Selecione a categoria</SelectItem>
+                  {categories.map((category) => (
+                    <SelectItem
+                      key={category._id}
+                      value={category._id}
+                      textValue={category.name ?? ""}
+                    >
+                      {category.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {categories.length === 0 && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Nenhuma categoria cadastrada. Crie uma categoria abaixo para continuar.
+                </p>
+              )}
+            </div>
+            <div className="min-w-0 max-w-full overflow-hidden">
+              <Label className="text-muted-foreground">Unidade de medida</Label>
+              <Select
+                value={form.unitOfMeasure || "none"}
+                onValueChange={(value) => onFormChange({ unitOfMeasure: value === "none" ? "un" : value })}
+              >
+                <SelectTrigger className="mt-1 h-10 w-full min-w-0">
+                  <SelectValue placeholder="Unidade de medida" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Selecione a unidade</SelectItem>
+                  <SelectItem value="un" textValue="Unidade (un)">
+                    Unidade (un)
+                  </SelectItem>
+                  <SelectItem value="pc" textValue="Peça (pc)">
+                    Peça (pc)
+                  </SelectItem>
+                  <SelectItem value="cx" textValue="Caixa (cx)">
+                    Caixa (cx)
+                  </SelectItem>
+                  <SelectItem value="kg" textValue="Quilograma (kg)">
+                    Quilograma (kg)
+                  </SelectItem>
+                  <SelectItem value="l" textValue="Litro (l)">
+                    Litro (l)
+                  </SelectItem>
+                  <SelectItem value="m" textValue="Metro (m)">
+                    Metro (m)
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="min-w-0 max-w-full overflow-hidden">
+              <Label className="text-muted-foreground">Marca</Label>
+              <Input
+                className="mt-1 h-10 w-full min-w-0"
+                value={form.brand}
+                onChange={(event) => onFormChange({ brand: event.target.value })}
+                placeholder="Marca (opcional)"
+              />
+            </div>
+            <div className="min-w-0 max-w-full overflow-hidden">
+              <Label className="text-muted-foreground">Modelo</Label>
+              <Input
+                className="mt-1 h-10 w-full min-w-0"
+                value={form.model}
+                onChange={(event) => onFormChange({ model: event.target.value })}
+                placeholder="Modelo (opcional)"
+              />
+            </div>
+          </div>
+
+          <div className="min-w-0 max-w-full overflow-hidden">
+            <Label className="text-muted-foreground">Especificação</Label>
+            <Input
+              className="mt-1 h-10 w-full min-w-0"
+              value={form.specification}
+              onChange={(event) => onFormChange({ specification: event.target.value })}
+              placeholder="Especificação (opcional)"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
+            Cancelar
+          </Button>
+          <Button onClick={onSave} disabled={loading}>
+            {loading ? "Salvando…" : "Salvar produto"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function QuickCategoryForm({
+  open,
+  onOpenChange,
+  name,
+  onNameChange,
+  loading,
+  onSave,
+  onCancel,
+}: {
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
+  name: string;
+  onNameChange: (value: string) => void;
+  loading: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-xs">
+        <DialogHeader>
+          <DialogTitle>Criar categoria</DialogTitle>
+          <DialogDescription>
+            Crie uma categoria para o produto sem fechar a conferência.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="min-w-0 max-w-full overflow-hidden">
+            <Label className="text-muted-foreground">Nome da categoria</Label>
+            <Input
+              className="mt-1 h-10 w-full min-w-0"
+              value={name}
+              onChange={(event) => onNameChange(event.target.value)}
+              placeholder="Nome da categoria"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
+            Cancelar
+          </Button>
+          <Button onClick={onSave} disabled={loading}>
+            {loading ? "Criando…" : "Criar categoria"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 async function handleQuickProductSave(
@@ -1387,21 +1599,33 @@ async function handleQuickProductCategorySave(
   setQuickProductLoading: (v: boolean) => void,
 ) {
   if (!setQuickProductNewCategoryName) return;
-  const name = setQuickProductNewCategoryName.trim();
+  const name =
+    typeof setQuickProductNewCategoryName === "string"
+      ? setQuickProductNewCategoryName.trim()
+      : typeof setQuickProductNewCategoryName === "function"
+        ? ""
+        : "";
   if (!name) {
     toast.error("Informe o nome da categoria.");
     return;
   }
+  const name = newName;
   try {
     const categoryId = await createCategory({ name });
     setQuickProductFormCategory(categoryId);
     setQuickProductCategoryOpen(false);
-    setQuickProductNewCategoryName("");
+    if (typeof setQuickProductNewCategoryName === "function") {
+      setQuickProductNewCategoryName("");
+    }
     toast.success("Categoria criada. Use-a para finalizar o cadastro do produto.");
   } catch (error) {
     toast.error(error instanceof Error ? error.message : "Não foi possível criar a categoria.");
+  } finally {
+    setQuickProductLoading(false);
   }
 }
+
+function handleQuickProductSaveWrapper(
 
 function handleQuickProductSaveWrapper(
   itemIndex: number | null,
