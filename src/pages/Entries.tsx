@@ -1330,25 +1330,6 @@ function handleQuickProductSaveWrapper(
 // --- fim wrappers ---
 }
 
-function handleQuickProductCategorySaveWrapper(
-  setQuickProductCategoryOpen: (v: boolean) => void,
-  setQuickProductNewCategoryName: (v: string) => void,
-  categoryId: string,
-  setQuickProductLoading: (v: boolean) => void,
-) {
-  // Dynamically created wrapper para o callback onSave da categoria.
-  return async () => {
-    return handleQuickProductCategorySave(
-      setQuickProductCategoryOpen,
-      setQuickProductNewCategoryName,
-      (v) => {},
-      setQuickProductLoading,
-      createCategory,
-      toast,
-    );
-  };
-}
-
 // --- fim wrappers ---
 
   );
