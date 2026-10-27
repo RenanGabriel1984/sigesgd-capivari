@@ -57,8 +57,10 @@ import { cn } from "@/lib/utils";
 import {
   digitsOnly,
   formatAccessKeyGrouped,
+  formatAccessKeyPrint,
   formatCnpj,
   formatCurrency,
+  formatIsoDateBrazilian,
 } from "@/lib/br-validators";
 import { validateAccessKey44 } from "@/lib/danfe-ocr";
 import type { NfeData, NfeItem, SupplierForMatch } from "@/lib/nfe";
@@ -241,11 +243,6 @@ function LoadingSkeleton() {
 
 const OCR_ORIGIN_NOTE = "Dados extraídos por OCR de DANFE/PDF/imagem — conferir antes de confirmar.";
 
-// ── Referências da DANFE de teste Incotech (comparação — NUNCA injeção) ─────
-const INCOTECH_TEST_ACCESS_KEY =
-  "42260922816315000144550010000029671515440064";
-const INCOTECH_TEST_CNPJ = "22816315000144";
-
 export function EntriesPage({ className }: { className?: string }) {
   const entries = useQuery(api.entries.list);
   const suppliers = useQuery(api.suppliers.list);
@@ -303,15 +300,6 @@ export function EntriesPage({ className }: { className?: string }) {
   // ── Conferência da chave de acesso (44 dígitos + dígito verificador) ─────
   const nfeAccessKeyDigits = digitsOnly(nfeAccessKey);
   const nfeAccessKeyValid = validateAccessKey44(nfeAccessKey);
-  /**
-   * Comparação de regressão executada somente nos testes: nos testes R23/R30 a
-   * DANFE chega com emissor Incotech Company Ltda e chave 4226…0064; aqui na
-   * interface de produção não há campo que compare a chave reconhecida com uma
-   * chave fixa de teste — a validação fiscal do DV permanece, o teste permanece
-   * no teste.
-   */
-  const nfeIncotechCheck = useMemo<null>(() => null, []);
-
   const buildReviewRows = (items: NfeItem[]): NfeReviewRow[] =>
     items.map((item) => ({
       item,
@@ -426,6 +414,7 @@ export function EntriesPage({ className }: { className?: string }) {
         code: item.code,
         description: item.description,
         ncm: item.ncm,
+        cst: item.cst,
         unit: item.unit,
         quantity: item.quantity,
         unitValue: item.unitValue,
@@ -954,7 +943,9 @@ export function EntriesPage({ className }: { className?: string }) {
               <div className="min-w-0 max-w-full overflow-hidden">
                 <Label className="text-muted-foreground">Data de emissão da NF-e</Label>
                 <p className="mt-1 text-sm min-w-0 max-w-full overflow-hidden break-words">
-                  {nfe.emissionDate || "—"}
+                  {nfe.emissionDate
+                    ? formatIsoDateBrazilian(nfe.emissionDate)
+                    : "—"}
                 </p>
               </div>
               <div>
@@ -1029,12 +1020,20 @@ export function EntriesPage({ className }: { className?: string }) {
                   placeholder="Chave pendente de conferência"
                 />
                 {nfeAccessKeyDigits ? (
-                  <p
-                    className="mt-1 font-mono text-xs break-all text-muted-foreground"
-                    aria-label="Chave de acesso completa (44 dígitos)"
-                  >
-                    {formatAccessKeyGrouped(nfeAccessKeyDigits)}
-                  </p>
+                  <>
+                    <p
+                      className="mt-1 font-mono text-xs break-all text-muted-foreground"
+                      aria-label="Chave de acesso completa (44 dígitos)"
+                    >
+                      {formatAccessKeyGrouped(nfeAccessKeyDigits)}
+                    </p>
+                    <p
+                      className="mt-1 font-mono text-xs break-all text-muted-foreground"
+                      aria-label="Chave de acesso no formato impresso na DANFE"
+                    >
+                      {formatAccessKeyPrint(nfeAccessKeyDigits)}
+                    </p>
+                  </>
                 ) : null}
                 <p
                   className={cn(
@@ -1073,19 +1072,6 @@ export function EntriesPage({ className }: { className?: string }) {
                       : ""}
                   </span>
                 </div>
-                {nfeIncotechCheck === true ? (
-                  <p className="text-xs text-emerald-700">
-                    Chave reconhecida confere integralmente com a chave esperada da DANFE de teste
-                    Incotech.
-                  </p>
-                ) : null}
-                {nfeIncotechCheck === false ? (
-                  <p className="rounded-md border bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                    Divergência: a chave reconhecida não coincide com a chave esperada da DANFE de
-                    teste Incotech ({formatAccessKeyGrouped(INCOTECH_TEST_ACCESS_KEY)}). O valor
-                    reconhecido foi preservado para conferência manual.
-                  </p>
-                ) : null}
               </div>
 
               <div>

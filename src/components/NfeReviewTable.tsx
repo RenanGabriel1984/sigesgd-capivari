@@ -153,6 +153,18 @@ export function NfeReviewTable({
                   {review.item.description || "Sem descrição identificada"}
                 </p>
 
+                {/* NCM e CST: colunas fiscais separadas da descrição (R30 §4). */}
+                {(review.item.ncm || review.item.cst) && (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                    {review.item.ncm ? (
+                      <span className="font-mono">NCM {review.item.ncm}</span>
+                    ) : null}
+                    {review.item.cst ? (
+                      <span className="font-mono">CST {review.item.cst}</span>
+                    ) : null}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {/* Quantidade — editável somente quando o documento não trouxe uma
                       quantidade válida (nunca inventamos o valor). */}

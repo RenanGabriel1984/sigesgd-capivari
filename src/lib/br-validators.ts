@@ -78,6 +78,38 @@ export const formatAccessKeyGrouped = (value: string | null | undefined): string
   return groups.join(" ");
 };
 
+/**
+ * Agrupa um bloco de 9 dígitos da chave em três subblocos de 3 (ex.:
+ * "000002967" → "000.002.967").
+ */
+function groupKeyNine(digits: string): string {
+  return digits.replace(/(\d{3})(?=\d)/g, "$1.");
+}
+
+/**
+ * Máscara de LEITURA da chave de acesso no formato impresso na DANFE:
+ *   42.2609.22.816.315/0001-44-55-001-000.002.967-151.544.006-4
+ *
+ * Função INDEPENDENTE, baseada apenas nas posições fixas da chave de 44
+ * dígitos: cUF(2) AAMM(4) CNPJ(14) mod(2) série(3) nNF(9) cNF(9) cDV(1).
+ * Uso SOMENTE para apresentação — o valor em estado/validação/persistência
+ * e a cópia continuam sendo os 44 dígitos crus. Se a entrada não tiver
+ * exatamente 44 dígitos, devolve os dígitos sem máscara (nunca inventa).
+ */
+export const formatAccessKeyPrint = (value: string | null | undefined): string => {
+  const digits = digitsOnly(value);
+  if (digits.length !== 44) return digits;
+  const uf = digits.slice(0, 2);
+  const aamm = digits.slice(2, 6);
+  const cnpj = digits.slice(6, 20);
+  const model = digits.slice(20, 22);
+  const serie = digits.slice(22, 25);
+  const nnf = digits.slice(25, 34);
+  const cnf = digits.slice(34, 43);
+  const dv = digits.slice(43, 44);
+  return `${uf}.${aamm}.${formatCnpj(cnpj)}-${model}-${serie}-${groupKeyNine(nnf)}-${groupKeyNine(cnf)}-${dv}`;
+};
+
 /** Formata data ISO (AAAA-MM-DD) para exibição brasileira (DD/MM/AAAA).
  * Decompõe a string ISO diretamente — nunca interpreta como timestamp —
  * para evitar variações de dia por fuso/horário. Não converte, apenas formata.

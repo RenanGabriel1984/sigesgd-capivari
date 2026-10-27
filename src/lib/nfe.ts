@@ -24,6 +24,8 @@ export interface NfeItem {
   description: string;
   ncm?: string;
   cfop?: string;
+  /** CST (C.S.T. da DANFE) — opcional; não é persistido no schema nesta fase. */
+  cst?: string;
   /** Unidade informada na NF (uCom) — preservada, sem conversão automática */
   unit: string;
   /** Quantidade (qCom) — preservada exatamente como informada */

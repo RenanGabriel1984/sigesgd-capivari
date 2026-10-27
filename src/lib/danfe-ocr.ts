@@ -912,6 +912,14 @@ function normalizeItemDescription(tokens: string[]): { description: string; ncm?
       continue;
     }
 
+    // CST entre colchetes colado pelo OCR ("… CHOCO 84716053 [0102] PC …").
+    const bracketedCst = token.match(/^\[(\d{4})\]$/);
+    if (bracketedCst) {
+      if (!cst) cst = bracketedCst[1];
+      end--;
+      continue;
+    }
+
     if (!isTrailingColumnCode(token)) break;
     const digits = token.replace(/[.\s]/g, "");
     if (!ncm && /^\d{8}$/.test(digits)) ncm = digits;
@@ -1907,6 +1915,7 @@ function extractItems(lines: string[]): DanfeItem[] {
       code: parsed.code,
       description: parsed.description,
       ncm: parsed.ncm,
+      cst: parsed.cst,
       quantity: parsed.quantity,
       unit: parsed.unit,
       unitValue: parsed.unitValue,
@@ -1997,11 +2006,7 @@ function mergeTruncatedItems(items: DanfeItem[]): DanfeItem[] {
       }
       continue;
     }
-    const merged = { ...item, cst: item.cst ?? twin!.cst };
-    if (!merged.ncm && twin!.ncm) {
-      merged.ncm = twin!.ncm;
-    }
-    out.push(merged);
+    out.push({ ...item });
   }
   return out;
 }

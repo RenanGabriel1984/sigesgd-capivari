@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import {
   digitsOnly,
   formatAccessKeyGrouped,
+  formatAccessKeyPrint,
   formatCnpj,
   formatIsoDateBrazilian,
 } from "@/lib/br-validators";
@@ -70,11 +71,6 @@ export interface DanfeImportDialogProps {
   /** Arquivo original (PDF/imagen) anexado — salvo pela Entrada, nunca aqui. */
   onFile?: (file: File | null) => void;
 }
-
-// ─── Referências de conferência (NUNCA preenchem campo do OCR) ───────────────
-const INCOTECH_TEST_ACCESS_KEY =
-  "42260922816315000144550010000029671515440064";
-const INCOTECH_TEST_CNPJ = "22816315000144";
 
 // ─── Pipeline de leitura (camada textual do PDF + OCR de imagem/escaneado) ──
 const TARGET_DPI = 300;
@@ -773,16 +769,6 @@ export function DanfeImportDialog({
   const accessKeyDigits = digitsOnly(parsed.accessKey ?? "");
   const keyValid = validateAccessKey44(parsed.accessKey ?? "");
 
-  /** Divergência entre a chave RECONHECIDA e a esperada na DANFE de teste Incotech. */
-  const incotechCheck = useMemo<boolean | null>(() => {
-    if (!accessKeyDigits) return null;
-    const isIncotechDocument =
-      digitsOnly(parsed.emitterCnpj ?? "") === INCOTECH_TEST_CNPJ ||
-      /incotech/i.test(fileName);
-    if (!isIncotechDocument) return null;
-    return accessKeyDigits === INCOTECH_TEST_ACCESS_KEY;
-  }, [accessKeyDigits, parsed.emitterCnpj, fileName]);
-
   useEffect(() => {
     if (!open) {
       setDiagnostic(null);
@@ -1057,6 +1043,9 @@ export function DanfeImportDialog({
                           <p className="text-sm min-w-0 max-w-full overflow-hidden break-words">
                             {formatAccessKeyGrouped(parsed.accessKey)}
                           </p>
+                          <p className="text-xs min-w-0 max-w-full overflow-hidden break-words text-muted-foreground">
+                            {formatAccessKeyPrint(parsed.accessKey)}
+                          </p>
                           <div className="flex flex-wrap items-center gap-2">
                             <Button
                               type="button"
@@ -1117,6 +1106,16 @@ export function DanfeImportDialog({
                             {item.code}
                           </span>{" "}
                           {item.description}
+                          {(item.ncm || item.cst) && (
+                            <span className="ml-1 font-mono text-[11px] text-muted-foreground">
+                              {[
+                                item.ncm ? `NCM ${item.ncm}` : null,
+                                item.cst ? `CST ${item.cst}` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                          )}
                           <span className="text-muted-foreground">
                             {" — "}
                             {item.quantity} {item.unit} × {formatCurrencyStable(item.unitValue)} ={" "}
