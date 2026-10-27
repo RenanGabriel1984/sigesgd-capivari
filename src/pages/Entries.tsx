@@ -32,6 +32,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Textarea,
+} from "@/components/ui/textarea";
+import { Plus, Loader2, X } from "lucide-react";
+import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -250,6 +255,27 @@ export function EntriesPage({ className }: { className?: string }) {
   const locations = useQuery(api.storageLocations.listActive);
   const areas = useQuery(api.stockAreas.listActive);
   const nfeAliases = useQuery(api.nfeProductAliases.list);
+
+  // ── cadastro rápido de produto a partir da conferência da NF-e (R31 §1) ────────
+  const [quickProductOpen, setQuickProductOpen] = useState(false);
+  const [quickProductItemIndex, setQuickProductItemIndex] = useState<number | null>(null);
+  const [quickProductForm, setQuickProductForm] = useState({
+    name: "",
+    description: "",
+    categoryId: "",
+    unitOfMeasure: "un",
+    brand: "",
+    model: "",
+    specification: "",
+  });
+  const [quickProductLoading, setQuickProductLoading] = useState(false);
+  const [quickProductCategoryOpen, setQuickProductCategoryOpen] = useState(false);
+  const [quickProductNewCategoryName, setQuickProductNewCategoryName] = useState("");
+
+  const createProduct = useMutation(api.products.create);
+  const createCategory = useMutation(api.categories.create);
+  const categories = useQuery(api.categories.listActive);
+  const products = useQuery(api.products.listActive);
 
   const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
   const createEntry = useMutation(api.entries.create);
@@ -1097,12 +1123,120 @@ export function EntriesPage({ className }: { className?: string }) {
                     ),
                   )
                 }
-                onNewProduct={() =>
-                  toast.info("Cadastre o produto em Produtos e retome esta conferência.")
-                }
+                onNewProduct={() => {
+                  toast.info("Cadastre o produto em Produtos e retome esta conferência.");
+                }}
                 onContinue={handleReviewContinue}
                 sourceLabel={nfeSourceLabel}
               />
+
+              {/* Abre o modal de cadastro rápido sem fechar a conferência da NF-e. */}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2 h-8"
+                onClick={() => {
+                  if (nfeItems.length === 0) return;
+                  const item = nfeItems[0].item;
+                  const hints = extractNfeProductHints(item);
+                  setQuickProductForm({
+                    name: item.description || "",
+                    description: item.description || "",
+                    categoryId: "",
+                    unitOfMeasure: hints.unitOfMeasure ?? "un",
+                    brand: hints.brand ?? "",
+                    model: hints.model ?? "",
+                    specification: "",
+                  });
+                  setQuickProductItemIndex(0);
+                  setQuickProductOpen(true);
+                }}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" /> Cadastrar novo produto
+              </Button>              {/* ── Cadastro rápido de produto a partir da conferência da NF-e (R31 §1) ──────── */}
+              <QuickProductForm
+                open={quickProductOpen}
+                onOpenChange={setQuickProductOpen}
+                categories={categories ?? []}
+                form={quickProductForm}
+                loading={quickProductLoading}
+                onFormChange={(patch) =>
+                  setQuickProductForm((current) => ({ ...current, ...patch }))
+                }
+                onCategoryCreateRequest={() => setQuickProductCategoryOpen(true)}
+                onSave={handleQuickProductSave}
+                onCancel={() => {
+                  setQuickProductOpen(false);
+                  setQuickProductItemIndex(null);
+                  resetQuickProductForm();
+                }}
+              />
+
+              {/* ── Criação rápida de categoria sem perder o contexto da conferência (R31 §1) ─ */}
+              <QuickCategoryForm
+                open={quickProductCategoryOpen}
+                onOpenChange={setQuickProductCategoryOpen}
+                name={quickProductNewCategoryName}
+                onNameChange={setQuickProductNewCategoryName}
+                loading={quickProductLoading}
+                onSave={handleQuickProductCategorySave}
+                onCancel={() => {
+                  setQuickProductCategoryOpen(false);
+                  setQuickProductNewCategoryName("");
+                }}
+              />
+
+              {/* ── Cadastro rápido de produto a partir da conferência da NF-e ──────── */}
+              <QuickProductForm
+                open={quickProductOpen}
+                onOpenChange={setQuickProductOpen}
+                categories={categories ?? []}
+                form={quickProductForm}
+                loading={quickProductLoading}
+                onFormChange={(patch) =>
+                  setQuickProductForm((current) => ({ ...current, ...patch }))
+                }
+                onCategoryCreateRequest={() => setQuickProductCategoryOpen(true)}
+                onSave={handleQuickProductSave}
+                onCancel={() => {
+                  setQuickProductOpen(false);
+                  setQuickProductItemIndex(null);
+                  resetQuickProductForm();
+                }}
+              />
+
+              {/* ── Criação rápida de categoria sem perder o contexto da conferência ─ */}
+              <Dialog
+                open={quickProductCategoryOpen}
+                onOpenChange={setQuickProductCategoryOpen}
+              >
+                <DialogContent className="max-w-sm">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <Plus className="h-4 w-4" /> Nova Categoria
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 py-2">
+                    <div>
+                      <Label>Nome da Categoria *</Label>
+                      <Input
+                        value={quickProductNewCategoryName}
+                        onChange={(e) => setQuickProductNewCategoryName(e.target.value)}
+                        placeholder="Ex: Periféricos USB"
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => { setQuickProductCategoryOpen(false); setQuickProductNewCategoryName(""); }}>
+                      Cancelar
+                    </Button>
+                    <Button onClick={handleQuickProductCategorySave}>
+                      Criar e Selecionar
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
 
@@ -1137,6 +1271,230 @@ export function EntriesPage({ className }: { className?: string }) {
         onCreated={handleSupplierCreated}
       />
     </AppShell>
+  );
+}
+
+// ── Cadastro rápido de produto a partir da conferência da NF-e (R31 §1) ────────
+
+function QuickProductForm({
+  open,
+  onOpenChange,
+  categories,
+  form,
+  loading,
+  onFormChange,
+  onCategoryCreateRequest,
+  onSave,
+  onCancel,
+}: {
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
+  categories: Array<{ _id: string; name: string }>;
+  form: {
+    name: string;
+    description: string;
+    categoryId: string;
+    unitOfMeasure: string;
+    brand: string;
+    model: string;
+    specification: string;
+  };
+  loading: boolean;
+  onFormChange: (patch: Partial<{ name: string; description: string; categoryId: string; unitOfMeasure: string; brand: string; model: string; specification: string }>) => void;
+  onCategoryCreateRequest: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const hasCategories = categories.length > 0;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Produto não cadastrado — criar rapidamente</DialogTitle>
+          <DialogDescription>
+            Este formulário cria apenas o registro de catálogo. O estoque só é atualizado quando você confirmar a entrada da NF-e.
+          </DialogDescription>
+        </DialogHeader>
+
+        {!hasCategories && (
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
+            <span className="shrink-0">⚠️</span>
+            <div>
+              <p className="text-sm font-medium text-amber-800">Nenhuma categoria cadastrada</p>
+              <p className="text-sm text-amber-700 mt-1">
+                Cadastre uma categoria antes de criar o produto. Você pode fazer isso agora sem sair da conferência.
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-4 py-2">
+          <div>
+            <Label>Nome *</Label>
+            <Input
+              value={form.name}
+              onChange={(e) => onFormChange({ name: e.target.value })}
+              placeholder="Ex: KIT TECLADO E MOUSE USB SLIM CHOCO"
+            />
+          </div>
+
+          <div>
+            <Label>Descrição</Label>
+            <Textarea
+              value={form.description}
+              onChange={(e) => onFormChange({ description: e.target.value })}
+              rows={2}
+              placeholder="Descrição fiscal da NF-e, sem NCM/CST concatenados"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <Label>Categoria *</Label>
+              {hasCategories ? (
+                <Select
+                  value={form.categoryId}
+                  onValueChange={(value) => onFormChange({ categoryId: value })}
+                >
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Selecionar categoria" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((c) => (
+                      <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <p className="text-sm text-muted-foreground">Nenhuma categoria cadastrada.</p>
+              )}
+            </div>
+
+            <div>
+              <Label>Unidade de Medida</Label>
+              <Select
+                value={form.unitOfMeasure}
+                onValueChange={(value) => onFormChange({ unitOfMeasure: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {UNITS_OF_MEASURE.map((u) => (
+                    <SelectItem key={u} value={u}>{UNIT_LABELS[u] ?? u}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Unidade reconhecida na NF-e, convertida para o catálogo.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <Label>Marca</Label>
+              <Input
+                value={form.brand}
+                onChange={(e) => onFormChange({ brand: e.target.value })}
+                placeholder="Opcional"
+              />
+            </div>
+            <div>
+              <Label>Modelo</Label>
+              <Input
+                value={form.model}
+                onChange={(e) => onFormChange({ model: e.target.value })}
+                placeholder="Opcional"
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label>Especificação</Label>
+            <Input
+              value={form.specification}
+              onChange={(e) => onFormChange({ specification: e.target.value })}
+              placeholder="Opcional"
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
+            Cancelar
+          </Button>
+          <Button onClick={onSave} disabled={loading || !form.name || !form.categoryId}>
+            {loading ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Criando…
+              </>
+            ) : (
+              "Criar produto"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Criação rápida de categoria sem perder o contexto da conferência (R31 §1) ─
+
+function QuickCategoryForm({
+  open,
+  onOpenChange,
+  name,
+  onNameChange,
+  loading,
+  onSave,
+  onCancel,
+}: {
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
+  name: string;
+  onNameChange: (value: string) => void;
+  loading: boolean;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Plus className="h-4 w-4" /> Nova Categoria
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div>
+            <Label>Nome da Categoria *</Label>
+            <Input
+              value={name}
+              onChange={(e) => onNameChange(e.target.value)}
+              placeholder="Ex: Periféricos USB"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
+            Cancelar
+          </Button>
+          <Button onClick={onSave} disabled={loading || !name.trim()}>
+            {loading ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Criando…
+              </>
+            ) : (
+              "Criar e Selecionar"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
