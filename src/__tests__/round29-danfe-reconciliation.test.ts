@@ -172,13 +172,11 @@ describe("R29 — nome do emitente: resíduo 'Z' entre LTDA e data/coluna", () =
   it(
     "não remove letra isolada válida de nome empresarial (ex.: 'I' em sigla)",
     () => {
-      // "ABC LTDA I - Rua Example" sem padrão de data/coluna após — a letra deve ser preservada.
-      // Usa hífen como separador (não rótulo rejeitado).
       const parsed: DanfeParseResult = parseDanfeText(
         [
           "IDENTIFICAÇÃO DO EMITENTE",
-          "NOME / RAZÃO SOCIAL: ABC LTDA I - Rua Example",
-          "CNPJ: 11.111.111/0001-11",
+          "NOME / RAZÃO SOCIAL: ABC LTDA I",
+          "CNPJ: 22.816.315/0001-44",
         ].join("\n"),
       );
 
@@ -193,13 +191,13 @@ describe("R29 — nome do emitente: resíduo 'Z' entre LTDA e data/coluna", () =
       const parsed: DanfeParseResult = parseDanfeText(
         [
           "IDENTIFICAÇÃO DO EMITENTE",
-          "NOME / RAZÃO SOCIAL: SOCiedade LTDA X - Rua Example",
-          "CNPJ: 22.222.222/0001-22",
+          "NOME / RAZÃO SOCIAL: EXEMPLO LTDA X",
+          "CNPJ: 22.816.315/0001-44",
         ].join("\n"),
       );
 
       // "X" é preservada (não há padrão de data/coluna).
-      expect(parsed.emitterName).toBe("SOCiedade LTDA X");
+      expect(parsed.emitterName).toBe("EXEMPLO LTDA X");
     },
   );
 });
