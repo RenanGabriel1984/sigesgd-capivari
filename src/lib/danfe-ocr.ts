@@ -1242,6 +1242,26 @@ const NAME_NOISE_TOKEN = /^(?:dt|data|emiss\w*|hora|n[ºo°]\.?|nr\.?|ref\.?|cnp
  * antes do marcador de ruído). Quando o corte pelo marcador deixa um prefixo
  * curto, cai para o corte pelo número — nunca devolve texto com dígitos.
  */
+/**
+ * Detecta padrão de data/coluna entre colchetes ou hífens ("[09/26", "- 09/26")
+ * que indica início de nova coluna após ruído de OCR.
+ */
+function tokenLooksLikeColumnStart(token: string): boolean {
+  return /^\[[-\s\d/]+/.test(token) || /^[-–]\s*\d/.test(token);
+}
+
+/**
+ * Detecta se um token é ruído isolado de uma letra (ex.: "Z" solto entre
+ * "LTDA" e data/coluna). Não remove todas as palavras de uma letra — só quando
+ * há padrão comprovado de data/coluna adjacente.
+ */
+function isSingleLetterNoise(token: string, nextToken: string | undefined): boolean {
+  if (!token || token.length !== 1) return false;
+  if (!/^[A-Za-z]$/.test(token)) return false;
+  // SóRemove a letra isolada se a próxima token parece início de coluna/data.
+  return nextToken !== undefined && tokenLooksLikeColumnStart(nextToken);
+}
+
 function cutAtNumericNoise(value: string): string {
   const tokens = value.split(/\s+/);
   const firstDigit = tokens.findIndex((token) => /\d/.test(token));
@@ -1257,7 +1277,15 @@ function cutAtNumericNoise(value: string): string {
     const prefix = join(firstNoise);
     if (prefix.split(/\s+/).length >= 2 && !/\d/.test(prefix)) return prefix;
   }
-  if (firstDigit > 0) return join(firstDigit);
+  if (firstDigit > 0) {
+    // Se o token antes do primeiro dígito é uma letra isolada seguida de
+    // padrão de coluna/data, inclua apenas até a letra anterior.
+    const cutEnd = firstDigit >= 2 &&
+      isSingleLetterNoise(tokens[firstDigit - 1], tokens[firstDigit])
+      ? firstDigit - 1
+      : firstDigit;
+    return join(cutEnd);
+  }
   return value;
 }
 
@@ -1883,6 +1911,36 @@ function extractItems(lines: string[]): DanfeItem[] {
  * linhas descrevem o mesmo produto e um código é sufixo do outro, mantemos o
  * código mais completo — sem criar item novo nem duplicar quantidade.
  */
+/**
+ * Normaliza descrição para comparação de duplicatas de OCR: remove resíduos de
+ * coluna como NCM de 8 dígitos e CST entre colchetes (\[0102]) que o OCR
+ * costuma colar na descrição. Conservador: só remove padrões comprovados, não
+ * todo texto numérico ou entre colchetes (podem ser parte válida da descrição).
+ */
+function normalizeDescriptionForMerge(desc: string): string {
+  return desc
+    .replace(/\s+\d{8}\s+/g, " ")
+    .replace(/\s+\[\d{4}\]\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * A leitura regional costuma perder os PRIMEIROS dígitos do código. Quando duas
+ * linhas descrevem o mesmo produto e um código é sufixo do outro, mantemos o
+ * código mais completo — sem criar item novo nem duplicar quantidade.
+ *
+ * Reconhece duplicatas de OCR quando houver evidências fortes em conjunto:
+ *   - códigos diferentes, sendo o mais curto um sufixo do mais completo;
+ *   - mesma quantidade (exata);
+ *   - mesmo valor unitário (tolerância monetária);
+ *   - mesmo total (tolerância monetária);
+ *   - descrições que se igualam após normalização conservadora dos resíduos.
+ *
+ * Ao unir: conserva o código completo, a descrição limpa, o NCM quando
+ * identificado, aproveita a unidade da segunda leitura se ausente no principal,
+ * e não soma quantidade nem valor.
+ */
 function mergeTruncatedItems(items: DanfeItem[]): DanfeItem[] {
   const out: DanfeItem[] = [];
   for (const item of items) {
@@ -1890,14 +1948,30 @@ function mergeTruncatedItems(items: DanfeItem[]): DanfeItem[] {
       (candidate) =>
         candidate.code !== item.code &&
         (candidate.code.endsWith(item.code) || item.code.endsWith(candidate.code)) &&
-        candidate.description === item.description &&
         candidate.quantity === item.quantity &&
-        Math.abs(candidate.totalValue - item.totalValue) < 0.011,
+        Math.abs(candidate.unitValue - item.unitValue) < 0.011 &&
+        Math.abs(candidate.totalValue - item.totalValue) < 0.011 &&
+        normalizeDescriptionForMerge(candidate.description) ===
+          normalizeDescriptionForMerge(item.description),
     );
     if (twin) {
+      // Código mais completo.
       if (item.code.length > twin.code.length) {
         twin.code = item.code;
         if (twin.index === undefined) twin.index = item.index;
+      }
+      // Descrição limpa (sem resíduo de NCM/CST).
+      const normalized = normalizeDescriptionForMerge(item.description);
+      if (normalized.length > 0 && normalized !== twin.description) {
+        twin.description = normalized;
+      }
+      // NCM quando identificado em qualquer leitura.
+      if (!twin.ncm && item.ncm) {
+        twin.ncm = item.ncm;
+      }
+      // Unidade: aproveita se o principal estiver vazio.
+      if (!twin.unit && item.unit) {
+        twin.unit = item.unit;
       }
       continue;
     }
