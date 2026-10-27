@@ -1173,6 +1173,7 @@ export function EntriesPage({ className }: { className?: string }) {
                   setQuickProductForm((current) => ({ ...current, ...patch }))
                 }
                 onCategoryCreateRequest={() => setQuickProductCategoryOpen(true)}
+                onCancel={() => setQuickProductOpen(false)}
                 onSave={() =>
                   handleQuickProductSaveWrapper(
                     quickProductItemIndex,
@@ -1256,6 +1257,20 @@ const emptyQuickProductForm = () => ({
   specification: "",
 });
 
+function emptyUnsatisfiedProduct(): UnsatisfiedProduct {
+  return {
+    name: '',
+    description: '',
+    categoryId: null,
+    unit: 'UN',
+    unitLabel: '',
+    brand: '',
+    model: '',
+    specification: '',
+    supplierCode: null,
+  };
+}
+
 function resetQuickProductForm() {
   // Estado encapsulado na página; esta função é usada pelo callback onCancel.
   // Como os setters são closures, expomos o estado via prop no componente e
@@ -1328,16 +1343,8 @@ function handleQuickProductSaveWrapper(
 }
 
 // --- fim wrappers ---
-}
-
-// --- fim wrappers ---
-
-  );
-}
-
-// ── Cadastro rápido de produto a partir da conferência da NF-e (R31 §1) ────────
-
-function QuickProductForm({
+}// ── Cadastro rápido de produto a partir da conferência da NF-e (R31 §1) ────────function QuickProductForm
+({
   open,
   onOpenChange,
   categories,
@@ -1347,7 +1354,77 @@ function QuickProductForm({
   onCategoryCreateRequest,
   onSave,
   onCancel,
-}: {
+}:
+{
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
+  categories: WithId<Category>[];
+  form: UnsavedProduct;
+  loading: boolean;
+  onFormChange: (patch: Partial<UnsavedProduct>) => void;
+  onCategoryCreateRequest: () => void;
+  onSave: () => Promise<{ success: boolean; productId?: string; error?: unknown }>;
+  onCancel: () => void;
+} & { trackOid?: string }) {
+  return (
+    <QuickProductFormInner
+      open={open}
+      onOpenChange={onOpenChange}
+      categories={categories}
+      form={form}
+      loading={loading}
+      onFormChange={onFormChange}
+      onCategoryCreateRequest={onCategoryCreateRequest}
+      onSave={onSave}
+      onCancel={onCancel}
+      trackOid={trackOid}
+    />
+  );
+}
+
+type QuickProductFormInnerProps = {
+  open: boolean;
+  onOpenChange: (value: boolean) => void;
+  categories: WithId<Category>[];
+  form: UnsavedProduct;
+  loading: boolean;    onFormChange: (patch: Partial<DraftItem>) => void;
+  onCategoryCreateRequest: () => void;
+  onSave: () => Promise<{ success: boolean; productId?: string; error?: unknown }>;
+  onCancel: () => void;
+  trackOid?: string;
+};
+
+function QuickProductFormInner(
+  props: {
+    open: boolean;
+    onOpenChange: (v: boolean) => void;
+    categories: WithId<Category>[];
+    form: UnsavedProduct;
+    loading: boolean;
+    onFormChange: (patch: Partial<UnsavedProduct>) => void;
+    onCategoryCreateRequest: () => void;
+    onSave: () => Promise<{ success: boolean; productId?: string; error?: unknown }>;
+    onCancel: () => void;
+  } = { open: false, onOpenChange: () => {}, categories: [], form: emptyUnsavedProduct(), loading: false, onFormChange: () => {}, onCategoryCreateRequest: () => {}, onSave: async () => ({ success: false }), onCancel: () => {} }
+) {
+  props: {
+    open: boolean;
+    onOpenChange: (v: boolean) => void;
+    categories: WithId<Category>[];
+    form: UnsavedProduct;
+    loading: boolean;
+    onFormChange: (patch: Partial<UnsavedProduct>) => void;
+    onCategoryCreateRequest: () => void;
+    onSave: () => Promise<{ success: boolean; productId?: string; error?: unknown }>;
+    onCancel: () => void;
+  } = { open: false, onOpenChange: () => {}, categories: [], form: emptyUnsavedProduct(), loading: false, onFormChange: () => {}, onCategoryCreateRequest: () => {}, onSave: async () => ({ success: false }), onCancel: () => {} }
+) {{
+  open,
+  onOpenChange,
+  categories,
+  form,
+  loading,
+}
   open: boolean;
   onOpenChange: (value: boolean) => void;
   categories: Array<{ _id: string; name: string }>;
