@@ -152,11 +152,6 @@ export interface DanfeFieldValidation {
 /** Tolerância entre quantidade × valor unitário e o total do item. */
 const ITEM_TOTAL_TOLERANCE = 0.05;
 
-// CST brasileiro: 4 dígitos no “C.S.T.” da DANFE (ex.: 0102).
-export function isValidBrazilianCST(value: string | null | undefined): value is "0102" {
-  return value === "0102";
-}
-
 function itemIsCoherent(item: DanfeItem): boolean {
   if (!(item.quantity > 0)) return false;
   if (!(item.unitValue >= 0) || !(item.totalValue > 0)) return false;
