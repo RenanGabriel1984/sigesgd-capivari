@@ -1997,9 +1997,9 @@ function mergeTruncatedItems(items: DanfeItem[]): DanfeItem[] {
       }
       continue;
     }
-    const merged = { ...item, cst: item.cst ?? twin.cst };
-    if (!merged.ncm && twin.ncm) {
-      merged.ncm = twin.ncm;
+    const merged = { ...item, cst: item.cst ?? twin!.cst };
+    if (!merged.ncm && twin!.ncm) {
+      merged.ncm = twin!.ncm;
     }
     out.push(merged);
   }
