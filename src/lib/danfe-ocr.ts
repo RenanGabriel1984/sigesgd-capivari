@@ -1966,7 +1966,7 @@ export function extractCSTFromDescription(description: string): string | undefin
 function mergeTruncatedItems(items: DanfeItem[]): DanfeItem[] {
   const out: DanfeItem[] = [];
   for (const item of items) {
-    const twin = out.find(
+    const twinCandidate = out.find(
       (candidate) =>
         candidate.code !== item.code &&
         (candidate.code.endsWith(item.code) || item.code.endsWith(candidate.code)) &&
@@ -1976,7 +1976,8 @@ function mergeTruncatedItems(items: DanfeItem[]): DanfeItem[] {
         normalizeDescriptionForMerge(candidate.description) ===
           normalizeDescriptionForMerge(item.description),
     );
-    if (twin) {
+    const twin = twinCandidate;
+    if (twin !== undefined) {
       // Código mais completo.
       if (item.code.length > twin.code.length) {
         twin.code = item.code;

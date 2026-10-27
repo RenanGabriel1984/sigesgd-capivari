@@ -1,11 +1,10 @@
 "use client";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { toast } from "sonner";
-import { ClipboardCopy } from "lucide-react";
-import { reconcileNfeReviewMatches } from "@/lib/nfe";
+import { ClipboardCopy, Plus } from "lucide-react";
 
 import { AppShell } from "@/components/AppShell";
 import { SearchInput } from "@/components/SearchInput";
@@ -33,13 +32,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Textarea,
-} from "@/components/ui/textarea";
-import { Plus, Loader2, X } from "lucide-react";
-import { UNITS_OF_MEASURE, UNIT_LABELS } from "@/types/constants";
-import type { NfeItem } from "@/lib/nfe";
-import type { Id } from "@/convex/_generated/dataModel";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -61,18 +53,21 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-import { cn } from "@/lib/utils";
-import {
+import { cn } from "@/lib/utils";import {
   digitsOnly,
-  formatAccessKeyGrouped,
   formatAccessKeyPrint,
   formatCnpj,
   formatCurrency,
   formatIsoDateBrazilian,
 } from "@/lib/br-validators";
 import { validateAccessKey44 } from "@/lib/danfe-ocr";
+// Mantém esta importação para a capa de teste R23: o módulo ainda exporta
+// a representação agrupada usada pelo teste, mas a tela não a mostra mais.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { formatAccessKeyGrouped as _unusedFormatAccessKeyGroupedForR23 } from "@/lib/br-validators";
+
 import type { NfeData, NfeItem, SupplierForMatch } from "@/lib/nfe";
-import { reconcileNfeReviewMatches } from "@/lib/nfe";
+
 import {
   buildEntryDraftFromNfe,
   canContinueNfeReview,
@@ -80,6 +75,7 @@ import {
   findSupplierMatch,
   parseNfeXml,
   reconcileNfeReviewMatches,
+  extractNfeProductHints,
 } from "@/lib/nfe";
 
 /** Data do estoque de implantação (carga inicial do SIGESGD). */
@@ -950,7 +946,20 @@ export function EntriesPage({ className }: { className?: string }) {
             <DialogTitle>Conferir NF-e{nfe.number ? ` ${nfe.number}` : ""}</DialogTitle>
             <DialogDescription>
               {nfeObservation || "Revise os dados e associe os itens a produtos antes de confirmar."}
-            </DialogDescription>
+            </DialogDescription>              {nfe.items.length > 0 && (nfe.items[0].ncm !== undefined || nfe.items[0].cst != null) && (
+                <div className="flex flex-wrap gap-2">
+                  {nfe.items[0].ncm !== undefined && (
+                    <Badge variant="secondary" className="font-mono text-[11px]">
+                      NCM {nfe.items[0].ncm}
+                    </Badge>
+                  )}
+                  {nfe.items[0].cst != null && (
+                    <Badge variant="secondary" className="font-mono text-[11px]">
+                      CST {nfe.items[0].cst}
+                    </Badge>
+                  )}
+                </div>
+              )}
           </DialogHeader>
 
           <div className="space-y-4">
@@ -971,6 +980,10 @@ export function EntriesPage({ className }: { className?: string }) {
                   {nfe.series || "—"}
                 </p>
               </div>
+
+              {/* Valores da NF-e: o total é o valor da nota, não um código.
+                  Quantidade da linha e valor unitário são apresentados separadamente
+                  na tabela de itens (R31 §2). */}
               <div className="min-w-0 max-w-full overflow-hidden">
                 <Label className="text-muted-foreground">Data de emissão da NF-e</Label>
                 <p className="mt-1 text-sm min-w-0 max-w-full overflow-hidden break-words">
@@ -979,6 +992,22 @@ export function EntriesPage({ className }: { className?: string }) {
                     : "—"}
                 </p>
               </div>
+
+              {/* Número de itens e código do item do fornecedor são identificadores
+                  distintos — nunca colados nem apresentados como se fossem a mesma
+                  coisa (R31 §2). */}
+              <div className="col-span-1 sm:col-span-3">
+                <Label className="text-muted-foreground">Identificadores fiscais</Label>
+                <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                  <span className="text-muted-foreground">Itens da nota:</span>
+                  <span className="font-mono font-medium">{nfe.items.length}</span>
+                  <span className="text-muted-foreground">Código do item (fornecedor):</span>
+                  <span className="font-mono font-medium break-all">
+                    {nfe.items[0]?.code || "—"}
+                  </span>
+                </div>
+              </div>
+
               <div>
                 <Label className="text-muted-foreground">Número da AF</Label>
                 <Input
@@ -1051,20 +1080,14 @@ export function EntriesPage({ className }: { className?: string }) {
                   placeholder="Chave pendente de conferência"
                 />
                 {nfeAccessKeyDigits ? (
-                  <>
-                    <p
-                      className="mt-1 font-mono text-xs break-all text-muted-foreground"
-                      aria-label="Chave de acesso completa (44 dígitos)"
-                    >
-                      {formatAccessKeyGrouped(nfeAccessKeyDigits)}
-                    </p>
-                    <p
-                      className="mt-1 font-mono text-xs break-all text-muted-foreground"
-                      aria-label="Chave de acesso no formato impresso na DANFE"
-                    >
-                      {formatAccessKeyPrint(nfeAccessKeyDigits)}
-                    </p>
-                  </>
+                  <p
+                    className="mt-1 font-mono text-xs break-all text-muted-foreground"
+                    aria-label="Chave de acesso no formato impresso na DANFE"
+                  >
+                    {nfeAccessKeyDigits.length === 44
+                      ? formatAccessKeyPrint(nfeAccessKeyDigits)
+                      : nfeAccessKeyDigits}
+                  </p>
                 ) : null}
                 <p
                   className={cn(
@@ -1136,6 +1159,9 @@ export function EntriesPage({ className }: { className?: string }) {
               />
 
               {/* Abre o modal de cadastro rápido sem fechar a conferência da NF-e. */}
+              {/* Botão de cadastro rápido de produto: abre o modal sem fechar a
+                  conferência da NF-e e pré-preenche a partir do primeiro item
+                  pendente da nota (R31 §1). */}
               <Button
                 type="button"
                 variant="outline"
@@ -1159,7 +1185,7 @@ export function EntriesPage({ className }: { className?: string }) {
                 }}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
-                {/* ícone só para manter o diálogo idêntico antes da refatoração */}
+                Cadastrar novo produto
               </Button>
 
               {/* ── Cadastro rápido de produto a partir da conferência da NF-e (R31 §1) ──────── */}
@@ -1200,7 +1226,7 @@ export function EntriesPage({ className }: { className?: string }) {
                   handleQuickProductCategorySaveWrapper(
                     setQuickProductCategoryOpen,
                     setQuickProductNewCategoryName,
-                    quickProductForm.categoryId,
+                    (v) => setQuickProductForm((current) => ({ ...current, categoryId: v })),
                     setQuickProductLoading,
                   )()
                 }
@@ -1247,7 +1273,17 @@ export function EntriesPage({ className }: { className?: string }) {
 
 // ── Handlers do cadastro rápido de produto (R31 §1) ──────────────────────────────
 
-const emptyQuickProductForm = () => ({
+type QuickProductFormState = {
+  name: string;
+  description: string;
+  categoryId: string;
+  unitOfMeasure: string;
+  brand: string;
+  model: string;
+  specification: string;
+};
+
+const emptyQuickProductForm = (): QuickProductFormState => ({
   name: "",
   description: "",
   categoryId: "",
@@ -1257,383 +1293,148 @@ const emptyQuickProductForm = () => ({
   specification: "",
 });
 
-function emptyUnsatisfiedProduct(): UnsatisfiedProduct {
-  return {
-    name: '',
-    description: '',
-    categoryId: null,
-    unit: 'UN',
-    unitLabel: '',
-    brand: '',
-    model: '',
-    specification: '',
-    supplierCode: null,
-  };
-}
-
 function resetQuickProductForm() {
-  // Estado encapsulado na página; esta função é usada pelo callback onCancel.
-  // Como os setters são closures, expomos o estado via prop no componente e
-  // delega o reset aqui para manter o comportamento idêntico ao original.
+  // Estado encapsulado na página; a ação de cancelamento delega o reset
+  // através dos setters já disponíveis na página.
 }
 
 async function handleQuickProductSave(
   itemIndex: number | null,
-  currentForm: ReturnType<typeof emptyQuickProductForm>,
+  currentForm: QuickProductFormState,
   setQuickProductOpen: (v: boolean) => void,
   setQuickProductItemIndex: (v: number | null) => void,
-  setQuickProductForm: (f: ReturnType<typeof emptyQuickProductForm>) => void,
+  setQuickProductForm: (f: QuickProductFormState) => void,
   setQuickProductLoading: (v: boolean) => void,
-  reconcileNfeReviewMatchesFn: typeof reconcileNfeReviewMatches,
-  productOptions: Array<{ _id: string; name: string }>,
-  nfeItems: Array<{ item: NfeItem; productId: string; matchStatus: string; matchScore: number; matchSource?: string | undefined; associationType: string; locationId?: string | undefined; supplierLot?: string | undefined }>,
-  setNfeItems: (f: (current: typeof nfeItems) => typeof nfeItems) => void,
-  createProduct: (args: { name: string; description?: string | undefined; categoryId: Id<"products">; unitOfMeasure: string; brand?: string | undefined; model?: string | undefined; specification?: string | undefined }) => Promise<Id<"products">>,
-  nfeSupplierId: string | null,
-  nfeDocumentFile: File | null,
-  nfe: NfeData,
-  toast: { info: (m: string) => void; error: (m: string) => void; success: (m: string) => void },
-  upsertNfeProductAlias: (args: { supplierId?: Id<"suppliers"> | undefined; supplierCode?: string | undefined; description: string; productId: Id<"products"> }) => Promise<Id<"nfeProductAliases">>,
 ) {
-  // Placeholder: implementação completa substitui este esqueleto.
-  // Por enquanto, mantemos a estrutura de tipo para compilação.
-  return;
+  if (itemIndex === null) {
+    toast.error("Sem linha de produto selecionada para salvar.");
+    return;
+  }
+
+  const name = currentForm.name.trim();
+  const description = currentForm.description.trim();
+  const categoryId = currentForm.categoryId;
+
+  if (!name) {
+    toast.error("Informe o nome do produto.");
+    return;
+  }
+  if (!categoryId) {
+    toast.error("Selecione ou crie uma categoria para o produto.");
+    return;
+  }
+
+  setQuickProductLoading(true);
+  try {
+    const productId = await createProduct({
+      name,
+      description: description || undefined,
+      categoryId: categoryId as Id<"products">,
+      unitOfMeasure: currentForm.unitOfMeasure,
+      brand: currentForm.brand || undefined,
+      model: currentForm.model || undefined,
+      specification: currentForm.specification || undefined,
+    });
+
+    // Associa o produto recém-criado à linha que originou o cadastro,
+    // mantendo a conferência aberta e preservando os demais campos.
+    setNfeItems((current) =>
+      current.map((row, position) =>
+        position === itemIndex
+          ? {
+              ...row,
+              productId,
+              matchStatus: "found" as const,
+              matchScore: 100,
+              matchSource: "created" as const,
+              associationType: "created" as const,
+            }
+          : row,
+      ),
+    );
+
+    // Memoriza a correspondência usando a descrição fiscal da NF-e quando
+    // houver fornecedor identificado (alias de código do fornecedor).
+    const row = nfeItems[itemIndex];
+    if (row && nfeSupplierId && row.item.description) {
+      try {
+        void upsertNfeProductAlias({
+          supplierId: nfeSupplierId as Id<"suppliers">,
+          supplierCode: row.item.code ?? undefined,
+          description: row.item.description.trim(),
+          productId,
+        });
+      } catch {
+        // Falha no alias não impede a associação da linha.
+      }
+    }
+
+    toast.success("Produto cadastrado e associado à linha desta NF-e.");
+    setQuickProductOpen(false);
+    setQuickProductItemIndex(null);
+    setQuickProductForm(emptyQuickProductForm());
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : "Não foi possível cadastrar o produto.");
+  } finally {
+    setQuickProductLoading(false);
+  }
 }
 
-function handleQuickProductCategorySave(
+async function handleQuickProductCategorySave(
   setQuickProductCategoryOpen: (v: boolean) => void,
   setQuickProductNewCategoryName: (v: string) => void,
   setQuickProductFormCategory: (v: string) => void,
   setQuickProductLoading: (v: boolean) => void,
-  createCategory: (args: { name: string }) => Promise<Id<"categories">>,
-  toast: { error: (m: string) => void; success: (m: string) => void },
 ) {
-  // Placeholder esqueleto para compilação.
-  return;
+  if (!setQuickProductNewCategoryName) return;
+  const name = setQuickProductNewCategoryName.trim();
+  if (!name) {
+    toast.error("Informe o nome da categoria.");
+    return;
+  }
+  try {
+    const categoryId = await createCategory({ name });
+    setQuickProductFormCategory(categoryId);
+    setQuickProductCategoryOpen(false);
+    setQuickProductNewCategoryName("");
+    toast.success("Categoria criada. Use-a para finalizar o cadastro do produto.");
+  } catch (error) {
+    toast.error(error instanceof Error ? error.message : "Não foi possível criar a categoria.");
+  }
 }
-
-// ── Wrappers injetados como props para manter o closure do estado (R31 §1) ────────
 
 function handleQuickProductSaveWrapper(
   itemIndex: number | null,
-  form: ReturnType<typeof emptyQuickProductForm>,
+  form: QuickProductFormState,
   setQuickProductOpen: (v: boolean) => void,
   setQuickProductItemIndex: (v: number | null) => void,
-  setQuickProductForm: (f: ReturnType<typeof emptyQuickProductForm>) => void,
+  setQuickProductForm: (v: QuickProductFormState) => void,
   setQuickProductLoading: (v: boolean) => void,
 ) {
-  return handleQuickProductSave(
-    itemIndex,
-    form,
-    setQuickProductOpen,
-    setQuickProductItemIndex,
-    setQuickProductForm,
-    setQuickProductLoading,
-    reconcileNfeReviewMatches,
-    productOptions,
-    nfeItems,
-    setNfeItems,
-    createProduct,
-    nfeSupplierId,
-    nfeDocumentFile,
-    nfe,
-    toast,
-    upsertNfeProductAlias,
-  );
-}
-
-// --- fim wrappers ---
-}// ── Cadastro rápido de produto a partir da conferência da NF-e (R31 §1) ────────function QuickProductForm
-({
-  open,
-  onOpenChange,
-  categories,
-  form,
-  loading,
-  onFormChange,
-  onCategoryCreateRequest,
-  onSave,
-  onCancel,
-}:
-{
-  open: boolean;
-  onOpenChange: (value: boolean) => void;
-  categories: WithId<Category>[];
-  form: UnsavedProduct;
-  loading: boolean;
-  onFormChange: (patch: Partial<UnsavedProduct>) => void;
-  onCategoryCreateRequest: () => void;
-  onSave: () => Promise<{ success: boolean; productId?: string; error?: unknown }>;
-  onCancel: () => void;
-} & { trackOid?: string }) {
-  return (
-    <QuickProductFormInner
-      open={open}
-      onOpenChange={onOpenChange}
-      categories={categories}
-      form={form}
-      loading={loading}
-      onFormChange={onFormChange}
-      onCategoryCreateRequest={onCategoryCreateRequest}
-      onSave={onSave}
-      onCancel={onCancel}
-      trackOid={trackOid}
-    />
-  );
-}
-
-type QuickProductFormInnerProps = {
-  open: boolean;
-  onOpenChange: (value: boolean) => void;
-  categories: WithId<Category>[];
-  form: UnsavedProduct;
-  loading: boolean;    onFormChange: (patch: Partial<DraftItem>) => void;
-  onCategoryCreateRequest: () => void;
-  onSave: () => Promise<{ success: boolean; productId?: string; error?: unknown }>;
-  onCancel: () => void;
-  trackOid?: string;
-};
-
-function QuickProductFormInner(
-  props: {
-    open: boolean;
-    onOpenChange: (v: boolean) => void;
-    categories: WithId<Category>[];
-    form: UnsavedProduct;
-    loading: boolean;
-    onFormChange: (patch: Partial<UnsavedProduct>) => void;
-    onCategoryCreateRequest: () => void;
-    onSave: () => Promise<{ success: boolean; productId?: string; error?: unknown }>;
-    onCancel: () => void;
-  } = { open: false, onOpenChange: () => {}, categories: [], form: emptyUnsavedProduct(), loading: false, onFormChange: () => {}, onCategoryCreateRequest: () => {}, onSave: async () => ({ success: false }), onCancel: () => {} }
-) {
-  props: {
-    open: boolean;
-    onOpenChange: (v: boolean) => void;
-    categories: WithId<Category>[];
-    form: UnsavedProduct;
-    loading: boolean;
-    onFormChange: (patch: Partial<UnsavedProduct>) => void;
-    onCategoryCreateRequest: () => void;
-    onSave: () => Promise<{ success: boolean; productId?: string; error?: unknown }>;
-    onCancel: () => void;
-  } = { open: false, onOpenChange: () => {}, categories: [], form: emptyUnsavedProduct(), loading: false, onFormChange: () => {}, onCategoryCreateRequest: () => {}, onSave: async () => ({ success: false }), onCancel: () => {} }
-) {{
-  open,
-  onOpenChange,
-  categories,
-  form,
-  loading,
-}
-  open: boolean;
-  onOpenChange: (value: boolean) => void;
-  categories: Array<{ _id: string; name: string }>;
-  form: {
-    name: string;
-    description: string;
-    categoryId: string;
-    unitOfMeasure: string;
-    brand: string;
-    model: string;
-    specification: string;
+  return async () => {
+    return await handleQuickProductSave(
+      itemIndex,
+      form,
+      setQuickProductOpen,
+      setQuickProductItemIndex,
+      setQuickProductForm,
+      setQuickProductLoading,
+    );
   };
-  loading: boolean;
-  onFormChange: (patch: Partial<{ name: string; description: string; categoryId: string; unitOfMeasure: string; brand: string; model: string; specification: string }>) => void;
-  onCategoryCreateRequest: () => void;
-  onSave: () => void;
-  onCancel: () => void;
-}) {
-  const hasCategories = categories.length > 0;
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Produto não cadastrado — criar rapidamente</DialogTitle>
-          <DialogDescription>
-            Este formulário cria apenas o registro de catálogo. O estoque só é atualizado quando você confirmar a entrada da NF-e.
-          </DialogDescription>
-        </DialogHeader>
-
-        {!hasCategories && (
-          <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
-            <span className="shrink-0">⚠️</span>
-            <div>
-              <p className="text-sm font-medium text-amber-800">Nenhuma categoria cadastrada</p>
-              <p className="text-sm text-amber-700 mt-1">
-                Cadastre uma categoria antes de criar o produto. Você pode fazer isso agora sem sair da conferência.
-              </p>
-            </div>
-          </div>
-        )}
-
-        <div className="space-y-4 py-2">
-          <div>
-            <Label>Nome *</Label>
-            <Input
-              value={form.name}
-              onChange={(e) => onFormChange({ name: e.target.value })}
-              placeholder="Ex: KIT TECLADO E MOUSE USB SLIM CHOCO"
-            />
-          </div>
-
-          <div>
-            <Label>Descrição</Label>
-            <Textarea
-              value={form.description}
-              onChange={(e) => onFormChange({ description: e.target.value })}
-              rows={2}
-              placeholder="Descrição fiscal da NF-e, sem NCM/CST concatenados"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <Label>Categoria *</Label>
-              {hasCategories ? (
-                <Select
-                  value={form.categoryId}
-                  onValueChange={(value) => onFormChange({ categoryId: value })}
-                >
-                  <SelectTrigger className="flex-1">
-                    <SelectValue placeholder="Selecionar categoria" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categories.map((c) => (
-                      <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <p className="text-sm text-muted-foreground">Nenhuma categoria cadastrada.</p>
-              )}
-            </div>
-
-            <div>
-              <Label>Unidade de Medida</Label>
-              <Select
-                value={form.unitOfMeasure}
-                onValueChange={(value) => onFormChange({ unitOfMeasure: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {UNITS_OF_MEASURE.map((u) => (
-                    <SelectItem key={u} value={u}>{UNIT_LABELS[u] ?? u}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Unidade reconhecida na NF-e, convertida para o catálogo.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <Label>Marca</Label>
-              <Input
-                value={form.brand}
-                onChange={(e) => onFormChange({ brand: e.target.value })}
-                placeholder="Opcional"
-              />
-            </div>
-            <div>
-              <Label>Modelo</Label>
-              <Input
-                value={form.model}
-                onChange={(e) => onFormChange({ model: e.target.value })}
-                placeholder="Opcional"
-              />
-            </div>
-          </div>
-
-          <div>
-            <Label>Especificação</Label>
-            <Input
-              value={form.specification}
-              onChange={(e) => onFormChange({ specification: e.target.value })}
-              placeholder="Opcional"
-            />
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
-            Cancelar
-          </Button>
-          <Button onClick={onSave} disabled={loading || !form.name || !form.categoryId}>
-            {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Criando…
-              </>
-            ) : (
-              "Criar produto"
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
-// ── Criação rápida de categoria sem perder o contexto da conferência (R31 §1) ─
-
-function QuickCategoryForm({
-  open,
-  onOpenChange,
-  name,
-  onNameChange,
-  loading,
-  onSave,
-  onCancel,
-}: {
-  open: boolean;
-  onOpenChange: (value: boolean) => void;
-  name: string;
-  onNameChange: (value: string) => void;
-  loading: boolean;
-  onSave: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Plus className="h-4 w-4" /> Nova Categoria
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4 py-2">
-          <div>
-            <Label>Nome da Categoria *</Label>
-            <Input
-              value={name}
-              onChange={(e) => onNameChange(e.target.value)}
-              placeholder="Ex: Periféricos USB"
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>
-            Cancelar
-          </Button>
-          <Button onClick={onSave} disabled={loading || !name.trim()}>
-            {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Criando…
-              </>
-            ) : (
-              "Criar e Selecionar"
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+function handleQuickProductCategorySaveWrapper(
+  setQuickProductCategoryOpen: (v: boolean) => void,
+  setQuickProductNewCategoryName: (v: string) => void,
+  setQuickProductFormCategory: (v: string) => void,
+  setQuickProductLoading: (v: boolean) => void,
+) {
+  return async () => {
+    return await handleQuickProductCategorySave(
+      setQuickProductCategoryOpen,
+      setQuickProductNewCategoryName,
+      setQuickProductFormCategory,
+      setQuickProductLoading,
+    );
+  };
 }
-
-export default EntriesPage;

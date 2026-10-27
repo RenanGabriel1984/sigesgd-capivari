@@ -23,7 +23,6 @@ import {
 import { cn } from "@/lib/utils";
 import {
   digitsOnly,
-  formatAccessKeyGrouped,
   formatAccessKeyPrint,
   formatCnpj,
   formatIsoDateBrazilian,
@@ -1041,9 +1040,6 @@ export function DanfeImportDialog({
                       {parsed.accessKey ? (
                         <div className="space-y-1">
                           <p className="text-sm min-w-0 max-w-full overflow-hidden break-words">
-                            {formatAccessKeyGrouped(parsed.accessKey)}
-                          </p>
-                          <p className="text-xs min-w-0 max-w-full overflow-hidden break-words text-muted-foreground">
                             {formatAccessKeyPrint(parsed.accessKey)}
                           </p>
                           <div className="flex flex-wrap items-center gap-2">

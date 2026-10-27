@@ -334,12 +334,12 @@ describe("R23 — 6. Interface: fornecedor/CNPJ separados e textos da chave", ()
     expect(ENTRIES).toContain("CNPJ pendente de conferência");
   });
 
-  it("chave de acesso exibida agrupada com contagem de dígitos e status do DV", () => {
+  it("chave de acesso exibida no formato impresso com contagem de dígitos e status do DV", () => {
     expect(formatAccessKeyGrouped(ACCESS_KEY)).toBe(
       "4226 0922 8163 1500 0144 5500 1000 0029 6715 1544 0064",
     );
-    expect(DIALOG).toContain("formatAccessKeyGrouped(parsed.accessKey)");
+    expect(DIALOG).toContain("formatAccessKeyPrint(parsed.accessKey)");
     expect(DIALOG).toContain("dígito verificador");
-    expect(ENTRIES).toContain("formatAccessKeyGrouped(nfeAccessKeyDigits)");
+    expect(ENTRIES).toContain("formatAccessKeyPrint(nfeAccessKeyDigits)");
   });
 });
