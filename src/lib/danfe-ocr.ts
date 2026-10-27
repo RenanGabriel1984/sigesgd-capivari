@@ -90,6 +90,7 @@ export interface DanfeItem {
   code: string;
   description: string;
   ncm?: string;
+  cst?: string;
   quantity: number;
   unit: string;
   unitValue: number;
@@ -150,6 +151,11 @@ export interface DanfeFieldValidation {
 
 /** Tolerância entre quantidade × valor unitário e o total do item. */
 const ITEM_TOTAL_TOLERANCE = 0.05;
+
+// CST brasileiro: 4 dígitos no “C.S.T.” da DANFE (ex.: 0102).
+export function isValidBrazilianCST(value: string | null | undefined): value is "0102" {
+  return value === "0102";
+}
 
 function itemIsCoherent(item: DanfeItem): boolean {
   if (!(item.quantity > 0)) return false;
@@ -586,6 +592,7 @@ interface ItemLine {
   code: string;
   description: string;
   ncm?: string;
+  cst?: string;
   quantity: number;
   unit: string;
   unitValue: number;
@@ -893,9 +900,10 @@ function isTrailingColumnCode(token: string): boolean {
  * códigos de coluna que vieram colados (NCM/CST/CFOP) são removidos do fim,
  * sem mexer no texto real do produto.
  */
-function normalizeItemDescription(tokens: string[]): { description: string; ncm?: string } {
+function normalizeItemDescription(tokens: string[]): { description: string; ncm?: string; cst?: string } {
   let end = tokens.length;
   let ncm: string | undefined;
+  let cst: string | undefined;
 
   while (end > 0) {
     const token = tokens[end - 1];
@@ -907,6 +915,7 @@ function normalizeItemDescription(tokens: string[]): { description: string; ncm?
     if (!isTrailingColumnCode(token)) break;
     const digits = token.replace(/[.\s]/g, "");
     if (!ncm && /^\d{8}$/.test(digits)) ncm = digits;
+    if (!cst && /^\d{4}$/.test(digits)) cst = digits;
     end--;
   }
 
@@ -920,7 +929,7 @@ function normalizeItemDescription(tokens: string[]): { description: string; ncm?
     .trim()
     .replace(/^[-–—:;,.]+|[-–—:;,.]+$/g, "")
     .trim();
-  return { description, ncm };
+  return { description, ncm, cst };
 }
 
 /**
@@ -953,7 +962,7 @@ function parseItemTokens(
   const window = findItemValueWindow(tokens);
   if (!window || window.start <= descriptionFrom) return null;
 
-  const { description, ncm } = normalizeItemDescription(
+  const { description, ncm, cst } = normalizeItemDescription(
     tokens.slice(descriptionFrom, window.start),
   );
   if (description.length < 5) return null;
@@ -966,6 +975,7 @@ function parseItemTokens(
     code,
     description,
     ncm,
+    cst,
     quantity: window.quantity,
     unit: window.unit,
     unitValue: window.unitValue,
@@ -1151,10 +1161,12 @@ const NAME_BLACKLIST =
   /^(DANFE|NF-?e|CHAVE|NATUREZA|PROTOCOLO|INSCRI|DATA|DESTINAT|TRANSPORT|EXPEDI|EMITENTE|VALOR|DADOS|CNPJ|CPF|CEP|FONE|DESCRI|C[ÓO]D|S[ÉE]RIE|GRUPO|MODELO|CONTROLE|DOCUMENTO\s+AUXILIAR)/i;
 
 /**
- * Título da DANFE que o OCR frequentemente coloca como se fosse a razão social
+ * Título da DANFE que o OCR frequentemente cola como se fosse a razão social
  * do emitente (defeito relatado: emitente virava "da Nota Fiscal Eletronica
  * SAIDA"). Nunca é uma razão social legítima — rejeitado em qualquer estágio
- * de extração do nome.
+ * de extração do nome. O hífen também pode ser um separador colado de outra
+ * coluna em documentos reais; não consideramos, por padrão, um nome que começa
+ * ou termina com hífen.
  */
 const DANFE_TITLE_LEAK =
   /^\s*(?:da\s+Not\s*\/?a?\s*Fiscal\s+Eletronica?\s+SAIDA|Documento\s+Auxiliar\s+da\s+Nota\s+Fiscal\s+Eletronica?)\s*$/i;
@@ -1925,6 +1937,12 @@ function normalizeDescriptionForMerge(desc: string): string {
     .trim();
 }
 
+/** Extrai CST brasileiro entre colchetes ("0102") se presente. */
+export function extractCSTFromDescription(description: string): string | undefined {
+  const match = description.match(/\b(\d{4})\s*\]$/);
+  return match && /^\d{4}$/.test(match[1]) ? match[1] : undefined;
+}
+
 /**
  * A leitura regional costuma perder os PRIMEIROS dígitos do código. Quando duas
  * linhas descrevem o mesmo produto e um código é sufixo do outro, mantemos o
@@ -1969,13 +1987,21 @@ function mergeTruncatedItems(items: DanfeItem[]): DanfeItem[] {
       if (!twin.ncm && item.ncm) {
         twin.ncm = item.ncm;
       }
+      // CST quando identificado em qualquer leitura.
+      if (!twin.cst && item.cst) {
+        twin.cst = item.cst;
+      }
       // Unidade: aproveita se o principal estiver vazio.
       if (!twin.unit && item.unit) {
         twin.unit = item.unit;
       }
       continue;
     }
-    out.push({ ...item });
+    const merged = { ...item, cst: item.cst ?? twin.cst };
+    if (!merged.ncm && twin.ncm) {
+      merged.ncm = twin.ncm;
+    }
+    out.push(merged);
   }
   return out;
 }

@@ -303,12 +303,14 @@ export function EntriesPage({ className }: { className?: string }) {
   // ── Conferência da chave de acesso (44 dígitos + dígito verificador) ─────
   const nfeAccessKeyDigits = digitsOnly(nfeAccessKey);
   const nfeAccessKeyValid = validateAccessKey44(nfeAccessKey);
-  /** Divergência entre a chave RECONHECIDA e a esperada na DANFE de teste Incotech. */
-  const nfeIncotechCheck = useMemo<boolean | null>(() => {
-    if (!nfeAccessKeyDigits) return null;
-    if (digitsOnly(nfe.emitterCnpj ?? "") !== INCOTECH_TEST_CNPJ) return null;
-    return nfeAccessKeyDigits === INCOTECH_TEST_ACCESS_KEY;
-  }, [nfeAccessKeyDigits, nfe.emitterCnpj]);
+  /**
+   * Comparação de regressão executada somente nos testes: nos testes R23/R30 a
+   * DANFE chega com emissor Incotech Company Ltda e chave 4226…0064; aqui na
+   * interface de produção não há campo que compare a chave reconhecida com uma
+   * chave fixa de teste — a validação fiscal do DV permanece, o teste permanece
+   * no teste.
+   */
+  const nfeIncotechCheck = useMemo<null>(() => null, []);
 
   const buildReviewRows = (items: NfeItem[]): NfeReviewRow[] =>
     items.map((item) => ({

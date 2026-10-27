@@ -25,6 +25,7 @@ import {
   digitsOnly,
   formatAccessKeyGrouped,
   formatCnpj,
+  formatIsoDateBrazilian,
 } from "@/lib/br-validators";
 
 import type { DanfeParseResult } from "@/lib/danfe-ocr";
@@ -1032,7 +1033,15 @@ export function DanfeImportDialog({
                   <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                     <DataCell label="Número da NF-e">{parsed.nfeNumber ?? "—"}</DataCell>
                     <DataCell label="Série">{parsed.series ?? "—"}</DataCell>
-                    <DataCell label="Data de emissão">{parsed.emissionDate ?? "—"}</DataCell>
+                    <DataCell label="Data de emissão" mono>
+                      {parsed.emissionDate ? (
+                        <span className="font-mono text-xs break-all">
+                          {formatIsoDateBrazilian(parsed.emissionDate)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </DataCell>
                     <DataCell label="CNPJ do emitente" mono>
                       {parsed.emitterCnpj ?? "—"}
                     </DataCell>
@@ -1073,19 +1082,6 @@ export function DanfeImportDialog({
                               {keyValid ? "válido" : "INVÁLIDO"}
                             </span>
                           </div>
-                          {incotechCheck === true && (
-                            <p className="text-xs text-emerald-700">
-                              Chave reconhecida confere integralmente com a chave esperada da DANFE
-                              de teste Incotech.
-                            </p>
-                          )}
-                          {incotechCheck === false && (
-                            <p className="rounded-md border bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                              Divergência: a chave reconhecida não coincide com a chave esperada da
-                              DANFE de teste Incotech ({formatAccessKeyGrouped(INCOTECH_TEST_ACCESS_KEY)}).
-                              O valor reconhecido foi preservado para conferência manual.
-                            </p>
-                          )}
                         </div>
                       ) : (
                         <span className="text-muted-foreground">Chave pendente de conferência</span>

@@ -78,6 +78,26 @@ export const formatAccessKeyGrouped = (value: string | null | undefined): string
   return groups.join(" ");
 };
 
+/** Formata data ISO (AAAA-MM-DD) para exibição brasileira (DD/MM/AAAA).
+ * Decompõe a string ISO diretamente — nunca interpreta como timestamp —
+ * para evitar variações de dia por fuso/horário. Não converte, apenas formata.
+ */
+export function formatIsoDateBrazilian(value: string | null | undefined): string {
+  if (!value) return "—";
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return value;
+  const [, year, month, day] = match;
+  const isValidDate =
+    year.length === 4 &&
+    month.length === 2 &&
+    day.length === 2 &&
+    Number(month) >= 1 &&
+    Number(month) <= 12 &&
+    Number(day) >= 1 &&
+    Number(day) <= 31;
+  return isValidDate ? `${day}/${month}/${year}` : value;
+}
+
 // ─── Normalização ────────────────────────────────────────────────────────────
 
 /** Normaliza CNPJ para somente dígitos. */
