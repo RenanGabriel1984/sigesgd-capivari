@@ -276,10 +276,8 @@ export function EntriesPage({ className }: { className?: string }) {
   const createCategory = useMutation(api.categories.create);
   const categories = useQuery(api.categories.listActive);
   const upsertNfeProductAlias = useMutation(api.nfeProductAliases.upsert);
-  const products = useQuery(api.products.listActive);
-  const productOptions = (products ?? []) as NfeReviewProduct[];
-  const products = useQuery(api.products.listActive);
-  const productOptions = (products ?? []) as NfeReviewProduct[];
+  const productsQuery = useQuery(api.products.listActive);
+  const productOptions = (productsQuery ?? []) as NfeReviewProduct[];
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -319,6 +317,7 @@ export function EntriesPage({ className }: { className?: string }) {
   const [nfeXmlFile, setNfeXmlFile] = useState<File | null>(null);
 
   const supplierOptions = suppliers ?? [];
+  const products = productsQuery ?? [];
   const productOptions = (products ?? []) as NfeReviewProduct[];
   const locationOptions = locations ?? [];
   const nfeSupplier = supplierOptions.find((s) => s._id === nfeSupplierId) ?? null;
@@ -499,6 +498,34 @@ export function EntriesPage({ className }: { className?: string }) {
       return;
     }
     toast.info("Associações conferidas — revise os identificadores fiscais e confirme a entrada.");
+  };
+
+  const handleQuickProductSaveWrapperSafe = (itemIndex: number | null, form: QuickProductFormState) => {
+    return () => {
+      handleQuickProductSaveWrapper(
+        itemIndex,
+        form,
+        setQuickProductOpen,
+        setQuickProductItemIndex,
+        setQuickProductForm,
+        setQuickProductLoading,
+      );
+    };
+  };
+
+  const handleQuickProductCategorySaveWrapperSafe = (categoryName: string) => {
+    return async () => {
+      const name = categoryName.trim();
+      if (!name) {
+        toast.error("Informe o nome da categoria.");
+        return;
+      }
+      const categoryId = await createCategory({ name });
+      setQuickProductFormCategory(categoryId);
+      setQuickProductCategoryOpen(false);
+      setQuickProductNewCategoryName("");
+      toast.success("Categoria criada. Use-a para finalizar o cadastro do produto.");
+    };
   };
 
   const handleConfirmImport = async () => {
@@ -1198,13 +1225,9 @@ export function EntriesPage({ className }: { className?: string }) {
                 onCategoryCreateRequest={() => setQuickProductCategoryOpen(true)}
                 onCancel={() => setQuickProductOpen(false)}
                 onSave={() =>
-                  handleQuickProductSaveWrapper(
+                  handleQuickProductSaveWrapperSafe(
                     quickProductItemIndex,
                     quickProductForm,
-                    setQuickProductOpen,
-                    setQuickProductItemIndex,
-                    setQuickProductForm,
-                    setQuickProductLoading,
                   )
                 }
                 onCancel={() => {
@@ -1222,12 +1245,7 @@ export function EntriesPage({ className }: { className?: string }) {
                 onNameChange={setQuickProductNewCategoryName}
                 loading={quickProductLoading}
                 onSave={() =>
-                  handleQuickProductCategorySaveWrapper(
-                    setQuickProductCategoryOpen,
-                    setQuickProductNewCategoryName,
-                    (v) => setQuickProductForm((current) => ({ ...current, categoryId: v })),
-                    setQuickProductLoading,
-                  )()
+                  handleQuickProductCategorySaveWrapperSafe(quickProductNewCategoryName)
                 }
                 onCancel={() => {
                   setQuickProductCategoryOpen(false);
@@ -1246,8 +1264,7 @@ export function EntriesPage({ className }: { className?: string }) {
          </Button>
          <Button onClick={() => void handleConfirmImport()}>Confirmar entrada</Button>
        </DialogFooter>
-     </DialogContent>
-   </Dialog>
+     </DialogContent>      </Dialog>
 
       <SupplierForm
         open={supplierFormOpen}
@@ -1609,7 +1626,6 @@ async function handleQuickProductCategorySave(
     toast.error("Informe o nome da categoria.");
     return;
   }
-  const name = newName;
   try {
     const categoryId = await createCategory({ name });
     setQuickProductFormCategory(categoryId);
@@ -1624,8 +1640,6 @@ async function handleQuickProductCategorySave(
     setQuickProductLoading(false);
   }
 }
-
-function handleQuickProductSaveWrapper(
 
 function handleQuickProductSaveWrapper(
   itemIndex: number | null,
