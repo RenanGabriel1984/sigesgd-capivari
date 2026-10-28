@@ -148,7 +148,7 @@ export default function EntriesPage() {
         await upsertNfeProductAlias({
           supplierId: "fornecedor-1",
           supplierCode: nfeItems[index]?.item.code ?? "",
-          normalizedDescription: name.toLowerCase(),
+          description: name,
           productId,
         }).catch(() => {});
       }
@@ -228,7 +228,7 @@ export default function EntriesPage() {
           matchScore: 0,
           associationType: "automatic" as const,
         })),
-      );
+      ) as unknown as void;
       setNfeSupplier(nfeData.supplier);
       setNfeOpen(true);
     },
