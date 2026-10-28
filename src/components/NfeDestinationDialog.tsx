@@ -77,9 +77,9 @@ export function NfeDestinationDialog({
           </p>
 
           <dl className="rounded-lg border bg-muted/30 p-3 space-y-1 text-sm">
-            <div className="flex flex-wrap gap-x-2">
+            <div className="flex flex-wrap gap-x-2 text-sm break-words">
               <dt className="text-muted-foreground">Fornecedor</dt>
-              <dd className="font-medium break-words">{supplierName ?? 'Não informado'}</dd>
+              <dd className="font-medium">{supplierName ?? 'Não informado'}</dd>
             </div>
             {supplierCnpj && (
               <div className="flex flex-wrap gap-x-2">
