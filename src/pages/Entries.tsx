@@ -910,8 +910,7 @@ export function EntriesPage({ className }: { className?: string }) {
           setCreateOpen(value);
           if (!value) resetCreateForm();
         }}
-      >
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+      ><DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Nova Entrada</DialogTitle>
             <DialogDescription>
@@ -1079,21 +1078,22 @@ export function EntriesPage({ className }: { className?: string }) {
             <DialogTitle>Conferir NF-e{nfe.number ? ` ${nfe.number}` : ""}</DialogTitle>
             <DialogDescription>
               {nfeObservation || "Revise os dados e associe os itens a produtos antes de confirmar."}
-            </DialogDescription>              {nfe.items.length > 0 && (nfe.items[0].ncm !== undefined || nfe.items[0].cst != null) && (
-                <div className="flex flex-wrap gap-2">
-                  {nfe.items[0].ncm !== undefined && (
-                    <Badge variant="secondary" className="font-mono text-[11px]">
-                      NCM {nfe.items[0].ncm}
-                    </Badge>
-                  )}
-                  {nfe.items[0].cst != null && (
-                    <Badge variant="secondary" className="font-mono text-[11px]">
-                      CST {nfe.items[0].cst}
-                    </Badge>
-                  )}
-                </div>
-              )}
+            </DialogDescription>
           </DialogHeader>
+          {nfe.items.length > 0 && (nfe.items[0].ncm !== undefined || nfe.items[0].cst != null) && (
+            <div className="flex flex-wrap gap-2">
+              {nfe.items[0].ncm !== undefined && (
+                <Badge variant="secondary" className="font-mono text-[11px]">
+                  NCM {nfe.items[0].ncm}
+                </Badge>
+              )}
+              {nfe.items[0].cst != null && (
+                <Badge variant="secondary" className="font-mono text-[11px]">
+                  CST {nfe.items[0].cst}
+                </Badge>
+              )}
+            </div>
+          )}
 
           <div className="space-y-4">
             <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
@@ -1131,8 +1131,6 @@ export function EntriesPage({ className }: { className?: string }) {
                   coisa (R31 §2). */}
               <div className="col-span-1 sm:col-span-3">
                 <Label className="text-muted-foreground">Identificadores fiscais</Label>
-                {/* Rótulo e valor em BLOCOS separados (rótulo acima, valor
-                    abaixo) — nunca colados na mesma linha (R31.3 §3). */}
                 <div className="mt-1 grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="min-w-0 max-w-full overflow-hidden">
                     <span className="text-xs text-muted-foreground">
