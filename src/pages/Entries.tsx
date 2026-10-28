@@ -145,12 +145,7 @@ export default function EntriesPage() {
       );
 
       if (nfeSupplier && name) {
-        await upsertNfeProductAlias({
-          supplierId: "fornecedor-1",
-          supplierCode: nfeItems[index]?.item.code ?? "",
-          description: name,
-          productId,
-        }).catch(() => {});
+
       }
 
       setQuickProductOpen(false);
