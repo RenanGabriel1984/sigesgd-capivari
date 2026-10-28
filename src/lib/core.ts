@@ -1,1 +1,1 @@
-function foo(){const x=1;return x}
+export function foo(){const x=1;return x}

@@ -76,36 +76,36 @@ export function NfeDestinationDialog({
             Confira o destino antes de registrar a entrada. O estoque só é alterado depois desta confirmação.
           </p>
 
-          <div className="rounded-lg border bg-muted/30 p-3 space-y-1 text-sm">
+          <dl className="rounded-lg border bg-muted/30 p-3 space-y-1 text-sm">
             <div className="flex flex-wrap gap-x-2">
-              <span className="text-muted-foreground">Fornecedor identificado:</span>
-              <span className="font-medium break-words">{supplierName ?? "Não informado"}</span>
+              <dt className="text-muted-foreground">Fornecedor</dt>
+              <dd className="font-medium break-words">{supplierName ?? 'Não informado'}</dd>
             </div>
             {supplierCnpj && (
               <div className="flex flex-wrap gap-x-2">
-                <span className="text-muted-foreground">CNPJ:</span>
-                <span className="font-mono text-xs sm:text-sm">{formatCnpj(supplierCnpj)}</span>
+                <dt className="text-muted-foreground">CNPJ</dt>
+                <dd className="font-mono text-xs sm:text-sm">{formatCnpj(supplierCnpj)}</dd>
               </div>
             )}
             {invoiceNumber && (
               <div className="flex flex-wrap gap-x-2">
-                <span className="text-muted-foreground">NF:</span>
-                <span className="font-mono">{invoiceNumber}</span>
+                <dt className="text-muted-foreground">NF-e</dt>
+                <dd className="font-mono">{invoiceNumber}</dd>
               </div>
             )}
             {invoiceDate && (
               <div className="flex flex-wrap gap-x-2">
-                <span className="text-muted-foreground">Data de emissão da NF-e:</span>
-                <span className="font-mono">{invoiceDate}</span>
+                <dt className="text-muted-foreground">Data de emissão</dt>
+                <dd className="font-mono">{invoiceDate}</dd>
               </div>
             )}
-            {typeof itemCount === "number" && (
+            {typeof itemCount === 'number' && (
               <div className="flex flex-wrap gap-x-2">
-                <span className="text-muted-foreground">Itens conferidos:</span>
-                <span className="font-medium">{itemCount}</span>
+                <dt className="text-muted-foreground">Itens</dt>
+                <dd className="font-medium">{itemCount}</dd>
               </div>
             )}
-          </div>
+          </dl>
 
           <div>
             <Label className="text-xs">Tipo de material *</Label>
