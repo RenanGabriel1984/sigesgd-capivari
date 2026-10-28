@@ -276,8 +276,10 @@ export function EntriesPage({ className }: { className?: string }) {
   const createCategory = useMutation(api.categories.create);
   const categories = useQuery(api.categories.listActive);
   const upsertNfeProductAlias = useMutation(api.nfeProductAliases.upsert);
+  const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
+  const createEntry = useMutation(api.entries.create);
+  const confirmEntry = useMutation(api.entries.confirm);
   const productsQuery = useQuery(api.products.listActive);
-  const productOptions = (productsQuery ?? []) as NfeReviewProduct[];
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -500,32 +502,104 @@ export function EntriesPage({ className }: { className?: string }) {
     toast.info("Associações conferidas — revise os identificadores fiscais e confirme a entrada.");
   };
 
-  const handleQuickProductSaveWrapperSafe = (itemIndex: number | null, form: QuickProductFormState) => {
-    return () => {
-      handleQuickProductSaveWrapper(
-        itemIndex,
-        form,
-        setQuickProductOpen,
-        setQuickProductItemIndex,
-        setQuickProductForm,
-        setQuickProductLoading,
+  /**
+   * Salva o cadastro rápido e associa o produto novo à linha que originou o
+   * formulário, mantendo a conferência da NF-e aberta (R31 §1).
+   * Cria SOMENTE catálogo — nenhum estoque é afetado até confirmar a entrada.
+   */
+  const handleQuickProductSave = async () => {
+    if (quickProductItemIndex === null) {
+      toast.error("Sem linha de produto selecionada para salvar.");
+      return;
+    }
+    const name = quickProductForm.name.trim();
+    const description = quickProductForm.description.trim();
+    if (!name) {
+      toast.error("Informe o nome do produto.");
+      return;
+    }
+    if (!quickProductForm.categoryId) {
+      toast.error("Selecione ou crie uma categoria para o produto.");
+      return;
+    }
+
+    setQuickProductLoading(true);
+    try {
+      const productId = await createProduct({
+        name,
+        description: description || undefined,
+        categoryId: quickProductForm.categoryId as Id<"categories">,
+        unitOfMeasure: quickProductForm.unitOfMeasure,
+        brand: quickProductForm.brand || undefined,
+        model: quickProductForm.model || undefined,
+        specification: quickProductForm.specification || undefined,
+        minimumStock: 0,
+        idealStock: 0,
+        maximumStock: 0,
+      });
+
+      const itemIndex = quickProductItemIndex;
+      setNfeItems((current) =>
+        current.map((row, position) =>
+          position === itemIndex
+            ? {
+                ...row,
+                productId,
+                matchStatus: "found" as const,
+                matchScore: 100,
+                matchSource: "new_product" as const,
+                associationType: "created" as const,
+              }
+            : row,
+        ),
       );
-    };
+
+      // Memoriza a associação fornecedor/código → produto nas próximas
+      // importações. Best-effort: falha aqui não desfaz a associação da linha.
+      const row = nfeItems[itemIndex];
+      if (row && nfeSupplierId && row.item.description) {
+        try {
+          void upsertNfeProductAlias({
+            supplierId: nfeSupplierId as Id<"suppliers">,
+            supplierCode: row.item.code || undefined,
+            description: row.item.description.trim(),
+            productId,
+          });
+        } catch {
+          // alias é memorização, não vínculo fiscal
+        }
+      }
+
+      toast.success("Produto cadastrado e associado à linha desta NF-e.");
+      setQuickProductOpen(false);
+      setQuickProductItemIndex(null);
+      setQuickProductForm(emptyQuickProductForm());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível cadastrar o produto.");
+    } finally {
+      setQuickProductLoading(false);
+    }
   };
 
-  const handleQuickProductCategorySaveWrapperSafe = (categoryName: string) => {
-    return async () => {
-      const name = categoryName.trim();
-      if (!name) {
-        toast.error("Informe o nome da categoria.");
-        return;
-      }
+  /** Cria a categoria sem fechar a conferência e pré-seleciona no formulário. */
+  const handleQuickProductCategorySave = async () => {
+    const name = quickProductNewCategoryName.trim();
+    if (!name) {
+      toast.error("Informe o nome da categoria.");
+      return;
+    }
+    setQuickProductLoading(true);
+    try {
       const categoryId = await createCategory({ name });
-      setQuickProductFormCategory(categoryId);
+      setQuickProductForm((current) => ({ ...current, categoryId }));
       setQuickProductCategoryOpen(false);
       setQuickProductNewCategoryName("");
       toast.success("Categoria criada. Use-a para finalizar o cadastro do produto.");
-    };
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível criar a categoria.");
+    } finally {
+      setQuickProductLoading(false);
+    }
   };
 
   const handleConfirmImport = async () => {
@@ -1223,18 +1297,12 @@ export function EntriesPage({ className }: { className?: string }) {
                   setQuickProductForm((current) => ({ ...current, ...patch }))
                 }
                 onCategoryCreateRequest={() => setQuickProductCategoryOpen(true)}
-                onCancel={() => setQuickProductOpen(false)}
-                onSave={() =>
-                  handleQuickProductSaveWrapperSafe(
-                    quickProductItemIndex,
-                    quickProductForm,
-                  )
-                }
                 onCancel={() => {
                   setQuickProductOpen(false);
                   setQuickProductItemIndex(null);
-                  resetQuickProductForm();
+                  setQuickProductForm(emptyQuickProductForm());
                 }}
+                onSave={() => void handleQuickProductSave()}
               />
 
               {/* ── Criação rápida de categoria sem perder o contexto da conferência (R31 §1) ─ */}
@@ -1244,9 +1312,7 @@ export function EntriesPage({ className }: { className?: string }) {
                 name={quickProductNewCategoryName}
                 onNameChange={setQuickProductNewCategoryName}
                 loading={quickProductLoading}
-                onSave={() =>
-                  handleQuickProductCategorySaveWrapperSafe(quickProductNewCategoryName)
-                }
+                onSave={() => void handleQuickProductCategorySave()}
                 onCancel={() => {
                   setQuickProductCategoryOpen(false);
                   setQuickProductNewCategoryName("");
@@ -1308,11 +1374,6 @@ const emptyQuickProductForm = (): QuickProductFormState => ({
   model: "",
   specification: "",
 });
-
-function resetQuickProductForm() {
-  // Estado encapsulado na página; a ação de cancelamento delega o reset
-  // através dos setters já disponíveis na página.
-}
 
 function QuickProductForm({
   open,
@@ -1527,152 +1588,4 @@ function QuickCategoryForm({
   );
 }
 
-async function handleQuickProductSave(
-  itemIndex: number | null,
-  currentForm: QuickProductFormState,
-  setQuickProductOpen: (v: boolean) => void,
-  setQuickProductItemIndex: (v: number | null) => void,
-  setQuickProductForm: (f: QuickProductFormState) => void,
-  setQuickProductLoading: (v: boolean) => void,
-) {
-  if (itemIndex === null) {
-    toast.error("Sem linha de produto selecionada para salvar.");
-    return;
-  }
-
-  const name = currentForm.name.trim();
-  const description = currentForm.description.trim();
-  const categoryId = currentForm.categoryId;
-
-  if (!name) {
-    toast.error("Informe o nome do produto.");
-    return;
-  }
-  if (!categoryId) {
-    toast.error("Selecione ou crie uma categoria para o produto.");
-    return;
-  }
-
-  setQuickProductLoading(true);
-  try {
-    const productId = await createProduct({
-      name,
-      description: description || undefined,
-      categoryId: categoryId as Id<"products">,
-      unitOfMeasure: currentForm.unitOfMeasure,
-      brand: currentForm.brand || undefined,
-      model: currentForm.model || undefined,
-      specification: currentForm.specification || undefined,
-    });
-
-    // Associa o produto recém-criado à linha que originou o cadastro,
-    // mantendo a conferência aberta e preservando os demais campos.
-    setNfeItems((current) =>
-      current.map((row, position) =>
-        position === itemIndex
-          ? {
-              ...row,
-              productId,
-              matchStatus: "found" as const,
-              matchScore: 100,
-              matchSource: "created" as const,
-              associationType: "created" as const,
-            }
-          : row,
-      ),
-    );
-
-    // Memoriza a correspondência usando a descrição fiscal da NF-e quando
-    // houver fornecedor identificado (alias de código do fornecedor).
-    const row = nfeItems[itemIndex];
-    if (row && nfeSupplierId && row.item.description) {
-      try {
-        void upsertNfeProductAlias({
-          supplierId: nfeSupplierId as Id<"suppliers">,
-          supplierCode: row.item.code ?? undefined,
-          description: row.item.description.trim(),
-          productId,
-        });
-      } catch {
-        // Falha no alias não impede a associação da linha.
-      }
-    }
-
-    toast.success("Produto cadastrado e associado à linha desta NF-e.");
-    setQuickProductOpen(false);
-    setQuickProductItemIndex(null);
-    setQuickProductForm(emptyQuickProductForm());
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : "Não foi possível cadastrar o produto.");
-  } finally {
-    setQuickProductLoading(false);
-  }
-}
-
-async function handleQuickProductCategorySave(
-  setQuickProductCategoryOpen: (v: boolean) => void,
-  setQuickProductNewCategoryName: (v: string) => void,
-  setQuickProductFormCategory: (v: string) => void,
-  setQuickProductLoading: (v: boolean) => void,
-) {
-  if (!setQuickProductNewCategoryName) return;
-  const name =
-    typeof setQuickProductNewCategoryName === "string"
-      ? setQuickProductNewCategoryName.trim()
-      : typeof setQuickProductNewCategoryName === "function"
-        ? ""
-        : "";
-  if (!name) {
-    toast.error("Informe o nome da categoria.");
-    return;
-  }
-  try {
-    const categoryId = await createCategory({ name });
-    setQuickProductFormCategory(categoryId);
-    setQuickProductCategoryOpen(false);
-    if (typeof setQuickProductNewCategoryName === "function") {
-      setQuickProductNewCategoryName("");
-    }
-    toast.success("Categoria criada. Use-a para finalizar o cadastro do produto.");
-  } catch (error) {
-    toast.error(error instanceof Error ? error.message : "Não foi possível criar a categoria.");
-  } finally {
-    setQuickProductLoading(false);
-  }
-}
-
-function handleQuickProductSaveWrapper(
-  itemIndex: number | null,
-  form: QuickProductFormState,
-  setQuickProductOpen: (v: boolean) => void,
-  setQuickProductItemIndex: (v: number | null) => void,
-  setQuickProductForm: (v: QuickProductFormState) => void,
-  setQuickProductLoading: (v: boolean) => void,
-) {
-  return async () => {
-    return await handleQuickProductSave(
-      itemIndex,
-      form,
-      setQuickProductOpen,
-      setQuickProductItemIndex,
-      setQuickProductForm,
-      setQuickProductLoading,
-    );
-  };
-}
-
-function handleQuickProductCategorySaveWrapper(
-  setQuickProductCategoryOpen: (v: boolean) => void,
-  setQuickProductNewCategoryName: (v: string) => void,
-  setQuickProductFormCategory: (v: string) => void,
-  setQuickProductLoading: (v: boolean) => void,
-) {
-  return async () => {
-    return await handleQuickProductCategorySave(
-      setQuickProductCategoryOpen,
-      setQuickProductNewCategoryName,
-      setQuickProductFormCategory,
-      setQuickProductLoading,
-    );
-  };
-}
+export default EntriesPage;
