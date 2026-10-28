@@ -74,6 +74,12 @@ export type ProductForMatch = {
   specification?: string | null;
 };
 
+export type Category = {
+  _id: string;
+  name: string;
+  createdAt?: Date;
+};
+
 export type ProductAliasForMatch = {
   _id: string;
   supplierId?: string | null;
