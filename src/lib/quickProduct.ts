@@ -130,6 +130,15 @@ export function associateQuickProduct<
 }
 
 /**
+ * Snapshot das linhas no momento da abertura do formulário. Cancelar
+ * restaura exatamente este estado — nenhuma linha é alterada como efeito
+ * colateral de abrir/fechar o cadastro rápido (R31.3 §1).
+ */
+export function snapshotReviewRows<T>(rows: readonly T[]): T[] {
+  return [...rows];
+}
+
+/**
  * Alias (memória de correspondência fornecedor/código → produto) só é
  * memorizado quando há FORNECEDOR IDENTIFICADO e descrição utilizável.
  * A ausência de alias nunca impede a associação da linha atual.

@@ -1092,31 +1092,46 @@ export function DanfeImportDialog({
                       Nenhum item identificado automaticamente — informe os itens na conferência.
                     </p>
                   ) : (
-                    <ul className="space-y-1">
+                    <ul className="space-y-2">
                       {parsed.items.map((item, index) => (
                         <li
                           key={index}
-                          className="text-sm min-w-0 max-w-full overflow-hidden break-words"
+                          className="min-w-0 max-w-full overflow-hidden rounded-md border border-border/40 bg-muted/20 px-3 py-2"
                         >
-                          <span className="font-mono text-xs text-muted-foreground">
-                            {item.code}
-                          </span>{" "}
-                          {item.description}
-                          {(item.ncm || item.cst) && (
-                            <span className="ml-1 font-mono text-[11px] text-muted-foreground">
-                              {[
-                                item.ncm ? `NCM ${item.ncm}` : null,
-                                item.cst ? `CST ${item.cst}` : null,
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
+                          {/* Código do fornecedor, descrição e identificadores
+                              fiscais em ELEMENTOS DISTINTOS com espaçamento
+                              explícito — nunca colados (R31.3 §3). */}
+                          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                              Cód. fornecedor {item.code}
                             </span>
+                            <span className="text-sm min-w-0 max-w-full break-words">
+                              {item.description}
+                            </span>
+                          </div>
+                          {(item.ncm || item.cst) && (
+                            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                              {item.ncm ? (
+                                <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                                  NCM {item.ncm}
+                                </span>
+                              ) : null}
+                              {item.cst ? (
+                                <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                                  CST {item.cst}
+                                </span>
+                              ) : null}
+                            </div>
                           )}
-                          <span className="text-muted-foreground">
-                            {" — "}
-                            {item.quantity} {item.unit} × {formatCurrencyStable(item.unitValue)} ={" "}
-                            {formatCurrencyStable(item.totalValue)}
-                          </span>
+                          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                            <span>Qtd. {item.quantity} {item.unit}</span>
+                            <span>
+                              Unitário {formatCurrencyStable(item.unitValue)}
+                            </span>
+                            <span>
+                              Total {formatCurrencyStable(item.totalValue)}
+                            </span>
+                          </div>
                         </li>
                       ))}
                     </ul>

@@ -189,9 +189,12 @@ describe("R30 §4 — reconciliação das duas leituras reais com CST separado",
     );
     expect(review).toContain("NCM {review.item.ncm}");
     expect(review).toContain("CST {review.item.cst}");
-    // NCM/CST nunca são misturados na descrição na exibição do diálogo.
-    expect(DIALOG).toContain("item.ncm ? `NCM ${item.ncm}` : null");
-    expect(DIALOG).toContain("item.cst ? `CST ${item.cst}` : null");
+    // NCM/CST nunca são misturados na descrição; na prévia do diálogo cada
+    // identificador vive em seu próprio elemento (R31.3 §3 substituiu o
+    // join colado por elementos separados com espaçamento explícito).
+    expect(DIALOG).toContain("NCM {item.ncm}");
+    expect(DIALOG).toContain("CST {item.cst}");
+    expect(DIALOG).not.toContain('join(" · ")');
   });
 });
 

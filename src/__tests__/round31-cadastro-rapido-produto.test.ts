@@ -321,9 +321,10 @@ describe("R31 §1/§3 — estrutura final e apresentação", () => {
       ENTRIES.indexOf("/** Cria a categoria sem fechar a conferência"),
     );
     expect(quickSaveBody).not.toContain("setNfeOpen");
-    // Cancelar também preserva a conferência e os dados da NF-e.
-    const cancelIdx = ENTRIES.indexOf("onCancel={() => {\n                  setQuickProductOpen(false);");
-    expect(cancelIdx).toBeGreaterThan(-1);
+    // Cancelar também preserva a conferência e os dados da NF-e: passa por
+    // cancelQuickProduct, que restaura o snapshot sem tocar em setNfeOpen.
+    expect(ENTRIES).toContain("onCancel={cancelQuickProduct}");
+    expect(ENTRIES).toContain("setNfeItems(quickProductSnapshot)");
     expect(quickSaveBody).not.toContain("setNfeItems([])");
   });
 

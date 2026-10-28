@@ -1,5 +1,5 @@
 "use client";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -83,6 +83,7 @@ import {
   emptyQuickProductForm,
   quickProductPrefill,
   shouldUpsertNfeAlias,
+  snapshotReviewRows,
   validateQuickProductForm,
   type QuickProductFormState,
 } from "@/lib/quickProduct";
@@ -279,6 +280,11 @@ export function EntriesPage({ className }: { className?: string }) {
   const [quickProductLoading, setQuickProductLoading] = useState(false);
   const [quickProductCategoryOpen, setQuickProductCategoryOpen] = useState(false);
   const [quickProductNewCategoryName, setQuickProductNewCategoryName] = useState("");
+  // Snapshot das linhas no instante da abertura do formulário: cancelar
+  // restaura exatamente o estado anterior, sem efeitos colaterais (R31.3 §1).
+  const [quickProductSnapshot, setQuickProductSnapshot] = useState<
+    NfeReviewRow[] | null
+  >(null);
 
   const createProduct = useMutation(api.products.create);
   const createCategory = useMutation(api.categories.create);
@@ -328,7 +334,13 @@ export function EntriesPage({ className }: { className?: string }) {
 
   const supplierOptions = suppliers ?? [];
   const products = productsQuery ?? [];
-  const productOptions = (products ?? []) as NfeReviewProduct[];
+  // Memoizado: um array novo a cada render faria o useEffect de rematch
+  // reexecutar sem necessidade, recalculando associações de linhas pendentes
+  // mesmo quando nada mudou no catálogo (causa-colateral observada na R31.3).
+  const productOptions = useMemo(
+    () => (products ?? []) as NfeReviewProduct[],
+    [products],
+  );
   const locationOptions = locations ?? [];
   const nfeSupplier = supplierOptions.find((s) => s._id === nfeSupplierId) ?? null;
 
@@ -520,7 +532,22 @@ export function EntriesPage({ className }: { className?: string }) {
     if (!row) return;
     setQuickProductForm(quickProductPrefill(row.item));
     setQuickProductItemIndex(index);
+    setQuickProductSnapshot(snapshotReviewRows(nfeItems));
     setQuickProductOpen(true);
+  };
+
+  /**
+   * Cancela o cadastro rápido: NENHUMA criação ocorre e o estado de
+   * associação de todas as linhas volta ao momento imediatamente anterior
+   * à abertura do formulário (R31.3 §1 — inclusive quando o catálogo ou os
+   * aliases terminaram de carregar enquanto o modal estava aberto).
+   */
+  const cancelQuickProduct = () => {
+    setQuickProductOpen(false);
+    setQuickProductItemIndex(null);
+    setQuickProductForm(emptyQuickProductForm());
+    if (quickProductSnapshot) setNfeItems(quickProductSnapshot);
+    setQuickProductSnapshot(null);
   };
 
   /**
@@ -578,6 +605,8 @@ export function EntriesPage({ className }: { className?: string }) {
       setQuickProductOpen(false);
       setQuickProductItemIndex(null);
       setQuickProductForm(emptyQuickProductForm());
+      // Sucesso: descarta o snapshot — a associação nova fica de fato.
+      setQuickProductSnapshot(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Não foi possível cadastrar o produto.");
     } finally {
@@ -1102,13 +1131,23 @@ export function EntriesPage({ className }: { className?: string }) {
                   coisa (R31 §2). */}
               <div className="col-span-1 sm:col-span-3">
                 <Label className="text-muted-foreground">Identificadores fiscais</Label>
-                <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                  <span className="text-muted-foreground">Itens da nota:</span>
-                  <span className="font-mono font-medium">{nfe.items.length}</span>
-                  <span className="text-muted-foreground">Código do item (fornecedor):</span>
-                  <span className="font-mono font-medium break-all">
-                    {nfe.items[0]?.code || "—"}
-                  </span>
+                {/* Rótulo e valor em BLOCOS separados (rótulo acima, valor
+                    abaixo) — nunca colados na mesma linha (R31.3 §3). */}
+                <div className="mt-1 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="min-w-0 max-w-full overflow-hidden">
+                    <span className="text-xs text-muted-foreground">
+                      Itens da nota:
+                    </span>
+                    <p className="font-mono font-medium">{nfe.items.length}</p>
+                  </div>
+                  <div className="min-w-0 max-w-full overflow-hidden">
+                    <span className="text-xs text-muted-foreground">
+                      Código do item (fornecedor):
+                    </span>
+                    <p className="font-mono font-medium break-all">
+                      {nfe.items[0]?.code || "—"}
+                    </p>
+                  </div>
                 </div>
               </div>
 
@@ -1282,7 +1321,10 @@ export function EntriesPage({ className }: { className?: string }) {
               {/* ── Cadastro rápido de produto a partir da conferência da NF-e (R31 §1) ──────── */}
               <QuickProductForm
                 open={quickProductOpen}
-                onOpenChange={setQuickProductOpen}
+                onOpenChange={(value) => {
+                  if (value) setQuickProductOpen(true);
+                  else cancelQuickProduct();
+                }}
                 categories={categories ?? []}
                 form={quickProductForm}
                 loading={quickProductLoading}
@@ -1290,11 +1332,7 @@ export function EntriesPage({ className }: { className?: string }) {
                   setQuickProductForm((current) => ({ ...current, ...patch }))
                 }
                 onCategoryCreateRequest={() => setQuickProductCategoryOpen(true)}
-                onCancel={() => {
-                  setQuickProductOpen(false);
-                  setQuickProductItemIndex(null);
-                  setQuickProductForm(emptyQuickProductForm());
-                }}
+                onCancel={cancelQuickProduct}
                 onSave={() => void handleQuickProductSave()}
               />
 
