@@ -52,8 +52,8 @@ export interface NfeReviewTableProps {
   locations?: Array<{ _id: string; name: string }>;
   /** Atualiza UMA linha (associação manual, lote, local, quantidade pendente). */
   onUpdate: (index: number, patch: Partial<NfeReviewRow>) => void;
-  /** Abre o cadastro de produto para o item pendente. */
-  onNewProduct?: () => void;
+  /** Abre o cadastro de produto para a LINHA indicada (índice do item). */
+  onNewProduct?: (index: number) => void;
   /** Avança para a próxima etapa (destino da NF-e). */
   onContinue?: () => void;
   /** Origem dos dados lidos (XML ou DANFE/OCR) — apenas informativo. */
@@ -276,7 +276,12 @@ export function NfeReviewTable({
 
                   <div className="min-w-0 max-w-full overflow-hidden flex items-end gap-2">
                     {onNewProduct && (
-                      <Button variant="outline" size="sm" className="h-8" onClick={onNewProduct}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8"
+                        onClick={() => onNewProduct(index)}
+                      >
                         Cadastrar novo produto
                       </Button>
                     )}

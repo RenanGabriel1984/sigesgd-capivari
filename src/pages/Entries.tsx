@@ -73,11 +73,19 @@ import {
   canContinueNfeReview,
   findDuplicateEntry,
   findSupplierMatch,
-  mapNfeUnit,
   parseNfeXml,
   reconcileNfeReviewMatches,
-  extractNfeProductHints,
 } from "@/lib/nfe";
+// Cadastro rápido de produto (R31 §1) — helpers puros, testados em
+// src/__tests__/round31-cadastro-rapido-produto.test.ts.
+import {
+  associateQuickProduct,
+  emptyQuickProductForm,
+  quickProductPrefill,
+  shouldUpsertNfeAlias,
+  validateQuickProductForm,
+  type QuickProductFormState,
+} from "@/lib/quickProduct";
 
 /** Data do estoque de implantação (carga inicial do SIGESGD). */
 const IMPLEMENTATION_STOCK_DATE = "2026-09-01";
@@ -259,7 +267,7 @@ export function EntriesPage({ className }: { className?: string }) {
   // ── cadastro rápido de produto a partir da conferência da NF-e (R31 §1) ────────
   const [quickProductOpen, setQuickProductOpen] = useState(false);
   const [quickProductItemIndex, setQuickProductItemIndex] = useState<number | null>(null);
-  const [quickProductForm, setQuickProductForm] = useState({
+  const [quickProductForm, setQuickProductForm] = useState<QuickProductFormState>({
     name: "",
     description: "",
     categoryId: "",
@@ -503,6 +511,19 @@ export function EntriesPage({ className }: { className?: string }) {
   };
 
   /**
+   * Abre o cadastro rápido para a LINHA indicada, sem fechar a conferência
+   * da NF-e (R31 §1 — o botão de cada linha conhece o índice e os dados
+   * exatos do item selecionado).
+   */
+  const openQuickProductForRow = (index: number) => {
+    const row = nfeItems[index];
+    if (!row) return;
+    setQuickProductForm(quickProductPrefill(row.item));
+    setQuickProductItemIndex(index);
+    setQuickProductOpen(true);
+  };
+
+  /**
    * Salva o cadastro rápido e associa o produto novo à linha que originou o
    * formulário, mantendo a conferência da NF-e aberta (R31 §1).
    * Cria SOMENTE catálogo — nenhum estoque é afetado até confirmar a entrada.
@@ -512,23 +533,18 @@ export function EntriesPage({ className }: { className?: string }) {
       toast.error("Sem linha de produto selecionada para salvar.");
       return;
     }
-    const name = quickProductForm.name.trim();
-    const description = quickProductForm.description.trim();
-    if (!name) {
-      toast.error("Informe o nome do produto.");
-      return;
-    }
-    if (!quickProductForm.categoryId) {
-      toast.error("Selecione ou crie uma categoria para o produto.");
+    const validation = validateQuickProductForm(quickProductForm);
+    if (!validation.ok) {
+      toast.error(validation.error);
       return;
     }
 
     setQuickProductLoading(true);
     try {
       const productId = await createProduct({
-        name,
-        description: description || undefined,
-        categoryId: quickProductForm.categoryId as Id<"categories">,
+        name: validation.name,
+        description: validation.description || undefined,
+        categoryId: validation.categoryId as Id<"categories">,
         unitOfMeasure: quickProductForm.unitOfMeasure,
         brand: quickProductForm.brand || undefined,
         model: quickProductForm.model || undefined,
@@ -539,25 +555,13 @@ export function EntriesPage({ className }: { className?: string }) {
       });
 
       const itemIndex = quickProductItemIndex;
-      setNfeItems((current) =>
-        current.map((row, position) =>
-          position === itemIndex
-            ? {
-                ...row,
-                productId,
-                matchStatus: "found" as const,
-                matchScore: 100,
-                matchSource: "new_product" as const,
-                associationType: "created" as const,
-              }
-            : row,
-        ),
-      );
+      setNfeItems((current) => associateQuickProduct(current, itemIndex, productId));
 
       // Memoriza a associação fornecedor/código → produto nas próximas
-      // importações. Best-effort: falha aqui não desfaz a associação da linha.
+      // importações. Best-effort e SOMENTE com fornecedor identificado:
+      // falha aqui não desfaz o produto criado nem a associação da linha.
       const row = nfeItems[itemIndex];
-      if (row && nfeSupplierId && row.item.description) {
+      if (row && shouldUpsertNfeAlias(row, nfeSupplierId)) {
         try {
           void upsertNfeProductAlias({
             supplierId: nfeSupplierId as Id<"suppliers">,
@@ -1251,9 +1255,7 @@ export function EntriesPage({ className }: { className?: string }) {
                     ),
                   )
                 }
-                onNewProduct={() => {
-                  toast.info("Cadastre o produto em Produtos e retome esta conferência.");
-                }}
+                onNewProduct={openQuickProductForRow}
                 onContinue={handleReviewContinue}
                 sourceLabel={nfeSourceLabel}
               />
@@ -1267,19 +1269,10 @@ export function EntriesPage({ className }: { className?: string }) {
                 size="sm"
                 className="mt-2 h-8"
                 onClick={() => {
-                  if (nfeItems.length === 0) return;
-                  const item = nfeItems[0].item;
-                  setQuickProductForm({
-                    name: item.description || "",
-                    description: item.description || "",
-                    categoryId: "",
-                    unitOfMeasure: mapNfeUnit(item.unit),
-                    brand: "",
-                    model: "",
-                    specification: "",
-                  });
-                  setQuickProductItemIndex(0);
-                  setQuickProductOpen(true);
+                  const pending = nfeItems.findIndex(
+                    (row) => row.matchStatus !== "found",
+                  );
+                  openQuickProductForRow(pending >= 0 ? pending : 0);
                 }}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
@@ -1354,26 +1347,7 @@ export function EntriesPage({ className }: { className?: string }) {
 }
 
 // ── Cadastro rápido de produto a partir da conferência da NF-e (R31 §1) ────────────
-
-type QuickProductFormState = {
-  name: string;
-  description: string;
-  categoryId: string;
-  unitOfMeasure: string;
-  brand: string;
-  model: string;
-  specification: string;
-};
-
-const emptyQuickProductForm = (): QuickProductFormState => ({
-  name: "",
-  description: "",
-  categoryId: "",
-  unitOfMeasure: "un",
-  brand: "",
-  model: "",
-  specification: "",
-});
+// Estado, validação e associação vivem em "@/lib/quickProduct" (puros/testáveis).
 
 function QuickProductForm({
   open,
