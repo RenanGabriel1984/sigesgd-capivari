@@ -68,6 +68,7 @@ import {
   findDuplicateEntry,
   findSupplierMatch,
   parseNfeXml,
+  pendingNfeItemsSummary,
   reconcileNfeReviewMatches,
   type Category,
   type NfeData,
@@ -509,15 +510,25 @@ function EntriesPage() {
   };
 
   const handleReviewAssociations = () => {
+    // R31.9: revisar/continuar NUNCA fecha a conferência — a ação apenas
+    // valida, informa quais linhas precisam de atenção e direciona o olhar
+    // para a seção de itens. Nenhuma mutação de produto, categoria, entrada
+    // ou estoque acontece aqui.
     if (!canContinueNfeReview(nfeItems)) {
+      const pending = pendingNfeItemsSummary(nfeItems);
       toast.error(
-        "Itens sem produto associado ficam pendentes — associe todos os itens antes de confirmar.",
+        pending.length > 0
+          ? `Itens que precisam de atenção: ${pending.join(" | ")} — associe-os na conferência antes de continuar.`
+          : "Itens sem produto associado ficam pendentes — associe todos os itens antes de confirmar.",
       );
-      return;
+    } else {
+      toast.info(
+        "Associações conferidas — revise os identificadores fiscais e confirme a entrada.",
+      );
     }
-    toast.info(
-      "Associações conferidas — revise os identificadores fiscais e confirme a entrada.",
-    );
+    document
+      .getElementById("nfe-review-items")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const openQuickProductForRow = (index: number) => {
@@ -1102,7 +1113,15 @@ function EntriesPage() {
             else setNfeOpen(false);
           }}
         >
-          <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
+          <DialogContent
+            className="max-h-[90vh] overflow-y-auto sm:max-w-5xl"
+            /* R31.9: o fechamento é só EXPLÍCITO (Cancelar, X, Esc). Um
+               pointer-down fora do diálogo — inclusive sobre o toast que o
+               próprio clique dispara, renderizado em portal próprio fora da
+               camada do Radix — não pode encerrar a conferência. */
+            onPointerDownOutside={(event) => event.preventDefault()}
+            onInteractOutside={(event) => event.preventDefault()}
+          >
             <DialogHeader>
               <DialogTitle>
                 Conferir NF-e{nfe.number ? ` ${nfe.number}` : ""}
@@ -1323,7 +1342,7 @@ function EntriesPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2" id="nfe-review-items">
                 <h4 className="text-sm font-medium">
                   Itens da NF-e ({nfeItems.length})
                 </h4>
@@ -1390,13 +1409,13 @@ function EntriesPage() {
             </div>
 
             <DialogFooter className="gap-2 sm:gap-3">
-              <Button variant="outline" onClick={() => setNfeOpen(false)}>
+              <Button type="button" variant="outline" onClick={() => setNfeOpen(false)}>
                 Cancelar
               </Button>
-              <Button variant="outline" onClick={handleReviewAssociations}>
+              <Button type="button" variant="outline" onClick={handleReviewAssociations}>
                 Revisar associações
               </Button>
-              <Button onClick={() => void handleConfirmImport()}>
+              <Button type="button" onClick={() => void handleConfirmImport()}>
                 Confirmar entrada
               </Button>
             </DialogFooter>

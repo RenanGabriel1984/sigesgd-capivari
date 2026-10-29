@@ -743,6 +743,31 @@ export function canContinueNfeReview(items: NfeReviewAssociation[]): boolean {
   return items.length > 0 && items.every((item) => Boolean(item.productId) && item.matchStatus === "found");
 }
 
+/**
+ * Rótulos legíveis das linhas que AINDA precisam de associação (R31.9 §2).
+ *
+ * A conferência usa este resumo para informar QUAIS itens faltam sem fechar
+ * o diálogo e sem tocar nos dados fiscais — função pura, sem mutação das
+ * linhas recebidas. A condição é exatamente a negação de
+ * `canContinueNfeReview`: sem productId ou sem status "found".
+ */
+export function pendingNfeItemsSummary(
+  rows: ReadonlyArray<{
+    item: NfeItem;
+    productId?: string;
+    matchStatus: ProductMatchStatus;
+  }>,
+): string[] {
+  return rows
+    .filter((row) => !row.productId || row.matchStatus !== "found")
+    .map((row) => {
+      const line = row.item.lineNumber ?? "?";
+      const code = row.item.code ? `cód. ${row.item.code} — ` : "";
+      const description = (row.item.description || "sem descrição").slice(0, 60);
+      return `linha ${line} — ${code}${description}`;
+    });
+}
+
 export interface NfeProductHints {
   brand?: string;
   model?: string;

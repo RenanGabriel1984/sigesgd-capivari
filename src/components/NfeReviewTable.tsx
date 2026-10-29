@@ -309,6 +309,7 @@ export function NfeReviewTable({
                   <div className="min-w-0 max-w-full overflow-hidden flex items-end gap-2">
                     {onNewProduct && (
                       <Button
+                        type="button"
                         variant="outline"
                         size="sm"
                         className="h-8"
@@ -338,7 +339,11 @@ export function NfeReviewTable({
 
       {onContinue && (
         <div className="flex justify-end">
-          <Button disabled={!canContinueNfeReview(items)} onClick={onContinue}>
+          <Button
+            type="button"
+            disabled={!canContinueNfeReview(items)}
+            onClick={onContinue}
+          >
             Continuar conferência
           </Button>
         </div>
