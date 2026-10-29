@@ -11,6 +11,11 @@ import React from "react";
 export interface QuickProductFormProps {
   open: boolean;
   onClose: () => void;
+  /**
+   * Mudança de abertura do modal — quando fornecida, decide Esc/overlay
+   * (R31.3 §1: fechar restaura o snapshot da conferência).
+   */
+  onOpenChange?: (open: boolean) => void;
   targetIndex: number;
   form: QuickProductFormState;
   onFormChange: (patch: Partial<QuickProductFormState>) => void;
@@ -28,6 +33,7 @@ export interface QuickProductFormProps {
 export function QuickProductForm({
   open,
   onClose,
+  onOpenChange,
   form,
   onFormChange,
   loading,
@@ -41,7 +47,17 @@ export function QuickProductForm({
   onCategoryOpenChange,
 }: QuickProductFormProps) {
   return (
-    <Dialog open={open} onOpenChange={(value) => value ? onCancel() : onClose()}>
+    <Dialog
+      open={open}
+      onOpenChange={(value) => {
+        if (onOpenChange) {
+          onOpenChange(value);
+          return;
+        }
+        if (value) onCancel();
+        else onClose();
+      }}
+    >
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Cadastrar novo produto</DialogTitle>
