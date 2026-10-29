@@ -325,3 +325,66 @@ describe("R31.3 §3 — separação visual de descrição, NCM, CST e rótulos",
     expect(ENTRIES).toContain("navigator.clipboard.writeText(nfeAccessKeyDigits)");
   });
 });
+
+// ─── R31.8 §2 — blocos e rótulos explícitos (nada depende só de gap) ────────
+
+describe("R31.8 §2 — apresentação em blocos com rótulos explícitos", () => {
+  it("prévia: código do fornecedor e descrição em parágrafos distintos", () => {
+    const start = DIALOG.indexOf("Cód. fornecedor {item.code}");
+    const liBody = DIALOG.slice(
+      DIALOG.lastIndexOf("<li", start),
+      DIALOG.indexOf("</li>", start),
+    );
+    expect(liBody).toMatch(/<p[^>]*>\s*Cód\. fornecedor \{item\.code\}\s*<\/p>/);
+    expect(liBody).toMatch(/<p[^>]*>\s*\{item\.description\}\s*<\/p>/);
+    // não dividem a mesma linha flexível:
+    expect(liBody).not.toContain("items-baseline");
+  });
+
+  it("prévia: quantidade, unidade, unitário e total empilhados com rótulo", () => {
+    expect(DIALOG).toContain("Quantidade: {item.quantity}");
+    expect(DIALOG).toContain("Unidade: {item.unit}");
+    expect(DIALOG).toContain(
+      "Valor unitário: {formatCurrencyStable(item.unitValue)}",
+    );
+    expect(DIALOG).toContain(
+      "Valor total do item: {formatCurrencyStable(item.totalValue)}",
+    );
+    // linhas de bloco (space-y), não sequência inline separada por gap:
+    expect(DIALOG).toContain(
+      'className="mt-1.5 space-y-1 text-xs text-muted-foreground"',
+    );
+    expect(DIALOG).not.toContain("flex flex-wrap gap-x-3 gap-y-0.5");
+  });
+
+  it("prévia e conferência: separador TEXTUAL entre NCM e CST", () => {
+    expect(DIALOG).toMatch(/\{item\.ncm && item\.cst \?/);
+    expect(REVIEW_TABLE).toMatch(/\{review\.item\.ncm && review\.item\.cst \?/);
+    expect(ENTRIES).toMatch(
+      /nfe\.items\[0\]\.ncm !== undefined && nfe\.items\[0\]\.cst != null \?/,
+    );
+  });
+
+  it("conferência: rótulos da linha são elementos de bloco e valores separados", () => {
+    const rotulos =
+      REVIEW_TABLE.match(
+        /<span className="block text-\[10px\] uppercase text-muted-foreground">/g,
+      ) ?? [];
+    expect(rotulos.length).toBeGreaterThanOrEqual(5);
+    expect(REVIEW_TABLE).toContain("Produto associado:");
+    expect(REVIEW_TABLE).toMatch(/Unitário \{formatMoney\(review\.item\.unitValue\)\}/);
+    expect(REVIEW_TABLE).toMatch(/Total \{formatMoney\(review\.item\.totalValue\)\}/);
+    // contador/fonte/status da conferência separados por texto, não só por gap:
+    expect(REVIEW_TABLE).toContain('<span aria-hidden="true">·</span>');
+  });
+
+  it("conferência: identificadores empilhados e fornecedor em linhas de bloco", () => {
+    // Contador e código do item deixam de dividir um grid (colagem no cópia):
+    expect(ENTRIES).toContain('<div className="mt-1 space-y-2">');
+    // Razão social e CNPJ em <p> de bloco, fora de flex-col:
+    expect(ENTRIES).toContain('<div className="min-w-0 space-y-0.5">');
+    expect(ENTRIES).toContain('<span className="block min-w-0 truncate">');
+    expect(ENTRIES).toContain('<span className="block text-xs text-muted-foreground">');
+    expect(ENTRIES).not.toContain("flex min-w-0 flex-col leading-tight");
+  });
+});

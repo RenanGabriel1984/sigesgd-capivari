@@ -102,9 +102,19 @@ export function NfeReviewTable({
       {/* Hierarquia: primeiro o estado geral, depois o que falta conferir. */}
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <Badge className="bg-muted text-foreground">{items.length} item(ns) da NF-e</Badge>
-        {sourceLabel && <Badge variant="outline">Fonte: {sourceLabel}</Badge>}
+        {/* Separadores TEXTOS entre os selos: contador, fonte e status nunca
+            ficam colados no texto copiado (R31.8 §2). */}
+        {sourceLabel && (
+          <>
+            <span aria-hidden="true">·</span>
+            <Badge variant="outline">Fonte: {sourceLabel}</Badge>
+          </>
+        )}
         {allAssociated && (
-          <Badge className="bg-emerald-100 text-emerald-800">Todos os itens associados</Badge>
+          <>
+            <span aria-hidden="true">·</span>
+            <Badge className="bg-emerald-100 text-emerald-800">Todos os itens associados</Badge>
+          </>
         )}
       </div>
 
@@ -136,15 +146,22 @@ export function NfeReviewTable({
                     Item {review.item.lineNumber ?? index + 1}
                   </span>
                   {review.item.code && (
-                    <span className="text-xs font-mono text-muted-foreground">
-                      cód. {review.item.code}
-                    </span>
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span className="text-xs font-mono text-muted-foreground">
+                        cód. {review.item.code}
+                      </span>
+                    </>
                   )}
+                  <span aria-hidden="true">·</span>
                   <Badge className={`${status.className} text-[10px]`}>{status.label}</Badge>
                   {review.matchStatus === "found" && (
-                    <span className="text-[10px] text-muted-foreground">
-                      {review.matchScore}% · {review.associationType === "manual" ? "manual" : "automática"}
-                    </span>
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {review.matchScore}% · {review.associationType === "manual" ? "manual" : "automática"}
+                      </span>
+                    </>
                   )}
                 </div>
 
@@ -159,6 +176,10 @@ export function NfeReviewTable({
                     {review.item.ncm ? (
                       <span className="font-mono">NCM {review.item.ncm}</span>
                     ) : null}
+                    {/* Separador texto: NCM e CST nunca ficam colados no cópia. */}
+                    {review.item.ncm && review.item.cst ? (
+                      <span aria-hidden="true">·</span>
+                    ) : null}
                     {review.item.cst ? (
                       <span className="font-mono">CST {review.item.cst}</span>
                     ) : null}
@@ -169,7 +190,9 @@ export function NfeReviewTable({
                   {/* Quantidade — editável somente quando o documento não trouxe uma
                       quantidade válida (nunca inventamos o valor). */}
                   <div className="min-w-0 max-w-full overflow-hidden">
-                    <span className="text-[10px] uppercase text-muted-foreground">Quantidade</span>
+                    <span className="block text-[10px] uppercase text-muted-foreground">
+                      Quantidade
+                    </span>
                     {quantityMissing ? (
                       <Input
                         type="number"
@@ -192,15 +215,24 @@ export function NfeReviewTable({
                   </div>
 
                   <div className="min-w-0 max-w-full overflow-hidden">
-                    <span className="text-[10px] uppercase text-muted-foreground">Valores</span>
+                    <span className="block text-[10px] uppercase text-muted-foreground">
+                      Valores
+                    </span>
+                    {/* Unitário e total em linhas de bloco distintas, cada um
+                        com rótulo próprio (R31.8 §2). */}
                     <p className="text-sm font-mono">
-                      {formatMoney(review.item.unitValue)} · total {formatMoney(review.item.totalValue)}
+                      Unitário {formatMoney(review.item.unitValue)}
+                    </p>
+                    <p className="text-sm font-mono">
+                      Total {formatMoney(review.item.totalValue)}
                     </p>
                   </div>
 
                   {/* Local */}
                   <div className="min-w-0 max-w-full overflow-hidden">
-                    <span className="text-[10px] uppercase text-muted-foreground">Local</span>
+                    <span className="block text-[10px] uppercase text-muted-foreground">
+                      Local
+                    </span>
                     <Select
                       value={review.locationId || "none"}
                       onValueChange={(value) =>
@@ -223,7 +255,7 @@ export function NfeReviewTable({
 
                   {/* Lote do fornecedor */}
                   <div className="min-w-0 max-w-full overflow-hidden">
-                    <span className="text-[10px] uppercase text-muted-foreground">
+                    <span className="block text-[10px] uppercase text-muted-foreground">
                       Lote do fornecedor
                     </span>
                     <Input
@@ -238,8 +270,8 @@ export function NfeReviewTable({
                 {/* Associação de produto + categoria ao lado */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="min-w-0 max-w-full overflow-hidden">
-                    <span className="text-[10px] uppercase text-muted-foreground">
-                      Produto associado
+                    <span className="block text-[10px] uppercase text-muted-foreground">
+                      Produto associado:
                     </span>
                     <Select
                       value={review.productId || "none"}

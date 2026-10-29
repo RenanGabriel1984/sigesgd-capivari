@@ -1098,22 +1098,31 @@ export function DanfeImportDialog({
                           key={index}
                           className="min-w-0 max-w-full overflow-hidden rounded-md border border-border/40 bg-muted/20 px-3 py-2"
                         >
-                          {/* Código do fornecedor, descrição e identificadores
-                              fiscais em ELEMENTOS DISTINTOS com espaçamento
-                              explícito — nunca colados (R31.3 §3). */}
-                          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                          {/* Código do fornecedor e descrição em LINHAS DE
+                              BLOCO distintas — não compartilham a mesma linha
+                              nem dependem de gap: o texto copiado nunca cola o
+                              código ao nome do produto (R31.8 §2). */}
+                          <div className="space-y-1">
+                            <p className="font-mono text-xs text-muted-foreground">
                               Cód. fornecedor {item.code}
-                            </span>
-                            <span className="text-sm min-w-0 max-w-full break-words">
+                            </p>
+                            <p className="text-sm min-w-0 max-w-full break-words">
                               {item.description}
-                            </span>
+                            </p>
                           </div>
                           {(item.ncm || item.cst) && (
                             <div className="mt-1.5 flex flex-wrap items-center gap-2">
                               {item.ncm ? (
                                 <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
                                   NCM {item.ncm}
+                                </span>
+                              ) : null}
+                              {/* Separador TEXTO entre os identificadores: mesmo
+                                  que a cópia perca o espaçamento visual, NCM e
+                                  CST nunca ficam colados (R31.8 §2). */}
+                              {item.ncm && item.cst ? (
+                                <span aria-hidden="true" className="text-[11px] text-muted-foreground">
+                                  ·
                                 </span>
                               ) : null}
                               {item.cst ? (
@@ -1123,14 +1132,19 @@ export function DanfeImportDialog({
                               ) : null}
                             </div>
                           )}
-                          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                            <span>Qtd. {item.quantity} {item.unit}</span>
-                            <span>
-                              Unitário {formatCurrencyStable(item.unitValue)}
-                            </span>
-                            <span>
-                              Total {formatCurrencyStable(item.totalValue)}
-                            </span>
+                          {/* Quantidade, unidade, unitário e total em CAMPOS
+                              DISTINTOS empilhados, cada um com rótulo próprio:
+                              nenhuma depende de gap para ser compreendida no
+                              texto copiado (R31.8 §2). */}
+                          <div className="mt-1.5 space-y-1 text-xs text-muted-foreground">
+                            <p className="font-mono">Quantidade: {item.quantity}</p>
+                            <p className="font-mono">Unidade: {item.unit}</p>
+                            <p className="font-mono">
+                              Valor unitário: {formatCurrencyStable(item.unitValue)}
+                            </p>
+                            <p className="font-mono">
+                              Valor total do item: {formatCurrencyStable(item.totalValue)}
+                            </p>
                           </div>
                         </li>
                       ))}

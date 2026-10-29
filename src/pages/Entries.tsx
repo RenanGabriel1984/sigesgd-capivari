@@ -171,14 +171,16 @@ async function uploadFile(
 /** Valor selecionado: razão social com truncate + CNPJ no próprio componente. */
 function SupplierSelectValue({ supplier }: { supplier: SupplierOption }) {
   return (
-    <span className="flex min-w-0 flex-col leading-tight">
-      <span className="min-w-0 truncate">{supplier.legalName}</span>
+    <span className="block min-w-0 leading-tight">
+      {/* Razão social e CNPJ em LINHAS DE BLOCO distintas — não compartilham
+          um flex-col, para que o texto copiado nunca os una (R31.8 §2). */}
+      <span className="block min-w-0 truncate">{supplier.legalName}</span>
       {supplier.cnpj ? (
-        <span className="text-xs text-muted-foreground">
+        <span className="block text-xs text-muted-foreground">
           CNPJ {formatCnpj(supplier.cnpj)}
         </span>
       ) : (
-        <span className="text-xs text-muted-foreground">
+        <span className="block text-xs text-muted-foreground">
           CNPJ pendente de conferência
         </span>
       )}
@@ -1113,11 +1115,17 @@ function EntriesPage() {
 
             {nfe.items.length > 0 &&
             (nfe.items[0].ncm !== undefined || nfe.items[0].cst != null) ? (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {nfe.items[0].ncm !== undefined ? (
                   <Badge variant="secondary" className="font-mono text-[11px]">
                     NCM {nfe.items[0].ncm}
                   </Badge>
+                ) : null}
+                {/* Separador texto: NCM e CST nunca ficam colados no cópia. */}
+                {nfe.items[0].ncm !== undefined && nfe.items[0].cst != null ? (
+                  <span aria-hidden="true" className="text-muted-foreground">
+                    ·
+                  </span>
                 ) : null}
                 {nfe.items[0].cst != null ? (
                   <Badge variant="secondary" className="font-mono text-[11px]">
@@ -1158,15 +1166,15 @@ function EntriesPage() {
                   <Label className="text-muted-foreground">
                     Identificadores fiscais
                   </Label>
-                  <div className="mt-1 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="mt-1 space-y-2">
                     <div className="min-w-0 max-w-full overflow-hidden">
-                      <span className="text-xs text-muted-foreground">
+                      <span className="block text-xs text-muted-foreground">
                         Itens da nota:
                       </span>
                       <p className="font-mono font-medium">{nfe.items.length}</p>
                     </div>
                     <div className="min-w-0 max-w-full overflow-hidden">
-                      <span className="text-xs text-muted-foreground">
+                      <span className="block text-xs text-muted-foreground">
                         Código do item (fornecedor):
                       </span>
                       <p className="font-mono font-medium break-all">
@@ -1213,7 +1221,9 @@ function EntriesPage() {
                     suppliers={supplierList}
                   />
                   {nfeSupplier ? (
-                    <div className="flex min-w-0 flex-col leading-tight">
+                    <div className="min-w-0 space-y-0.5">
+                      {/* Razão social e CNPJ em linhas de bloco distintas —
+                          nunca compartilham um flex (R31.8 §2). */}
                       <p className="text-sm min-w-0 max-w-full break-words">
                         Fornecedor identificado: {nfeSupplier.legalName}
                       </p>
