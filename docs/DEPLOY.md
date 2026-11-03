@@ -188,12 +188,15 @@ preciso um deployment Convex separado da produção.
    ```bash
    VITE_CONVEX_URL=https://<deployment-homolog>.convex.cloud \
    VITE_APP_ENV=homologacao \
-   bun run build
+   bun scripts/build-homolog.mjs      # gera dist-homolog/ com checagens de segurança
    ```
 
-   `VITE_APP_ENV=homologacao` faz o diagnóstico da DANFE exibir o ambiente
-   correto (ver abaixo). O build de produção continua usando o deployment de
-   produção.
+   O script recusa o backend oficial (lista em `PRODUCTION_CONVEX_HOSTS`),
+   valida com o mesmo resolvedor do app (`src/lib/convex-url.ts`) e confere no
+   bundle que o host de homologação foi embutido. `--dry-run` apenas valida a
+   configuração. Sem `VITE_APP_ENV`, o app ignora `VITE_CONVEX_URL` e usa o
+   deployment oficial (comportamento de produção preservado).
+   Guia completo, ações do proprietário e roteiro: `docs/HOMOLOGACAO.md`.
 
 3. **Servir o `dist/` estaticamente** (Vercel/Netlify/hosting interno ou
    `bun run preview`) em um domínio/rota que NÃO seja o de produção.

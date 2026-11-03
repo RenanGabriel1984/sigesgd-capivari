@@ -12,6 +12,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { resolvedConvexHost } from "@/lib/convex-url";
 import {
   Select,
   SelectContent,
@@ -95,17 +96,12 @@ function environmentLabel(): "desenvolvimento" | "homologacao" | "producao" {
 }
 
 /**
- * Host do deployment Convex usado por ESTA build — identifica o backend sem
- * expor chaves: só o host público que já viaja no bundle do cliente.
+ * Host do deployment Convex EFETIVAMENTE usado por esta build (mesma fonte do
+ * cliente em `src/main.tsx`) — produção = deployment oficial; homologação =
+ * deployment isolado. Sem chaves/segredos: apenas o host público.
  */
 function backendHost(): string | null {
-  const url = import.meta.env?.VITE_CONVEX_URL;
-  if (!url) return null;
-  try {
-    return new URL(url).host;
-  } catch {
-    return null;
-  }
+  return resolvedConvexHost;
 }
 
 /** Hash do bundle de entrada servido — identificador do build. */

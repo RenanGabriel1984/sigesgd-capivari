@@ -9,14 +9,14 @@ import React, { StrictMode, useEffect, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router";
 import "./index.css";
+import { resolvedConvexUrl } from "@/lib/convex-url";
 
-// ── Deployment Convex oficial do Gestão de Estoque SGGD ────────────────────────────────────
-// A URL fica fixa no código de propósito: o ambiente de build da plataforma
-// pode injetar um VITE_CONVEX_URL desatualizado (outro deployment, sem a carga
-// oficial) e esse valor acabava embutido como literal morto no bundle
-// publicado. Fixando aqui, o frontend publicado conecta exclusivamente no
-// deployment com os dados oficiais (53 produtos, ENT-2026-000001, 72 orgs).
-const convexUrl = "https://first-herring-264.convex.cloud";
+// ── Backend Convex do Gestão de Estoque SGGD ─────────────────────────────────────────────
+// Produção usa o deployment oficial fixo (imune a VITE_CONVEX_URL desatualizado
+// injetado no build). Homologação só é aceita com VITE_APP_ENV=homologacao +
+// VITE_CONVEX_URL de um deployment isolado — regra em src/lib/convex-url.ts,
+// chamada por scripts/build-homolog.mjs. Sem essa exceção, qualquer build de
+// homologação continuaria falando com os dados oficiais.
 
 // Lazy load route components
 const Landing = lazy(() => import("./pages/Landing.tsx"));
@@ -94,7 +94,7 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-const convex = new ConvexReactClient(convexUrl);
+const convex = new ConvexReactClient(resolvedConvexUrl);
 
 function RouteSyncer() {
   const location = useLocation();

@@ -57,6 +57,10 @@ const DEPLOY_DOC = readFileSync(
   resolve(__dirname, "..", "..", "docs", "DEPLOY.md"),
   "utf8",
 );
+const CONVEX_URL_LIB = readFileSync(
+  resolve(__dirname, "..", "lib", "convex-url.ts"),
+  "utf8",
+);
 
 const advanceBody = ENTRIES.slice(
   ENTRIES.indexOf("const handleAdvanceToSummary = () => {"),
@@ -352,7 +356,10 @@ describe("R31.9 D — diagnóstico do ambiente de execução", () => {
     expect(DIALOG).toContain("buildId: buildIdFrom(bundle),");
     expect(DIALOG).toContain("ambiente: environmentLabel(),");
     expect(DIALOG).toContain("backendHost: backendHost(),");
-    expect(DIALOG).toContain("new URL(url).host");
+    // R32.0: o host vem do backend EFETIVAMENTE usado pela build
+    // (fonte única em src/lib/convex-url.ts), não de um env genérico.
+    expect(DIALOG).toContain("return resolvedConvexHost;");
+    expect(CONVEX_URL_LIB).toContain("new URL(url).host");
     // Nunca chaves/segredos no diagnóstico:
     expect(DIALOG).not.toContain("CONVEX_DEPLOY_KEY");
     // Campos opcionais: diagnósticos/fixtures antigos continuam válidos.
