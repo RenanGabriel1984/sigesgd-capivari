@@ -51,6 +51,7 @@ import {
   type NfeReviewProduct,
   type NfeReviewRow,
 } from "@/components/NfeReviewTable";
+import { NfeEntrySummary } from "@/components/NfeEntrySummary";
 import { QuickProductForm } from "@/components/QuickProductForm";
 import { SupplierForm } from "@/components/SupplierForm";
 
@@ -68,7 +69,6 @@ import {
   findDuplicateEntry,
   findSupplierMatch,
   parseNfeXml,
-  pendingNfeItemsSummary,
   reconcileNfeReviewMatches,
   type Category,
   type NfeData,
@@ -84,6 +84,11 @@ import {
   validateQuickProductForm,
   type QuickProductFormState,
 } from "@/lib/quickProduct";
+import {
+  buildNfeEntrySummary,
+  evaluateNfeAdvance,
+  type NfeEntryStep,
+} from "@/lib/nfe-summary";
 import { useAuth } from "@/hooks/use-auth";
 
 /** Origem DANFE/OCR registrada na entrada confirmada (§15). */
@@ -350,6 +355,9 @@ function EntriesPage() {
   const [nfeItems, setNfeItems] = useState<NfeReviewRow[]>([]);
   const [danfeFile, setDanfeFile] = useState<File | null>(null);
   const [nfeXmlFile, setNfeXmlFile] = useState<File | null>(null);
+  // ── Etapa da conferência (R31.9): produtos → resumo ──
+  const [nfeStep, setNfeStep] = useState<NfeEntryStep>("products");
+  const [nfeConfirming, setNfeConfirming] = useState(false);
 
   const supplierList = suppliers ?? [];
   const locationList = locations ?? [];
@@ -373,6 +381,24 @@ function EntriesPage() {
       }),
     );
   }, [nfe, products, nfeAliases, nfeSupplierId, productOptions]);
+
+  // Resumo da entrada montado com os MESMOS dados da conferência (R31.9 B).
+  const nfeSummary = buildNfeEntrySummary({
+    nfe: {
+      number: nfe.number,
+      series: nfe.series,
+      emissionDate: nfe.emissionDate,
+      accessKey: nfeAccessKeyDigits,
+      totalValue: nfe.totalValue,
+    },
+    rows: nfeItems,
+    products: productOptions,
+    locations: locationList,
+    supplier: nfeSupplier,
+    afNumber: nfeAfNumber,
+    processNumber: nfeProcessNumber,
+    empenhoNumber: nfeEmpenhoNumber,
+  });
 
   const resetCreateForm = useCallback(() => {
     setNfNumber("");
@@ -425,6 +451,7 @@ function EntriesPage() {
       }
       const match = findSupplierMatch(parsed, supplierList);
       setNfeSupplierId(match.found && match.supplierId ? match.supplierId : null);
+      setNfeStep("products");
       setXmlOpen(false);
       setNfeOpen(true);
     } catch {
@@ -488,6 +515,7 @@ function EntriesPage() {
           ? match.supplierId
           : null,
     );
+    setNfeStep("products");
     setDanfeOpen(false);
     setNfeOpen(true);
   };
@@ -509,26 +537,37 @@ function EntriesPage() {
     }
   };
 
-  const handleReviewAssociations = () => {
-    // R31.9: revisar/continuar NUNCA fecha a conferência — a ação apenas
-    // valida, informa quais linhas precisam de atenção e direciona o olhar
-    // para a seção de itens. Nenhuma mutação de produto, categoria, entrada
-    // ou estoque acontece aqui.
-    if (!canContinueNfeReview(nfeItems)) {
-      const pending = pendingNfeItemsSummary(nfeItems);
-      toast.error(
-        pending.length > 0
-          ? `Itens que precisam de atenção: ${pending.join(" | ")} — associe-os na conferência antes de continuar.`
-          : "Itens sem produto associado ficam pendentes — associe todos os itens antes de confirmar.",
-      );
-    } else {
-      toast.info(
-        "Associações conferidas — revise os identificadores fiscais e confirme a entrada.",
-      );
+  /**
+   * ÚNICO comando de avanço da conferência (R31.9 Parte A).
+   *
+   * Não fecha o diálogo, não navega e não cria nada: valida as associações e
+   * as quantidades; se algo falta, informa a linha exata e rola até ela; se
+   * tudo está associado, abre a etapa de resumo (mesmos dados, sem recriar
+   * estado). Nenhuma mutação de produto, categoria, entrada ou estoque.
+   */
+  const handleAdvanceToSummary = () => {
+    const outcome = evaluateNfeAdvance(nfeItems);
+    if (!outcome.ok) {
+      toast.error(outcome.message);
+      const target =
+        document.getElementById(
+          outcome.firstPendingIndex >= 0
+            ? `nfe-item-${outcome.firstPendingIndex}`
+            : "nfe-review-items",
+        ) ?? document.getElementById("nfe-review-items");
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
     }
-    document
-      .getElementById("nfe-review-items")
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setNfeStep("summary");
+  };
+
+  /** Volta do resumo para a conferência — estado preservado integralmente. */
+  const handleBackToProducts = () => setNfeStep("products");
+
+  /** Saída intencional da operação (única ação que fecha a conferência). */
+  const cancelNfeConference = () => {
+    setNfeOpen(false);
+    setNfeStep("products");
   };
 
   const openQuickProductForRow = (index: number) => {
@@ -642,6 +681,7 @@ function EntriesPage() {
   };
 
   const handleConfirmImport = async () => {
+    if (nfeConfirming) return;
     if (nfe.items.length === 0) {
       toast.error("A entrada precisa de pelo menos um item identificado.");
       return;
@@ -652,6 +692,7 @@ function EntriesPage() {
       );
       return;
     }
+    setNfeConfirming(true);
     try {
       let documentStorageId: string | undefined;
       if (danfeFile) {
@@ -721,6 +762,7 @@ function EntriesPage() {
       await confirmEntry({ entryId: entryId as any });
       toast.success("Entrada confirmada: estoque e lotes atualizados.");
       setNfeOpen(false);
+      setNfeStep("products");
       setNfe(EMPTY_NFE);
       setNfeItems([]);
       setDanfeFile(null);
@@ -729,6 +771,8 @@ function EntriesPage() {
       toast.error(
         error instanceof Error ? error.message : "Falha ao registrar a entrada.",
       );
+    } finally {
+      setNfeConfirming(false);
     }
   };
 
@@ -1110,7 +1154,7 @@ function EntriesPage() {
           open={nfeOpen}
           onOpenChange={(value) => {
             if (value) setNfeOpen(true);
-            else setNfeOpen(false);
+            else cancelNfeConference();
           }}
         >
           <DialogContent
@@ -1122,6 +1166,15 @@ function EntriesPage() {
             onPointerDownOutside={(event) => event.preventDefault()}
             onInteractOutside={(event) => event.preventDefault()}
           >
+            {nfeStep === "summary" ? (
+              <NfeEntrySummary
+                summary={nfeSummary}
+                onBack={handleBackToProducts}
+                onConfirm={() => void handleConfirmImport()}
+                confirming={nfeConfirming}
+              />
+            ) : (
+              <>
             <DialogHeader>
               <DialogTitle>
                 Conferir NF-e{nfe.number ? ` ${nfe.number}` : ""}
@@ -1358,7 +1411,6 @@ function EntriesPage() {
                     )
                   }
                   onNewProduct={openQuickProductForRow}
-                  onContinue={handleReviewAssociations}
                   sourceLabel={sourceLabel}
                 />
                 <Button
@@ -1409,16 +1461,19 @@ function EntriesPage() {
             </div>
 
             <DialogFooter className="gap-2 sm:gap-3">
-              <Button type="button" variant="outline" onClick={() => setNfeOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={cancelNfeConference}
+              >
                 Cancelar
               </Button>
-              <Button type="button" variant="outline" onClick={handleReviewAssociations}>
-                Revisar associações
-              </Button>
-              <Button type="button" onClick={() => void handleConfirmImport()}>
-                Confirmar entrada
+              <Button type="button" onClick={handleAdvanceToSummary}>
+                Avançar para resumo
               </Button>
             </DialogFooter>
+              </>
+            )}
           </DialogContent>
         </Dialog>
       ) : null}

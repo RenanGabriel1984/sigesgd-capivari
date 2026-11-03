@@ -167,6 +167,58 @@ O sistema possui funções de seed em `src/convex/seed.ts` para criar:
 
 ---
 
+## Homologação isolada (R31.9)
+
+O frontend é estático, mas o **backend é escolhido no build** por
+`VITE_CONVEX_URL`. Para testar o fluxo de Entradas sem tocar no banco real é
+preciso um deployment Convex separado da produção.
+
+### Procedimento mínimo
+
+1. **Criar o deployment de homologação** (uma vez), em conta/equipe Convex:
+
+   ```bash
+   # Opção A — deployment de desenvolvimento dedicado (Dashboard > Settings > Deployments)
+   # Opção B — preview deployment por nome:
+   bunx convex deploy --preview-name homolog
+   ```
+
+2. **Apontar o build para ele** (somente no ambiente de homologação):
+
+   ```bash
+   VITE_CONVEX_URL=https://<deployment-homolog>.convex.cloud \
+   VITE_APP_ENV=homologacao \
+   bun run build
+   ```
+
+   `VITE_APP_ENV=homologacao` faz o diagnóstico da DANFE exibir o ambiente
+   correto (ver abaixo). O build de produção continua usando o deployment de
+   produção.
+
+3. **Servir o `dist/` estaticamente** (Vercel/Netlify/hosting interno ou
+   `bun run preview`) em um domínio/rota que NÃO seja o de produção.
+
+4. **Validar o ambiente no diagnóstico**: importar a DANFE → “Diagnóstico
+   técnico” mostra `ambiente`, `build` (hash do bundle), `backend` (somente o
+   host, sem chaves) e `versão` do app. Se `ambiente` não for `homologacao` ou
+   `backend` não for o deployment de homologação, **não execute mutações**.
+
+### Regras
+
+- Nunca rodar seeds, confirmação de entrada ou criação de produto no banco de
+  produção durante homologação.
+- O banco de homologação começa vazio: criar categoria/fornecedor/produto de
+  teste é permitido **apenas nele**.
+- `CONVEX_DEPLOY_KEY` de produção nunca deve ser usada no build de homologação.
+
+> Situação atual deste workspace: não há segundo deployment Convex
+> configurado (o `convex.json` só define `src/convex/` como pasta de funções) e
+> os arquivos de ambiente são gerenciados fora do repositório. Portanto o
+> preview de homologação **não está disponível** até que o deployment seja
+> criado e o build seja gerado apontando para ele.
+
+---
+
 ## Monitoramento
 
 - **Convex Dashboard**: https://dashboard.convex.dev

@@ -81,6 +81,40 @@ function isDevEnvironment(): boolean {
 }
 
 /**
+ * Ambiente de execução (R31.9 Parte D): `VITE_APP_ENV` explícito quando
+ * existir (ex.: "homologacao"); caso contrário, desenvolvimento/produção pelo
+ * modo do Vite. Nenhum segredo é lido — apenas rótulos.
+ */
+function environmentLabel(): "desenvolvimento" | "homologacao" | "producao" {
+  const explicit = String(import.meta.env?.VITE_APP_ENV ?? "").toLowerCase();
+  if (["homolog", "homologacao", "homologation", "staging", "preview"].includes(explicit)) {
+    return "homologacao";
+  }
+  if (["production", "producao", "prod"].includes(explicit)) return "producao";
+  return import.meta.env?.DEV ? "desenvolvimento" : "producao";
+}
+
+/**
+ * Host do deployment Convex usado por ESTA build — identifica o backend sem
+ * expor chaves: só o host público que já viaja no bundle do cliente.
+ */
+function backendHost(): string | null {
+  const url = import.meta.env?.VITE_CONVEX_URL;
+  if (!url) return null;
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
+/** Hash do bundle de entrada servido — identificador do build. */
+function buildIdFrom(bundle: string | null): string | null {
+  const match = bundle?.match(/index-([A-Za-z0-9_-]+)\.js$/);
+  return match ? match[1] : null;
+}
+
+/**
  * Identificação da execução do diagnóstico: correlaciona o JSON copiado com a
  * revisão do build servido e com a leitura específica (id único por importação).
  */
@@ -95,6 +129,9 @@ function identificacaoDiagnostico(): DanfeDiagnosticIdentificacao {
     versaoApp: APP_VERSION,
     modo: isDevEnvironment() ? "desenvolvimento" : "producao",
     bundleEntrada: bundle,
+    buildId: buildIdFrom(bundle),
+    ambiente: environmentLabel(),
+    backendHost: backendHost(),
     userAgent: typeof navigator !== "undefined" ? navigator.userAgent : null,
   };
 }
@@ -644,6 +681,15 @@ function DiagnosticoTecnicoSecao({
             · itens: {diagnostic.estadoInterface.itensNoObjetoFinal} · execução{" "}
             {diagnostic.identificacao.diagnosticoId} · versão {diagnostic.identificacao.versaoApp} (
             {diagnostic.identificacao.modo})
+            {diagnostic.identificacao.ambiente
+              ? ` · ambiente ${diagnostic.identificacao.ambiente}`
+              : ""}
+            {diagnostic.identificacao.buildId
+              ? ` · build ${diagnostic.identificacao.buildId}`
+              : ""}
+            {diagnostic.identificacao.backendHost
+              ? ` · backend ${diagnostic.identificacao.backendHost}`
+              : ""}
             {diagnostic.identificacao.bundleEntrada
               ? ` · bundle ${diagnostic.identificacao.bundleEntrada}`
               : ""}

@@ -33,6 +33,16 @@ export interface DanfeDiagnosticIdentificacao {
   modo: "desenvolvimento" | "producao";
   /** Nome do bundle de entrada servido (ex.: /assets/index-<hash>.js). */
   bundleEntrada: string | null;
+  /**
+   * R31.9 Parte D — identificação do ambiente de execução:
+   *  • `buildId`: hash do bundle de entrada servido (identificador do build);
+   *  • `ambiente`: desenvolvimento, homologação ou produção;
+   *  • `backendHost`: host do deployment Convex em uso (sem chaves/segredos).
+   * Campos opcionais para não quebrar diagnósticos antigos/fixtures.
+   */
+  buildId?: string | null;
+  ambiente?: "desenvolvimento" | "homologacao" | "producao";
+  backendHost?: string | null;
   userAgent: string | null;
 }
 

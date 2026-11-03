@@ -160,8 +160,13 @@ describe("NF-e 372043 — ciclo de vida da conferência", () => {
     expect(afterUpdate.productId).toBe("manual-or-created-product");
   });
 
-  it("usa canContinueNfeReview como regra única visual e funcional do avanço", () => {
-    expect(REVIEW_TABLE_SOURCE).toContain("disabled={!canContinueNfeReview(items)}");
+  it("usa canContinueNfeReview como regra única do avanço (sem comando duplicado)", () => {
+    // R31.9: a duplicidade "Continuar conferência" (tabela) ×
+    // "Revisar associações" (rodapé) foi removida — há um único comando de
+    // avanço, que delega a regra a evaluateNfeAdvance → canContinueNfeReview.
+    expect(REVIEW_TABLE_SOURCE).not.toContain("Continuar conferência");
+    expect(REVIEW_TABLE_SOURCE).not.toContain("onContinue");
+    expect(ENTRIES_SOURCE).toContain("evaluateNfeAdvance(nfeItems)");
     expect(ENTRIES_SOURCE).toContain("if (!canContinueNfeReview(nfeItems))");
     expect(canContinueNfeReview([
       { productId: CX735_AMARELO_ID, matchStatus: "found", associationType: "automatic" },

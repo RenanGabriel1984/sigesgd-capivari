@@ -22,7 +22,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  canContinueNfeReview,
   type NfeItem,
   type ProductAssociationType,
   type ProductForMatch,
@@ -54,8 +53,6 @@ export interface NfeReviewTableProps {
   onUpdate: (index: number, patch: Partial<NfeReviewRow>) => void;
   /** Abre o cadastro de produto para a LINHA indicada (índice do item). */
   onNewProduct?: (index: number) => void;
-  /** Avança para a próxima etapa (destino da NF-e). */
-  onContinue?: () => void;
   /** Origem dos dados lidos (XML ou DANFE/OCR) — apenas informativo. */
   sourceLabel?: string;
 }
@@ -91,7 +88,6 @@ export function NfeReviewTable({
   locations,
   onUpdate,
   onNewProduct,
-  onContinue,
   sourceLabel,
 }: NfeReviewTableProps) {
   const { pendingCount, allAssociated } = nfeItemsAssociationState(items);
@@ -139,6 +135,7 @@ export function NfeReviewTable({
             return (
               <div
                 key={`${review.item.lineNumber}-${index}`}
+                id={`nfe-item-${index}`}
                 className="min-w-0 max-w-full overflow-hidden border-b last:border-b-0 p-3 space-y-2"
               >
                 <div className="flex flex-wrap items-center gap-2 min-w-0">
@@ -337,17 +334,6 @@ export function NfeReviewTable({
         </p>
       )}
 
-      {onContinue && (
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            disabled={!canContinueNfeReview(items)}
-            onClick={onContinue}
-          >
-            Continuar conferência
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
