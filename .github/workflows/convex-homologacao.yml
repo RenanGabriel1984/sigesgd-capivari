@@ -19,8 +19,14 @@ name: Convex — publicar funções em HOMOLOGAÇÃO
 #      própria deploy key (não aceita `--deployment` junto de
 #      CONVEX_DEPLOY_KEY), então o prefixo `prod:tame-alligator-797` é
 #      validado sem imprimir a chave.
-#   3. Verificação pós-deploy no log + `GET /version` no host de homologação,
-#      com tripwire: se o host de produção aparecer no log, o job falha.
+#   3. Confirmação pela saída REAL do CLI: sucesso de `bunx convex deploy`
+#      (exit 0, garantido pelo `pipefail`) + as linhas que a versão 1.48.0
+#      imprime — "Deploying code to deployment:" e
+#      "Deployed Convex functions to https://tame-alligator-797.convex.cloud".
+#      Tripwire: se o host de produção aparecer no log, o job falha.
+#      Nenhuma rota HTTP é chamada: `.convex.cloud` é o endpoint das funções e
+#      `.convex.site` só serve as rotas registradas em src/convex/http.ts
+#      (apenas auth) — não existe rota `/version` neste projeto.
 #
 # O QUE ESTE WORKFLOW NÃO FAZ
 #   • não define variáveis de ambiente do deployment — JWT_PRIVATE_KEY, JWKS e
@@ -28,7 +34,11 @@ name: Convex — publicar funções em HOMOLOGAÇÃO
 #     do Convex, nunca aqui; CONVEX_SITE_URL é injetada pelo próprio Convex;
 #   • não publica frontend (para isso: scripts/build-homolog.mjs + hosting
 #     separado da produção);
-#   • não usa `--yes` (opção inexistente no CLI 1.48.0);
+#   • não usa `--yes` (opção inexistente no CLI 1.48.0) — e não precisa: com
+#     deploy key o CLI compara o deployment pedido com o da chave e, sendo o
+#     mesmo (`configuredDeployment.name === deploymentFields.deploymentName`),
+#     não abre o prompt interativo `askToConfirmPush` de deploy.js;
+#   • não chama rotas HTTP do deployment nem inventa endpoints;
 #   • não roda `convex dev`, não cria/remove deployment e não escreve dados.
 #
 # PRÉ-REQUISITO (ação do proprietário, uma vez)
@@ -146,47 +156,53 @@ jobs:
           set -euo pipefail
           log="${RUNNER_TEMP}/deploy.log"
           bunx convex --version | tee "${log}"
-          bunx convex deploy 2>&1 | tee -a "${log}"
+          bunx convex deploy 2>&1 | tee -a "${log}"   # `pipefail`: exit do deploy é o exit do passo
 
-      - name: Verificar destino publicado (tripwire de produção)
+      - name: Verificar destino publicado (log do deploy + tripwire de produção)
         run: |
+          # Confirmação = (a) sucesso real de `bunx convex deploy`, cujo exit code
+          # já foi propagado pelo `pipefail` do passo anterior, e (b) as duas
+          # linhas que o CLI 1.48.0 emite no log:
+          #   "Deploying code to deployment:"  … anúncio do alvo
+          #   "Deployed Convex functions to https://<deployment>.convex.cloud"
+          # Nenhuma rota HTTP é chamada aqui.
           set -euo pipefail
           log="${RUNNER_TEMP}/deploy.log"
+          limpo="${RUNNER_TEMP}/deploy.limpo.log"
 
-          if grep -q "${HOST_PROIBIDO}" "${log}"; then
-            echo "::error::O log menciona o host de PRODUÇÃO (${HOST_PROIBIDO}). Verificação abortada."
+          if [ ! -s "${log}" ]; then
+            echo "::error::Log de deploy vazio. Publicação não confirmada."
             exit 1
           fi
 
-          if ! grep -q "Deploying code to deployment" "${log}"; then
-            echo "::error::O log não confirma o envio das funções. Nada é considerado publicado."
+          # Remove só códigos ANSI do spinner; o texto das mensagens é preservado.
+          sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "${log}" > "${limpo}"
+
+          if grep -qF "${HOST_PROIBIDO}" "${limpo}"; then
+            echo "::error::O log menciona o host de PRODUÇÃO (${HOST_PROIBIDO}). Publicação não confirmada."
             exit 1
           fi
 
-          if ! grep -q "${ALVO_REF}" "${log}"; then
-            echo "::error::O log não menciona o deployment de homologação (${ALVO_REF})."
+          if ! grep -qF "Deploying code to deployment:" "${limpo}"; then
+            echo "::error::O log não contém o anúncio do deployment alvo. Publicação não confirmada."
             exit 1
           fi
 
-          codigo=""
-          for tentativa in 1 2 3 4 5; do
-            codigo="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://${ALVO_HOST}/version" || true)"
-            if [ "${codigo}" = "200" ]; then
-              break
-            fi
-            sleep 5
-          done
-
-          if [ "${codigo}" != "200" ]; then
-            echo "::error::GET https://${ALVO_HOST}/version respondeu '${codigo}'. Publicação não confirmada."
+          if ! grep -qF "Deployed Convex functions to https://${ALVO_HOST}" "${limpo}"; then
+            echo "::error::O log não contém 'Deployed Convex functions to https://${ALVO_HOST}'. Publicação não confirmada."
             exit 1
           fi
 
           {
             echo "### Publicação em homologação"
             echo ""
-            echo "- deployment: \`${ALVO_REF}\` (\`${ALVO_HOST}\`)"
-            echo "- \`GET /version\`: ${codigo}"
+            echo "- comando: \`bunx convex deploy\` (exit 0)"
+            echo "- alvo anunciado pelo CLI:"
+            echo ""
+            echo '```'
+            grep -F -A2 "Deploying code to deployment:" "${limpo}"
+            echo '```'
+            echo ""
             echo "- produção (\`${HOST_PROIBIDO}\`): não referenciada no log"
             echo ""
             echo "Este workflow não altera variáveis do deployment. Se o login falhar,"
