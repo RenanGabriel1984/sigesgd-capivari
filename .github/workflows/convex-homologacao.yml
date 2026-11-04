@@ -125,10 +125,11 @@ jobs:
           tipo="${prefixo%%:*}"
           ref="${prefixo##*:}"
 
+          # Somente `prod`: chave de desenvolvimento (`dev`) é recusada.
           case "${tipo}" in
-            prod|dev) ;;
+            prod) ;;
             *)
-              echo "::error::Tipo de deploy key não reconhecido. Nada foi publicado."
+              echo "::error::Tipo de deploy key não permitido (aceito apenas prod). Nada foi publicado."
               exit 1
               ;;
           esac
