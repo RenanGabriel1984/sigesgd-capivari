@@ -790,7 +790,7 @@ export function DanfeImportDialog({
 }: DanfeImportDialogProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const [cameraAvailable, setCameraAvailable] = useState(false);
+  const [cameraAvailable, setCameraAvailable] = useState(true);
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
   const [showReview, setShowReview] = useState(false);
   const [parsed, setParsed] = useState<DanfeParseResult>(EMPTY_PARSED);
@@ -940,18 +940,16 @@ export function DanfeImportDialog({
             {!showReview && (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  {cameraAvailable && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="gap-2"
-                      disabled={reading}
-                      onClick={() => cameraInputRef.current?.click()}
-                    >
-                      <Camera className="h-4 w-4" />
-                      Tirar foto da DANFE
-                    </Button>
-                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2"
+                    disabled={reading || !cameraAvailable}
+                    onClick={() => cameraAvailable && cameraInputRef.current?.click()}
+                  >
+                    <Camera className="h-4 w-4" />
+                    {cameraAvailable ? "Tirar foto da DANFE" : "Câmera não disponível"}
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"
@@ -984,10 +982,15 @@ export function DanfeImportDialog({
                   a leitura não identificar os campos, use a entrada manual ou importe o XML —
                   Importar NF-e XML.
                 </p>
-                {cameraAvailable && (
+                {cameraAvailable ? (
                   <p className="text-xs text-muted-foreground">
                     No celular, a câmera traseira é aberta direto para capturar a DANFE. Anexar
                     continua aceitando PDF, foto da galeria e imagem já salva no aparelho.
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Este aparelho não detectou câmera disponível. Para importar, anexe um PDF ou
+                    imagem, ou use a entrada manual / Importar NF-e XML.
                   </p>
                 )}
               </div>
