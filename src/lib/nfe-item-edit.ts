@@ -59,6 +59,10 @@ export function parseDecimalInput(raw: string): number | null {
   if (text.includes(",")) {
     // Formato brasileiro: ponto é separador de milhar, vírgula é decimal.
     normalized = text.replace(/\./g, "").replace(",", ".");
+  } else if (/^-?\d{1,3}(?:\.\d{3})+$/.test(text)) {
+    // "1.323" digitado sem centavos é mil trezentos e vinte e três — nunca
+    // 1,323 (erro de 1000× no valor da entrada).
+    normalized = text.replace(/\./g, "");
   }
 
   if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return null;

@@ -91,11 +91,15 @@ describe("entries.create: materialType nunca é rebaixado", () => {
       /await\s+ctx\.db\.insert\(\s*"entries"\s*,\s*\{[\s\S]*?\}\s*\)/,
     );
     expect(insert).not.toBeNull();
-    // O default só pode ser aplicado quando o valor é AUSENTE (??), nunca
-    // quando o valor enviado é "permanent".
-    expect(insert![0]).toMatch(/materialType:\s*args\.materialType\s*\?\?\s*"consumption"/);
+    // D1: o tipo de material é OBRIGATÓRIO na criação e é persistido
+    // exatamente como enviado — sem default e sem qualquer rebaixamento.
+    expect(insert![0]).toMatch(/materialType:\s*args\.materialType\s*,/);
+    expect(insert![0]).not.toMatch(/\?\?\s*"consumption"/);
     // E não existe um ternário que converta "permanent" em "consumption".
     expect(insert![0]).not.toMatch(/===?\s*"permanent"\s*\?\s*"consumption"/);
+    expect(ENTRIES_SOURCE).toMatch(
+      /materialType:\s*v\.union\(v\.literal\("consumption"\),\s*v\.literal\("permanent"\)\)/,
+    );
   });
 });
 

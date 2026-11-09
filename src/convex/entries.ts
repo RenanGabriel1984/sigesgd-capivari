@@ -202,8 +202,11 @@ export const create = mutation({
     totalValue: v.optional(v.number()),
     xmlStorageId: v.optional(v.string()),
     importedFromXml: v.optional(v.boolean()),
-    // ── Classificação da entrada (histórica) ──
-    materialType: v.optional(v.union(v.literal("consumption"), v.literal("permanent"))),
+    // ── Classificação da entrada — OBRIGATÓRIA (D1) ──
+    // Sem esta escolha a entrada não é criada: o sistema não presume que toda
+    // entrada é material de consumo. Entradas históricas continuam com o campo
+    // opcional no schema; a obrigatoriedade vale para novas criações.
+    materialType: v.union(v.literal("consumption"), v.literal("permanent")),
     // ── Área/Subestoque de destino — ESCOLHA do usuário (nunca derivada
     // automaticamente do fornecedor nem da categoria) ──
     areaId: v.optional(v.id("stockAreas")),
@@ -302,14 +305,11 @@ export const create = mutation({
       xmlStorageId: args.xmlStorageId || undefined,
       importedFromXml: args.importedFromXml || undefined,
       status: "draft",
-      // O tipo de material é ESCOLHA do usuário e é persistido exatamente como
-      // enviado. O fallback anterior (`?? "consumption"`) mascarava o stale
-      // closure do frontend: uma escolha "Material permanente" perdida viraria
-      // "consumption" sem nenhum aviso. A UI agora envia o valor explicitamente
-      // (ver `resolveNfeDestination` em src/lib/nfe-destination.ts); este
-      // default defensivo permanece APENAS para clientes legados/importadores
-      // diretos, e nunca converte "permanent" em "consumption".
-      materialType: args.materialType ?? "consumption",
+      // O tipo de material é ESCOLHA do usuário e chega por ARGUMENTO
+      // (ver `resolveNfeDestination` em src/lib/nfe-destination.ts). Não existe
+      // default: o valor é persistido exatamente como enviado — "permanent"
+      // nunca é rebaixado para "consumption".
+      materialType: args.materialType,
       areaId: args.areaId,
       createdAt: now,
       updatedAt: now,

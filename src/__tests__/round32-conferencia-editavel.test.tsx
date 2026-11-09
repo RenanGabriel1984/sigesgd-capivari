@@ -20,6 +20,9 @@ import {
 } from "@/components/NfeReviewTable";
 import {
   nfeItemTotalMismatch,
+  parseDecimalInput,
+  parseMoneyInput,
+  parseQuantityInput,
   validateNfeReviewItems,
 } from "@/lib/nfe-item-edit";
 
@@ -260,5 +263,24 @@ describe("R32/D3 — divergências explícitas", () => {
     expect(
       nfeItemTotalMismatch({ ...row().item, totalValue: 1323.51 }),
     ).toBeNull();
+  });
+});
+
+describe("R32/D3 — leitura dos valores digitados", () => {
+  it("aceita formato brasileiro, ponto decimal e milhar sem centavos", () => {
+    expect(parseDecimalInput("1.323,50")).toBe(1323.5);
+    expect(parseDecimalInput("R$ 52,94")).toBe(52.94);
+    expect(parseDecimalInput("1323.50")).toBe(1323.5);
+    expect(parseDecimalInput("1.323")).toBe(1323); // não 1,323
+    expect(parseDecimalInput("25")).toBe(25);
+  });
+
+  it("rejeita texto sem número, quantidade zero/negativa e valor negativo", () => {
+    expect(parseDecimalInput("")).toBeNull();
+    expect(parseDecimalInput("abc")).toBeNull();
+    expect(parseQuantityInput("0")).toBeNull();
+    expect(parseQuantityInput("-3")).toBeNull();
+    expect(parseMoneyInput("-1,00")).toBeNull();
+    expect(parseQuantityInput("2,5")).toBe(2.5);
   });
 });

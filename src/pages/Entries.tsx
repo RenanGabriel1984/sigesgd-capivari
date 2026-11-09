@@ -1443,6 +1443,10 @@ function EntriesPage() {
                       Rascunho <span className="font-mono font-medium">{nfeDraft.entryNumber}</span>{" "}
                       criado e ainda NÃO confirmado — nada foi somado ao estoque.
                     </p>
+                    <p className="text-[11px]">
+                      Os itens já foram gravados neste rascunho: qualquer correção feita agora na
+                      conferência não altera o rascunho existente.
+                    </p>
                     <Button
                       type="button"
                       size="sm"
