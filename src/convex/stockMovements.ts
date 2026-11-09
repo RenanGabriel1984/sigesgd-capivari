@@ -23,7 +23,10 @@ export const list = query({
       const product = await ctx.db.get(m.productId);
       const user = await ctx.db.get(m.userId);
       const supplier = m.supplierId ? await ctx.db.get(m.supplierId) : null;
-      return { ...m, product, user, supplier };
+      const area = m.areaId ? await ctx.db.get(m.areaId) : null;
+      const location = m.locationId ? await ctx.db.get(m.locationId) : null;
+      const toLocation = m.toLocationId ? await ctx.db.get(m.toLocationId) : null;
+      return { ...m, product, user, supplier, area, location, toLocation };
     }));
   },
 });
@@ -36,7 +39,10 @@ export const byProduct = query({
     return Promise.all(movements.map(async (m) => {
       const user = await ctx.db.get(m.userId);
       const supplier = m.supplierId ? await ctx.db.get(m.supplierId) : null;
-      return { ...m, user, supplier };
+      const area = m.areaId ? await ctx.db.get(m.areaId) : null;
+      const location = m.locationId ? await ctx.db.get(m.locationId) : null;
+      const toLocation = m.toLocationId ? await ctx.db.get(m.toLocationId) : null;
+      return { ...m, user, supplier, area, location, toLocation };
     }));
   },
 });
