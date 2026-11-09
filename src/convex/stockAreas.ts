@@ -120,6 +120,160 @@ export const summary = query({
  * nunca apaga e nunca toca em estoque, lotes ou movimentações. Cada criação
  * gera registro de auditoria.
  */
+/**
+ * Lotes com saldo que ainda não têm uma combinação consistente de área e local.
+ * A consulta é somente leitura e fornece contexto para classificação manual.
+ */
+export const unclassifiedLots = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const lots = await ctx.db.query("lots").collect();
+    const pending = [];
+    for (const lot of lots) {
+      if (!lot.active || lot.quantityAvailable <= 0) continue;
+      const location = lot.locationId ? await ctx.db.get(lot.locationId) : null;
+      const consistent = !!lot.areaId && !!lot.locationId &&
+        !!location && location.areaId === lot.areaId;
+      if (consistent) continue;
+
+      const product = await ctx.db.get(lot.productId);
+      const entry = await ctx.db.get(lot.entryId);
+      const entryItems = await ctx.db.query("entryItems")
+        .withIndex("by_entry", (q: any) => q.eq("entryId", lot.entryId)).collect();
+      const entryItem = entryItems.find((item: any) =>
+        item.lotId === lot._id || item.lotId === lot.lotNumber
+      ) ?? null;
+      const currentArea = lot.areaId ? await ctx.db.get(lot.areaId) : null;
+      const suggestedLocationId = lot.locationId ?? entryItem?.locationId ?? null;
+      const suggestedLocation = suggestedLocationId ? await ctx.db.get(suggestedLocationId) : null;
+      const suggestedAreaId = lot.areaId ?? suggestedLocation?.areaId ?? null;
+
+      pending.push({
+        lotId: lot._id,
+        lotNumber: lot.lotNumber,
+        productId: lot.productId,
+        productName: product?.name ?? "Produto não encontrado",
+        quantityAvailable: lot.quantityAvailable,
+        quantityReceived: lot.quantityReceived,
+        entryNumber: entry?.entryNumber ?? null,
+        invoiceNumber: lot.invoiceNumber ?? entry?.invoiceNumber ?? null,
+        currentAreaName: currentArea?.name ?? null,
+        currentLocationName: location?.name ?? null,
+        suggestedAreaId,
+        suggestedLocationId,
+        areaMissing: !lot.areaId,
+        locationMissing: !lot.locationId || !location || location.areaId !== lot.areaId,
+      });
+    }
+    return pending.sort((a, b) => a.productName.localeCompare(b.productName, "pt-BR") ||
+      a.lotNumber.localeCompare(b.lotNumber));
+  },
+});
+
+/**
+ * Classifica explicitamente um lote legado na área/local selecionados.
+ * O saldo global não muda. A quantidade é retirada do saldo local legado
+ * (sem área) e adicionada ao saldo da área somente quando a conferência fecha.
+ */
+export const classifyLot = mutation({
+  args: {
+    lotId: v.id("lots"),
+    areaId: v.id("stockAreas"),
+    locationId: v.id("storageLocations"),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    const lot = await ctx.db.get(args.lotId);
+    if (!lot || !lot.active) throw new Error("Lote não encontrado ou inativo.");
+    if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable <= 0) {
+      throw new Error("O lote não possui saldo disponível para classificação.");
+    }
+    const area = await ctx.db.get(args.areaId);
+    const location = await ctx.db.get(args.locationId);
+    if (!area || !area.active || !location || !location.active || location.areaId !== args.areaId) {
+      throw new Error("A área e o local selecionados precisam estar ativos e pertencer um ao outro.");
+    }
+    if (lot.areaId && lot.areaId !== args.areaId) {
+      throw new Error("O lote já possui outra área. Use uma transferência de estoque para mudar de área.");
+    }
+    if (lot.locationId && lot.locationId !== args.locationId) {
+      throw new Error("O lote já possui outro local físico. Use uma transferência para mudar o local.");
+    }
+
+    const reservations = await ctx.db.query("requestItemReservations")
+      .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+    const reserved = reservations.reduce((sum: number, item: any) => sum + item.quantityRemaining, 0);
+    if (reserved > 0) {
+      throw new Error("Este lote possui unidades reservadas por solicitações. Conclua ou cancele essas solicitações antes de classificá-lo.");
+    }
+
+    const entryItems = await ctx.db.query("entryItems")
+      .withIndex("by_entry", (q: any) => q.eq("entryId", lot.entryId)).collect();
+    const linkedEntryItem = entryItems.find((item: any) =>
+      item.lotId === lot._id || item.lotId === lot.lotNumber
+    );
+    const sourceLocationId = lot.locationId ?? linkedEntryItem?.locationId ?? args.locationId;
+    if (sourceLocationId !== args.locationId) {
+      throw new Error("O local registrado para este lote difere do local selecionado. Faça uma transferência física auditável antes da classificação.");
+    }
+
+    const rows = await ctx.db.query("stockByLocation")
+      .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).collect();
+    const targetRow = rows.find((row: any) =>
+      row.locationId === args.locationId && row.areaId === args.areaId
+    );
+    const alreadyClassifiedRow = rows.find((row: any) =>
+      row.locationId === args.locationId && row.areaId === lot.areaId && !!lot.areaId
+    );
+    const legacyRows = rows.filter((row: any) =>
+      row.locationId === args.locationId && !row.areaId
+    );
+    const legacyQuantity = legacyRows.reduce((sum: number, row: any) => sum + row.quantity, 0);
+
+    // Se o lote já possuía área e faltava somente a localização, o saldo pode
+    // já estar no bucket classificado. Caso contrário, precisa existir saldo legado.
+    const balanceAlreadyClassified = !!lot.areaId && !!alreadyClassifiedRow &&
+      alreadyClassifiedRow.quantity >= lot.quantityAvailable;
+    if (!balanceAlreadyClassified && legacyQuantity < lot.quantityAvailable) {
+      throw new Error(
+        `O saldo legado deste produto/local (${legacyQuantity}) é menor que o saldo do lote (${lot.quantityAvailable}). Nenhuma classificação foi aplicada.`
+      );
+    }
+
+    if (!balanceAlreadyClassified) {
+      let amountToMove = lot.quantityAvailable;
+      for (const legacyRow of legacyRows) {
+        if (amountToMove <= 0) break;
+        const move = Math.min(legacyRow.quantity, amountToMove);
+        await ctx.db.patch(legacyRow._id, { quantity: legacyRow.quantity - move });
+        amountToMove -= move;
+      }
+      if (targetRow) {
+        await ctx.db.patch(targetRow._id, { quantity: targetRow.quantity + lot.quantityAvailable });
+      } else {
+        await ctx.db.insert("stockByLocation", {
+          productId: lot.productId,
+          locationId: args.locationId,
+          areaId: args.areaId,
+          quantity: lot.quantityAvailable,
+        });
+      }
+    }
+
+    await ctx.db.patch(lot._id, { areaId: args.areaId, locationId: args.locationId });
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "update",
+      entity: "lots",
+      entityId: lot._id,
+      details: `Classificação manual do lote ${lot.lotNumber}: ${lot.quantityAvailable} unidade(s) → ${area.name} / ${location.name}. Saldo global inalterado.`,
+      timestamp: Date.now(),
+    });
+    return lot._id;
+  },
+});
+
 export const ensureBaselineAreas = mutation({
   args: {},
   handler: async (ctx) => {
