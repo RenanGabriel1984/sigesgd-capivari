@@ -201,9 +201,9 @@ export default function StockAreas() {
               <div className="text-sm">
                 <p className="font-medium">{noAreaRow.name || NO_AREA_LABEL}</p>
                 <p className="text-muted-foreground text-xs">
-                  {noAreaRow.lots} lote(s) · {noAreaRow.quantityAvailable} unidade(s) disponíveis ainda
-                  sem área/subestoque definida. Para direcionar material já existente a uma área, use
-                  uma transferência de estoque auditável.
+                  {noAreaRow.lots} lote(s) · {noAreaRow.quantityAvailable} unidade(s) livres ainda
+                  aguardam classificação consistente de área e local físico. Confira a lista de lotes
+                  pendentes abaixo antes de disponibilizar esse saldo para solicitações.
                 </p>
               </div>
             </CardContent>

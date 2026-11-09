@@ -59,7 +59,7 @@ export function suggestAreaByCategory(
 }
 
 /** Rótulo de exibição quando a entrada não possui área definida. */
-export const NO_AREA_LABEL = "Sem área (estoque geral)";
+export const NO_AREA_LABEL = "Sem área/local — classificação pendente";
 
 /** Área/subestoque de referência: estoque geral da Secretaria. */
 export const AREA_TI_GERAL = "TI Geral";

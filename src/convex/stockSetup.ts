@@ -465,7 +465,6 @@ export const productLocationSummary = query({
 });
 
 /**
- * Quick stock exit/**
  * Quick stock exit (saída simples).
  * Simplified exit without the full request/approval flow.
  * Uses FIFO lot consumption. Reduces both global and location stock.
@@ -604,7 +603,6 @@ export const quickExit = mutation({
 });
 
 /**
- * Cleanup: remove test/homologation data./**
  * Cleanup: remove test/homologation data.
  * Preserves users, passwords, auth, schema, audit logs.
  */
