@@ -450,6 +450,7 @@ const schema = defineSchema(
       exitMovementId: v.optional(v.id("stockMovements")),
       areaId: v.optional(v.id("stockAreas")),
       locationId: v.optional(v.id("storageLocations")),
+      toLocationId: v.optional(v.id("storageLocations")),
       timestamp: v.number(),
       canceled: v.optional(v.boolean()),
       canceledAt: v.optional(v.number()),
@@ -772,6 +773,8 @@ const schema = defineSchema(
       lotId: v.optional(v.id("lots")),
       fromLocationId: v.id("storageLocations"),
       toLocationId: v.id("storageLocations"),
+      fromAreaId: v.optional(v.id("stockAreas")),
+      toAreaId: v.optional(v.id("stockAreas")),
       quantity: v.number(),
       responsibleUserId: v.id("users"),
       observation: v.optional(v.string()),
@@ -779,6 +782,15 @@ const schema = defineSchema(
     }).index("by_product", ["productId"])
       .index("by_from", ["fromLocationId"])
       .index("by_to", ["toLocationId"]),
+
+    stockTransferLots: defineTable({
+      transferId: v.id("stockTransfers"),
+      sourceLotId: v.id("lots"),
+      destinationLotId: v.id("lots"),
+      quantity: v.number(),
+    }).index("by_transfer", ["transferId"])
+      .index("by_sourceLot", ["sourceLotId"])
+      .index("by_destinationLot", ["destinationLotId"]),
 
     // ── GOMAQ Exchanges (Trocas de Suprimento) ──
     gomaQExchanges: defineTable({
