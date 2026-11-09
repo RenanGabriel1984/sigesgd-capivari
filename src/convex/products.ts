@@ -74,7 +74,10 @@ export const getById = query({
     const movements = await ctx.db.query("stockMovements").withIndex("by_product", (q) => q.eq("productId", args.id)).order("desc").take(10);
     const movementsWithUser = await Promise.all(movements.map(async (m: any) => {
       const user = await ctx.db.get(m.userId);
-      return { ...m, user };
+      const area = m.areaId ? await ctx.db.get(m.areaId) : null;
+      const location = m.locationId ? await ctx.db.get(m.locationId) : null;
+      const toLocation = m.toLocationId ? await ctx.db.get(m.toLocationId) : null;
+      return { ...m, user, area, location, toLocation };
     }));
     // ── Lotes do produto (rastreabilidade de origem) ──
     const lots = await ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", args.id)).order("desc").collect();
@@ -84,10 +87,29 @@ export const getById = query({
       return { ...l, entry, supplier };
     }));
     // ── Localizações (estoque por local) ──
-    const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
-    const locations = await Promise.all(sbls.map(async (s: any) => {
-      const location = await ctx.db.get(s.locationId);
-      return { location, quantity: s.quantity };
+    const sbls = await ctx.db.query("stockByLocation")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
+    const locations = await Promise.all(sbls.map(async (row: any) => {
+      const location = await ctx.db.get(row.locationId);
+      const area = row.areaId && location?.areaId === row.areaId
+        ? await ctx.db.get(row.areaId) : null;
+      const reservations = await ctx.db.query("requestItemReservations")
+        .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
+      const reservedQuantity = reservations
+        .filter((reservation: any) =>
+          reservation.locationId === row.locationId &&
+          reservation.areaId === (row.areaId ?? undefined)
+        )
+        .reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0);
+      return {
+        location,
+        area,
+        areaId: area?._id ?? null,
+        classificationPending: !area,
+        quantity: row.quantity,
+        reservedQuantity,
+        availableQuantity: Math.max(0, row.quantity - reservedQuantity),
+      };
     }));
     return {
       ...product,
