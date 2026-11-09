@@ -90,7 +90,33 @@ export const update = mutation({
       if (location.areaId && location.areaId !== updates.areaId) {
         throw new Error("A área de um local já classificado não pode ser trocada diretamente. Use uma transferência/classificação auditável.");
       }
+      if (!location.areaId) {
+        const lotsAtLocation = await ctx.db.query("lots")
+          .withIndex("by_location", (q: any) => q.eq("locationId", id)).collect();
+        if (lotsAtLocation.some((lot: any) => lot.areaId && lot.areaId !== updates.areaId)) {
+          throw new Error("Há lotes neste local já vinculados a outra área. Não é seguro atribuir uma área diferente ao local.");
+        }
+        const balancesAtLocation = await ctx.db.query("stockByLocation")
+          .withIndex("by_location", (q: any) => q.eq("locationId", id)).collect();
+        if (balancesAtLocation.some((row: any) => row.areaId && row.areaId !== updates.areaId)) {
+          throw new Error("Há saldos neste local já vinculados a outra área. Regularize a classificação antes de alterar o local.");
+        }
+      }
     }
+
+    if (updates.active === false) {
+      const lotsAtLocation = await ctx.db.query("lots")
+        .withIndex("by_location", (q: any) => q.eq("locationId", id)).collect();
+      if (lotsAtLocation.some((lot: any) => lot.active && lot.quantityAvailable > 0)) {
+        throw new Error("Não é possível desativar um local que ainda possui lotes com saldo. Transfira ou regularize o estoque primeiro.");
+      }
+      const balancesAtLocation = await ctx.db.query("stockByLocation")
+        .withIndex("by_location", (q: any) => q.eq("locationId", id)).collect();
+      if (balancesAtLocation.some((row: any) => row.quantity > 0)) {
+        throw new Error("Não é possível desativar um local que ainda possui saldo por localização.");
+      }
+    }
+
     if (updates.name) {
       updates.name = updates.name.trim();
       const all = await ctx.db.query("storageLocations").collect();
