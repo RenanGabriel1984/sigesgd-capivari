@@ -371,7 +371,11 @@ describe("Entrada de Material (garantias estáticas)", () => {
 
   it("documento original preservado e origem DANFE/OCR registrada (§15)", () => {
     expect(ENTRIES).toContain('nfeXmlFile.type || "application/xml"');
-    expect(ENTRIES).toContain("Falha ao salvar o DANFE original");
+    // D4: a mensagem de falha de upload vive no orquestrador do fluxo,
+    // compartilhado por XML e DANFE (nenhum anexo é perdido em silêncio).
+    expect(read("src/lib/entry-import-flow.ts")).toContain(
+      "Falha ao salvar o DANFE original",
+    );
     expect(ENTRIES).toContain("Dados extraídos por OCR de DANFE/PDF/imagem");
   });
 

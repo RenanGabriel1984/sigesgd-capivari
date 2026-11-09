@@ -620,7 +620,24 @@ const HEADER_LINE_PATTERNS = [
 ];
 
 const ITEM_INDEX_RE = /^\d{1,3}$/;
-const ITEM_CODE_RE = /^\d{3,7}$/;
+/**
+ * Código de produto na coluna "Código" da DANFE.
+ *
+ * O catálogo real dos fornecedores NÃO é numérico: convivem códigos curtos,
+ * códigos longos de 10+ dígitos e códigos alfanuméricos com separadores
+ * (`ABC-1234`, `00X01234`, `0001234567`). A regra antiga (`^\d{3,7}$`)
+ * descartava a LINHA INTEIRA do item nesses casos — era a causa de DANFEs
+ * "sem itens" mesmo com texto perfeito.
+ *
+ * Regras para continuar conservador (nada de item falso):
+ *  • 3 a 20 caracteres (chave de acesso com 44 dígitos nunca entra);
+ *  • começa por letra ou dígito e usa só letras, dígitos e separadores de
+ *    catálogo (`.` `_` `/` `-`);
+ *  • contém ao menos um dígito — rótulos de coluna (NCM, CST, UNID) e
+ *    palavras da descrição nunca viram código;
+ *  • não é data (`28/09/2026`) nem valor monetário (vírgula é proibida).
+ */
+const ITEM_CODE_RE = /^(?!\d{1,2}\/\d{1,2}\/\d{2,4}$)(?=.{3,20}$)(?=.*\d)[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const QUANTITY_TOKEN_RE = /^\d{1,9}(?:[.,]\d{1,4})?$/;
 // Aceita 2 a 4 decimais: o OCR real do PDF/PNG já imprimiu preços e
 // quantidades com 4 casas (ex.: "52,9400", "25,0000") — travar em 2
@@ -719,8 +736,16 @@ interface ValueWindow {
   totalValue: number;
 }
 
-/** Código de produto aceitável SEM o número do item (linha consolidada do OCR). */
-const ITEM_CODE_NO_INDEX_RE = /^\d{4,7}$/;
+/**
+ * Código de produto aceitável SEM o número do item (linha consolidada do OCR).
+ *
+ * Mesma regra do código com índice, com UMA restrição extra: 8 dígitos puros
+ * são o NCM/SH da coluna fiscal — quando o OCR perdeu o código e o número do
+ * item, um NCM no começo da linha não pode virar código do fornecedor (isso
+ * associaria o produto errado por alias).
+ */
+const ITEM_CODE_NO_INDEX_RE =
+  /^(?!\d{8}$)(?!\d{1,2}\/\d{1,2}\/\d{2,4}$)(?=.{4,20}$)(?=.*\d)[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
 const ALPHA_UNIT_RE = /^[A-Za-zÀ-ÿ]{1,6}\.?$/;
 

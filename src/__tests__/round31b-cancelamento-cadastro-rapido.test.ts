@@ -372,8 +372,13 @@ describe("R31.8 §2 — apresentação em blocos com rótulos explícitos", () =
       ) ?? [];
     expect(rotulos.length).toBeGreaterThanOrEqual(5);
     expect(REVIEW_TABLE).toContain("Produto associado:");
-    expect(REVIEW_TABLE).toMatch(/Unitário \{formatMoney\(review\.item\.unitValue\)\}/);
-    expect(REVIEW_TABLE).toMatch(/Total \{formatMoney\(review\.item\.totalValue\)\}/);
+    // D3: os valores são editáveis, mas o valor reconhecido segue exibido de
+    // forma explícita quando o usuário altera o campo.
+    expect(REVIEW_TABLE).toContain("reconhecido:");
+    expect(REVIEW_TABLE).toMatch(/formatMoney\(review\.item\.unitValue\)/);
+    expect(REVIEW_TABLE).toMatch(/formatMoney\(review\.item\.totalValue\)/);
+    expect(REVIEW_TABLE).toContain("Valor unitário");
+    expect(REVIEW_TABLE).toContain("Valor total");
     // contador/fonte/status da conferência separados por texto, não só por gap:
     expect(REVIEW_TABLE).toContain('<span aria-hidden="true">·</span>');
   });

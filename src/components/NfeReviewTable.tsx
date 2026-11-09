@@ -2,15 +2,20 @@
  * Tabela de conferência da NF-e (XML ou DANFE/OCR).
  *
  * REGRAS DESTA TELA:
- *  • `canContinueNfeReview(items)` é a ÚNICA regra visual e funcional do
- *    avanço — nenhum item pode avançar sem produto associado e "found".
+ *  • `canContinueNfeReview(items)` é uma das regras de avanço — nenhum item
+ *    avança sem produto associado e "found".
  *  • Um item que o OCR NÃO conseguiu identificar vira uma linha PENDENTE:
  *    campos editáveis/vazios, nunca um produto inventado. O usuário associa
  *    manualmente (ou cria o produto) antes de finalizar.
  *  • A categoria do material fica visível ao lado do produto associado.
- *  • Quantidades/preços vêm do documento fiscal; quando o OCR não trouxe uma
- *    quantidade válida, o campo fica VAZIO para digitação — nunca inventado.
+ *  • D3: quantidade, unidade, valor unitário e total são SEMPRE editáveis —
+ *    mesmo quando o OCR trouxe valores aparentemente válidos. Alterações são
+ *    destacadas, o valor reconhecido fica visível, o total é recalculado e uma
+ *    divergência matemática bloqueia o avanço (nunca é confirmada em silêncio).
  */
+import { useState } from "react";
+import type { ChangeEvent } from "react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +26,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  formatDecimalInput,
+  nfeItemRevision,
+  nfeItemTotalMismatch,
+  nfeReviewTotals,
+  parseMoneyInput,
+  parseQuantityInput,
+  reconcileItemTotal,
+  type NfeItemOriginalValues,
+} from "@/lib/nfe-item-edit";
 import {
   type NfeItem,
   type ProductAssociationType,
@@ -43,18 +58,22 @@ export type NfeReviewRow = {
   associationType: ProductAssociationType;
   locationId?: string;
   supplierLot?: string;
+  /** Valores reconhecidos no documento (comparação/destaque de alteração). */
+  originalValues?: NfeItemOriginalValues;
 };
 
 export interface NfeReviewTableProps {
   items: NfeReviewRow[];
   products: NfeReviewProduct[];
   locations?: Array<{ _id: string; name: string }>;
-  /** Atualiza UMA linha (associação manual, lote, local, quantidade pendente). */
+  /** Atualiza UMA linha (associação manual, lote, local, quantidade, valores). */
   onUpdate: (index: number, patch: Partial<NfeReviewRow>) => void;
   /** Abre o cadastro de produto para a LINHA indicada (índice do item). */
   onNewProduct?: (index: number) => void;
   /** Origem dos dados lidos (XML ou DANFE/OCR) — apenas informativo. */
   sourceLabel?: string;
+  /** Total da nota (valor do documento), para comparar com a soma dos itens. */
+  documentTotal?: number;
 }
 
 const STATUS_LABEL: Record<ProductMatchStatus, { label: string; className: string }> = {
@@ -89,9 +108,42 @@ export function NfeReviewTable({
   onUpdate,
   onNewProduct,
   sourceLabel,
+  documentTotal,
 }: NfeReviewTableProps) {
   const { pendingCount, allAssociated } = nfeItemsAssociationState(items);
   const hasInvalidQuantity = items.some((row) => !(Number(row.item.quantity) > 0));
+  // Texto em edição por campo — preserva "1," e valores parciais enquanto o
+  // usuário digita sem sobrescrever o estado da linha a cada tecla.
+  const [editing, setEditing] = useState<Record<string, string>>({});
+  const totals = nfeReviewTotals(items, documentTotal);
+
+  const fieldKey = (index: number, field: string) => `${index}:${field}`;
+
+  const textProps = (
+    index: number,
+    field: string,
+    current: number | undefined,
+    apply: (raw: string) => void,
+  ) => {
+    const key = fieldKey(index, field);
+    return {
+      value: editing[key] ?? formatDecimalInput(current),
+      onChange: (event: ChangeEvent<HTMLInputElement>) => {
+        const raw = event.target.value;
+        setEditing((previous) => ({ ...previous, [key]: raw }));
+        apply(raw);
+      },
+      onBlur: () =>
+        setEditing((previous) => {
+          const next = { ...previous };
+          delete next[key];
+          return next;
+        }),
+    };
+  };
+
+  const changedClass = (changed: boolean) =>
+    changed ? "mt-1 h-8 border-amber-400 bg-amber-50" : "mt-1 h-8";
 
   return (
     <div className="min-w-0 max-w-full overflow-x-hidden space-y-3">
@@ -114,6 +166,11 @@ export function NfeReviewTable({
         )}
       </div>
 
+      <p className="text-xs text-muted-foreground">
+        Quantidade, unidade e valores podem ser corrigidos aqui: um erro de leitura não pode
+        chegar ao estoque. Campos alterados ficam destacados e mostram o valor reconhecido.
+      </p>
+
       {items.length === 0 && (
         <div className="rounded-md border bg-amber-50 px-3 py-2 text-xs text-amber-800">
           Nenhum item identificado na NF-e — a lista está vazia, nenhum item foi associado.
@@ -131,7 +188,9 @@ export function NfeReviewTable({
         <div className="min-w-0 max-w-full overflow-x-hidden">
           {items.map((review, index) => {
             const status = STATUS_LABEL[review.matchStatus] ?? STATUS_LABEL.not_found;
-            const quantityMissing = !(Number(review.item.quantity) > 0);
+            const revision = nfeItemRevision(review.item, review.originalValues);
+            const original = review.originalValues;
+            const mismatch = nfeItemTotalMismatch(review.item);
             return (
               <div
                 key={`${review.item.lineNumber}-${index}`}
@@ -152,6 +211,14 @@ export function NfeReviewTable({
                   )}
                   <span aria-hidden="true">·</span>
                   <Badge className={`${status.className} text-[10px]`}>{status.label}</Badge>
+                  {revision.anyChanged && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <Badge className="bg-amber-100 text-amber-800 text-[10px]">
+                        alterado na conferência
+                      </Badge>
+                    </>
+                  )}
                   {review.matchStatus === "found" && (
                     <>
                       <span aria-hidden="true">·</span>
@@ -183,48 +250,119 @@ export function NfeReviewTable({
                   </div>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {/* Quantidade — editável somente quando o documento não trouxe uma
-                      quantidade válida (nunca inventamos o valor). */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {/* Quantidade — sempre editável (D3). */}
                   <div className="min-w-0 max-w-full overflow-hidden">
                     <span className="block text-[10px] uppercase text-muted-foreground">
                       Quantidade
                     </span>
-                    {quantityMissing ? (
-                      <Input
-                        type="number"
-                        min="0"
-                        step="any"
-                        value=""
-                        placeholder="Informe a quantidade"
-                        className="mt-1 h-8"
-                        onChange={(event) =>
-                          onUpdate(index, {
-                            item: { ...review.item, quantity: Number(event.target.value) || 0 },
-                          })
-                        }
-                      />
-                    ) : (
-                      <p className="text-sm font-mono">
-                        {review.item.quantity} {review.item.unit}
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      aria-label={`Quantidade do item ${review.item.lineNumber ?? index + 1}`}
+                      className={changedClass(revision.quantityChanged)}
+                      placeholder="Informe a quantidade"
+                      {...textProps(index, "quantity", review.item.quantity, (raw) =>
+                        onUpdate(index, {
+                          item: reconcileItemTotal(review.item, {
+                            quantity: parseQuantityInput(raw) ?? 0,
+                          }),
+                        }),
+                      )}
+                    />
+                    {original && revision.quantityChanged && (
+                      <p className="text-[10px] text-amber-700">
+                        reconhecido: {original.quantity}
                       </p>
                     )}
                   </div>
 
+                  {/* Unidade — sempre editável (D3). */}
                   <div className="min-w-0 max-w-full overflow-hidden">
                     <span className="block text-[10px] uppercase text-muted-foreground">
-                      Valores
+                      Unidade
                     </span>
-                    {/* Unitário e total em linhas de bloco distintas, cada um
-                        com rótulo próprio (R31.8 §2). */}
-                    <p className="text-sm font-mono">
-                      Unitário {formatMoney(review.item.unitValue)}
-                    </p>
-                    <p className="text-sm font-mono">
-                      Total {formatMoney(review.item.totalValue)}
-                    </p>
+                    <Input
+                      type="text"
+                      maxLength={12}
+                      aria-label={`Unidade do item ${review.item.lineNumber ?? index + 1}`}
+                      className={changedClass(revision.unitChanged)}
+                      placeholder="UN"
+                      value={review.item.unit ?? ""}
+                      onChange={(event) =>
+                        onUpdate(index, {
+                          item: { ...review.item, unit: event.target.value.toUpperCase() },
+                        })
+                      }
+                    />
+                    {original && revision.unitChanged && (
+                      <p className="text-[10px] text-amber-700">
+                        reconhecido: {original.unit || "—"}
+                      </p>
+                    )}
                   </div>
 
+                  {/* Valor unitário — sempre editável (D3). */}
+                  <div className="min-w-0 max-w-full overflow-hidden">
+                    <span className="block text-[10px] uppercase text-muted-foreground">
+                      Valor unitário
+                    </span>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      aria-label={`Valor unitário do item ${review.item.lineNumber ?? index + 1}`}
+                      className={changedClass(revision.unitValueChanged)}
+                      placeholder="0,00"
+                      {...textProps(index, "unitValue", review.item.unitValue, (raw) =>
+                        onUpdate(index, {
+                          item: reconcileItemTotal(review.item, {
+                            unitValue: parseMoneyInput(raw),
+                          }),
+                        }),
+                      )}
+                    />
+                    {original && revision.unitValueChanged && (
+                      <p className="text-[10px] text-amber-700">
+                        reconhecido: {formatMoney(original.unitValue)}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Valor total — sempre editável; recalculado por qtd × unitário. */}
+                  <div className="min-w-0 max-w-full overflow-hidden">
+                    <span className="block text-[10px] uppercase text-muted-foreground">
+                      Valor total
+                    </span>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      aria-label={`Valor total do item ${review.item.lineNumber ?? index + 1}`}
+                      className={changedClass(revision.totalValueChanged)}
+                      placeholder="0,00"
+                      {...textProps(index, "totalValue", review.item.totalValue, (raw) =>
+                        onUpdate(index, {
+                          item: reconcileItemTotal(review.item, {
+                            totalValue: parseMoneyInput(raw),
+                          }),
+                        }),
+                      )}
+                    />
+                    {original && revision.totalValueChanged && (
+                      <p className="text-[10px] text-amber-700">
+                        reconhecido: {formatMoney(original.totalValue)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {mismatch && (
+                  <p className="text-[11px] text-amber-700">
+                    Total não confere: {review.item.quantity} × {formatMoney(review.item.unitValue)} ={" "}
+                    {formatMoney(mismatch.expected)} — informado {formatMoney(review.item.totalValue)}.
+                  </p>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {/* Local */}
                   <div className="min-w-0 max-w-full overflow-hidden">
                     <span className="block text-[10px] uppercase text-muted-foreground">
@@ -327,6 +465,22 @@ export function NfeReviewTable({
           })}
         </div>
       </div>
+
+      {items.length > 0 && (
+        <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
+          <p className="font-medium">
+            Soma dos itens: {formatMoney(totals.itemsTotal)}
+            {totals.documentTotal != null ? ` · Total da nota: ${formatMoney(totals.documentTotal)}` : ""}
+          </p>
+          {totals.diverges && (
+            <p className="mt-1 text-amber-700">
+              A soma dos itens difere do total do documento em{" "}
+              {formatMoney(Math.abs(totals.difference ?? 0))}. O total da nota será o valor do
+              documento — confira os itens antes de confirmar.
+            </p>
+          )}
+        </div>
+      )}
 
       {hasInvalidQuantity && (
         <p className="text-xs text-amber-700">

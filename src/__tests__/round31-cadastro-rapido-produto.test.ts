@@ -288,10 +288,13 @@ describe("R31 §2.11 — o cadastro rápido não cria entrada nem estoque", () =
 
   it("entries.create/confirm continuam apenas no fluxo normal de confirmação", () => {
     const confirmFlow = ENTRIES.slice(
-      ENTRIES.indexOf("const handleConfirmImport = async () => {"),
+      ENTRIES.indexOf("const handleConfirmImport = async ("),
       ENTRIES.indexOf("const handleCreateDraft = async () => {"),
     );
-    expect(confirmFlow).toContain("await createEntry({");
+    // D1/D4: o fluxo normal passa pelo orquestrador (que chama entries.create
+    // uma única vez e confirma o MESMO rascunho na retentativa).
+    expect(confirmFlow).toContain("runEntryImport({");
+    expect(confirmFlow).toContain("await createEntry(payload as any)");
     expect(confirmFlow).toContain("await confirmEntry({");
   });
 });
@@ -347,8 +350,10 @@ describe("R31 §1/§3 — estrutura final e apresentação", () => {
     // Conferência: nº de itens e código do fornecedor são rótulos separados.
     expect(ENTRIES).toContain("Itens da nota:");
     expect(ENTRIES).toContain("Código do item (fornecedor):");
-    // Linha da tabela: quantidade com unidade e valores formatados à parte.
-    expect(REVIEW_TABLE).toContain("{review.item.quantity} {review.item.unit}");
+    // Linha da tabela: quantidade e unidade em campos separados (D3 tornou os
+    // dois editáveis na conferência; o valor reconhecido continua visível).
+    expect(REVIEW_TABLE).toContain("Quantidade");
+    expect(REVIEW_TABLE).toContain("Unidade");
     expect(REVIEW_TABLE).toContain("formatMoney(review.item.unitValue)");
     expect(REVIEW_TABLE).toContain("formatMoney(review.item.totalValue)");
     expect(REVIEW_TABLE).toContain("cód. {review.item.code}");

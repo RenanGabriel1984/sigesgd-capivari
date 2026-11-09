@@ -544,6 +544,10 @@ const schema = defineSchema(
       documentStorageId: v.optional(v.string()),
       // ── NF-e importada (XML) ──
       accessKey: v.optional(v.string()),
+      // Impressão digital normalizada fornecedor+número+série — usada para
+      // impedir a duplicidade da mesma nota (D5). Entradas anteriores a esta
+      // correção não têm o campo e continuam cobertas pela varredura por data.
+      invoiceFingerprint: v.optional(v.string()),
       series: v.optional(v.string()),
       totalValue: v.optional(v.number()),
       xmlStorageId: v.optional(v.string()),
@@ -561,7 +565,8 @@ const schema = defineSchema(
     }).index("by_status", ["status"])
       .index("by_number", ["entryNumber"])
       .index("by_date", ["receivedAt"])
-      .index("by_access_key", ["accessKey"]),
+      .index("by_access_key", ["accessKey"])
+      .index("by_invoice_fingerprint", ["invoiceFingerprint"]),
 
     // ── Entry Items (Itens da Entrada) ──
     entryItems: defineTable({

@@ -1,6 +1,13 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { validateEntryUnits } from "../lib/material-types";
+import {
+  duplicateInvoiceMessage,
+  entryInvoiceFingerprint,
+  findDuplicateInvoice,
+  normalizeAccessKey,
+  normalizeInvoiceNumber,
+} from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
@@ -13,6 +20,72 @@ async function requireUser(ctx: any) {
 async function requireStockManagerOrAdmin(ctx: any) {
   // RBAC central: operação de entradas (criar/confirmar/editar/estornar).
   return requirePermission(ctx, "entries.create", { entity: "entries" });
+}
+
+/**
+ * Localiza uma entrada que já representa a MESMA nota (D5).
+ *
+ * A regra de comparação vive em `src/lib/entry-duplicates.ts` (testável); aqui
+ * ficam apenas as consultas:
+ *   • chave de acesso → índice exato `by_access_key`;
+ *   • impressão digital fornecedor+número+série → `by_invoice_fingerprint`
+ *     (entradas novas);
+ *   • histórico anterior ao índice → janela recente por data, para que a
+ *     proteção também valha contra notas registradas antes desta correção.
+ *
+ * Toda leitura abaixo entra no conjunto de leitura da mutation: duas criações
+ * concorrentes da mesma nota disputam o mesmo range e o Convex serializa a
+ * segunda (ela reavalia e enxerga a entrada recém-criada).
+ */
+async function findExistingInvoice(
+  ctx: any,
+  probe: {
+    accessKey?: string | null;
+    invoiceNumber?: string | null;
+    series?: string | null;
+    supplierId?: string | null;
+  },
+  options: { excludeId?: string } = {},
+) {
+  const accessKey = normalizeAccessKey(probe.accessKey);
+  const fingerprint = entryInvoiceFingerprint(probe);
+  const candidates: any[] = [];
+
+  if (accessKey) {
+    const byKey = await ctx.db
+      .query("entries")
+      .withIndex("by_access_key", (q: any) => q.eq("accessKey", accessKey))
+      .collect();
+    candidates.push(...byKey);
+  }
+
+  if (fingerprint) {
+    const byFingerprint = await ctx.db
+      .query("entries")
+      .withIndex("by_invoice_fingerprint", (q: any) => q.eq("invoiceFingerprint", fingerprint))
+      .collect();
+    candidates.push(...byFingerprint);
+  }
+
+  if (normalizeInvoiceNumber(probe.invoiceNumber)) {
+    const recent = await ctx.db
+      .query("entries")
+      .withIndex("by_date")
+      .order("desc")
+      .take(400);
+    candidates.push(...recent);
+  }
+
+  return findDuplicateInvoice(
+    candidates,
+    {
+      accessKey: accessKey || undefined,
+      invoiceNumber: probe.invoiceNumber,
+      series: probe.series,
+      supplierId: probe.supplierId,
+    },
+    options,
+  );
 }
 
 /** Generate sequential entry number: ENT-ANO-SEQUENCIAL */
@@ -162,13 +235,25 @@ export const create = mutation({
 
     if (args.items.length === 0) throw new Error("A entrada deve ter pelo menos um item");
 
-    // NF-e: impedir importação/efetivação duplicada da mesma chave de acesso
-    if (args.accessKey) {
-      const accessKey = args.accessKey.trim();
-      const existing = await ctx.db.query("entries").withIndex("by_access_key", (q: any) => q.eq("accessKey", accessKey)).first();
-      if (existing) {
-        throw new Error(`Esta NF-e já foi registrada (entrada ${existing.entryNumber}). Não é possível duplicar o estoque.`);
-      }
+    // ── Anti-duplicidade (D5): chave de acesso OU fornecedor+número+série ──
+    // Vale para importação XML/DANFE E para a entrada manual. Entrada estornada
+    // não bloqueia (a nota pode ser registrada de novo, com histórico).
+    const accessKey = normalizeAccessKey(args.accessKey) || undefined;
+    const existingInvoice = await findExistingInvoice(ctx, {
+      accessKey,
+      invoiceNumber: args.invoiceNumber,
+      series: args.series,
+      supplierId: args.supplierId,
+    });
+    if (existingInvoice) {
+      throw new Error(
+        duplicateInvoiceMessage(existingInvoice, {
+          accessKey,
+          invoiceNumber: args.invoiceNumber,
+          series: args.series,
+          supplierId: args.supplierId,
+        }),
+      );
     }
 
     // Validate each item
@@ -182,6 +267,13 @@ export const create = mutation({
 
     const now = Date.now();
     const entryNumber = await generateEntryNumber(ctx);
+    // Impressão digital normalizada (fornecedor+número+série) — permite a
+    // checagem exata de duplicidade das entradas criadas a partir daqui.
+    const invoiceFingerprint = entryInvoiceFingerprint({
+      supplierId: args.supplierId,
+      invoiceNumber: args.invoiceNumber,
+      series: args.series,
+    });
 
     // Área/Subestoque precisa existir (cadastro independente)
     if (args.areaId) {
@@ -203,7 +295,8 @@ export const create = mutation({
       responsibleUserId: userId,
       observation: args.observation || undefined,
       documentStorageId: args.documentStorageId || undefined,
-      accessKey: args.accessKey ? args.accessKey.trim() : undefined,
+      accessKey,
+      invoiceFingerprint,
       series: args.series || undefined,
       totalValue: args.totalValue,
       xmlStorageId: args.xmlStorageId || undefined,
@@ -253,7 +346,9 @@ export const create = mutation({
       timestamp: now,
     });
 
-    return entryId;
+    // O número volta junto com o id: a interface consegue mostrar o rascunho
+    // pendente (D4) sem uma segunda consulta.
+    return { entryId, entryNumber };
   },
 });
 
@@ -272,6 +367,24 @@ export const confirm = mutation({
 
     const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
     if (items.length === 0) throw new Error("Entrada não possui itens");
+
+    // ── Segunda barreira de duplicidade (D5) ──
+    // Dois rascunhos da mesma nota podem existir (criados antes desta correção
+    // ou por um cliente que ignorou a interface). Confirmar os dois dobraria o
+    // estoque — aqui a nota é recusada antes de qualquer escrita.
+    const conflictingInvoice = await findExistingInvoice(
+      ctx,
+      {
+        accessKey: entry.accessKey,
+        invoiceNumber: entry.invoiceNumber,
+        series: entry.series,
+        supplierId: entry.supplierId,
+      },
+      { excludeId: args.entryId },
+    );
+    if (conflictingInvoice) {
+      throw new Error(duplicateInvoiceMessage(conflictingInvoice, entry));
+    }
 
     // ── Unidades patrimoniais (material permanente) ──
     const entryUnits = await ctx.db

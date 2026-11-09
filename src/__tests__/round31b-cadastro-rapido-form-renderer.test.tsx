@@ -32,10 +32,11 @@ describe("QuickProductForm.tsx — forma visual e ligação ao prefill", () => {
     expect(FORM).toContain('value={form.unitOfMeasure || "none"}');
   });
 
-  it("salvar e cancelar são passados como props e o dialog usa onCancel como onOpenChange", () => {
-    expect(FORM).toContain("onSave={onSave}");
-    expect(FORM).toContain("onCancel={onCancel}");
-    expect(FORM).toContain("value ? onCancel() : onClose()");
+  it("salvar e cancelar são ligados aos props e o dialog usa onCancel como onOpenChange", () => {
+    expect(FORM).toContain("onClick={() => void onSave()}");
+    expect(FORM).toContain("onClick={onCancel}");
+    expect(FORM).toContain("if (value) onCancel();");
+    expect(FORM).toContain("else onClose();");
   });
 
   it("os demais campos úteis do catálogo estão presentes", () => {
@@ -49,6 +50,6 @@ describe("QuickProductForm.tsx — forma visual e ligação ao prefill", () => {
 describe("QuickProductForm prop contract", () => {
   it("define targetIndex como número, mesmo quando chamado fora do fluxo da conferência", () => {
     expect(FORM).toContain("targetIndex: number");
-    expect(FORM).toContain("props) {");
+    expect(FORM).toContain("}: QuickProductFormProps)");
   });
 });

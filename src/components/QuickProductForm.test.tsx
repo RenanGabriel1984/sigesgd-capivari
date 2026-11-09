@@ -74,7 +74,10 @@ describe("QuickProductForm.tsx — rendering do cadastro rápido", () => {
       resolve(__dirname, "..", "pages", "Entries.tsx"),
       "utf8",
     );
-    expect(ENTRIES).toContain("const entryId = await createEntry({");
+    // D1/D4: a tela delega ao orquestrador, que mantém create → confirm e o
+    // destino explícito (materialType + área) no fluxo normal.
+    expect(ENTRIES).toContain("runEntryImport({");
+    expect(ENTRIES).toContain("await createEntry(payload as any)");
     expect(ENTRIES).toContain("await confirmEntry({ entryId: entryId as any });");
   });
 });

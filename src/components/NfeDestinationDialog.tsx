@@ -25,7 +25,12 @@ interface NfeDestinationDialogProps {
   invoiceDate?: string | null;
   /** Quantidade de itens conferidos na NF-e */
   itemCount?: number;
-  initialMaterialType?: MaterialType;
+  /**
+   * Classificação já confirmada em uma abertura anterior (reentrada).
+   * `null` significa "ainda não escolhido" — a tela NUNCA pré-seleciona
+   * "Material de consumo" por conta própria (D1).
+   */
+  initialMaterialType?: MaterialType | null;
   initialAreaId?: string;
   onConfirm: (materialType: MaterialType, areaId: string) => void;
 }
@@ -47,17 +52,19 @@ export function NfeDestinationDialog({
   invoiceNumber,
   invoiceDate,
   itemCount,
-  initialMaterialType = "consumption",
+  initialMaterialType = null,
   initialAreaId = "",
   onConfirm,
 }: NfeDestinationDialogProps) {
-  const [materialType, setMaterialType] = useState<MaterialType>(initialMaterialType);
+  const [materialType, setMaterialType] = useState<MaterialType | null>(
+    initialMaterialType,
+  );
   const [areaId, setAreaId] = useState(initialAreaId ?? "");
 
   // Cada abertura da conferência começa do destino atual da importação
   useEffect(() => {
     if (open) {
-      setMaterialType(initialMaterialType);
+      setMaterialType(initialMaterialType ?? null);
       setAreaId(initialAreaId ?? "");
     }
   }, [open, initialMaterialType, initialAreaId]);
@@ -109,8 +116,13 @@ export function NfeDestinationDialog({
 
           <div>
             <Label className="text-xs">Tipo de material *</Label>
-            <Select value={materialType} onValueChange={(v) => setMaterialType(v as MaterialType)}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+            <Select
+              value={materialType ?? ""}
+              onValueChange={(v) => setMaterialType(v as MaterialType)}
+            >
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder="Escolha: consumo ou permanente" />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="consumption">{MATERIAL_TYPE_LABELS.consumption}</SelectItem>
                 <SelectItem value="permanent">{MATERIAL_TYPE_LABELS.permanent}</SelectItem>
@@ -151,15 +163,31 @@ export function NfeDestinationDialog({
           </div>
 
           <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">
-            Destino selecionado: <span className="font-medium text-foreground break-words">{areaName}</span>
+            Destino selecionado:{" "}
+            <span className="font-medium text-foreground break-words">{areaName}</span>
             {" · "}
-            {MATERIAL_TYPE_LABELS[materialType]}
+            {materialType ? MATERIAL_TYPE_LABELS[materialType] : "tipo de material não escolhido"}
           </div>
+
+          {!materialType && (
+            <p className="text-xs text-amber-700">
+              Escolha explicitamente entre material de consumo e material permanente. A entrada
+              não é registrada sem essa classificação.
+            </p>
+          )}
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={() => onConfirm(materialType, areaId)}>Confirmar destino e registrar</Button>
+          <Button
+            disabled={!materialType}
+            onClick={() => {
+              if (!materialType) return;
+              onConfirm(materialType, areaId);
+            }}
+          >
+            Confirmar destino e registrar
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

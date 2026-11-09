@@ -54,6 +54,8 @@ import {
 import { NfeEntrySummary } from "@/components/NfeEntrySummary";
 import { QuickProductForm } from "@/components/QuickProductForm";
 import { SupplierForm } from "@/components/SupplierForm";
+import { NfeDestinationDialog } from "@/components/NfeDestinationDialog";
+import { EntryPatrimonyDialog } from "@/components/EntryPatrimonyDialog";
 
 import {
   digitsOnly,
@@ -89,6 +91,23 @@ import {
   evaluateNfeAdvance,
   type NfeEntryStep,
 } from "@/lib/nfe-summary";
+import { MATERIAL_TYPE_LABELS, type MaterialType } from "@/lib/material-types";
+import {
+  NFE_DESTINATION_REQUIRED_MESSAGE,
+  NfeDestinationError,
+  type NfeDestination,
+  type NfeDestinationState,
+} from "@/lib/nfe-destination";
+import {
+  runEntryImport,
+  type EntryImportDraftRef,
+  type EntryImportStoredDocuments,
+} from "@/lib/entry-import-flow";
+import {
+  nfeWithReviewedItems,
+  originalValuesOf,
+  validateNfeReviewItems,
+} from "@/lib/nfe-item-edit";
 import { useAuth } from "@/hooks/use-auth";
 
 /** Origem DANFE/OCR registrada na entrada confirmada (§15). */
@@ -142,6 +161,8 @@ const emptyEntryItem = (): ManualEntryItem => ({
 const initialReviewRows = (items: NfeItem[]): NfeReviewRow[] =>
   items.map((item) => ({
     item,
+    // D3: guarda o valor reconhecido para destacar o que o usuário corrigir.
+    originalValues: originalValuesOf(item),
     productId: "",
     matchStatus: "not_found" as const,
     matchScore: 0,
@@ -338,6 +359,8 @@ function EntriesPage() {
   const [cProcessNumber, setCProcessNumber] = useState("");
   const [cEmpenhoNumber, setCEmpenhoNumber] = useState("");
   const [items, setItems] = useState<ManualEntryItem[]>([emptyEntryItem()]);
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualDraft, setManualDraft] = useState<EntryImportDraftRef | null>(null);
 
   // ── Cadastro inline de fornecedor ──
   const [newSupplierName, setNewSupplierName] = useState("");
@@ -358,6 +381,23 @@ function EntriesPage() {
   // ── Etapa da conferência (R31.9): produtos → resumo ──
   const [nfeStep, setNfeStep] = useState<NfeEntryStep>("products");
   const [nfeConfirming, setNfeConfirming] = useState(false);
+  // ── D1: destino escolhido (tipo de material + área) — nunca presumido ──
+  const [nfeDestination, setNfeDestination] = useState<NfeDestinationState>({
+    materialType: null,
+    areaId: null,
+  });
+  const [destinationOpen, setDestinationOpen] = useState(false);
+  // ── D4: rascunho já criado e documentos já armazenados (recuperação) ──
+  const [nfeDraft, setNfeDraft] = useState<EntryImportDraftRef | null>(null);
+  const [nfeStoredDocuments, setNfeStoredDocuments] =
+    useState<EntryImportStoredDocuments>({});
+  // ── D1: entrada permanente aguardando unidades patrimoniais ──
+  const [pendingPatrimony, setPendingPatrimony] =
+    useState<EntryImportDraftRef | null>(null);
+  const [manualMaterialType, setManualMaterialType] = useState<
+    MaterialType | ""
+  >("");
+  const organizations = useQuery(api.organizations.listActive);
 
   const supplierList = suppliers ?? [];
   const locationList = locations ?? [];
@@ -406,6 +446,7 @@ function EntriesPage() {
     setInvoiceDate("");
     setcSupplierId(null);
     setAreaId("");
+    setManualMaterialType("");
     setObservation("");
     setCAfNumber("");
     setCProcessNumber("");
@@ -441,6 +482,10 @@ function EntriesPage() {
       setNfeItems(initialReviewRows(parsed.items));
       setNfeXmlFile(file);
       setDanfeFile(null);
+      // NF-e nova: destino e rascunho anteriores não valem para esta nota.
+      setNfeDestination({ materialType: null, areaId: null });
+      setNfeDraft(null);
+      setNfeStoredDocuments({});
       const duplicate = findDuplicateEntry(entries ?? [], {
         accessKey: digitsOnly(parsed.accessKey ?? ""),
       });
@@ -499,6 +544,9 @@ function EntriesPage() {
     setNfeObservation(DANFE_SOURCE_OBSERVATION);
     setNfeItems(initialReviewRows(parsedNfe.items));
     setNfeXmlFile(null);
+    setNfeDestination({ materialType: null, areaId: null });
+    setNfeDraft(null);
+    setNfeStoredDocuments({});
     const duplicate = findDuplicateEntry(entries ?? [], {
       accessKey: parsedNfe.accessKey,
     });
@@ -558,7 +606,29 @@ function EntriesPage() {
       target?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
+    // D3: quantidade/valores corrigidos também precisam fechar a matemática.
+    const itemValidation = validateNfeReviewItems(nfeItems);
+    if (!itemValidation.ok) {
+      toast.error(itemValidation.message);
+      document
+        .getElementById(`nfe-item-${itemValidation.index}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     setNfeStep("summary");
+  };
+
+  /**
+   * D1: o diálogo de destino entrega a escolha por ARGUMENTO no mesmo tick —
+   * nada é lido de estado que ainda não foi aplicado.
+   */
+  const handleDestinationConfirm = (
+    materialType: MaterialType,
+    areaId: string,
+  ) => {
+    setNfeDestination({ materialType, areaId });
+    setDestinationOpen(false);
+    void handleConfirmImport({ materialType, areaId });
   };
 
   /** Volta do resumo para a conferência — estado preservado integralmente. */
@@ -680,7 +750,24 @@ function EntriesPage() {
     }
   };
 
-  const handleConfirmImport = async () => {
+  /** Exibe os avisos de upload separados dos erros de criação/confirmação. */
+  const showImportWarnings = (warnings: { message: string }[]) => {
+    for (const warning of warnings) toast.warning(warning.message);
+  };
+
+  /**
+   * D1 + D4 — única porta de confirmação da importação XML/DANFE.
+   *
+   * • O destino chega por ARGUMENTO (o diálogo passa a escolha no mesmo tick),
+   *   com o estado persistido apenas como fallback de reentrada. Sem escolha a
+   *   operação para ANTES de qualquer upload/escrita.
+   * • O rascunho é criado UMA vez: se a confirmação falhar, a retentativa usa o
+   *   mesmo `entryId` e os documentos já armazenados (sem novo rascunho e sem
+   *   novo upload).
+   * • Material permanente: cria o rascunho e abre as unidades patrimoniais —
+   *   o estoque só muda em `entries.confirm`.
+   */
+  const handleConfirmImport = async (destination?: NfeDestination) => {
     if (nfeConfirming) return;
     if (nfe.items.length === 0) {
       toast.error("A entrada precisa de pelo menos um item identificado.");
@@ -692,35 +779,32 @@ function EntriesPage() {
       );
       return;
     }
-    setNfeConfirming(true);
-    try {
-      let documentStorageId: string | undefined;
-      if (danfeFile) {
-        try {
-          documentStorageId = await uploadFile(
-            generateUploadUrl,
-            danfeFile,
-            danfeFile.type || "application/pdf",
-          );
-        } catch {
-          toast.error("Falha ao salvar o DANFE original — a entrada segue sem o anexo.");
-        }
-      }
-      let xmlStorageId: string | undefined;
-      if (nfeXmlFile) {
-        try {
-          xmlStorageId = await uploadFile(
-            generateUploadUrl,
-            nfeXmlFile,
-            nfeXmlFile.type || "application/xml",
-          );
-        } catch {
-          toast.error("Falha ao salvar o XML original — a entrada segue sem o anexo.");
-        }
-      }
+    const itemValidation = validateNfeReviewItems(nfeItems);
+    if (!itemValidation.ok) {
+      toast.error(itemValidation.message);
+      return;
+    }
 
-      const draft = buildEntryDraftFromNfe(
-        nfe,
+    const destinationOverride =
+      destination ??
+      (nfeDestination.materialType
+        ? {
+            materialType: nfeDestination.materialType,
+            areaId: nfeDestination.areaId ?? "",
+          }
+        : null);
+    // D1: material permanente é decidido pelo destino RESOLVIDO (override ou
+    // estado persistido), nunca por um default.
+    const effectiveMaterialType =
+      destinationOverride?.materialType ?? nfeDestination.materialType;
+
+    // D3: o rascunho nasce dos itens REVISADOS na conferência.
+    const reviewedNfe = nfeWithReviewedItems(nfe, nfeItems);
+
+    let draft: ReturnType<typeof buildEntryDraftFromNfe>;
+    try {
+      draft = buildEntryDraftFromNfe(
+        reviewedNfe,
         nfeItems.map((row) => ({
           productId: row.productId,
           locationId: row.locationId,
@@ -732,34 +816,105 @@ function EntriesPage() {
         {
           supplierId: nfeSupplierId ?? undefined,
           observation: nfeObservation || undefined,
-          documentStorageId,
-          xmlStorageId,
         },
       );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Itens incompletos para a entrada.",
+      );
+      return;
+    }
 
-      const entryId = await createEntry({
-        receivedAt: Date.now(),
-        originType: "purchase",
-        supplierId: (nfeSupplierId || undefined) as any,
-        invoiceNumber: draft.invoiceNumber || undefined,
-        invoiceDate: draft.invoiceDate,
-        purchaseAuthorizationNumber: nfeAfNumber || undefined,
-        processNumber: nfeProcessNumber || undefined,
-        empenhoNumber: nfeEmpenhoNumber || undefined,
-        accessKey: draft.accessKey,
-        series: draft.series,
-        totalValue: draft.totalValue,
-        documentStorageId: draft.documentStorageId,
-        xmlStorageId: draft.xmlStorageId,
-        importedFromXml: sourceLabel === "XML",
-        observation: draft.observation,
-        items: draft.items.map((item) => ({
-          ...item,
-          productId: item.productId as any,
-          locationId: item.locationId as any,
-        })),
+    setNfeConfirming(true);
+    try {
+      const result = await runEntryImport({
+        destination: destinationOverride,
+        destinationState: nfeDestination,
+        existingDraft: nfeDraft,
+        storedDocuments: nfeStoredDocuments,
+        uploadDocument: danfeFile
+          ? () =>
+              uploadFile(
+                generateUploadUrl,
+                danfeFile,
+                danfeFile.type || "application/pdf",
+              )
+          : undefined,
+        uploadXml: nfeXmlFile
+          ? () =>
+              uploadFile(
+                generateUploadUrl,
+                nfeXmlFile,
+                nfeXmlFile.type || "application/xml",
+              )
+          : undefined,
+        createEntry: async (payload) => {
+          const created = await createEntry(payload as any);
+          return {
+            entryId: created.entryId as string,
+            entryNumber: created.entryNumber as string,
+            materialType: payload.materialType,
+          };
+        },
+        confirmEntry: async (entryId: string) => {
+          await confirmEntry({ entryId: entryId as any });
+        },
+        payload: {
+          receivedAt: Date.now(),
+          originType: "purchase",
+          supplierId: (nfeSupplierId || undefined) as any,
+          invoiceNumber: draft.invoiceNumber || undefined,
+          invoiceDate: draft.invoiceDate,
+          purchaseAuthorizationNumber: nfeAfNumber || undefined,
+          processNumber: nfeProcessNumber || undefined,
+          empenhoNumber: nfeEmpenhoNumber || undefined,
+          accessKey: draft.accessKey,
+          series: draft.series,
+          totalValue: draft.totalValue,
+          importedFromXml: sourceLabel === "XML",
+          observation: draft.observation,
+          items: draft.items.map((item) => ({
+            ...item,
+            productId: item.productId as any,
+            locationId: item.locationId as any,
+          })),
+        },
+        requiresPatrimonyUnits: effectiveMaterialType === "permanent",
       });
-      await confirmEntry({ entryId: entryId as any });
+
+      showImportWarnings(result.warnings);
+
+      if (result.status === "create-failed") {
+        setNfeStoredDocuments(result.storedDocuments);
+        toast.error(`Falha ao criar a entrada: ${result.createError}`);
+        return;
+      }
+
+      // O rascunho existe a partir daqui: guardar id/número e documentos.
+      setNfeDraft(result.draft);
+      setNfeStoredDocuments(result.storedDocuments);
+      setNfeDestination({
+        materialType: result.draft.materialType,
+        areaId: destinationOverride?.areaId ?? "",
+      });
+
+      if (result.status === "awaiting-patrimony-units") {
+        setNfeOpen(false);
+        setPendingPatrimony(result.draft);
+        toast.info(
+          `Rascunho ${result.draft.entryNumber} criado. Informe as unidades patrimoniais para confirmar a entrada.`,
+        );
+        return;
+      }
+
+      if (result.status === "draft-pending") {
+        toast.error(
+          `Rascunho ${result.draft.entryNumber} criado, mas a confirmação falhou: ${result.confirmError}. ` +
+            "Use \"Confirmar rascunho existente\" — não é necessário cadastrar a nota de novo.",
+        );
+        return;
+      }
+
       toast.success("Entrada confirmada: estoque e lotes atualizados.");
       setNfeOpen(false);
       setNfeStep("products");
@@ -767,7 +922,15 @@ function EntriesPage() {
       setNfeItems([]);
       setDanfeFile(null);
       setNfeXmlFile(null);
+      setNfeDraft(null);
+      setNfeStoredDocuments({});
+      setNfeDestination({ materialType: null, areaId: null });
     } catch (error) {
+      if (error instanceof NfeDestinationError) {
+        setDestinationOpen(true);
+        toast.error(NFE_DESTINATION_REQUIRED_MESSAGE);
+        return;
+      }
       toast.error(
         error instanceof Error ? error.message : "Falha ao registrar a entrada.",
       );
@@ -776,48 +939,111 @@ function EntriesPage() {
     }
   };
 
+  /**
+   * Entrada manual — mesmo fluxo de criação/confirmação (D1/D4): o tipo de
+   * material é escolhido explicitamente e, se a confirmação falhar, o rascunho
+   * fica identificado para retomada sem recriar a entrada.
+   */
   const handleCreateDraft = async () => {
     const withProduct = items.filter((item) => item.productId);
     if (withProduct.length === 0) {
       toast.error("Adicione pelo menos um item à entrada.");
       return;
     }
+    if (!manualMaterialType) {
+      toast.error(
+        "Escolha o tipo de material (consumo ou permanente) antes de criar a entrada.",
+      );
+      return;
+    }
+
+    setManualSaving(true);
     try {
-      const entryId = await createEntry({
-        receivedAt:
-          (invoiceDate && new Date(`${invoiceDate}T12:00:00`).getTime()) ||
-          Date.now(),
-        originType: "purchase",
-        supplierId: (cSupplierId || undefined) as any,
-        invoiceNumber: nfNumber || undefined,
-        invoiceDate: invoiceDate || undefined,
-        series,
-        purchaseAuthorizationNumber: cAfNumber || undefined,
-        processNumber: cProcessNumber || undefined,
-        empenhoNumber: cEmpenhoNumber || undefined,
-        areaId: (areaId || undefined) as any,
-        observation: observation || undefined,
-        items: withProduct.map((item) => ({
-          productId: item.productId as any,
-          quantity: Number(item.quantity) || 0,
-          unitOfMeasure: item.unitOfMeasure,
-          unitCost: Number(item.unitCost) || undefined,
-          brand: item.brand || undefined,
-          model: item.model || undefined,
-          specification: item.specification || undefined,
-          locationId: (item.locationId || undefined) as any,
-          photoStorageId: item.photoStorageId || undefined,
-          supplierLotNumber: item.supplierLotNumber || undefined,
-        })),
+      const result = await runEntryImport({
+        destination: { materialType: manualMaterialType, areaId },
+        existingDraft: manualDraft,
+        createEntry: async (payload) => {
+          const created = await createEntry(payload as any);
+          return {
+            entryId: created.entryId as string,
+            entryNumber: created.entryNumber as string,
+            materialType: payload.materialType,
+          };
+        },
+        confirmEntry: async (entryId: string) => {
+          await confirmEntry({ entryId: entryId as any });
+        },
+        payload: {
+          receivedAt:
+            (invoiceDate && new Date(`${invoiceDate}T12:00:00`).getTime()) ||
+            Date.now(),
+          originType: "purchase",
+          supplierId: (cSupplierId || undefined) as any,
+          invoiceNumber: nfNumber || undefined,
+          invoiceDate: invoiceDate || undefined,
+          series,
+          purchaseAuthorizationNumber: cAfNumber || undefined,
+          processNumber: cProcessNumber || undefined,
+          empenhoNumber: cEmpenhoNumber || undefined,
+          observation: observation || undefined,
+          items: withProduct.map((item) => ({
+            productId: item.productId as any,
+            quantity: Number(item.quantity) || 0,
+            unitOfMeasure: item.unitOfMeasure,
+            unitCost: Number(item.unitCost) || undefined,
+            brand: item.brand || undefined,
+            model: item.model || undefined,
+            specification: item.specification || undefined,
+            locationId: (item.locationId || undefined) as any,
+            photoStorageId: item.photoStorageId || undefined,
+            supplierLotNumber: item.supplierLotNumber || undefined,
+          })),
+        },
+        requiresPatrimonyUnits: manualMaterialType === "permanent",
       });
-      await confirmEntry({ entryId: entryId as any });
+
+      showImportWarnings(result.warnings);
+
+      if (result.status === "create-failed") {
+        toast.error(`Falha ao criar a entrada: ${result.createError}`);
+        return;
+      }
+
+      setManualDraft(result.draft);
+
+      if (result.status === "awaiting-patrimony-units") {
+        setNewEntryOpen(false);
+        resetCreateForm();
+        setManualDraft(null);
+        setPendingPatrimony(result.draft);
+        toast.info(
+          `Rascunho ${result.draft.entryNumber} criado. Informe as unidades patrimoniais para confirmar a entrada.`,
+        );
+        return;
+      }
+
+      if (result.status === "draft-pending") {
+        toast.error(
+          `Rascunho ${result.draft.entryNumber} criado, mas a confirmação falhou: ${result.confirmError}. ` +
+            "Tente novamente — a entrada já existe e não será duplicada.",
+        );
+        return;
+      }
+
       toast.success("Entrada registrada e estoque atualizado.");
+      setManualDraft(null);
       resetCreateForm();
       setNewEntryOpen(false);
     } catch (error) {
+      if (error instanceof NfeDestinationError) {
+        toast.error(NFE_DESTINATION_REQUIRED_MESSAGE);
+        return;
+      }
       toast.error(
         error instanceof Error ? error.message : "Falha ao registrar a entrada.",
       );
+    } finally {
+      setManualSaving(false);
     }
   };
 
@@ -953,14 +1179,31 @@ function EntriesPage() {
                 </TableCell>
                 <TableCell>
                   {entry.status === "draft" ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs"
-                      onClick={() => void handleConfirmEntry(entry._id as any)}
-                    >
-                      Confirmar
-                    </Button>
+                    entry.materialType === "permanent" ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() =>
+                          setPendingPatrimony({
+                            entryId: entry._id as string,
+                            entryNumber: entry.entryNumber,
+                            materialType: "permanent",
+                          })
+                        }
+                      >
+                        Informar patrimônios
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => void handleConfirmEntry(entry._id as any)}
+                      >
+                        Confirmar
+                      </Button>
+                    )
                   ) : null}
                 </TableCell>
               </TableRow>
@@ -1028,6 +1271,30 @@ function EntriesPage() {
                 onChange={setcSupplierId}
                 suppliers={supplierList}
               />
+            </FieldRow>
+            <FieldRow
+              label="Tipo de material"
+              tooltip="Classificação obrigatória: o sistema não presume que toda entrada é material de consumo."
+            >
+              <Select
+                value={manualMaterialType || "none"}
+                onValueChange={(value) =>
+                  setManualMaterialType(value === "none" ? "" : (value as MaterialType))
+                }
+              >
+                <SelectTrigger className="mt-1 h-10 w-full min-w-0 max-w-full">
+                  <SelectValue placeholder="Escolha: consumo ou permanente" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Escolha o tipo de material</SelectItem>
+                  <SelectItem value="consumption">
+                    {MATERIAL_TYPE_LABELS.consumption}
+                  </SelectItem>
+                  <SelectItem value="permanent">
+                    {MATERIAL_TYPE_LABELS.permanent}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </FieldRow>
             <FieldRow label="Área de destino">
               <Select value={areaId || "none"} onValueChange={(value) => setAreaId(value === "none" ? "" : value)}>
@@ -1100,7 +1367,9 @@ function EntriesPage() {
             >
               Cancelar
             </Button>
-            <Button onClick={() => void handleCreateDraft()}>Criar entrada</Button>
+            <Button onClick={() => void handleCreateDraft()} disabled={manualSaving}>
+              {manualSaving ? "Registrando…" : "Criar entrada"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1167,12 +1436,44 @@ function EntriesPage() {
             onInteractOutside={(event) => event.preventDefault()}
           >
             {nfeStep === "summary" ? (
-              <NfeEntrySummary
-                summary={nfeSummary}
-                onBack={handleBackToProducts}
-                onConfirm={() => void handleConfirmImport()}
-                confirming={nfeConfirming}
-              />
+              <>
+                {nfeDraft ? (
+                  <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 space-y-2 text-xs text-amber-900">
+                    <p>
+                      Rascunho <span className="font-mono font-medium">{nfeDraft.entryNumber}</span>{" "}
+                      criado e ainda NÃO confirmado — nada foi somado ao estoque.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      disabled={nfeConfirming}
+                      onClick={() => void handleConfirmImport()}
+                    >
+                      Confirmar rascunho existente
+                    </Button>
+                  </div>
+                ) : null}
+                <div className="mb-3 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                  Destino da entrada:{" "}
+                  <span className="font-medium text-foreground">
+                    {nfeDestination.materialType
+                      ? MATERIAL_TYPE_LABELS[nfeDestination.materialType]
+                      : "ainda não escolhido"}
+                  </span>
+                  {" · "}
+                  <span className="font-medium text-foreground">
+                    {(areas ?? []).find((area) => area._id === nfeDestination.areaId)?.name ??
+                      "Sem área (estoque geral)"}
+                  </span>
+                </div>
+                <NfeEntrySummary
+                  summary={nfeSummary}
+                  onBack={handleBackToProducts}
+                  onConfirm={() => void handleConfirmImport()}
+                  confirming={nfeConfirming}
+                />
+              </>
             ) : (
               <>
             <DialogHeader>
@@ -1403,6 +1704,7 @@ function EntriesPage() {
                   items={nfeItems}
                   products={productOptions}
                   locations={locationList}
+                  documentTotal={nfe.totalValue}
                   onUpdate={(index, patch) =>
                     setNfeItems((current) =>
                       current.map((row, position) =>
@@ -1490,6 +1792,48 @@ function EntriesPage() {
             : null
         }
         onCreated={handleSupplierCreated}
+      />
+
+      {/* ── D1: destino da entrada (tipo de material + área/subestoque) ── */}
+      <NfeDestinationDialog
+        open={destinationOpen}
+        onOpenChange={setDestinationOpen}
+        areas={(areas ?? []).map((area) => ({ id: area._id, name: area.name }))}
+        supplierName={nfeSupplier?.legalName ?? nfe.emitterName}
+        supplierCnpj={nfeSupplier?.cnpj ?? nfe.emitterCnpj}
+        invoiceNumber={nfe.number}
+        invoiceDate={nfe.emissionDate}
+        itemCount={nfeItems.length}
+        initialMaterialType={nfeDestination.materialType}
+        initialAreaId={nfeDestination.areaId ?? ""}
+        onConfirm={handleDestinationConfirm}
+      />
+
+      {/* ── D1: identificação patrimonial da entrada permanente ── */}
+      <EntryPatrimonyDialog
+        open={pendingPatrimony !== null}
+        entryId={pendingPatrimony?.entryId ?? null}
+        entryNumber={pendingPatrimony?.entryNumber}
+        products={productOptions.map((product) => ({
+          _id: product._id,
+          name: product.name,
+        }))}
+        locations={locationList.map((location) => ({
+          _id: location._id,
+          name: location.name,
+        }))}
+        organizations={(organizations ?? []) as any}
+        onClose={() => setPendingPatrimony(null)}
+        onConfirmed={() => {
+          setPendingPatrimony(null);
+          setNfe(EMPTY_NFE);
+          setNfeItems([]);
+          setNfeDraft(null);
+          setNfeStoredDocuments({});
+          setNfeDestination({ materialType: null, areaId: null });
+          setNfeStep("products");
+          setManualDraft(null);
+        }}
       />
     </AppShell>
   );

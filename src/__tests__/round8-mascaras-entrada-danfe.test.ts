@@ -493,7 +493,10 @@ describe("§12/§13 — Conferência humana obrigatória e regressão", () => {
     expect(ENTRIES).toContain("Importar NF-e XML");
     expect(ENTRIES).toContain("parseNfeXml(");
     expect(ENTRIES).toContain('nfeXmlFile.type || "application/xml"');
-    expect(ENTRIES).toContain("Falha ao salvar o DANFE original");
+    // D4: upload de documento e de XML tem tratamento próprio no orquestrador.
+    const FLOW = read("src/lib/entry-import-flow.ts");
+    expect(FLOW).toContain("Falha ao salvar o DANFE original");
+    expect(FLOW).toContain("Falha ao salvar o XML original");
     expect(DIALOG).toContain('accept=".pdf,image/*"');
     expect(DIALOG).toContain("tesseract.js");
     expect(DIALOG).toContain("pdfjs-dist");
