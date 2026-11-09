@@ -45,8 +45,11 @@ function StockAreasSkeleton() {
 export default function StockAreas() {
   const areas = useQuery(api.stockAreas.list);
   const summary = useQuery(api.stockAreas.summary);
+  const unclassifiedLots = useQuery(api.stockAreas.unclassifiedLots);
+  const storageLocations = useQuery(api.storageLocations.listActive);
   const createArea = useMutation(api.stockAreas.create);
   const updateArea = useMutation(api.stockAreas.update);
+  const classifyLot = useMutation(api.stockAreas.classifyLot);
   const ensureBaselineAreas = useMutation(api.stockAreas.ensureBaselineAreas);
   const navigate = useNavigate();
 
@@ -56,6 +59,10 @@ export default function StockAreas() {
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [seeding, setSeeding] = useState(false);
+  const [classificationLot, setClassificationLot] = useState<any>(null);
+  const [classificationAreaId, setClassificationAreaId] = useState("");
+  const [classificationLocationId, setClassificationLocationId] = useState("");
+  const [classificationSaving, setClassificationSaving] = useState(false);
 
   if (areas === undefined) return <StockAreasSkeleton />;
 
@@ -110,6 +117,35 @@ export default function StockAreas() {
     } catch (e) {
       const message = e instanceof Error ? e.message : "Não foi possível alterar o status da área.";
       toast.error(message);
+    }
+  };
+
+  const handleOpenClassification = (lot: any) => {
+    setClassificationLot(lot);
+    setClassificationAreaId(lot.suggestedAreaId ?? "");
+    setClassificationLocationId(lot.suggestedLocationId ?? "");
+  };
+
+  const handleClassifyLot = async () => {
+    if (!classificationLot || !classificationAreaId || !classificationLocationId) {
+      toast.error("Selecione a área e o local físico após conferir o lote.");
+      return;
+    }
+    setClassificationSaving(true);
+    try {
+      await classifyLot({
+        lotId: classificationLot.lotId as never,
+        areaId: classificationAreaId as never,
+        locationId: classificationLocationId as never,
+      });
+      toast.success(`Lote ${classificationLot.lotNumber} classificado. O saldo global não foi alterado.`);
+      setClassificationLot(null);
+      setClassificationAreaId("");
+      setClassificationLocationId("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível classificar o lote.");
+    } finally {
+      setClassificationSaving(false);
     }
   };
 
@@ -174,6 +210,48 @@ export default function StockAreas() {
           </Card>
         )}
 
+        {unclassifiedLots && unclassifiedLots.length > 0 && (
+          <Card className="border-border/50">
+            <CardContent className="p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-medium text-sm">Lotes pendentes de classificação</p>
+                  <p className="text-xs text-muted-foreground">
+                    {unclassifiedLots.length} lote(s) com saldo ainda sem área/local consistente.
+                    Confira fisicamente antes de classificar.
+                  </p>
+                </div>
+                <Badge variant="secondary">{unclassifiedLots.reduce((sum, lot) => sum + lot.quantityAvailable, 0)} unidade(s)</Badge>
+              </div>
+              <div className="space-y-2">
+                {unclassifiedLots.slice(0, 30).map((lot) => (
+                  <div key={lot.lotId} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-md border p-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{lot.productName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        Lote {lot.lotNumber} · {lot.quantityAvailable} disponível(is)
+                        {lot.entryNumber ? ` · Entrada ${lot.entryNumber}` : ""}
+                        {lot.invoiceNumber ? ` · NF ${lot.invoiceNumber}` : ""}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Atual: {lot.currentAreaName ?? "Sem área"} / {lot.currentLocationName ?? "Sem local"}
+                      </p>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => handleOpenClassification(lot)}>
+                      Conferir e classificar
+                    </Button>
+                  </div>
+                ))}
+                {unclassifiedLots.length > 30 && (
+                  <p className="text-xs text-muted-foreground">
+                    Exibindo os primeiros 30 lotes. Classifique-os para revelar os próximos.
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {areas.length === 0 ? (
           <Card className="border-border/50">
             <CardContent className="py-16 text-center">
@@ -225,6 +303,72 @@ export default function StockAreas() {
           </div>
         )}
       </div>
+
+      <Dialog open={!!classificationLot} onOpenChange={(open) => { if (!open && !classificationSaving) setClassificationLot(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Classificar lote legado</DialogTitle>
+          </DialogHeader>
+          {classificationLot && (
+            <div className="space-y-3 py-2">
+              <div className="rounded-md bg-muted/50 p-3">
+                <p className="text-sm font-medium">{classificationLot.productName}</p>
+                <p className="text-xs text-muted-foreground">
+                  Lote {classificationLot.lotNumber} · {classificationLot.quantityAvailable} unidade(s) disponíveis
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Entrada {classificationLot.entryNumber ?? "—"} · NF {classificationLot.invoiceNumber ?? "—"}
+                </p>
+              </div>
+              <div>
+                <Label>Área / Subestoque *</Label>
+                <select
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={classificationAreaId}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setClassificationAreaId(next);
+                    if (!(storageLocations ?? []).some((location: any) => location._id === classificationLocationId && location.areaId === next)) {
+                      setClassificationLocationId("");
+                    }
+                  }}
+                >
+                  <option value="">Selecione a área...</option>
+                  {areas.filter((area) => area.active).map((area) => (
+                    <option key={area._id} value={area._id}>{area.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label>Local físico *</Label>
+                <select
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={classificationLocationId}
+                  onChange={(event) => setClassificationLocationId(event.target.value)}
+                  disabled={!classificationAreaId}
+                >
+                  <option value="">Selecione o local...</option>
+                  {(storageLocations ?? []).filter((location: any) =>
+                    location.active && location.areaId === classificationAreaId
+                  ).map((location: any) => (
+                    <option key={location._id} value={location._id}>{location.name}</option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Esta ação apenas separa o saldo legado no local/área escolhidos. Não altera a quantidade global.
+                Não use para mover fisicamente o material entre locais; para isso, registre uma transferência.
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClassificationLot(null)} disabled={classificationSaving}>Cancelar</Button>
+            <Button onClick={handleClassifyLot} disabled={classificationSaving || !classificationAreaId || !classificationLocationId}>
+              {classificationSaving ? "Classificando..." : "Confirmar classificação"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
         <DialogContent className="max-w-md">
