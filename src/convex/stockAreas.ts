@@ -84,7 +84,10 @@ export const summary = query({
     }
 
     for (const lot of lots) {
-      const key = (lot.areaId as string | undefined) ?? "none";
+      const location = lot.locationId ? await ctx.db.get(lot.locationId) : null;
+      const hasConsistentAreaAndLocation = !!lot.areaId && !!lot.locationId &&
+        !!location && location.areaId === lot.areaId;
+      const key = hasConsistentAreaAndLocation ? lot.areaId as string : "none";
       const current =
         buckets.get(key) ??
         {
@@ -218,6 +221,17 @@ export const classifyLot = mutation({
       throw new Error("O local registrado para este lote difere do local selecionado. Faça uma transferência física auditável antes da classificação.");
     }
 
+    const productStock = await ctx.db.query("stock")
+      .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).first();
+    if (!productStock) throw new Error("Registro global de estoque não encontrado; classificação cancelada.");
+    const productReservations = await ctx.db.query("requestItemReservations")
+      .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).collect();
+    const areaReserved = productReservations.reduce((sum: number, item: any) => sum + item.quantityRemaining, 0);
+    const legacyReserved = Math.max(0, productStock.reservedQuantity - areaReserved);
+    if (legacyReserved > 0) {
+      throw new Error("Há solicitações antigas aprovadas sem reserva por lote para este produto. Conclua ou cancele essas solicitações antes de classificar o saldo.");
+    }
+
     const rows = await ctx.db.query("stockByLocation")
       .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).collect();
     const targetRow = rows.find((row: any) =>
@@ -234,7 +248,10 @@ export const classifyLot = mutation({
     // Se o lote já possuía área e faltava somente a localização, o saldo pode
     // já estar no bucket classificado. Caso contrário, precisa existir saldo legado.
     const balanceAlreadyClassified = !!lot.areaId && !!alreadyClassifiedRow &&
-      alreadyClassifiedRow.quantity >= lot.quantityAvailable;
+      alreadyClassifiedRow.quantity >= lot.quantityAvailable && legacyQuantity === 0;
+    if (targetRow && legacyQuantity > 0) {
+      throw new Error("Existem saldos legados e classificados simultaneamente neste produto/local. A classificação automática é ambígua; confira o inventário antes de prosseguir.");
+    }
     if (!balanceAlreadyClassified && legacyQuantity < lot.quantityAvailable) {
       throw new Error(
         `O saldo legado deste produto/local (${legacyQuantity}) é menor que o saldo do lote (${lot.quantityAvailable}). Nenhuma classificação foi aplicada.`
