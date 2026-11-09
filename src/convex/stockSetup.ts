@@ -418,35 +418,42 @@ export const productLocationSummary = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    const sbl = await ctx.db.query("stockByLocation").collect();
-    const locIds = [...new Set(sbl.map((s) => s.locationId))];
-    const locs = await Promise.all(locIds.map((id) => ctx.db.get(id)));
-    const locName = new Map(
-      locs
-        .filter((l): l is NonNullable<typeof l> => !!l)
-        .map((l) => [l._id, l.name])
-    );
-    const byProduct = new Map<
-      string,
-      Array<{ locationId: string; locationName: string; quantity: number }>
-    >();
-    for (const s of sbl) {
-      const arr = byProduct.get(s.productId) ?? [];
-      arr.push({
-        locationId: s.locationId,
-        locationName: locName.get(s.locationId) ?? "—",
-        quantity: s.quantity,
+    const rows = await ctx.db.query("stockByLocation").collect();
+    const byProduct = new Map<string, Array<{
+      locationId: string; locationName: string; areaId: string | null;
+      areaName: string; quantity: number;
+    }>>();
+
+    for (const row of rows) {
+      const location = await ctx.db.get(row.locationId);
+      if (!location) continue;
+      const area = row.areaId && location.areaId === row.areaId
+        ? await ctx.db.get(row.areaId) : null;
+      const reservations = await ctx.db.query("requestItemReservations")
+        .withIndex("by_product", (q: any) => q.eq("productId", row.productId))
+        .collect();
+      const reserved = reservations
+        .filter((reservation: any) =>
+          reservation.locationId === row.locationId &&
+          reservation.areaId === (row.areaId ?? undefined)
+        )
+        .reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0);
+      const entries = byProduct.get(row.productId) ?? [];
+      entries.push({
+        locationId: row.locationId,
+        locationName: location.name,
+        areaId: area ? area._id as string : null,
+        areaName: area?.name ?? "Sem área — pendente de classificação",
+        quantity: Math.max(0, row.quantity - reserved),
       });
-      byProduct.set(s.productId, arr);
+      byProduct.set(row.productId, entries);
     }
-    return Array.from(byProduct.entries()).map(([productId, locations]) => ({
-      productId,
-      locations,
-    }));
+    return Array.from(byProduct.entries()).map(([productId, locations]) => ({ productId, locations }));
   },
 });
 
 /**
+ * Quick stock exit/**
  * Quick stock exit (saída simples).
  * Simplified exit without the full request/approval flow.
  * Uses FIFO lot consumption. Reduces both global and location stock.
@@ -454,8 +461,9 @@ export const productLocationSummary = query({
 export const quickExit = mutation({
   args: {
     productId: v.id("products"),
+    areaId: v.id("stockAreas"),
+    locationId: v.id("storageLocations"),
     quantity: v.number(),
-    locationId: v.optional(v.id("storageLocations")),
     destination: v.string(),
     receiverName: v.string(),
     reason: v.optional(v.string()),
@@ -464,143 +472,115 @@ export const quickExit = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireAdmin(ctx);
-
-    // Defesa numérica: normaliza Int64 → number (v.number() aceita Int64 via CLI)
     args = { ...args, quantity: Number(args.quantity) };
-
-    if (args.quantity <= 0) {
-      throw new Error("Quantidade deve ser maior que zero");
+    if (!Number.isFinite(args.quantity) || args.quantity <= 0) {
+      throw new Error("Quantidade deve ser um número válido maior que zero");
     }
-
-    // ── Validate product ──
     const product = await ctx.db.get(args.productId);
-    if (!product) throw new Error("Produto não encontrado");
-    if (!product.active) throw new Error("Produto está inativo");
+    if (!product || !product.active) throw new Error("Produto não encontrado ou inativo");
+    const area = await ctx.db.get(args.areaId);
+    const location = await ctx.db.get(args.locationId);
+    if (!area || !area.active || !location || !location.active || location.areaId !== args.areaId) {
+      throw new Error("A área/local selecionado não está ativo ou não corresponde.");
+    }
+    const stock = await ctx.db.query("stock")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).first();
+    if (!stock) throw new Error("Produto não possui registro de estoque");
+    const globalAvailable = stock.physicalQuantity - stock.reservedQuantity;
+    if (args.quantity > globalAvailable) {
+      throw new Error(`Estoque global insuficiente. Disponível: ${globalAvailable} ${product.unitOfMeasure}`);
+    }
 
-    // ── Check stock ──
-    const stock = await ctx.db
-      .query("stock")
-      .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-
-    const available =
-      (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
-
-    if (args.quantity > available) {
+    const existingReservations = await ctx.db.query("requestItemReservations")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+    const areaReservedGlobal = existingReservations.reduce(
+      (sum: number, reservation: any) => sum + reservation.quantityRemaining, 0
+    );
+    const legacyReserved = Math.max(0, stock.reservedQuantity - areaReservedGlobal);
+    if (legacyReserved > 0) {
       throw new Error(
-        `Estoque insuficiente. Disponível: ${available} ${product.unitOfMeasure}`
+        `Há ${legacyReserved} unidade(s) reservada(s) por solicitação antiga sem área. Conclua ou cancele essa solicitação antes da saída rápida.`
       );
     }
 
-    const now = Date.now();
-    const previousPhysical = stock?.physicalQuantity ?? 0;
-    const previousReserved = stock?.reservedQuantity ?? 0;
+    const locationRows = await ctx.db.query("stockByLocation")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+    const locationStock = locationRows.find((row: any) =>
+      row.locationId === args.locationId && row.areaId === args.areaId
+    );
+    if (!locationStock || locationStock.quantity < args.quantity) {
+      throw new Error(`Estoque insuficiente em "${area.name}" / "${location.name}". Disponível: ${locationStock?.quantity ?? 0}.`);
+    }
 
-    // ── 1. Consume lots (FIFO: oldest first, then by lotNumber) ──
-    const lots = await ctx.db
-      .query("lots")
-      .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .collect();
-
-    const activeLots = lots
-      .filter((l) => l.active && l.quantityAvailable > 0)
-      .sort(
-        (a, b) =>
-          a.receivedAt - b.receivedAt ||
-          a.lotNumber.localeCompare(b.lotNumber)
-      );
+    const productLots = await ctx.db.query("lots")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+    const candidates = [];
+    for (const lot of productLots) {
+      if (!lot.active || lot.areaId !== args.areaId || lot.locationId !== args.locationId) continue;
+      const reservations = await ctx.db.query("requestItemReservations")
+        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+      const reserved = reservations.reduce((sum: number, reservation: any) =>
+        sum + reservation.quantityRemaining, 0);
+      candidates.push({ lot, free: Math.max(0, lot.quantityAvailable - reserved) });
+    }
+    candidates.sort((a: any,b: any) =>
+      a.lot.receivedAt - b.lot.receivedAt || a.lot.lotNumber.localeCompare(b.lot.lotNumber)
+    );
 
     let remaining = args.quantity;
     const consumedLots: Array<{ lotId: string; quantity: number }> = [];
-
-    for (const lot of activeLots) {
+    for (const candidate of candidates) {
       if (remaining <= 0) break;
-      const consume = Math.min(remaining, lot.quantityAvailable);
-      await ctx.db.patch(lot._id, {
-        quantityAvailable: lot.quantityAvailable - consume,
-      });
-      consumedLots.push({ lotId: lot._id, quantity: consume });
+      const lot = await ctx.db.get(candidate.lot._id);
+      if (!lot) throw new Error("Lote desapareceu durante a saída.");
+      const reservations = await ctx.db.query("requestItemReservations")
+        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+      const reserved = reservations.reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0);
+      const free = Math.max(0, lot.quantityAvailable - reserved);
+      const consume = Math.min(free, remaining);
+      if (consume <= 0) continue;
+      await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consume });
+      consumedLots.push({ lotId: lot._id as string, quantity: consume });
       remaining -= consume;
     }
-
     if (remaining > 0) {
-      throw new Error(
-        `Lotes insuficientes. Faltam ${remaining} ${product.unitOfMeasure} para consumo`
-      );
+      throw new Error(`Lotes insuficientes em "${area.name}" / "${location.name}". Faltam ${remaining} ${product.unitOfMeasure}.`);
     }
 
-    // ── 2. Reduce global stock ──
+    const now = Date.now();
+    const previousPhysical = stock.physicalQuantity;
+    const previousReserved = stock.reservedQuantity;
     const newPhysical = previousPhysical - args.quantity;
-    await ctx.db.patch(stock!._id, { physicalQuantity: newPhysical });
+    await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+    await ctx.db.patch(locationStock._id, { quantity: locationStock.quantity - args.quantity });
 
-    // ── 3. Reduce location stock if specified ──
-    if (args.locationId) {
-      const sbl = await ctx.db
-        .query("stockByLocation")
-        .withIndex("by_product", (q) => q.eq("productId", args.productId))
-        .collect();
-      const sblForLocation = sbl.find(
-        (s) => s.locationId === args.locationId
-      );
-
-      if (sblForLocation) {
-        const newLocQty = sblForLocation.quantity - args.quantity;
-        if (newLocQty < 0) {
-          throw new Error(
-            `Estoque insuficiente no local. Disponível: ${sblForLocation.quantity}`
-          );
-        }
-        await ctx.db.patch(sblForLocation._id, { quantity: newLocQty });
-      }
-    }
-
-    // ── 4. Create stock movement ──
-    // CORREÇÃO: o lote consumido passa a ser gravado no campo ESTRUTURADO
-    // `lotId`. Antes ele existia apenas dentro do texto da observation, o que
-    // impedia a devolução de restaurar o `quantityAvailable` do lote e gerava
-    // a divergência 3337 x 3338. A observation é mantida para compatibilidade.
     const consumedLotId = resolveConsumedLotId(consumedLots as LotConsumption[]);
     const lotInfo = formatConsumedLots(consumedLots, (id) =>
-      lots.find((l) => l._id === id)?.lotNumber,
+      productLots.find((lot: any) => lot._id === id)?.lotNumber
     );
-
-    // Número sequencial da saída (SAI-ANO-SEQ) — usado no vínculo de devoluções
     const exitNumber = await generateExitNumber(ctx);
-
     await ctx.db.insert("stockMovements", {
-      productId: args.productId,
-      type: "exit",
-      quantity: args.quantity,
-      previousPhysical,
-      newPhysical,
-      previousReserved,
-      newReserved: previousReserved,
-      userId,
-      exitNumber,
-      lotId: consumedLotId ?? undefined,
+      productId: args.productId, type: "exit", quantity: args.quantity,
+      previousPhysical, newPhysical, previousReserved, newReserved: previousReserved,
+      userId, exitNumber, lotId: consumedLotId ?? undefined,
+      areaId: args.areaId, locationId: args.locationId,
       observation: [
         `Saída rápida — ${args.receiverName}`,
+        `Área: ${area.name}`,
+        `Local: ${location.name}`,
         args.reason ? `Motivo: ${args.reason}` : "",
         args.osNumber ? `O.S.: ${args.osNumber}` : "",
         args.observation ?? "",
         `Destino: ${args.destination}`,
         `Lotes: ${lotInfo}`,
-      ]
-        .filter(Boolean)
-        .join(" | "),
+      ].filter(Boolean).join(" | "),
       timestamp: now,
     });
-
-    // ── 5. Audit ──
     await ctx.db.insert("auditLogs", {
-      userId,
-      action: "move_stock",
-      entity: "stock",
-      entityId: args.productId,
-      details: `Saída rápida: ${args.quantity}x ${product.name} → ${args.destination} (${args.receiverName})`,
+      userId, action: "move_stock", entity: "stock", entityId: args.productId,
+      details: `Saída rápida: ${args.quantity}x ${product.name} — ${area.name} / ${location.name} → ${args.destination} (${args.receiverName})`,
       timestamp: now,
     });
-
     return {
       message: "Saída registrada com sucesso",
       quantity: args.quantity,
@@ -612,6 +592,7 @@ export const quickExit = mutation({
 });
 
 /**
+ * Cleanup: remove test/homologation data./**
  * Cleanup: remove test/homologation data.
  * Preserves users, passwords, auth, schema, audit logs.
  */
