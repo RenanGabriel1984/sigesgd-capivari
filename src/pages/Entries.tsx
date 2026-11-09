@@ -626,6 +626,23 @@ function EntriesPage() {
     materialType: MaterialType,
     areaId: string,
   ) => {
+    const invalidIndex = nfeItems.findIndex((row) => {
+      if (!row.productId) return true;
+      if (!row.locationId) return !!areaId;
+      const location = locationList.find((item) => item._id === row.locationId);
+      if (!location) return true;
+      return areaId ? location.areaId !== areaId : !!location.areaId;
+    });
+    if (invalidIndex >= 0) {
+      setDestinationOpen(false);
+      setNfeStep("products");
+      toast.error(
+        areaId
+          ? "Selecione, em cada item da NF-e, um local físico pertencente à área escolhida."
+          : "A entrada sem área só pode usar locais ainda não classificados. Escolha a área antes de prosseguir.",
+      );
+      return;
+    }
     setNfeDestination({ materialType, areaId });
     setDestinationOpen(false);
     void handleConfirmImport({ materialType, areaId });
@@ -955,6 +972,17 @@ function EntriesPage() {
         "Escolha o tipo de material (consumo ou permanente) antes de criar a entrada.",
       );
       return;
+    }
+    for (const item of withProduct) {
+      const location = locationList.find((entry) => entry._id === item.locationId);
+      if (areaId && (!location || location.areaId !== areaId)) {
+        toast.error("Cada item precisa de um local físico pertencente à área escolhida.");
+        return;
+      }
+      if (!areaId && location?.areaId) {
+        toast.error("O local selecionado pertence a uma área. Escolha essa área como destino da entrada.");
+        return;
+      }
     }
 
     setManualSaving(true);
@@ -1297,7 +1325,18 @@ function EntriesPage() {
               </Select>
             </FieldRow>
             <FieldRow label="Área de destino">
-              <Select value={areaId || "none"} onValueChange={(value) => setAreaId(value === "none" ? "" : value)}>
+              <Select value={areaId || "none"} onValueChange={(value) => {
+                const nextAreaId = value === "none" ? "" : value;
+                setAreaId(nextAreaId);
+                const allowedLocations = locationList.filter((location) =>
+                  nextAreaId ? location.areaId === nextAreaId : !location.areaId
+                );
+                setItems((current) => current.map((item) => ({
+                  ...item,
+                  locationId: allowedLocations.some((location) => location._id === item.locationId)
+                    ? item.locationId : "",
+                })));
+              }}>
                 <SelectTrigger className="mt-1 h-10 w-full min-w-0 max-w-full">
                   <SelectValue placeholder="Selecionar área" />
                 </SelectTrigger>
@@ -1345,7 +1384,10 @@ function EntriesPage() {
             <NewEntryItemsEditor
               items={items}
               products={productOptions}
-              locations={locationList}
+              locations={locationList.filter((location) =>
+                areaId ? location.areaId === areaId : !location.areaId
+              )}
+              locationRequired={!!areaId}
               onUpdateItem={handleManualItemUpdate}
               onAddItem={() => setItems((current) => [...current, emptyEntryItem()])}
               onRemoveItem={(index) =>

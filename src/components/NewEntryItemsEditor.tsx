@@ -11,6 +11,7 @@ interface ItemEditorProps {
   items: any[];
   products: any[];
   locations: any[];
+  locationRequired?: boolean;
   onUpdateItem: (index: number, field: any, value: string) => void;
   onAddItem: () => void;
   onRemoveItem: (index: number) => void;
@@ -21,6 +22,7 @@ export function NewEntryItemsEditor({
   items,
   products,
   locations,
+  locationRequired = false,
   onUpdateItem,
   onAddItem,
   onRemoveItem,
@@ -159,7 +161,7 @@ export function NewEntryItemsEditor({
                 />
               </div>
               <div>
-                <Label className="text-xs">Local de destino</Label>
+                <Label className="text-xs">Local de destino {locationRequired ? "*" : "(opcional)"}</Label>
                 <Select
                   value={item.locationId}
                   onValueChange={(value) =>
@@ -167,7 +169,7 @@ export function NewEntryItemsEditor({
                   }
                 >
                   <SelectTrigger className="mt-1 h-8">
-                    <SelectValue placeholder="Opcional" />
+                    <SelectValue placeholder={locationRequired ? "Obrigatório" : "Opcional"} />
                   </SelectTrigger>
                   <SelectContent>
                     {locations.map((location) => (
