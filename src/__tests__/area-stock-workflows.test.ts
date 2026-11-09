@@ -1,0 +1,95 @@
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const ROOT = resolve(__dirname, "../..");
+const read = (path: string) => readFileSync(resolve(ROOT, path), "utf-8");
+const schema = read("src/convex/schema.ts");
+const requests = read("src/convex/requests.ts");
+const entries = read("src/convex/entries.ts");
+const stockSetup = read("src/convex/stockSetup.ts");
+const transfers = read("src/convex/stockTransfers.ts");
+const stockAreas = read("src/convex/stockAreas.ts");
+const stockMovements = read("src/convex/stockMovements.ts");
+
+function mutationBlock(source: string, name: string): string {
+  const start = source.indexOf(`export const ${name} = mutation({`);
+  expect(start, `mutation ${name} ausente`).toBeGreaterThan(-1);
+  const next = source.indexOf("\nexport const ", start + 1);
+  return source.slice(start, next < 0 ? undefined : next);
+}
+
+describe("estoque por área e local físico — regressões de segurança", () => {
+  it("mantém campos aditivos e rastreabilidade entre reserva, lote e transferência", () => {
+    expect(schema).toContain('areaId: v.optional(v.id("stockAreas"))');
+    expect(schema).toContain('sourceLocationId: v.optional(v.id("storageLocations"))');
+    expect(schema).toContain("requestItemReservations: defineTable({");
+    expect(schema).toContain('locationId: v.optional(v.id("storageLocations"))');
+    expect(schema).toContain("stockTransferLots: defineTable({");
+    expect(schema).toContain('toLocationId: v.optional(v.id("storageLocations"))');
+  });
+
+  it("não confirma entrada em área com local físico de outra área", () => {
+    const confirm = mutationBlock(entries, "confirm");
+    expect(confirm).toContain("location.areaId !== entry.areaId");
+    expect(confirm).toContain("locationId: item.locationId");
+    expect(confirm).toContain("areaId: entry.areaId");
+  });
+
+  it("exige área e local explícitos em cada nova solicitação", () => {
+    const create = mutationBlock(requests, "create");
+    expect(create).toContain('areaId: v.id("stockAreas")');
+    expect(create).toContain('sourceLocationId: v.id("storageLocations")');
+    expect(create).toContain("sourceLocation.areaId !== item.areaId");
+  });
+
+  it("aprova com reserva FIFO restrita à mesma área e ao mesmo local", () => {
+    const approve = mutationBlock(requests, "approve");
+    expect(approve).toContain("planFifoAreaLotAllocation");
+    expect(approve).toContain("lot.areaId !== requestItem.areaId");
+    expect(approve).toContain("lot.locationId !== requestItem.sourceLocationId");
+    expect(approve).toContain('ctx.db.insert("requestItemReservations"');
+  });
+
+  it("entrega apenas lotes reservados e reduz o saldo do local de origem", () => {
+    const deliver = mutationBlock(requests, "deliver");
+    expect(deliver).toContain('ctx.db.query("requestItemReservations")');
+    expect(deliver).toContain("lot.areaId !== item.areaId");
+    expect(deliver).toContain("lot.locationId !== item.sourceLocationId");
+    expect(deliver).toContain('ctx.db.patch(source._id, { quantity: source.quantity - input.quantityDelivered })');
+    expect(deliver).toContain("Materiais de áreas definidas não serão consumidos");
+  });
+
+  it("saída rápida exige área/local e não consome lotes reservados", () => {
+    const quickExit = mutationBlock(stockSetup, "quickExit");
+    expect(quickExit).toContain('areaId: v.id("stockAreas")');
+    expect(quickExit).toContain('locationId: v.id("storageLocations")');
+    expect(quickExit).toContain("lot.areaId !== args.areaId");
+    expect(quickExit).toContain("lot.locationId !== args.locationId");
+    expect(quickExit).toContain("lot.quantityAvailable - reserved");
+  });
+
+  it("transferência registra áreas e preserva linhagem dos lotes de origem/destino", () => {
+    const create = mutationBlock(transfers, "create");
+    expect(create).toContain("fromAreaId: fromLocation.areaId");
+    expect(create).toContain("toAreaId: toLocation.areaId");
+    expect(create).toContain('ctx.db.insert("stockTransferLots"');
+    expect(create).toContain("sourceLotId");
+    expect(create).toContain("destinationLotId");
+  });
+
+  it("classificação manual não altera saldo global e exige conferência do saldo legado", () => {
+    const classify = mutationBlock(stockAreas, "classifyLot");
+    expect(classify).toContain("legacyQuantity < lot.quantityAvailable");
+    expect(classify).toContain('ctx.db.patch(lot._id, { areaId: args.areaId, locationId: args.locationId })');
+    expect(classify).toContain('entity: "lots"');
+    expect(classify).not.toContain('ctx.db.patch(productStock._id');
+  });
+
+  it("bloqueia mutations antigas que alteravam somente o saldo global", () => {
+    for (const name of ["createEntry", "createExit", "reserveStock", "editEntry", "reverseEntry", "createAdjustment"]) {
+      const block = mutationBlock(stockMovements, name);
+      expect(block).toContain("throw new Error");
+    }
+  });
+});
