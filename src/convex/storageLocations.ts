@@ -18,7 +18,10 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    return await ctx.db.query("storageLocations").collect();
+    const locations = await ctx.db.query("storageLocations").collect();
+    return Promise.all(locations.map(async (location: any) => ({
+      ...location, area: location.areaId ? await ctx.db.get(location.areaId) : null,
+    })));
   },
 });
 
@@ -26,10 +29,11 @@ export const listActive = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    return await ctx.db
-      .query("storageLocations")
-      .withIndex("by_active", (q) => q.eq("active", true))
-      .collect();
+    const locations = await ctx.db.query("storageLocations")
+      .withIndex("by_active", (q) => q.eq("active", true)).collect();
+    return Promise.all(locations.map(async (location: any) => ({
+      ...location, area: location.areaId ? await ctx.db.get(location.areaId) : null,
+    })));
   },
 });
 
@@ -37,10 +41,13 @@ export const create = mutation({
   args: {
     name: v.string(),
     description: v.optional(v.string()),
+    areaId: v.id("stockAreas"),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
     if (!args.name.trim()) throw new Error("Nome do local é obrigatório");
+    const area = await ctx.db.get(args.areaId);
+    if (!area || !area.active) throw new Error("Selecione uma área/subestoque ativa para o local.");
 
     // Check for duplicate name
     const existing = await ctx.db.query("storageLocations").collect();
@@ -52,6 +59,7 @@ export const create = mutation({
       name: args.name.trim(),
       description: args.description || undefined,
       active: true,
+      areaId: args.areaId,
     });
 
     await ctx.db.insert("auditLogs", {
@@ -68,6 +76,7 @@ export const update = mutation({
     name: v.optional(v.string()),
     description: v.optional(v.string()),
     active: v.optional(v.boolean()),
+    areaId: v.optional(v.id("stockAreas")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
@@ -75,6 +84,13 @@ export const update = mutation({
     const location = await ctx.db.get(id);
     if (!location) throw new Error("Local não encontrado");
 
+    if (updates.areaId !== undefined) {
+      const area = await ctx.db.get(updates.areaId);
+      if (!area || !area.active) throw new Error("A área selecionada não existe ou está inativa.");
+      if (location.areaId && location.areaId !== updates.areaId) {
+        throw new Error("A área de um local já classificado não pode ser trocada diretamente. Use uma transferência/classificação auditável.");
+      }
+    }
     if (updates.name) {
       updates.name = updates.name.trim();
       const all = await ctx.db.query("storageLocations").collect();

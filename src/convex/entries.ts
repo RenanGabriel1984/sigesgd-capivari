@@ -415,6 +415,21 @@ export const confirm = mutation({
       );
     }
 
+    if (entry.areaId) {
+      const selectedArea = await ctx.db.get(entry.areaId);
+      if (!selectedArea || !selectedArea.active) throw new Error("A área/subestoque da entrada não existe ou está inativa.");
+      for (const item of items) {
+        if (!item.locationId) {
+          const product = await ctx.db.get(item.productId);
+          throw new Error(`Selecione o local físico para "${product?.name ?? "o item"}" antes de confirmar esta entrada.`);
+        }
+        const location = await ctx.db.get(item.locationId);
+        if (!location || !location.active) throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
+        if (location.areaId !== entry.areaId) {
+          throw new Error(`O local "${location.name}" não pertence à área "${selectedArea.name}".`);
+        }
+      }
+    }
     const now = Date.now();
     const confirmedItemDetails: string[] = [];
 
@@ -446,6 +461,7 @@ export const confirm = mutation({
         observation: item.observation,
         materialType: entry.materialType,
         areaId: entry.areaId,
+        locationId: item.locationId,
       });
 
       // Rastreabilidade Entrada → EntryItem → Lote → Movimentação.
@@ -469,11 +485,17 @@ export const confirm = mutation({
       // Update stock by location (saldo por localização) — keeps global × location consistent
       if (item.locationId) {
         const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const sbl = sblList.find((s: any) => s.locationId === item.locationId);
+        const sbl = sblList.find((s: any) =>
+          s.locationId === item.locationId &&
+          (s.areaId ?? undefined) === (entry.areaId ?? undefined)
+        );
         if (sbl) {
           await ctx.db.patch(sbl._id, { quantity: sbl.quantity + item.quantity });
         } else {
-          await ctx.db.insert("stockByLocation", { productId: item.productId, locationId: item.locationId, quantity: item.quantity });
+          await ctx.db.insert("stockByLocation", {
+            productId: item.productId, locationId: item.locationId,
+            quantity: item.quantity, areaId: entry.areaId,
+          });
         }
       }
 
@@ -489,6 +511,8 @@ export const confirm = mutation({
         userId,
         entryId: args.entryId,
         lotId: lotNumber,
+        areaId: entry.areaId,
+        locationId: item.locationId,
         documentNumber: entry.invoiceNumber,
         observation: `Entrada ${entry.entryNumber} — Lote ${lotNumber}`,
         timestamp: now,

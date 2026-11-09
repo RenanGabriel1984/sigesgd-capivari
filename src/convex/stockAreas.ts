@@ -1,4 +1,4 @@
-import { query, mutation, internalMutation } from "./_generated/server";
+import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { BASELINE_STOCK_AREAS, NO_AREA_LABEL } from "../lib/stock-areas";
 import { requirePermission } from "./rbac";
@@ -57,10 +57,17 @@ export const summary = query({
     await requireUser(ctx);
     const areas = await ctx.db.query("stockAreas").collect();
     const lots = await ctx.db.query("lots").collect();
+    const reservationsByLot = new Map<string, number>();
+    for (const lot of lots) {
+      const reservations = await ctx.db.query("requestItemReservations")
+        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+      reservationsByLot.set(lot._id as string,
+        reservations.reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0));
+    }
 
     const buckets = new Map<
       string,
-      { areaId: string | null; name: string; active: boolean; description: string | null; lots: number; quantityAvailable: number; quantityReceived: number }
+      { areaId: string | null; name: string; active: boolean; description: string | null; lots: number; quantityAvailable: number; quantityReserved: number; quantityReceived: number }
     >();
 
     for (const area of areas) {
@@ -71,6 +78,7 @@ export const summary = query({
         description: area.description ?? null,
         lots: 0,
         quantityAvailable: 0,
+        quantityReserved: 0,
         quantityReceived: 0,
       });
     }
@@ -86,10 +94,13 @@ export const summary = query({
           description: null,
           lots: 0,
           quantityAvailable: 0,
+          quantityReserved: 0,
           quantityReceived: 0,
         };
       current.lots += 1;
-      current.quantityAvailable += lot.quantityAvailable;
+      const reserved = reservationsByLot.get(lot._id as string) ?? 0;
+      current.quantityReserved += reserved;
+      current.quantityAvailable += Math.max(0, lot.quantityAvailable - reserved);
       current.quantityReceived += lot.quantityReceived;
       buckets.set(key, current);
     }
@@ -109,9 +120,10 @@ export const summary = query({
  * nunca apaga e nunca toca em estoque, lotes ou movimentações. Cada criação
  * gera registro de auditoria.
  */
-export const ensureBaselineAreas = internalMutation({
+export const ensureBaselineAreas = mutation({
   args: {},
   handler: async (ctx) => {
+    const { userId } = await requireStockManagerOrAdmin(ctx);
     const created: string[] = [];
     const skipped: string[] = [];
 
@@ -130,6 +142,7 @@ export const ensureBaselineAreas = internalMutation({
         active: true,
       });
       await ctx.db.insert("auditLogs", {
+        userId,
         action: "create",
         entity: "stockAreas",
         entityId: id as string,

@@ -448,6 +448,8 @@ const schema = defineSchema(
       exitNumber: v.optional(v.string()),
       // ── Vínculo reverso: movimentação de DEVOLUÇÃO → saída original ──
       exitMovementId: v.optional(v.id("stockMovements")),
+      areaId: v.optional(v.id("stockAreas")),
+      locationId: v.optional(v.id("storageLocations")),
       timestamp: v.number(),
       canceled: v.optional(v.boolean()),
       canceledAt: v.optional(v.number()),
@@ -519,6 +521,8 @@ const schema = defineSchema(
       quantityDelivered: v.number(),
       deliveredSerialNumbers: v.optional(v.array(v.string())),
       targetPrinterId: v.optional(v.id("printers")),
+      areaId: v.optional(v.id("stockAreas")),
+      sourceLocationId: v.optional(v.id("storageLocations")),
     }).index("by_request", ["requestId"])
       .index("by_product", ["productId"]),
 
@@ -618,8 +622,10 @@ const schema = defineSchema(
       // ── Classificação preservada historicamente no lote ──
       materialType: v.optional(materialTypeValidator),
       areaId: v.optional(v.id("stockAreas")),
+      locationId: v.optional(v.id("storageLocations")),
     }).index("by_product", ["productId"])
       .index("by_entry", ["entryId"])
+      .index("by_location", ["locationId"])
       .index("by_number", ["lotNumber"])
       .index("by_active", ["active"]),
 
@@ -628,7 +634,9 @@ const schema = defineSchema(
       name: v.string(),
       description: v.optional(v.string()),
       active: v.boolean(),
-    }).index("by_active", ["active"]),
+      areaId: v.optional(v.id("stockAreas")),
+    }).index("by_active", ["active"])
+      .index("by_area", ["areaId"]),
 
     // ── Inventories (Inventários) ──
     inventories: defineTable({
@@ -670,6 +678,21 @@ const schema = defineSchema(
       quantity: v.number(),
     }).index("by_requestItem", ["requestItemId"])
       .index("by_lot", ["lotId"]),
+
+    requestItemReservations: defineTable({
+      requestItemId: v.id("requestItems"),
+      productId: v.id("products"),
+      lotId: v.id("lots"),
+      areaId: v.id("stockAreas"),
+      locationId: v.id("storageLocations"),
+      quantity: v.number(),
+      quantityRemaining: v.number(),
+      quantityDelivered: v.number(),
+      quantityReleased: v.number(),
+      createdAt: v.number(),
+    }).index("by_requestItem", ["requestItemId"])
+      .index("by_lot", ["lotId"])
+      .index("by_product", ["productId"]),
 
     // ── Returns (Devoluções) — SEMPRE vinculada a uma SAÍDA real ──
     returns: defineTable({
@@ -739,6 +762,7 @@ const schema = defineSchema(
       productId: v.id("products"),
       locationId: v.id("storageLocations"),
       quantity: v.number(),
+      areaId: v.optional(v.id("stockAreas")),
     }).index("by_product", ["productId"])
       .index("by_location", ["locationId"]),
 
