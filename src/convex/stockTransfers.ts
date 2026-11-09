@@ -77,6 +77,19 @@ export const create = mutation({
     const product = await ctx.db.get(args.productId);
     if (!product || !product.active) throw new Error("Produto não encontrado ou inativo");
 
+    const globalStock = await ctx.db.query("stock")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).first();
+    if (!globalStock) throw new Error("Registro global de estoque não encontrado.");
+    const allReservations = await ctx.db.query("requestItemReservations")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+    const areaReserved = allReservations.reduce((sum: number, item: any) => sum + item.quantityRemaining, 0);
+    const legacyReserved = Math.max(0, globalStock.reservedQuantity - areaReserved);
+    if (legacyReserved > 0) {
+      throw new Error("Há solicitações antigas aprovadas sem reserva por lote para este produto. Conclua ou cancele essas solicitações antes de transferir.");
+    }
+    const globalAvailable = globalStock.physicalQuantity - globalStock.reservedQuantity;
+    if (args.quantity > globalAvailable) throw new Error("A quantidade excede o estoque global livre.");
+
     const locationRows = await ctx.db.query("stockByLocation")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
     const sourceStock = locationRows.find((row: any) => row.locationId === args.fromLocationId && row.areaId === fromLocation.areaId);
