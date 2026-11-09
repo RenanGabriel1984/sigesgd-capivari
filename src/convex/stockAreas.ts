@@ -386,7 +386,15 @@ export const update = mutation({
       updates.name = name;
     }
     if (args.description !== undefined) updates.description = args.description.trim() || undefined;
-    if (args.active !== undefined) updates.active = args.active;
+    if (args.active !== undefined) {
+      if (args.active === false) {
+        const lots = await ctx.db.query("lots").collect();
+        if (lots.some((lot: any) => lot.areaId === args.id && lot.active && lot.quantityAvailable > 0)) {
+          throw new Error("Não é possível desativar uma área que ainda possui lotes com saldo. Transfira ou regularize o estoque primeiro.");
+        }
+      }
+      updates.active = args.active;
+    }
 
     await ctx.db.patch(args.id, updates);
     const action = args.active === false ? "deactivate" : args.active === true ? "activate" : "update";
