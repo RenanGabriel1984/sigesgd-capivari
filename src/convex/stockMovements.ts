@@ -48,6 +48,7 @@ export const createEntry = mutation({
     documentNumber: v.optional(v.string()), observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    throw new Error("Entrada direta legada desativada. Use o módulo Entradas para registrar documento, lote, área e local físico.");
     const { userId } = await requireStockManagerOrAdmin(ctx);
     if (args.quantity <= 0) throw new Error("A quantidade deve ser positiva");
     if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
@@ -78,6 +79,7 @@ export const createExit = mutation({
     requestId: v.optional(v.id("requests")), observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    throw new Error("Saída direta global desativada. Use Solicitações ou Saída rápida e informe a área/local de origem.");
     const { userId } = await requireStockManagerOrAdmin(ctx);
     if (args.quantity <= 0) throw new Error("A quantidade deve ser positiva");
     if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
@@ -107,6 +109,7 @@ export const createExit = mutation({
 export const reserveStock = mutation({
   args: { productId: v.id("products"), quantity: v.number(), requestId: v.id("requests") },
   handler: async (ctx, args) => {
+    throw new Error("Reserva manual isolada desativada. Reservas devem ser criadas durante a aprovação da solicitação.");
     const { userId } = await requireUser(ctx);
     const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
     if (!stock) throw new Error("Registro de estoque não encontrado");
@@ -134,6 +137,7 @@ export const editEntry = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    throw new Error("Edição direta de entrada legada desativada. Use o módulo Entradas para preservar lote, área e localização.");
     const { userId } = await requireStockManagerOrAdmin(ctx);
     if (args.quantity <= 0) throw new Error("A quantidade deve ser maior que zero");
     if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
@@ -180,6 +184,7 @@ export const reverseEntry = mutation({
     reason: v.string(),
   },
   handler: async (ctx, args) => {
+    throw new Error("Estorno direto de entrada legada desativado. Use o estorno do módulo Entradas para preservar lote, área e localização.");
     const { userId } = await requireStockManagerOrAdmin(ctx);
     if (!args.reason.trim()) throw new Error("O motivo do estorno é obrigatório");
     const movement = await ctx.db.get(args.movementId);
@@ -222,6 +227,7 @@ export const reverseEntry = mutation({
 export const createAdjustment = mutation({
   args: { productId: v.id("products"), newQuantity: v.number(), observation: v.string() },
   handler: async (ctx, args) => {
+    throw new Error("Ajuste global legado desativado. A correção precisa ocorrer por inventário/lote/área/local para preservar a rastreabilidade.");
     const { userId } = await requireStockManagerOrAdmin(ctx);
     if (args.newQuantity < 0) throw new Error("A quantidade não pode ser negativa");
     if (!isFinite(args.newQuantity)) throw new Error("Quantidade inválida");
