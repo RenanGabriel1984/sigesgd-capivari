@@ -157,10 +157,10 @@ export default function StockTransfersPage() {
                           <Badge variant="outline">{t.quantity}</Badge>
                         </TableCell>
                         <TableCell className="text-sm">
-                          {t.fromLocation?.name ?? "\u2014"}
+                          {(t.fromArea?.name ? `${t.fromArea.name} / ` : "") + (t.fromLocation?.name ?? "\u2014")}
                         </TableCell>
                         <TableCell className="text-sm">
-                          {t.toLocation?.name ?? "\u2014"}
+                          {(t.toArea?.name ? `${t.toArea.name} / ` : "") + (t.toLocation?.name ?? "\u2014")}
                         </TableCell>
                         <TableCell className="text-sm">
                           {t.responsible?.name ?? "\u2014"}
@@ -210,7 +210,7 @@ export default function StockTransfersPage() {
                     <option value="">Origem...</option>
                     {(locations ?? []).map((l: any) => (
                       <option key={l._id} value={l._id}>
-                        {l.name}
+                        {l.area?.name ? `${l.area.name} / ` : "Sem área / "}{l.name}
                       </option>
                     ))}
                   </select>
@@ -225,7 +225,7 @@ export default function StockTransfersPage() {
                     <option value="">Destino...</option>
                     {(locations ?? []).map((l: any) => (
                       <option key={l._id} value={l._id}>
-                        {l.name}
+                        {l.area?.name ? `${l.area.name} / ` : "Sem área / "}{l.name}
                       </option>
                     ))}
                   </select>
