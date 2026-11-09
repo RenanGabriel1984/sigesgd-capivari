@@ -651,6 +651,8 @@ const schema = defineSchema(
       observation: v.optional(v.string()),
       // ── Escopo do inventário (opcional; vazio = todos os locais/produtos) ──
       locationId: v.optional(v.id("storageLocations")),
+      // Snapshot da área do local no momento em que o inventário foi aberto.
+      areaId: v.optional(v.id("stockAreas")),
       categoryId: v.optional(v.id("categories")),
       productIds: v.optional(v.array(v.id("products"))),
       closedAt: v.optional(v.number()),
