@@ -157,10 +157,10 @@ export default function StockTransfersPage() {
                           <Badge variant="outline">{t.quantity}</Badge>
                         </TableCell>
                         <TableCell className="text-sm">
-                          {(t.fromArea?.name ? `${t.fromArea.name} / ` : "") + (t.fromLocation?.name ?? "\u2014")}
+                          {(t.fromArea?.name ? `${t.fromArea.name} / ` : "") + ((t.fromArea?.name ? `${t.fromArea.name} / ` : "") + (t.fromLocation?.name ?? "\u2014"))}
                         </TableCell>
                         <TableCell className="text-sm">
-                          {(t.toArea?.name ? `${t.toArea.name} / ` : "") + (t.toLocation?.name ?? "\u2014")}
+                          {(t.toArea?.name ? `${t.toArea.name} / ` : "") + ((t.toArea?.name ? `${t.toArea.name} / ` : "") + (t.toLocation?.name ?? "\u2014"))}
                         </TableCell>
                         <TableCell className="text-sm">
                           {t.responsible?.name ?? "\u2014"}
