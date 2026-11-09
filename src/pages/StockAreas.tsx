@@ -47,6 +47,7 @@ export default function StockAreas() {
   const summary = useQuery(api.stockAreas.summary);
   const createArea = useMutation(api.stockAreas.create);
   const updateArea = useMutation(api.stockAreas.update);
+  const ensureBaselineAreas = useMutation(api.stockAreas.ensureBaselineAreas);
   const navigate = useNavigate();
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -54,6 +55,7 @@ export default function StockAreas() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
+  const [seeding, setSeeding] = useState(false);
 
   if (areas === undefined) return <StockAreasSkeleton />;
 
@@ -111,6 +113,22 @@ export default function StockAreas() {
     }
   };
 
+  const handleEnsureBaseline = async () => {
+    setSeeding(true);
+    try {
+      const result = await ensureBaselineAreas({});
+      toast.success(
+        result.created.length
+          ? `Áreas padrão criadas: ${result.created.join(", ")}`
+          : "As cinco áreas padrão já estão cadastradas."
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível criar as áreas padrão.");
+    } finally {
+      setSeeding(false);
+    }
+  };
+
   const activeCount = areas.filter((a) => a.active).length;
   const inactiveCount = areas.length - activeCount;
 
@@ -127,6 +145,9 @@ export default function StockAreas() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={handleEnsureBaseline} disabled={seeding}>
+              {seeding ? "Criando..." : "Adicionar áreas padrão"}
+            </Button>
             <Button variant="outline" className="gap-2" onClick={() => navigate("/transfers")}>
               <ArrowRightLeft className="h-4 w-4" /> Transferir estoque
             </Button>
@@ -180,7 +201,8 @@ export default function StockAreas() {
                       </Badge>
                     </div>
                     <p className="text-xs font-mono text-muted-foreground">
-                      {totals?.lots ?? 0} lote(s) · {totals?.quantityAvailable ?? 0} unidade(s) disponíveis
+                      {totals?.lots ?? 0} lote(s) · {totals?.quantityAvailable ?? 0} livre(s)
+                      {(totals as any)?.quantityReserved > 0 ? ` · ${(totals as any).quantityReserved} reservada(s)` : ""}
                     </p>
                     {area.description && (
                       <p className="text-xs text-muted-foreground mt-2 whitespace-normal break-words">

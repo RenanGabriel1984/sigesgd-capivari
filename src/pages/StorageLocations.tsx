@@ -14,6 +14,7 @@ import { toast } from "sonner";
 
 export default function StorageLocations() {
   const locations = useQuery(api.storageLocations.list);
+  const areas = useQuery(api.stockAreas.listActive);
   const createLocation = useMutation(api.storageLocations.create);
   const updateLocation = useMutation(api.storageLocations.update);
 
@@ -21,11 +22,13 @@ export default function StorageLocations() {
   const [editId, setEditId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [areaId, setAreaId] = useState("");
   const [saving, setSaving] = useState(false);
 
   const resetForm = () => {
     setName("");
     setDescription("");
+    setAreaId("");
     setEditId(null);
   };
 
@@ -38,6 +41,7 @@ export default function StorageLocations() {
     setEditId(loc._id);
     setName(loc.name);
     setDescription(loc.description ?? "");
+    setAreaId(loc.areaId ?? "");
     setDialogOpen(true);
   };
 
@@ -46,13 +50,17 @@ export default function StorageLocations() {
       toast.error("Nome do local é obrigatório");
       return;
     }
+    if (!areaId) {
+      toast.error("Selecione a área/subestoque deste local");
+      return;
+    }
     setSaving(true);
     try {
       if (editId) {
-        await updateLocation({ id: editId as any, name: name.trim(), description: description || undefined });
+        await updateLocation({ id: editId as any, name: name.trim(), description: description || undefined, areaId: areaId as any });
         toast.success("Local atualizado com sucesso");
       } else {
-        await createLocation({ name: name.trim(), description: description || undefined });
+        await createLocation({ name: name.trim(), description: description || undefined, areaId: areaId as any });
         toast.success("Local criado com sucesso");
       }
       setDialogOpen(false);
@@ -111,6 +119,9 @@ export default function StorageLocations() {
                       {loc.active ? "Ativo" : "Inativo"}
                     </Badge>
                   </div>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    Área: {loc.area?.name ?? "Sem área — pendente de classificação"}
+                  </p>
                   {loc.description && (
                     <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{loc.description}</p>
                   )}
@@ -144,6 +155,19 @@ export default function StorageLocations() {
                 placeholder="Ex: Armário TI 01"
                 className="mt-1"
               />
+            </div>
+            <div>
+              <Label>Área / Subestoque *</Label>
+              <select
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={areaId}
+                onChange={(event) => setAreaId(event.target.value)}
+              >
+                <option value="">Selecione a área...</option>
+                {(areas ?? []).map((area) => (
+                  <option key={area._id} value={area._id}>{area.name}</option>
+                ))}
+              </select>
             </div>
             <div>
               <Label>Descrição</Label>
