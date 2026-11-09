@@ -42,6 +42,8 @@ interface RequestItemForm {
   productId: string;
   quantity: number;
   targetPrinterId: string;
+  areaId: string;
+  sourceLocationId: string;
 }
 
 const REASON_OPTIONS = [
@@ -57,6 +59,8 @@ export default function Requests() {
   const { user } = useAuth();
   const requests = useQuery(api.requests.list);
   const products = useQuery(api.products.listActive);
+  const stockAreas = useQuery(api.stockAreas.listActive);
+  const storageLocations = useQuery(api.storageLocations.listActive);
   const organizations = useQuery(api.organizations.list);
   const createRequest = useMutation(api.requests.create);
   const allPrinters = useQuery(api.printers.listActive);
@@ -70,7 +74,9 @@ export default function Requests() {
   const [searchParams] = useSearchParams();
   const prefillProduct = searchParams.get("product") ?? "";
   const [createDialog, setCreateDialog] = useState(!!prefillProduct);
-  const [items, setItems] = useState<RequestItemForm[]>([{ productId: prefillProduct, quantity: 1, targetPrinterId: "" }]);
+  const [items, setItems] = useState<RequestItemForm[]>([{
+    productId: prefillProduct, quantity: 1, targetPrinterId: "", areaId: "", sourceLocationId: "",
+  }]);
   const [observation, setObservation] = useState("");
   const [secretariaId, setSecretariaId] = useState("");
   const [departamentoId, setDepartamentoId] = useState("");
@@ -154,7 +160,9 @@ export default function Requests() {
 
   const availableProducts = useMemo(() => products?.filter((p) => p.active) ?? [], [products]);
 
-  const addItem = () => setItems([...items, { productId: "", quantity: 1, targetPrinterId: "" }]);
+  const addItem = () => setItems([...items, {
+    productId: "", quantity: 1, targetPrinterId: "", areaId: "", sourceLocationId: "",
+  }]);
   const removeItem = (i: number) => setItems(items.filter((_, idx) => idx !== i));
   const updateItem = (i: number, field: keyof RequestItemForm, value: any) => {
     const newItems = [...items];
@@ -163,7 +171,7 @@ export default function Requests() {
   };
 
   const resetForm = () => {
-    setItems([{ productId: "", quantity: 1, targetPrinterId: "" }]);
+    setItems([{ productId: "", quantity: 1, targetPrinterId: "", areaId: "", sourceLocationId: "" }]);
     setObservation("");
     setSecretariaId("");
     setDepartamentoId("");
@@ -182,6 +190,15 @@ export default function Requests() {
     if (!reason.trim()) { toast.error("O motivo da solicitação é obrigatório"); return; }
     const validItems = items.filter((i) => i.productId && i.quantity > 0);
     if (validItems.length === 0) { toast.error("Adicione pelo menos um item do estoque válido"); return; }
+    for (const item of validItems) {
+      if (!item.areaId) { toast.error("Selecione a área/subestoque de cada item"); return; }
+      if (!item.sourceLocationId) { toast.error("Selecione o local físico de origem de cada item"); return; }
+      const location = (storageLocations ?? []).find((entry: any) => entry._id === item.sourceLocationId);
+      if (!location || location.areaId !== item.areaId) {
+        toast.error("O local físico selecionado não pertence à área escolhida");
+        return;
+      }
+    }
     // Frontend toner check: for items with compatibility entries, targetPrinterId is required
     for (const item of validItems) {
       const product = availableProducts.find((p) => p._id === item.productId);
@@ -229,6 +246,8 @@ export default function Requests() {
           productId: i.productId as any,
           quantityRequested: i.quantity,
           targetPrinterId: i.targetPrinterId ? (i.targetPrinterId as any) : undefined,
+          areaId: i.areaId as any,
+          sourceLocationId: i.sourceLocationId as any,
         })),
       });
       toast.success("Solicitação criada com sucesso");
@@ -469,8 +488,15 @@ export default function Requests() {
         {r.osNumber && <div className="mb-2 text-xs"><span className="font-medium text-muted-foreground">O.S.:</span> {r.osNumber}</div>}
         <div className="space-y-1.5 mb-3">
           {r.items?.map((item: any) => (
-            <div key={item._id} className="flex items-center justify-between text-sm bg-muted/50 rounded px-3 py-1.5">
-              <span className="truncate">{item.product?.name ?? "Item"}</span>
+            <div key={item._id} className="flex items-center justify-between text-sm bg-muted/50 rounded px-3 py-1.5 gap-3">
+              <div className="min-w-0">
+                <span className="truncate block">{item.product?.name ?? "Item"}</span>
+                {(item.area || item.sourceLocation) && (
+                  <span className="text-[10px] text-muted-foreground block">
+                    {item.area?.name ?? "Sem área"} · {item.sourceLocation?.name ?? "Local não informado"}
+                  </span>
+                )}
+              </div>
               <span className="font-mono text-xs shrink-0 ml-2">
                 Sol: {item.quantityRequested}
                 {item.quantityApproved > 0 && ` | Apr: ${item.quantityApproved}`}
@@ -707,7 +733,7 @@ export default function Requests() {
               ) : (
                 <div className="space-y-2 mt-2">
                   {items.map((item, i) => (
-                    <div key={i} className="flex gap-2 items-end">
+                    <div key={i} className="border rounded-lg p-3 space-y-2">
                       <div className="flex-1">
                         <Select value={item.productId} onValueChange={(v) => updateItem(i, "productId", v)}>
                           <SelectTrigger><SelectValue placeholder="Selecione um item..." /></SelectTrigger>
@@ -721,6 +747,33 @@ export default function Requests() {
                       </div>
                       <div className="w-20">
                         <Input type="number" min="1" value={item.quantity} onChange={(e) => updateItem(i, "quantity", Number(e.target.value))} />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-xs">Área / Subestoque *</Label>
+                          <Select value={item.areaId} onValueChange={(value) => {
+                            updateItem(i, "areaId", value);
+                            updateItem(i, "sourceLocationId", "");
+                          }}>
+                            <SelectTrigger><SelectValue placeholder="Selecione a área" /></SelectTrigger>
+                            <SelectContent>
+                              {(stockAreas ?? []).map((area) => (
+                                <SelectItem key={area._id} value={area._id}>{area.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Local físico de origem *</Label>
+                          <Select value={item.sourceLocationId} onValueChange={(value) => updateItem(i, "sourceLocationId", value)} disabled={!item.areaId}>
+                            <SelectTrigger><SelectValue placeholder="Selecione o local" /></SelectTrigger>
+                            <SelectContent>
+                              {(storageLocations ?? []).filter((location: any) => location.areaId === item.areaId).map((location: any) => (
+                                <SelectItem key={location._id} value={location._id}>{location.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
                       {/* Printer selector — only for toner/compat items */}
                       {(() => {
