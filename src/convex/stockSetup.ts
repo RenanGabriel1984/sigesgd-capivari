@@ -126,6 +126,12 @@ async function performInitialLoad(
     }
     if (item.quantity === 0) continue;
 
+      const location = await ctx.db.get(item.locationId);
+      if (!location || !location.active) {
+        throw new Error("A carga inicial precisa apontar para um local físico ativo.");
+      }
+      const areaId = location.areaId;
+
       // ── 1. Create lot for traceability ──
       const lotNumber = await generateLotNumber(ctx, item.productId);
       const lotId = await ctx.db.insert("lots", {
@@ -136,6 +142,8 @@ async function performInitialLoad(
         quantityAvailable: item.quantity,
         receivedAt: now,
         active: true,
+        areaId,
+        locationId: item.locationId,
         observation: `Carga inicial — ${item.quantity} unidades`,
       });
 
@@ -157,7 +165,8 @@ async function performInitialLoad(
         .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
         .collect();
       const sblForLocation = existingSbl.find(
-        (s: any) => s.locationId === item.locationId
+        (s: any) => s.locationId === item.locationId &&
+          (s.areaId ?? undefined) === (areaId ?? undefined)
       );
 
       if (sblForLocation) {
@@ -169,6 +178,7 @@ async function performInitialLoad(
           productId: item.productId,
           locationId: item.locationId,
           quantity: item.quantity,
+          areaId,
         });
       }
 
@@ -212,6 +222,8 @@ async function performInitialLoad(
         userId,
         entryId,
         lotId: lotId as string,
+        areaId,
+        locationId: item.locationId,
         observation: `Carga inicial — lote ${lotNumber} — ${item.quantity} unidades`,
         timestamp: now,
       });
