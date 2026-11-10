@@ -109,6 +109,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(createReturn).toContain("areaId: exit.areaId");
     expect(createReturn).toContain("quantityAvailable: part.lot.quantityAvailable + part.quantity");
     expect(createReturn).toContain("row.locationId === targetLocationId");
+    expect(createReturn).toContain("unassignedLegacyReturned");
   });
 
   it("mantém as cinco áreas de estoque aprovadas como estrutura padrão", () => {
