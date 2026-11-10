@@ -26,7 +26,8 @@ export const list = query({
       const area = m.areaId ? await ctx.db.get(m.areaId) : null;
       const location = m.locationId ? await ctx.db.get(m.locationId) : null;
       const toLocation = m.toLocationId ? await ctx.db.get(m.toLocationId) : null;
-      return { ...m, product, user, supplier, area, location, toLocation };
+      const toArea = m.toAreaId ? await ctx.db.get(m.toAreaId) : null;
+      return { ...m, product, user, supplier, area, location, toLocation, toArea };
     }));
   },
 });
@@ -42,7 +43,8 @@ export const byProduct = query({
       const area = m.areaId ? await ctx.db.get(m.areaId) : null;
       const location = m.locationId ? await ctx.db.get(m.locationId) : null;
       const toLocation = m.toLocationId ? await ctx.db.get(m.toLocationId) : null;
-      return { ...m, user, supplier, area, location, toLocation };
+      const toArea = m.toAreaId ? await ctx.db.get(m.toAreaId) : null;
+      return { ...m, user, supplier, area, location, toLocation, toArea };
     }));
   },
 });
