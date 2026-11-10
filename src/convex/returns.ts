@@ -274,6 +274,14 @@ export const create = mutation({
       a.lot.receivedAt - b.lot.receivedAt ||
       a.lot.lotNumber.localeCompare(b.lot.lotNumber)
     );
+    // Registros históricos de devolução podem não ter exitMovementId nem lotId.
+    // Sua quantidade já reduz o total devolvível; abatemos conservadoramente
+    // essa parte dos primeiros lotes FIFO para não restaurar saldo em duplicidade.
+    let unassignedLegacyReturned = (allReturns as any[])
+      .filter((record) => !record.exitMovementId && !record.lotId &&
+        !!exit.requestId && record.requestId === exit.requestId &&
+        record.productId === exit.productId)
+      .reduce((sum: number, record: any) => sum + record.quantity, 0);
     const parts: Array<{ lot: any | null; quantity: number }> = [];
     let remaining = args.quantity;
     if (orderedSources.length > 0) {
@@ -282,7 +290,9 @@ export const create = mutation({
         : orderedSources;
       for (const source of candidates) {
         if (remaining <= 0) break;
-        const alreadyForLot = returnedByLot.get(source.lot._id as string) ?? 0;
+        const assignedLegacyReturn = Math.min(source.quantity, unassignedLegacyReturned);
+        unassignedLegacyReturned -= assignedLegacyReturn;
+        const alreadyForLot = (returnedByLot.get(source.lot._id as string) ?? 0) + assignedLegacyReturn;
         const availableFromLot = Math.max(0, source.quantity - alreadyForLot);
         const quantity = Math.min(availableFromLot, remaining);
         if (quantity <= 0) continue;
