@@ -589,7 +589,7 @@ export const quickExit = mutation({
       productLots.find((lot: any) => lot._id === id)?.lotNumber
     );
     const exitNumber = await generateExitNumber(ctx);
-    await ctx.db.insert("stockMovements", {
+    const movementId = await ctx.db.insert("stockMovements", {
       productId: args.productId, type: "exit", quantity: args.quantity,
       previousPhysical, newPhysical, previousReserved, newReserved: previousReserved,
       userId, exitNumber, lotId: consumedLotId ?? undefined,
@@ -606,6 +606,16 @@ export const quickExit = mutation({
       ].filter(Boolean).join(" | "),
       timestamp: now,
     });
+    for (const consumed of consumedLots) {
+      await ctx.db.insert("stockMovementLots", {
+        movementId,
+        lotId: consumed.lotId as any,
+        quantity: consumed.quantity,
+        areaId: args.areaId,
+        locationId: args.locationId,
+      });
+    }
+
     await ctx.db.insert("auditLogs", {
       userId, action: "move_stock", entity: "stock", entityId: args.productId,
       details: `Saída rápida: ${args.quantity}x ${product.name} — ${area.name} / ${location.name} → ${args.destination} (${args.receiverName})`,
