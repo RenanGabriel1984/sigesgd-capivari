@@ -11,6 +11,9 @@ const stockSetup = read("src/convex/stockSetup.ts");
 const transfers = read("src/convex/stockTransfers.ts");
 const stockAreas = read("src/convex/stockAreas.ts");
 const stockMovements = read("src/convex/stockMovements.ts");
+const products = read("src/convex/products.ts");
+const returns = read("src/convex/returns.ts");
+const areaDefinitions = read("src/lib/stock-areas.ts");
 
 function mutationBlock(source: string, name: string): string {
   const start = source.indexOf(`export const ${name} = mutation({`);
@@ -76,6 +79,42 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(create).toContain('ctx.db.insert("stockTransferLots"');
     expect(create).toContain("sourceLotId");
     expect(create).toContain("destinationLotId");
+  });
+
+  it("registra todas as alocações de lote feitas por cada saída", () => {
+    expect(schema).toContain("stockMovementLots: defineTable({");
+    const deliver = mutationBlock(requests, "deliver");
+    const quickExit = mutationBlock(stockSetup, "quickExit");
+    expect(deliver).toContain('ctx.db.insert("stockMovementLots"');
+    expect(quickExit).toContain('ctx.db.insert("stockMovementLots"');
+    expect(deliver).toContain("movementId, lotId: lot._id, quantity: consume");
+    expect(quickExit).toContain("lotId: consumed.lotId");
+  });
+
+  it("não permite cadastrar ou carregar saldo inicial sem área ativa", () => {
+    const createProduct = mutationBlock(products, "create");
+    expect(createProduct).toContain("if (!location.areaId)");
+    expect(createProduct).toContain("initialAreaId = area._id");
+    expect(createProduct).toContain("areaId: initialAreaId");
+    expect(stockSetup).toContain("if (!location.areaId)");
+    expect(stockSetup).toContain("A área vinculada ao local");
+  });
+
+  it("devolve cada parcela ao lote e ao subestoque da saída original", () => {
+    const createReturn = mutationBlock(returns, "create");
+    expect(createReturn).toContain('ctx.db.query("stockMovementLots")');
+    expect(createReturn).toContain("sourceLots");
+    expect(createReturn).toContain("lot.areaId !== exit.areaId");
+    expect(createReturn).toContain("lot.locationId !== exit.locationId");
+    expect(createReturn).toContain("areaId: exit.areaId");
+    expect(createReturn).toContain("quantityAvailable: part.lot.quantityAvailable + part.quantity");
+    expect(createReturn).toContain("row.locationId === targetLocationId");
+  });
+
+  it("mantém as cinco áreas de estoque aprovadas como estrutura padrão", () => {
+    for (const areaName of ["TI Geral", "Impressoras", "Limpeza", "Copa e Cozinha", "Água Mineral"]) {
+      expect(areaDefinitions).toContain(areaName);
+    }
   });
 
   it("classificação manual não altera saldo global e exige conferência do saldo legado", () => {
