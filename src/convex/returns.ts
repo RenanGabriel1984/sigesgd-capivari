@@ -48,7 +48,8 @@ export const list = query({
       const request = r.requestId ? await ctx.db.get(r.requestId) : null;
       const exit = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
       const location = r.locationId ? await ctx.db.get(r.locationId) : null;
-      return { ...r, product, lot, returnedBy, receivedBy, request, exit, location };
+      const area = r.areaId ? await ctx.db.get(r.areaId) : null;
+      return { ...r, product, lot, returnedBy, receivedBy, request, exit, location, area };
     }));
   },
 });
@@ -75,12 +76,16 @@ export const returnable = query({
       const user: any = await ctx.db.get(m.userId);
       const request: any = m.requestId ? await ctx.db.get(m.requestId) : null;
       const requester: any = request?.requesterId ? await ctx.db.get(request.requesterId) : null;
+      const area = m.areaId ? await ctx.db.get(m.areaId) : null;
+      const location = m.locationId ? await ctx.db.get(m.locationId) : null;
       const returned = returnedQuantityForExit(allReturns, m);
       const available = returnableQuantity(m.quantity, returned);
       return {
         ...m,
         product,
         user,
+        area,
+        location,
         requesterName: requester?.name ?? user?.name ?? null,
         osNumber: request?.osNumber ?? null,
         requestReason: request?.reason ?? null,
