@@ -697,6 +697,16 @@ const schema = defineSchema(
       .index("by_lot", ["lotId"])
       .index("by_product", ["productId"]),
 
+    // ── Lotes consumidos por cada movimentação (permite devolução multi-lote exata) ──
+    stockMovementLots: defineTable({
+      movementId: v.id("stockMovements"),
+      lotId: v.id("lots"),
+      quantity: v.number(),
+      areaId: v.optional(v.id("stockAreas")),
+      locationId: v.optional(v.id("storageLocations")),
+    }).index("by_movement", ["movementId"])
+      .index("by_lot", ["lotId"]),
+
     // ── Returns (Devoluções) — SEMPRE vinculada a uma SAÍDA real ──
     returns: defineTable({
       // Saída real que está sendo revertida (movimentação type "exit")
@@ -710,7 +720,8 @@ const schema = defineSchema(
       reason: v.string(),
       // Condição do material devolvido
       condition: v.optional(returnConditionValidator),
-      // Local físico de destino da devolução (opcional)
+      // Área e local de destino da devolução; preservam o subestoque de origem.
+      areaId: v.optional(v.id("stockAreas")),
       locationId: v.optional(v.id("storageLocations")),
       returnedByUserId: v.id("users"),
       receivedByUserId: v.optional(v.id("users")),
