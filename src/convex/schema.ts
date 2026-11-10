@@ -451,6 +451,7 @@ const schema = defineSchema(
       areaId: v.optional(v.id("stockAreas")),
       locationId: v.optional(v.id("storageLocations")),
       toLocationId: v.optional(v.id("storageLocations")),
+      toAreaId: v.optional(v.id("stockAreas")),
       timestamp: v.number(),
       canceled: v.optional(v.boolean()),
       canceledAt: v.optional(v.number()),
