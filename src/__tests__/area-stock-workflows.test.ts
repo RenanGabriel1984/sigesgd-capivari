@@ -30,6 +30,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(schema).toContain('locationId: v.optional(v.id("storageLocations"))');
     expect(schema).toContain("stockTransferLots: defineTable({");
     expect(schema).toContain('toLocationId: v.optional(v.id("storageLocations"))');
+    expect(schema).toContain('toAreaId: v.optional(v.id("stockAreas"))');
   });
 
   it("não confirma entrada em área com local físico de outra área", () => {
@@ -79,6 +80,8 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(create).toContain('ctx.db.insert("stockTransferLots"');
     expect(create).toContain("sourceLotId");
     expect(create).toContain("destinationLotId");
+    expect(create).toContain("toAreaId: toLocation.areaId");
+    expect(stockMovements).toContain("const toArea = m.toAreaId ? await ctx.db.get(m.toAreaId) : null");
   });
 
   it("registra todas as alocações de lote feitas por cada saída", () => {
