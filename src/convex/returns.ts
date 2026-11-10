@@ -137,12 +137,10 @@ export const create = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { userId, user } = await requireReturnCreate(ctx);
-
+    const { userId } = await requireReturnCreate(ctx);
     const reason = args.reason.trim();
     if (!reason) throw new Error("O motivo da devolução é obrigatório");
 
-    // A saída original precisa existir e ser uma saída real
     const exit: any = await ctx.db.get(args.exitMovementId);
     if (!exit) throw new Error("Saída original não encontrada");
     if (exit.type !== "exit") throw new Error("A movimentação informada não é uma saída");
@@ -151,158 +149,252 @@ export const create = mutation({
     const product: any = await ctx.db.get(exit.productId);
     if (!product) throw new Error("Produto da saída não encontrado");
 
-    // Saldo disponível para devolver NESTA saída
     const allReturns = await loadReturns(ctx);
     const alreadyReturned = returnedQuantityForExit(allReturns, exit);
-    const error = validateReturnQuantity({
+    const quantityError = validateReturnQuantity({
       exitQuantity: exit.quantity,
       alreadyReturned,
       requested: args.quantity,
     });
-    if (error) throw new Error(error);
+    if (quantityError) throw new Error(quantityError);
 
-    // ── Lote de origem da devolução (ATOMICIDADE) ─────────────────────────────
-    // A devolução DEVE devolver ao mesmo lote que a saída consumiu. Sem isso o
-    // saldo global era restaurado e o `quantityAvailable` do lote não — o estado
-    // parcial que gerou a divergência 3337 x 3338.
-    //
-    // Precedência: lote informado na devolução → `stockMovements.lotId` da
-    // saída. A validação acontece ANTES de qualquer escrita, para que uma
-    // recusa não deixe estado parcial.
-    const exitLotId = (exit as any).lotId ?? null;
-    const productLots = await ctx.db
-      .query("lots")
-      .withIndex("by_product", (q) => q.eq("productId", exit.productId))
+    // Devoluções de saídas classificadas permanecem na mesma área e no mesmo
+    // local físico de origem. Mudança de local deve ser uma transferência.
+    let targetLocationId: any = undefined;
+    if (exit.areaId) {
+      if (!exit.locationId) {
+        throw new Error("A saída não possui local físico registrado. Não é seguro devolver para um subestoque sem origem identificada.");
+      }
+      const sourceLocation: any = await ctx.db.get(exit.locationId);
+      if (!sourceLocation || !sourceLocation.active || sourceLocation.areaId !== exit.areaId) {
+        throw new Error("A área/local da saída original não está mais consistente. Regularize a classificação antes da devolução.");
+      }
+      if (args.locationId && args.locationId !== exit.locationId) {
+        throw new Error("A devolução deve voltar ao local físico de origem. Para mudar o local, registre uma transferência após a devolução.");
+      }
+      targetLocationId = exit.locationId;
+    } else if (args.locationId) {
+      const legacyDestination: any = await ctx.db.get(args.locationId);
+      if (!legacyDestination || !legacyDestination.active) {
+        throw new Error("Local físico de destino não encontrado ou inativo.");
+      }
+      if (legacyDestination.areaId) {
+        throw new Error("Uma saída sem área não pode devolver material diretamente para um local já classificado. Classifique a origem com conferência ou use uma movimentação apropriada.");
+      }
+      targetLocationId = args.locationId;
+    }
+
+    // Preferir a trilha completa de lotes consumidos. Ela permite devolver
+    // corretamente uma saída que utilizou dois ou mais lotes FIFO.
+    const movementLots = await ctx.db.query("stockMovementLots")
+      .withIndex("by_movement", (q: any) => q.eq("movementId", exit._id))
       .collect();
-    // Material rastreado por lote: existe lote ativo do produto. Sem lote ativo,
-    // a devolução opera apenas sobre o saldo global (comportamento histórico
-    // de itens sem rastreio, preservado deliberadamente).
-    const requiresLot =
-      args.lotId != null || exitLotId != null || productLots.some((l: any) => l.active);
+    const sourceLots: Array<{ lot: any; quantity: number }> = [];
 
-    let resolvedLotId = args.lotId ?? (exitLotId as any);
-    if (resolvedLotId && typeof resolvedLotId === "string" && !resolvedLotId.startsWith("LOT-")) {
-      // `stockMovements.lotId` guarda o ID do lote; se por algum motivo
-      // histórico guardou apenas o número, não é um ID utilizável.
-      resolvedLotId = null as any;
+    if (movementLots.length > 0) {
+      for (const link of movementLots) {
+        const lot: any = await ctx.db.get(link.lotId);
+        if (!lot || lot.productId !== exit.productId) {
+          throw new Error("A trilha de lotes da saída está incompleta. Devolução bloqueada para preservar a rastreabilidade.");
+        }
+        if (exit.areaId) {
+          if (lot.areaId !== exit.areaId || lot.locationId !== exit.locationId) {
+            throw new Error("Um lote consumido não corresponde à área/local da saída. Devolução bloqueada.");
+          }
+        } else if (lot.areaId || lot.locationId) {
+          throw new Error("A saída legada está vinculada a um lote já classificado em área/local. Devolução bloqueada.");
+        }
+        sourceLots.push({ lot, quantity: link.quantity });
+      }
+    } else {
+      const productLots = await ctx.db.query("lots")
+        .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+        .collect();
+      const rawLotId = args.lotId ?? exit.lotId ?? null;
+      let fallbackLot: any = args.lotId ? await ctx.db.get(args.lotId) : null;
+      if (!fallbackLot && rawLotId) {
+        if (String(rawLotId).startsWith("LOT-")) {
+          fallbackLot = await ctx.db.query("lots")
+            .withIndex("by_number", (q: any) => q.eq("lotNumber", rawLotId))
+            .first();
+        } else {
+          fallbackLot = await ctx.db.get(rawLotId as any);
+        }
+      }
+      const requiresLot = !!rawLotId || productLots.some((lot: any) => lot.active);
+      const lotGuard = resolveReturnLotGuard({
+        exitLotId: fallbackLot?._id ? String(fallbackLot._id) : null,
+        requiresLot,
+      });
+      if (lotGuard) {
+        const exitLabel = exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
+        throw new Error(buildUnresolvableLotMessage({
+          productName: product.name, exitLabel, reason: lotGuard,
+        }));
+      }
+      if (fallbackLot) {
+        if (fallbackLot.productId !== exit.productId) {
+          throw new Error("Lote não corresponde ao produto da saída");
+        }
+        if (exit.areaId) {
+          if (fallbackLot.areaId !== exit.areaId || fallbackLot.locationId !== exit.locationId) {
+            throw new Error("O lote de origem não pertence à área/local da saída. Devolução bloqueada.");
+          }
+        } else if (fallbackLot.areaId || fallbackLot.locationId) {
+          throw new Error("Não é possível devolver uma saída legada para um lote classificado em área/local.");
+        }
+        sourceLots.push({ lot: fallbackLot, quantity: exit.quantity });
+      }
     }
 
-    const lotGuard = resolveReturnLotGuard({ exitLotId: resolvedLotId ?? null, requiresLot });
-    if (lotGuard) {
-      const exitLabelForError = exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
-      throw new Error(
-        buildUnresolvableLotMessage({ productName: product.name, exitLabel: exitLabelForError, reason: lotGuard }),
-      );
+    if (args.lotId && sourceLots.length > 0 && !sourceLots.some((part) => part.lot._id === args.lotId)) {
+      throw new Error("O lote selecionado não pertence à saída original.");
+    }
+    if (exit.areaId && sourceLots.length === 0) {
+      throw new Error("A saída classificada não possui vínculo verificável com os lotes consumidos. Devolução bloqueada.");
     }
 
-    // Lote, quando identificado, precisa existir e pertencer ao produto
-    const resolvedLot: any = resolvedLotId ? await ctx.db.get(resolvedLotId) : null;
-    if (resolvedLotId && !resolvedLot) throw new Error("Lote de origem da saída não encontrado");
-    if (resolvedLot && resolvedLot.productId !== exit.productId) {
-      throw new Error("Lote não corresponde ao produto da saída");
+    // Distribuir a quantidade a devolver entre os mesmos lotes consumidos,
+    // abatendo devoluções anteriores lote a lote.
+    const returnedByLot = new Map<string, number>();
+    for (const record of allReturns as any[]) {
+      if (record.lotId && (record.exitMovementId === exit._id ||
+        (!record.exitMovementId && !!exit.requestId && record.requestId === exit.requestId &&
+          record.productId === exit.productId))) {
+        returnedByLot.set(record.lotId as string,
+          (returnedByLot.get(record.lotId as string) ?? 0) + record.quantity);
+      }
+    }
+    const orderedSources = [...sourceLots].sort((a, b) =>
+      a.lot.receivedAt - b.lot.receivedAt ||
+      a.lot.lotNumber.localeCompare(b.lot.lotNumber)
+    );
+    const parts: Array<{ lot: any | null; quantity: number }> = [];
+    let remaining = args.quantity;
+    if (orderedSources.length > 0) {
+      const candidates = args.lotId
+        ? orderedSources.filter((part) => part.lot._id === args.lotId)
+        : orderedSources;
+      for (const source of candidates) {
+        if (remaining <= 0) break;
+        const alreadyForLot = returnedByLot.get(source.lot._id as string) ?? 0;
+        const availableFromLot = Math.max(0, source.quantity - alreadyForLot);
+        const quantity = Math.min(availableFromLot, remaining);
+        if (quantity <= 0) continue;
+        parts.push({ lot: source.lot, quantity });
+        remaining -= quantity;
+      }
+      if (remaining > 0) {
+        throw new Error("A quantidade solicitada excede o saldo ainda devolvível dos lotes consumidos nesta saída.");
+      }
+    } else {
+      parts.push({ lot: null, quantity: args.quantity });
     }
 
-    if (args.receivedByUserId) {
-      const receiver = await ctx.db.get(args.receivedByUserId);
-      if (!receiver) throw new Error("Usuário recebedor não encontrado");
+    if (args.receivedByUserId && !(await ctx.db.get(args.receivedByUserId))) {
+      throw new Error("Usuário recebedor não encontrado");
+    }
+
+    const stock = await ctx.db.query("stock")
+      .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+      .first();
+    if (!stock) throw new Error("Registro de estoque não encontrado");
+
+    let locationStock: any = null;
+    if (targetLocationId) {
+      const locationRows = await ctx.db.query("stockByLocation")
+        .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+        .collect();
+      locationStock = locationRows.find((row: any) =>
+        row.locationId === targetLocationId &&
+        (row.areaId ?? undefined) === (exit.areaId ?? undefined)
+      ) ?? null;
     }
 
     const now = Date.now();
     const condition: ReturnCondition = args.condition;
-
-    // 1) Registro da devolução (rastreável e reversor)
-    const returnId = await ctx.db.insert("returns", {
-      exitMovementId: exit._id,
-      requestId: exit.requestId,
-      productId: exit.productId,
-      lotId: resolvedLotId ?? undefined,
-      quantity: args.quantity,
-      reason,
-      condition,
-      locationId: args.locationId,
-      returnedByUserId: userId,
-      receivedByUserId: args.receivedByUserId,
-      observation: args.observation,
-      createdAt: now,
-    });
-
-    // 2) Repor estoque físico global
-    const stock = await ctx.db
-      .query("stock")
-      .withIndex("by_product", (q) => q.eq("productId", exit.productId))
-      .first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
-
     const newPhysical = applyReturnToStock(stock.physicalQuantity, args.quantity);
     await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
 
-    // 3) Repor saldo no local físico (quando a devolução informa o destino)
-    if (args.locationId) {
-      const sblList = await ctx.db
-        .query("stockByLocation")
-        .withIndex("by_product", (q) => q.eq("productId", exit.productId))
-        .collect();
-      const sbl = sblList.find((s: any) => s.locationId === args.locationId);
-      if (sbl) {
-        await ctx.db.patch(sbl._id, {
-          quantity: applyReturnToLocation(sbl.quantity, args.quantity),
+    if (targetLocationId) {
+      if (locationStock) {
+        await ctx.db.patch(locationStock._id, {
+          quantity: applyReturnToLocation(locationStock.quantity, args.quantity),
         });
       } else {
         await ctx.db.insert("stockByLocation", {
           productId: exit.productId,
-          locationId: args.locationId,
+          locationId: targetLocationId,
+          areaId: exit.areaId,
           quantity: args.quantity,
         });
       }
     }
 
-    // 4) Repor disponibilidade do lote (OBRIGATÓRIO quando rastreado)
-    //    A validação do passo anterior (guard) já garantiu que, quando o
-    //    material exige lote, existe um lote resolvível. Aqui o lote e o
-    //    saldo global SEMPRE sobem juntos — nunca um sem o outro.
-    if (resolvedLot) {
-      await ctx.db.patch(resolvedLot._id, {
-        quantityAvailable: resolvedLot.quantityAvailable + args.quantity,
+    const returnIds: string[] = [];
+    let runningPhysical = stock.physicalQuantity;
+    for (const part of parts) {
+      if (part.lot) {
+        await ctx.db.patch(part.lot._id, {
+          quantityAvailable: part.lot.quantityAvailable + part.quantity,
+        });
+      }
+      const returnId = await ctx.db.insert("returns", {
+        exitMovementId: exit._id,
+        requestId: exit.requestId,
+        productId: exit.productId,
+        lotId: part.lot?._id,
+        quantity: part.quantity,
+        reason,
+        condition,
+        areaId: exit.areaId,
+        locationId: targetLocationId,
+        returnedByUserId: userId,
+        receivedByUserId: args.receivedByUserId,
+        observation: args.observation,
+        createdAt: now,
       });
+      returnIds.push(returnId as string);
+
+      const nextPhysical = runningPhysical + part.quantity;
+      await ctx.db.insert("stockMovements", {
+        productId: exit.productId,
+        type: "return",
+        quantity: part.quantity,
+        previousPhysical: runningPhysical,
+        newPhysical: nextPhysical,
+        previousReserved: stock.reservedQuantity,
+        newReserved: stock.reservedQuantity,
+        userId,
+        requestId: exit.requestId,
+        exitMovementId: exit._id,
+        lotId: part.lot?._id,
+        areaId: exit.areaId,
+        locationId: targetLocationId,
+        observation: `Devolução da saída ${exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR")} — ${reason}` +
+          (args.observation ? ` | ${args.observation}` : ""),
+        timestamp: now,
+      });
+      runningPhysical = nextPhysical;
     }
 
-    // 5) Movimentação de DEVOLUÇÃO vinculada à saída original
-    //    (a baixa original NÃO é alterada)
     const exitLabel = exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
-    await ctx.db.insert("stockMovements", {
-      productId: exit.productId,
-      type: "return",
-      quantity: args.quantity,
-      previousPhysical: stock.physicalQuantity,
-      newPhysical,
-      previousReserved: stock.reservedQuantity,
-      newReserved: stock.reservedQuantity,
-      userId,
-      requestId: exit.requestId,
-      exitMovementId: exit._id,
-      lotId: resolvedLot ? resolvedLot.lotNumber : undefined,
-      observation:
-        `Devolução da saída ${exitLabel} — ${reason}` +
-        (args.observation ? ` | ${args.observation}` : ""),
-      timestamp: now,
-    });
-
-    // 6) Auditoria
     await ctx.db.insert("auditLogs", {
       userId,
       action: "return_stock",
       entity: "returns",
-      entityId: returnId,
+      entityId: returnIds[0],
       details: buildReturnAuditDetail({
         quantity: args.quantity,
         productName: product.name,
         exitLabel,
         condition,
         reason,
-      }),
+      }) + (parts.length > 1 ? ` | distribuída entre ${parts.length} lotes` : ""),
       timestamp: now,
     });
 
-    return returnId;
+    return returnIds.length === 1 ? returnIds[0] : returnIds;
   },
 });
+
