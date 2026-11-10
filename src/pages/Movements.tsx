@@ -59,7 +59,7 @@ export default function Movements() {
               <TableCell className="text-xs text-muted-foreground">
                 {m.area?.name ?? "Sem área"}
                 {m.location?.name ? ` / ${m.location.name}` : ""}
-                {m.toLocation?.name ? ` → ${m.toLocation.name}` : ""}
+                {m.toLocation?.name ? ` → ${m.toArea?.name ? `${m.toArea.name} / ` : ""}${m.toLocation.name}` : ""}
               </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
@@ -107,7 +107,7 @@ export default function Movements() {
                   <p className="text-[10px] text-muted-foreground mt-2">
                     {m.area?.name ?? "Sem área"}
                     {m.location?.name ? ` / ${m.location.name}` : ""}
-                    {m.toLocation?.name ? ` → ${m.toLocation.name}` : ""}
+                    {m.toLocation?.name ? ` → ${m.toArea?.name ? `${m.toArea.name} / ` : ""}${m.toLocation.name}` : ""}
                   </p>
                 )}
                 <div className="flex items-center justify-between mt-2 gap-2">
