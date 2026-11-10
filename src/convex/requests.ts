@@ -559,7 +559,7 @@ export const deliver = mutation({
       await ctx.db.patch(stock._id, { physicalQuantity: newPhysical, reservedQuantity: newReserved });
 
       const exitNumber = await generateExitNumber(ctx);
-      await ctx.db.insert("stockMovements", {
+      const movementId = await ctx.db.insert("stockMovements", {
         productId: item.productId, type: "exit", quantity: input.quantityDelivered,
         previousPhysical: stock.physicalQuantity, newPhysical,
         previousReserved: stock.reservedQuantity, newReserved,
@@ -597,6 +597,10 @@ export const deliver = mutation({
             quantityDelivered: reservation.quantityDelivered + consume,
           });
           await ctx.db.insert("requestItemLots", { requestItemId: input.itemId, lotId: lot._id, quantity: consume });
+          await ctx.db.insert("stockMovementLots", {
+            movementId, lotId: lot._id, quantity: consume,
+            areaId: item.areaId, locationId: item.sourceLocationId,
+          });
           remaining -= consume;
         }
         if (remaining > 0) throw new Error("Reservas por lote insuficientes para concluir a entrega.");
@@ -617,6 +621,10 @@ export const deliver = mutation({
           const consume=Math.min(lot.quantityAvailable,remaining);
           await ctx.db.patch(lot._id,{quantityAvailable:lot.quantityAvailable-consume});
           await ctx.db.insert("requestItemLots",{requestItemId:input.itemId,lotId:lot._id,quantity:consume});
+          await ctx.db.insert("stockMovementLots", {
+            movementId, lotId: lot._id, quantity: consume,
+            areaId: undefined, locationId: undefined,
+          });
           remaining-=consume;
         }
         if(remaining>0)throw new Error("Lotes legados sem classificação insuficientes.");
