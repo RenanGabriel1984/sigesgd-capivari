@@ -170,7 +170,8 @@ export const create = mutation({
       productId: args.productId, type: "transfer", quantity: args.quantity,
       previousPhysical: globalStock.physicalQuantity, newPhysical: globalStock.physicalQuantity,
       previousReserved: globalStock.reservedQuantity, newReserved: globalStock.reservedQuantity,
-      userId, areaId: fromLocation.areaId, locationId: args.fromLocationId, toLocationId: args.toLocationId,
+      userId, areaId: fromLocation.areaId, locationId: args.fromLocationId,
+      toLocationId: args.toLocationId, toAreaId: toLocation.areaId,
       observation: `Transferência: ${fromArea.name}/${fromLocation.name} → ${toArea.name}/${toLocation.name}`,
       timestamp: now,
     });
