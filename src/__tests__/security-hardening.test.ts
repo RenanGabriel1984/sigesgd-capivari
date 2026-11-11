@@ -567,7 +567,7 @@ describe("SEC — segredos (B-07)", () => {
 describe("SEC — integridade numérica e campos livres (§14/§17)", () => {
   it("SEC-NAN-01: requests rejeita valores não finitos em aprovação e entrega", () => {
     const reqSrc = stripComments(read("src/convex/requests.ts"));
-    expect(reqSrc).toMatch(/Number\.isFinite\(item\.quantityApproved\)/);
+    expect(reqSrc).toMatch(/Number\.isFinite\(input\.quantityApproved\)/);
     expect(reqSrc).toMatch(/Number\.isFinite\(input\.quantityDelivered\)/);
   });
 

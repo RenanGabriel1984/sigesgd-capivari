@@ -39,4 +39,5 @@ jobs:
         run: bunx vitest run
 
       - name: Compilar frontend e TypeScript
+        if: always()
         run: bun run build

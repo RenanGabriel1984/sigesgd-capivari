@@ -333,7 +333,7 @@ describe("Área/Subestoque", () => {
     ).toBe("area_impressoras");
     // O nome da área NÃO carrega fornecedor: trocar de empresa não muda a estrutura.
     expect(area).toBe("Impressoras");
-    expect(NO_AREA_LABEL).toBe("Sem área (estoque geral)");
+    expect(NO_AREA_LABEL).toBe("Sem área/local — classificação pendente");
   });
 });
 
