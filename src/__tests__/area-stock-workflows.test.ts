@@ -14,6 +14,7 @@ const stockMovements = read("src/convex/stockMovements.ts");
 const products = read("src/convex/products.ts");
 const returns = read("src/convex/returns.ts");
 const areaDefinitions = read("src/lib/stock-areas.ts");
+const inventory = read("src/convex/inventory.ts");
 
 function mutationBlock(source: string, name: string): string {
   const start = source.indexOf(`export const ${name} = mutation({`);
@@ -142,6 +143,21 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(classify).toContain('entity: "lots"');
     expect(classify).not.toContain("location.areaId");
     expect(classify).not.toContain('ctx.db.patch(productStock._id');
+  });
+
+  it("resumo e detalhe usam a área do lote/saldo, não a área legada do armário", () => {
+    expect(stockAreas).toContain("const key = lot.areaId && buckets.has(lot.areaId as string)");
+    expect(stockAreas).not.toContain("location.areaId === lot.areaId");
+    expect(products).toContain("const area = row.areaId ? await ctx.db.get(row.areaId) : null");
+  });
+
+  it("inventário por armário separa área e impede ajuste ambíguo", () => {
+    const create = mutationBlock(inventory, "create");
+    const close = mutationBlock(inventory, "close");
+    expect(create).toContain('areaId: v.optional(v.id("stockAreas"))');
+    expect(create).toContain("(row.areaId ?? undefined) === args.areaId");
+    expect(close).toContain("(row.areaId ?? undefined) === areaId");
+    expect(close).toContain("refaça a contagem para ajustar o bucket correto");
   });
 
   it("bloqueia mutations antigas que alteravam somente o saldo global", () => {
