@@ -415,34 +415,40 @@ export const confirm = mutation({
       );
     }
 
-    if (!entry.areaId) {
-      for (const item of items) {
-        if (!item.locationId) continue;
-        const location = await ctx.db.get(item.locationId);
-        if (location?.areaId) {
-          throw new Error(`O local "${location.name}" pertence a uma área. Classifique a entrada com essa área antes de confirmar.`);
-        }
+    // Área de negócio e local físico são dimensões independentes.
+    // entries.areaId é a área padrão; item.areaId pode sobrescrever por linha.
+    const itemAreas = new Map<string, string | undefined>();
+    if (entry.areaId) {
+      const defaultArea = await ctx.db.get(entry.areaId);
+      if (!defaultArea || !defaultArea.active) {
+        throw new Error("A área/subestoque padrão da entrada não existe ou está inativa.");
       }
     }
-    if (entry.areaId) {
-      const selectedArea = await ctx.db.get(entry.areaId);
-      if (!selectedArea || !selectedArea.active) throw new Error("A área/subestoque da entrada não existe ou está inativa.");
-      for (const item of items) {
-        if (!item.locationId) {
+    for (const item of items) {
+      const effectiveAreaId = item.areaId ?? entry.areaId;
+      itemAreas.set(item._id as string, effectiveAreaId as string | undefined);
+      if (effectiveAreaId) {
+        const area = await ctx.db.get(effectiveAreaId as any);
+        if (!area || !area.active) {
           const product = await ctx.db.get(item.productId);
-          throw new Error(`Selecione o local físico para "${product?.name ?? "o item"}" antes de confirmar esta entrada.`);
+          throw new Error(`A área selecionada para "${product?.name ?? "o item"}" não existe ou está inativa.`);
         }
+      }
+      if (item.locationId) {
         const location = await ctx.db.get(item.locationId);
-        if (!location || !location.active) throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
-        if (location.areaId !== entry.areaId) {
-          throw new Error(`O local "${location.name}" não pertence à área "${selectedArea.name}".`);
+        if (!location || !location.active) {
+          throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
         }
+      } else if (effectiveAreaId) {
+        const product = await ctx.db.get(item.productId);
+        throw new Error(`Selecione o local físico para "${product?.name ?? "o item"}" antes de confirmar esta entrada.`);
       }
     }
     const now = Date.now();
     const confirmedItemDetails: string[] = [];
 
     for (const item of items) {
+      const itemAreaId = itemAreas.get(item._id as string);
       // Validate product
       const product = await ctx.db.get(item.productId);
       if (!product) throw new Error(`Produto não encontrado para item da entrada`);
@@ -469,7 +475,7 @@ export const confirm = mutation({
         active: true,
         observation: item.observation,
         materialType: entry.materialType,
-        areaId: entry.areaId,
+        areaId: itemAreaId as any,
         locationId: item.locationId,
       });
 
@@ -477,7 +483,10 @@ export const confirm = mutation({
       // Sem este back-patch, `entryItems.lotId` ficava ausente (foi o caso dos
       // 8 itens da ENT-2026-000002) e o detalhe da entrada não conseguia ligar
       // o item ao lote que ele gerou.
-      await ctx.db.patch(item._id, { lotId: lotId as string });
+      await ctx.db.patch(item._id, {
+        lotId: lotId as string,
+        areaId: itemAreaId as any,
+      });
 
       // Update stock (increase physicalQuantity)
       const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
@@ -496,14 +505,14 @@ export const confirm = mutation({
         const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
         const sbl = sblList.find((s: any) =>
           s.locationId === item.locationId &&
-          (s.areaId ?? undefined) === (entry.areaId ?? undefined)
+          (s.areaId ?? undefined) === (itemAreaId ?? undefined)
         );
         if (sbl) {
           await ctx.db.patch(sbl._id, { quantity: sbl.quantity + item.quantity });
         } else {
           await ctx.db.insert("stockByLocation", {
             productId: item.productId, locationId: item.locationId,
-            quantity: item.quantity, areaId: entry.areaId,
+            quantity: item.quantity, areaId: itemAreaId as any,
           });
         }
       }
@@ -520,7 +529,7 @@ export const confirm = mutation({
         userId,
         entryId: args.entryId,
         lotId: lotNumber,
-        areaId: entry.areaId,
+        areaId: itemAreaId as any,
         locationId: item.locationId,
         documentNumber: entry.invoiceNumber,
         observation: `Entrada ${entry.entryNumber} — Lote ${lotNumber}`,
@@ -559,6 +568,7 @@ export const addItem = mutation({
     model: v.optional(v.string()),
     specification: v.optional(v.string()),
     locationId: v.optional(v.id("storageLocations")),
+    areaId: v.optional(v.id("stockAreas")),
     photoStorageId: v.optional(v.string()),
     supplierLotNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
@@ -593,6 +603,7 @@ export const addItem = mutation({
       model: args.model,
       specification: args.specification,
       locationId: args.locationId,
+      areaId: args.areaId,
       photoStorageId: args.photoStorageId,
       supplierLotNumber: args.supplierLotNumber || undefined,
       observation: args.observation,
@@ -628,6 +639,7 @@ export const updateItem = mutation({
     model: v.optional(v.string()),
     specification: v.optional(v.string()),
     locationId: v.optional(v.id("storageLocations")),
+    areaId: v.optional(v.id("stockAreas")),
     photoStorageId: v.optional(v.string()),
     supplierLotNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
@@ -665,6 +677,7 @@ export const updateItem = mutation({
     if (args.model !== undefined) updates.model = args.model;
     if (args.specification !== undefined) updates.specification = args.specification;
     if (args.locationId !== undefined) updates.locationId = args.locationId;
+    if (args.areaId !== undefined) updates.areaId = args.areaId;
     if (args.photoStorageId !== undefined) updates.photoStorageId = args.photoStorageId;
     if (args.supplierLotNumber !== undefined) updates.supplierLotNumber = args.supplierLotNumber;
     if (args.observation !== undefined) updates.observation = args.observation;
