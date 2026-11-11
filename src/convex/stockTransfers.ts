@@ -59,8 +59,8 @@ export const create = mutation({
     productId: v.id("products"), lotId: v.optional(v.id("lots")),
     fromLocationId: v.id("storageLocations"), toLocationId: v.id("storageLocations"),
     // Área é escolhida independentemente do local físico; null representa "Sem área".
-    fromAreaId: v.union(v.id("stockAreas"), v.null()),
-    toAreaId: v.union(v.id("stockAreas"), v.null()),
+    fromAreaId: v.optional(v.union(v.id("stockAreas"), v.null())),
+    toAreaId: v.optional(v.union(v.id("stockAreas"), v.null())),
     quantity: v.number(), observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -75,8 +75,10 @@ export const create = mutation({
     if (!fromLocation || !fromLocation.active) throw new Error("Local de origem não encontrado ou inativo");
     if (!toLocation || !toLocation.active) throw new Error("Local de destino não encontrado ou inativo");
 
-    const sourceAreaId = args.fromAreaId ?? undefined;
-    const destinationAreaId = args.toAreaId ?? undefined;
+    // Compatibilidade: chamadas antigas sem área explícita usam o metadado
+    // legado do local. Nova interface envia null explicitamente para "Sem área".
+    const sourceAreaId = args.fromAreaId === undefined ? fromLocation.areaId : (args.fromAreaId ?? undefined);
+    const destinationAreaId = args.toAreaId === undefined ? toLocation.areaId : (args.toAreaId ?? undefined);
     const fromArea = sourceAreaId ? await ctx.db.get(sourceAreaId) : null;
     const toArea = destinationAreaId ? await ctx.db.get(destinationAreaId) : null;
     if (sourceAreaId && !fromArea?.active) throw new Error("A área de origem não existe ou está inativa.");
