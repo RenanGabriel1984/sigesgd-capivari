@@ -253,7 +253,6 @@ async function performInitialLoad(
       });
 
       const product = await ctx.db.get(item.productId);
-      const location = await ctx.db.get(item.locationId);
       summary.push(
         `${product?.name ?? item.productId} → ${location?.name ?? item.locationId}: ${item.quantity} (lote ${lotNumber})`
       );
