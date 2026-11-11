@@ -636,6 +636,9 @@ const schema = defineSchema(
       name: v.string(),
       description: v.optional(v.string()),
       active: v.boolean(),
+      // Campo legado mantido apenas para compatibilidade de leitura.
+      // Um local físico pode armazenar materiais de diversas áreas; nunca
+      // use este vínculo como regra de classificação ou validação de estoque.
       areaId: v.optional(v.id("stockAreas")),
     }).index("by_active", ["active"])
       .index("by_area", ["areaId"]),
