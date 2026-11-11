@@ -87,6 +87,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(create).toContain("toAreaId: args.toAreaId");
     expect(create).toContain("lot.areaId !== args.fromAreaId");
     expect(create).toContain("areaId: args.toAreaId");
+    expect(create).toContain("previousPhysical: globalStock.physicalQuantity, newPhysical: globalStock.physicalQuantity");
     expect(create).toContain('ctx.db.insert("stockTransferLots"');
     expect(create).toContain("sourceLotId");
     expect(create).toContain("destinationLotId");
@@ -151,6 +152,10 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(regularization).toContain("REGULARIZAR_SIGESGD_2026");
     expect(regularization).toContain("requestItemReservations");
     expect(regularization).toContain("stockMovementLots");
+    expect(regularization).toContain("Quantidade inválida no item/lote");
+    expect(regularization).toContain("Reserva ativa não corresponde à área/local/lote");
+    expect(regularization).toContain("Foram resolvidos ");
+    expect(regularization.match(/^  \"[^\"]+\": \"(?:TI Geral|Impressoras)\"[,]?$/gm)?.length).toBe(53);
     const apply = mutationBlock(regularization, "applyAuditedInitialStockRegularization");
     expect(apply).not.toContain("physicalQuantity:");
     expect(apply).not.toContain("quantityAvailable:");
