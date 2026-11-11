@@ -171,8 +171,8 @@ export const create = mutation({
         throw new Error("A saída não possui local físico registrado. Não é seguro devolver para um subestoque sem origem identificada.");
       }
       const sourceLocation: any = await ctx.db.get(exit.locationId);
-      if (!sourceLocation || !sourceLocation.active || sourceLocation.areaId !== exit.areaId) {
-        throw new Error("A área/local da saída original não está mais consistente. Regularize a classificação antes da devolução.");
+      if (!sourceLocation || !sourceLocation.active) {
+        throw new Error("O local físico da saída original não existe ou está inativo.");
       }
       if (args.locationId && args.locationId !== exit.locationId) {
         throw new Error("A devolução deve voltar ao local físico de origem. Para mudar o local, registre uma transferência após a devolução.");
@@ -182,9 +182,6 @@ export const create = mutation({
       const legacyDestination: any = await ctx.db.get(args.locationId);
       if (!legacyDestination || !legacyDestination.active) {
         throw new Error("Local físico de destino não encontrado ou inativo.");
-      }
-      if (legacyDestination.areaId) {
-        throw new Error("Uma saída sem área não pode devolver material diretamente para um local já classificado. Classifique a origem com conferência ou use uma movimentação apropriada.");
       }
       targetLocationId = args.locationId;
     }
