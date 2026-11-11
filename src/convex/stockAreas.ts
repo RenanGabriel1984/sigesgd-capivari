@@ -84,10 +84,11 @@ export const summary = query({
     }
 
     for (const lot of lots) {
-      const location = lot.locationId ? await ctx.db.get(lot.locationId) : null;
-      const hasConsistentAreaAndLocation = !!lot.areaId && !!lot.locationId &&
-        !!location && location.areaId === lot.areaId;
-      const key = hasConsistentAreaAndLocation ? lot.areaId as string : "none";
+      // Área classifica o material; localização informa somente onde está guardado.
+      // Um mesmo armário pode conter lotes de áreas diferentes.
+      const key = lot.areaId && buckets.has(lot.areaId as string)
+        ? lot.areaId as string
+        : "none";
       const current =
         buckets.get(key) ??
         {
@@ -136,8 +137,8 @@ export const unclassifiedLots = query({
     for (const lot of lots) {
       if (!lot.active || lot.quantityAvailable <= 0) continue;
       const location = lot.locationId ? await ctx.db.get(lot.locationId) : null;
-      const consistent = !!lot.areaId && !!lot.locationId &&
-        !!location && location.areaId === lot.areaId;
+      const area = lot.areaId ? await ctx.db.get(lot.areaId) : null;
+      const consistent = !!area?.active && !!lot.locationId && !!location?.active;
       if (consistent) continue;
 
       const product = await ctx.db.get(lot.productId);
@@ -149,8 +150,9 @@ export const unclassifiedLots = query({
       ) ?? null;
       const currentArea = lot.areaId ? await ctx.db.get(lot.areaId) : null;
       const suggestedLocationId = lot.locationId ?? entryItem?.locationId ?? null;
-      const suggestedLocation = suggestedLocationId ? await ctx.db.get(suggestedLocationId) : null;
-      const suggestedAreaId = lot.areaId ?? suggestedLocation?.areaId ?? null;
+      // Nunca inferir a área a partir do armário. A entrada/item pode fornecer
+      // a área de negócio; caso contrário, a classificação exige escolha explícita.
+      const suggestedAreaId = lot.areaId ?? entryItem?.areaId ?? entry?.areaId ?? null;
 
       pending.push({
         lotId: lot._id,
@@ -165,8 +167,8 @@ export const unclassifiedLots = query({
         currentLocationName: location?.name ?? null,
         suggestedAreaId,
         suggestedLocationId,
-        areaMissing: !lot.areaId,
-        locationMissing: !lot.locationId || !location || location.areaId !== lot.areaId,
+        areaMissing: !lot.areaId || !currentArea?.active,
+        locationMissing: !lot.locationId || !location?.active,
       });
     }
     return pending.sort((a, b) => a.productName.localeCompare(b.productName, "pt-BR") ||
@@ -194,8 +196,8 @@ export const classifyLot = mutation({
     }
     const area = await ctx.db.get(args.areaId);
     const location = await ctx.db.get(args.locationId);
-    if (!area || !area.active || !location || !location.active || location.areaId !== args.areaId) {
-      throw new Error("A área e o local selecionados precisam estar ativos e pertencer um ao outro.");
+    if (!area || !area.active || !location || !location.active) {
+      throw new Error("Selecione uma área/subestoque e um local físico ativos.");
     }
     if (lot.areaId && lot.areaId !== args.areaId) {
       throw new Error("O lote já possui outra área. Use uma transferência de estoque para mudar de área.");
