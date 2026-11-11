@@ -64,8 +64,8 @@ export default function StockTransfersPage() {
       toast.error("Selecione o produto, as áreas e os locais de origem e destino");
       return;
     }
-    if (fromLocationId === toLocationId) {
-      toast.error("Origem e destino não podem ser o mesmo local");
+    if (fromLocationId === toLocationId && fromAreaId === toAreaId) {
+      toast.error("Origem e destino não podem ser a mesma combinação de área e local.");
       return;
     }
     if (quantity <= 0) {
