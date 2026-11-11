@@ -58,7 +58,7 @@ async function generateLotNumber(ctx: any, productId: string): Promise<string> {
 async function performInitialLoad(
   ctx: any,
   userId: string,
-  items: Array<{ productId: string; locationId: string; quantity: number; unitOfMeasure?: string }>,
+  items: Array<{ productId: string; locationId: string; areaId?: string; quantity: number; unitOfMeasure?: string }>,
   observation: string
 ) {
   if (!items || items.length === 0) {
@@ -79,12 +79,13 @@ async function performInitialLoad(
     if (!location || !location.active) {
       throw new Error("A carga inicial precisa apontar para um local físico ativo.");
     }
-    if (!location.areaId) {
-      throw new Error(`O local "${location.name}" ainda não pertence a uma área/subestoque. Classifique-o antes da carga inicial.`);
+    const selectedAreaId = item.areaId ?? location.areaId;
+    if (!selectedAreaId) {
+      throw new Error(`Informe a área/subestoque do material armazenado em "${location.name}". O local físico não define a área.`);
     }
-    const area = await ctx.db.get(location.areaId);
+    const area = await ctx.db.get(selectedAreaId as any);
     if (!area || !area.active) {
-      throw new Error(`A área vinculada ao local "${location.name}" não existe ou está inativa.`);
+      throw new Error(`A área selecionada para "${location.name}" não existe ou está inativa.`);
     }
   }
 
@@ -144,10 +145,13 @@ async function performInitialLoad(
     if (item.quantity === 0) continue;
 
       const location = await ctx.db.get(item.locationId);
-      if (!location || !location.active || !location.areaId) {
-        throw new Error("O local físico precisa continuar ativo e vinculado a uma área para concluir a carga inicial.");
+      if (!location || !location.active) {
+        throw new Error("O local físico precisa continuar ativo para concluir a carga inicial.");
       }
-      const areaId = location.areaId;
+      const areaId = item.areaId ?? location.areaId;
+      if (!areaId) {
+        throw new Error(`Informe a área do produto ${item.productId}; o armário não determina o subestoque.`);
+      }
       const area = await ctx.db.get(areaId);
       if (!area || !area.active) throw new Error("A área da carga inicial não existe ou está inativa.");
 
@@ -176,6 +180,7 @@ async function performInitialLoad(
         unitOfMeasure: item.unitOfMeasure ?? (await ctx.db.get(item.productId))?.unitOfMeasure ?? "un",
         lotId,
         locationId: item.locationId,
+        areaId,
       });
 
       // ── 3. stockByLocation ──
@@ -286,6 +291,7 @@ export const initialStockLoad = mutation({
         locationId: v.id("storageLocations"),
         quantity: v.number(),
         unitOfMeasure: v.optional(v.string()),
+        areaId: v.optional(v.id("stockAreas")),
       })
     ),
     observation: v.optional(v.string()),
@@ -319,6 +325,7 @@ export const importInitialSheet = mutation({
         quantity: v.number(),
         unitOfMeasure: v.optional(v.string()),
         observation: v.optional(v.string()),
+        areaId: v.optional(v.id("stockAreas")),
       })
     ),
     observation: v.optional(v.string()),
@@ -354,6 +361,7 @@ export const importInitialSheet = mutation({
       locationId: string;
       quantity: number;
       unitOfMeasure?: string;
+      areaId?: string;
     }> = [];
     let matched = 0;
     let created = 0;
@@ -416,6 +424,7 @@ export const importInitialSheet = mutation({
         productId,
         locationId: row.locationId,
         quantity: row.quantity,
+        areaId: row.areaId,
         // UOM original da planilha: a quantidade fica semanticamente na
         // unidade registrada (cx permanece cx, pct permanece pct).
         unitOfMeasure: row.unitOfMeasure || (existing?.unitOfMeasure ?? "un"),
@@ -458,8 +467,7 @@ export const productLocationSummary = query({
     for (const row of rows) {
       const location = await ctx.db.get(row.locationId);
       if (!location) continue;
-      const area = row.areaId && location.areaId === row.areaId
-        ? await ctx.db.get(row.areaId) : null;
+      const area = row.areaId ? await ctx.db.get(row.areaId) : null;
       const reservations = await ctx.db.query("requestItemReservations")
         .withIndex("by_product", (q: any) => q.eq("productId", row.productId))
         .collect();
@@ -510,8 +518,8 @@ export const quickExit = mutation({
     if (!product || !product.active) throw new Error("Produto não encontrado ou inativo");
     const area = await ctx.db.get(args.areaId);
     const location = await ctx.db.get(args.locationId);
-    if (!area || !area.active || !location || !location.active || location.areaId !== args.areaId) {
-      throw new Error("A área/local selecionado não está ativo ou não corresponde.");
+    if (!area || !area.active || !location || !location.active) {
+      throw new Error("A área/subestoque e o local físico precisam estar ativos.");
     }
     const stock = await ctx.db.query("stock")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).first();
