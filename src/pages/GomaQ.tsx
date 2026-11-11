@@ -97,6 +97,7 @@ type FamilyMemberView = {
   unitOfMeasure: string;
   currentStock: number;
   inArea: number;
+  availableInArea: number;
   baseUnits: number;
   packaging: PackagingConversion | null;
 };
@@ -110,6 +111,7 @@ type SupplyFamilyView = {
   baseUnit: string;
   baseStock: number;
   baseStockInArea: number;
+  baseAvailableInArea: number;
   compositionLabel: string;
   members: FamilyMemberView[];
   minimumStock: number | null;
@@ -377,22 +379,22 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
   const inBaseUnits = !!packager?.packaging;
   const conv = packager?.packaging ?? null;
   const qty = Number(quantity) || 0;
-  const check = useMemo(() => validateWithdrawal(qty, family.baseStock), [qty, family.baseStock]);
+  const check = useMemo(() => validateWithdrawal(qty, family.baseAvailableInArea), [qty, family.baseAvailableInArea]);
   const plan = useMemo(
     () =>
       conv
         ? planPackOperation(qty, {
-            closedPacks: packager?.currentStock ?? 0,
-            looseUnits: family.baseStock - (packager?.currentStock ?? 0) * conv.factor,
+            closedPacks: packager?.availableInArea ?? 0,
+            looseUnits: family.baseAvailableInArea - (packager?.availableInArea ?? 0) * conv.factor,
             factor: conv.factor,
           })
         : null,
-    [conv, qty, packager, family.baseStock],
+    [conv, qty, packager, family.baseAvailableInArea],
   );
   const planLabel = (() => {
     if (!conv || !plan || !check.ok) return null;
     if (plan.operation === "open_pack") {
-      const loose = family.baseStock - (packager?.currentStock ?? 0) * conv.factor;
+      const loose = family.baseAvailableInArea - (packager?.availableInArea ?? 0) * conv.factor;
       return `Sai das ${loose} un. avulsas e abre ${plan.packs} ${conv.packagingUnit}${plan.packs > 1 ? "s" : ""} fechada${plan.packs > 1 ? "s" : ""} (abertura integral registrada).`;
     }
     if (plan.packs > 0) {
@@ -408,12 +410,12 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
   const unidades = departamentoId ? orgList.filter((o) => o.parentId === departamentoId) : [];
 
   const nameOf = (id: string) => orgList.find((o) => o._id === id)?.name ?? null;
-  const lowStock = buildLowStockWarning(family.baseStock, family.minimumStock, qty);
+  const lowStock = buildLowStockWarning(family.baseAvailableInArea, family.minimumStock, qty);
   const confirmRows = buildWithdrawalConfirmation({
     productLabel: family.familyName,
     quantity: qty,
     baseUnit: inBaseUnits && conv ? conv.baseUnit : family.baseUnit,
-    currentStock: family.baseStock,
+    currentStock: family.baseAvailableInArea,
     minimumStock: family.minimumStock,
     secretaria: nameOf(secretariaId),
     departamento: nameOf(departamentoId),
@@ -422,7 +424,7 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
     osNumber,
     observation,
   });
-  const canConfirm = canConfirmWithdrawal({ quantity: qty, available: family.baseStock, reason });
+  const canConfirm = canConfirmWithdrawal({ quantity: qty, available: family.baseAvailableInArea, reason });
 
   // Cancelar (em qualquer etapa) e fechar o modal são a MESMA ação: nenhum
   // estado de estoque é tocado, apenas o estado local do formulário.
