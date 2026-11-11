@@ -328,9 +328,7 @@ export default function StockAreas() {
                   onChange={(event) => {
                     const next = event.target.value;
                     setClassificationAreaId(next);
-                    if (!(storageLocations ?? []).some((location: any) => location._id === classificationLocationId && location.active)) {
-                      setClassificationLocationId("");
-                    }
+                    // O armário é físico e não muda quando a área do lote muda.
                   }}
                 >
                   <option value="">Selecione a área...</option>
@@ -348,7 +346,9 @@ export default function StockAreas() {
                   disabled={!classificationAreaId}
                 >
                   <option value="">Selecione o local...</option>
-                  {(storageLocations ?? []).filter((location: any) => location.active).map((location: any) => (
+                  {(storageLocations ?? []).filter((location: any) =>
+                    location.active
+                  ).map((location: any) => (
                     <option key={location._id} value={location._id}>{location.name}</option>
                   ))}
                 </select>
