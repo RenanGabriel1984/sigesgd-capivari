@@ -57,6 +57,7 @@ export default function Inventory() {
 
   const inventories = useQuery(api.inventory.list) as InventoryView[] | undefined;
   const locations = useQuery(api.storageLocations.listActive);
+  const areas = useQuery(api.stockAreas.listActive);
   const products = useQuery(api.products.listActive);
   const categories = useQuery(api.categories.listActive);
   const initialStatus = useQuery(api.stockSetup.getInitialLoadStatus, canInitialLoad ? {} : "skip");
@@ -85,6 +86,7 @@ export default function Inventory() {
 
   // Implantação inicial
   const [initialLocationId, setInitialLocationId] = useState("");
+  const [initialAreaId, setInitialAreaId] = useState("");
   const [quantities, setQuantities] = useState<Record<string, string>>({});
 
   // Criação contextual de produto na implantação inicial
@@ -106,6 +108,8 @@ export default function Inventory() {
   // Importação da planilha de inventário físico
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetText, setSheetText] = useState("");
+  const [sheetDefaultAreaId, setSheetDefaultAreaId] = useState("");
+  const [sheetAreaByIndex, setSheetAreaByIndex] = useState<Record<number, string>>({});
   const [importing, setImporting] = useState(false);
 
   const [loadingInitial, setLoadingInitial] = useState(false);
@@ -296,12 +300,21 @@ export default function Inventory() {
     }
   };
 
-  const sheetValidRows = sheetRows.filter((r) => r.locationId && r.quantity > 0);
+  const sheetRowsWithArea = sheetRows.map((row, index) => ({
+    ...row,
+    areaId: sheetAreaByIndex[index] || sheetDefaultAreaId,
+  }));
+  const sheetValidRows = sheetRowsWithArea.filter((r) => r.locationId && r.areaId && r.quantity > 0);
+  const sheetMissingAreas = sheetRowsWithArea.filter((r) => r.locationId && r.quantity > 0 && !r.areaId).length;
   const sheetMatched = sheetRows.filter((r) => r.productId).length;
   const sheetNew = sheetRows.filter((r) => !r.productId && r.locationId && r.quantity > 0).length;
   const sheetUnknownLocations = sheetRows.filter((r) => !r.locationId).length;
 
   const handleImportSheet = async () => {
+    if (sheetMissingAreas > 0) {
+      toast.error(`Defina a área/subestoque de destino para as ${sheetMissingAreas} linha(s) pendentes.`);
+      return;
+    }
     if (sheetValidRows.length === 0) {
       toast.error("Nenhuma linha válida (verifique local e quantidade)");
       return;
@@ -310,6 +323,7 @@ export default function Inventory() {
     try {
       const res = await importInitialSheet({
         rows: sheetValidRows.map((r) => ({
+          areaId: r.areaId as any,
           locationId: r.locationId as any,
           productName: r.productName,
           brand: r.brand || undefined,
@@ -324,6 +338,8 @@ export default function Inventory() {
       );
       setSheetOpen(false);
       setSheetText("");
+      setSheetAreaByIndex({});
+      setSheetDefaultAreaId("");
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao importar planilha");
     }
@@ -331,10 +347,16 @@ export default function Inventory() {
   };
 
   const handleConfirmInitialLoad = async () => {
+    if (!initialAreaId) { toast.error("Selecione a área/subestoque"); return; }
     if (!initialLocationId) { toast.error("Selecione o local de armazenamento"); return; }
     const items = Object.entries(quantities)
       .filter(([, q]) => Number(q) > 0)
-      .map(([productId, q]) => ({ productId: productId as any, locationId: initialLocationId as any, quantity: Number(q) }));
+      .map(([productId, q]) => ({
+        productId: productId as any,
+        areaId: initialAreaId as any,
+        locationId: initialLocationId as any,
+        quantity: Number(q),
+      }));
     if (items.length === 0) { toast.error("Informe ao menos uma quantidade"); return; }
     setLoadingInitial(true);
     try {
@@ -573,7 +595,18 @@ export default function Inventory() {
                 <CardContent className="py-4">
                   <div className="flex flex-col sm:flex-row sm:items-end gap-4">
                     <div className="w-full sm:max-w-xs">
-                      <Label className="text-xs">Local de armazenamento *</Label>
+                      <Label className="text-xs">Área / Subestoque *</Label>
+                      <Select value={initialAreaId} onValueChange={setInitialAreaId}>
+                        <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione a área" /></SelectTrigger>
+                        <SelectContent>
+                          {areas?.map((area) => (
+                            <SelectItem key={area._id} value={area._id}>{area.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-full sm:max-w-xs">
+                      <Label className="text-xs">Local físico *</Label>
                       <Select value={initialLocationId} onValueChange={setInitialLocationId}>
                         <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione o local" /></SelectTrigger>
                         <SelectContent>
@@ -815,17 +848,32 @@ export default function Inventory() {
               <p className="text-sm text-muted-foreground">
                 Cole as linhas da planilha (separadas por <code>;</code> ou <code>,</code>). Colunas:
                 <strong> Localização; Produto; Marca; Quantidade; Unidade; Observação</strong>.
+                Defina uma área padrão e, quando necessário, altere a área de cada linha na prévia.
                 Produtos existentes são associados pelo nome — novos produtos são cadastrados automaticamente (categoria "Diversos").
               </p>
               <Textarea
                 value={sheetText}
-                onChange={(e) => setSheetText(e.target.value)}
+                onChange={(e) => { setSheetText(e.target.value); setSheetAreaByIndex({}); }}
                 rows={8}
                 placeholder={"Localização; Produto; Marca; Quantidade; Unidade; Observação\nArmário TI 01; Cabo HDMI; Exbom; 8; un; Caixa original\nArmário TI 02; Mouse óptico; Multilaser; 5; un;"}
                 className="font-mono text-xs"
               />
               {sheetText.trim() && (
                 <div className="border rounded-lg p-3 space-y-2">
+                  <div className="max-w-sm">
+                    <Label>Área padrão para as linhas importadas *</Label>
+                    <Select value={sheetDefaultAreaId} onValueChange={setSheetDefaultAreaId}>
+                      <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione a área padrão" /></SelectTrigger>
+                      <SelectContent>
+                        {areas?.map((area) => (
+                          <SelectItem key={area._id} value={area._id}>{area.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Linhas de outras áreas podem receber uma exceção individual na tabela abaixo.
+                    </p>
+                  </div>
                   <p className="text-sm font-medium">Prévia</p>
                   <div className="flex flex-wrap gap-2 text-xs">
                     <Badge variant="secondary">{sheetRows.length} linha(s)</Badge>
@@ -833,6 +881,9 @@ export default function Inventory() {
                     <Badge variant="secondary" className="text-amber-700 bg-amber-50 border-amber-200">{sheetNew} novo(s) serão cadastrados</Badge>
                     {sheetUnknownLocations > 0 && (
                       <Badge variant="destructive">{sheetUnknownLocations} com local não reconhecido</Badge>
+                    )}
+                    {sheetMissingAreas > 0 && (
+                      <Badge variant="destructive">{sheetMissingAreas} sem área definida</Badge>
                     )}
                   </div>
                   <div className="overflow-x-auto max-h-48 overflow-y-auto">
@@ -842,6 +893,7 @@ export default function Inventory() {
                           <TableHead className="text-xs">Local</TableHead>
                           <TableHead className="text-xs">Produto</TableHead>
                           <TableHead className="text-xs">Qtd</TableHead>
+                          <TableHead className="text-xs">Área / Subestoque</TableHead>
                           <TableHead className="text-xs">Situação</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -851,6 +903,29 @@ export default function Inventory() {
                             <TableCell className="text-xs">{r.locationName || "—"}</TableCell>
                             <TableCell className="text-xs">{r.productName}</TableCell>
                             <TableCell className="text-xs font-mono">{r.quantity}</TableCell>
+                            <TableCell className="min-w-[190px]">
+                              <Select
+                                value={sheetAreaByIndex[i] ? sheetAreaByIndex[i] : "default"}
+                                onValueChange={(value) => setSheetAreaByIndex((prev) => {
+                                  const next = { ...prev };
+                                  if (value === "default") delete next[i];
+                                  else next[i] = value;
+                                  return next;
+                                })}
+                              >
+                                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Selecione a área" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="default">
+                                    {sheetDefaultAreaId
+                                      ? `Padrão: ${areas?.find((area) => area._id === sheetDefaultAreaId)?.name ?? "área"}`
+                                      : "Selecione uma área"}
+                                  </SelectItem>
+                                  {areas?.map((area) => (
+                                    <SelectItem key={area._id} value={area._id}>{area.name}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
                             <TableCell>
                               {!r.locationId ? (
                                 <Badge variant="destructive" className="text-[10px]">Local não reconhecido</Badge>
@@ -869,8 +944,8 @@ export default function Inventory() {
               )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => { setSheetOpen(false); setSheetText(""); }}>Cancelar</Button>
-              <Button onClick={handleImportSheet} disabled={importing || sheetValidRows.length === 0}>
+              <Button variant="outline" onClick={() => { setSheetOpen(false); setSheetText(""); setSheetAreaByIndex({}); setSheetDefaultAreaId(""); }}>Cancelar</Button>
+              <Button onClick={handleImportSheet} disabled={importing || sheetValidRows.length === 0 || sheetMissingAreas > 0 || sheetUnknownLocations > 0}>
                 {importing ? "Importando..." : `Confirmar importação (${sheetValidRows.length} linha(s))`}
               </Button>
             </DialogFooter>
