@@ -58,7 +58,7 @@ async function generateLotNumber(ctx: any, productId: string): Promise<string> {
 async function performInitialLoad(
   ctx: any,
   userId: string,
-  items: Array<{ productId: string; locationId: string; quantity: number; unitOfMeasure?: string }>,
+  items: Array<{ productId: string; locationId: string; areaId?: string; quantity: number; unitOfMeasure?: string }>,
   observation: string
 ) {
   if (!items || items.length === 0) {
@@ -71,20 +71,18 @@ async function performInitialLoad(
   // para number JS para que nenhuma aritmética misture bigint com number.
   items = items.map((i) => ({ ...i, quantity: Number(i.quantity) }));
 
-  // Carga inicial também precisa nascer em um subestoque identificado.
-  // Validamos todas as origens antes de criar entrada/lotes/saldos.
+  // Área e local físico são dimensões independentes. areaId por item é
+  // preferencial; location.areaId é usado somente como fallback legado.
   for (const item of items) {
     if (item.quantity <= 0) continue;
     const location = await ctx.db.get(item.locationId);
     if (!location || !location.active) {
       throw new Error("A carga inicial precisa apontar para um local físico ativo.");
     }
-    if (!location.areaId) {
-      throw new Error(`O local "${location.name}" ainda não pertence a uma área/subestoque. Classifique-o antes da carga inicial.`);
-    }
-    const area = await ctx.db.get(location.areaId);
-    if (!area || !area.active) {
-      throw new Error(`A área vinculada ao local "${location.name}" não existe ou está inativa.`);
+    item.areaId = item.areaId ?? location.areaId;
+    if (item.areaId) {
+      const area = await ctx.db.get(item.areaId);
+      if (!area || !area.active) throw new Error("A área/subestoque selecionada não existe ou está inativa.");
     }
   }
 
@@ -144,12 +142,14 @@ async function performInitialLoad(
     if (item.quantity === 0) continue;
 
       const location = await ctx.db.get(item.locationId);
-      if (!location || !location.active || !location.areaId) {
-        throw new Error("O local físico precisa continuar ativo e vinculado a uma área para concluir a carga inicial.");
+      if (!location || !location.active) {
+        throw new Error("O local físico precisa continuar ativo para concluir a carga inicial.");
       }
-      const areaId = location.areaId;
-      const area = await ctx.db.get(areaId);
-      if (!area || !area.active) throw new Error("A área da carga inicial não existe ou está inativa.");
+      const areaId = item.areaId;
+      if (areaId) {
+        const area = await ctx.db.get(areaId);
+        if (!area || !area.active) throw new Error("A área da carga inicial não existe ou está inativa.");
+      }
 
       // ── 1. Create lot for traceability ──
       const lotNumber = await generateLotNumber(ctx, item.productId);
@@ -175,6 +175,7 @@ async function performInitialLoad(
         // outro). NUNCA converte: 13 caixas continuam 13 cx, não 650 un.
         unitOfMeasure: item.unitOfMeasure ?? (await ctx.db.get(item.productId))?.unitOfMeasure ?? "un",
         lotId,
+        areaId,
         locationId: item.locationId,
       });
 
@@ -286,6 +287,7 @@ export const initialStockLoad = mutation({
         locationId: v.id("storageLocations"),
         quantity: v.number(),
         unitOfMeasure: v.optional(v.string()),
+        areaId: v.optional(v.id("stockAreas")),
       })
     ),
     observation: v.optional(v.string()),
@@ -318,6 +320,7 @@ export const importInitialSheet = mutation({
         brand: v.optional(v.string()),
         quantity: v.number(),
         unitOfMeasure: v.optional(v.string()),
+        areaId: v.optional(v.id("stockAreas")),
         observation: v.optional(v.string()),
       })
     ),
@@ -352,6 +355,7 @@ export const importInitialSheet = mutation({
     const items: Array<{
       productId: string;
       locationId: string;
+      areaId?: string;
       quantity: number;
       unitOfMeasure?: string;
     }> = [];
@@ -415,6 +419,7 @@ export const importInitialSheet = mutation({
       items.push({
         productId,
         locationId: row.locationId,
+        areaId: row.areaId,
         quantity: row.quantity,
         // UOM original da planilha: a quantidade fica semanticamente na
         // unidade registrada (cx permanece cx, pct permanece pct).
@@ -458,8 +463,7 @@ export const productLocationSummary = query({
     for (const row of rows) {
       const location = await ctx.db.get(row.locationId);
       if (!location) continue;
-      const area = row.areaId && location.areaId === row.areaId
-        ? await ctx.db.get(row.areaId) : null;
+      const area = row.areaId ? await ctx.db.get(row.areaId) : null;
       const reservations = await ctx.db.query("requestItemReservations")
         .withIndex("by_product", (q: any) => q.eq("productId", row.productId))
         .collect();
@@ -510,8 +514,8 @@ export const quickExit = mutation({
     if (!product || !product.active) throw new Error("Produto não encontrado ou inativo");
     const area = await ctx.db.get(args.areaId);
     const location = await ctx.db.get(args.locationId);
-    if (!area || !area.active || !location || !location.active || location.areaId !== args.areaId) {
-      throw new Error("A área/local selecionado não está ativo ou não corresponde.");
+    if (!area || !area.active || !location || !location.active) {
+      throw new Error("A área ou o local físico selecionado não está ativo.");
     }
     const stock = await ctx.db.query("stock")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).first();
