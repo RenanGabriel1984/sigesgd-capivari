@@ -57,6 +57,7 @@ export const listByProduct = query({
 export const create = mutation({
   args: {
     productId: v.id("products"), lotId: v.optional(v.id("lots")),
+    areaId: v.id("stockAreas"),
     fromLocationId: v.id("storageLocations"), toLocationId: v.id("storageLocations"),
     quantity: v.number(), observation: v.optional(v.string()),
   },
@@ -69,11 +70,8 @@ export const create = mutation({
     const toLocation = await ctx.db.get(args.toLocationId);
     if (!fromLocation || !fromLocation.active) throw new Error("Local de origem não encontrado ou inativo");
     if (!toLocation || !toLocation.active) throw new Error("Local de destino não encontrado ou inativo");
-    if (!fromLocation.areaId || !toLocation.areaId) throw new Error("Classifique a área dos locais de origem e destino antes de transferir estoque");
-
-    const fromArea = await ctx.db.get(fromLocation.areaId);
-    const toArea = await ctx.db.get(toLocation.areaId);
-    if (!fromArea?.active || !toArea?.active) throw new Error("A área de origem ou destino está inativa");
+    const area = await ctx.db.get(args.areaId);
+    if (!area?.active) throw new Error("Selecione uma área/subestoque ativa para a transferência.");
     const product = await ctx.db.get(args.productId);
     if (!product || !product.active) throw new Error("Produto não encontrado ou inativo");
 
@@ -92,7 +90,7 @@ export const create = mutation({
 
     const locationRows = await ctx.db.query("stockByLocation")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
-    const sourceStock = locationRows.find((row: any) => row.locationId === args.fromLocationId && row.areaId === fromLocation.areaId);
+    const sourceStock = locationRows.find((row: any) => row.locationId === args.fromLocationId && row.areaId === args.areaId);
     if (!sourceStock || sourceStock.quantity < args.quantity) {
       throw new Error(`Estoque insuficiente em "${fromArea.name}" / "${fromLocation.name}". Disponível: ${sourceStock?.quantity ?? 0}.`);
     }
@@ -101,7 +99,7 @@ export const create = mutation({
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
     const candidates: Array<{ lot: any; free: number }> = [];
     for (const lot of productLots) {
-      if (!lot.active || lot.areaId !== fromLocation.areaId || lot.locationId !== args.fromLocationId) continue;
+      if (!lot.active || lot.areaId !== args.areaId || lot.locationId !== args.fromLocationId) continue;
       if (args.lotId && lot._id !== args.lotId) continue;
       const reservations = await ctx.db.query("requestItemReservations")
         .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
@@ -121,12 +119,12 @@ export const create = mutation({
     }
     if (remaining > 0) throw new Error(`Lotes livres insuficientes na origem. Faltam ${remaining} unidade(s); transferências não podem consumir quantidades reservadas.`);
 
-    const destinationStock = locationRows.find((row: any) => row.locationId === args.toLocationId && row.areaId === toLocation.areaId);
+    const destinationStock = locationRows.find((row: any) => row.locationId === args.toLocationId && row.areaId === args.areaId);
     const now = Date.now();
     const transferId = await ctx.db.insert("stockTransfers", {
       productId: args.productId, lotId: planned.length === 1 ? planned[0].lotId as any : undefined,
       fromLocationId: args.fromLocationId, toLocationId: args.toLocationId,
-      fromAreaId: fromLocation.areaId, toAreaId: toLocation.areaId,
+      fromAreaId: args.areaId, toAreaId: args.areaId,
       quantity: args.quantity, responsibleUserId: userId, observation: args.observation, createdAt: now,
     });
 
@@ -151,8 +149,8 @@ export const create = mutation({
         invoiceNumber: sourceLot.invoiceNumber, purchaseAuthorizationNumber: sourceLot.purchaseAuthorizationNumber,
         photoStorageId: sourceLot.photoStorageId, supplierLotNumber: sourceLot.supplierLotNumber,
         active: true,
-        observation: `Transferido de ${sourceLot.lotNumber} — ${fromArea.name}/${fromLocation.name} → ${toArea.name}/${toLocation.name}`,
-        materialType: sourceLot.materialType, areaId: toLocation.areaId, locationId: toLocation._id,
+        observation: `Transferido de ${sourceLot.lotNumber} — ${area.name}/${fromLocation.name} → ${area.name}/${toLocation.name}`,
+        materialType: sourceLot.materialType, areaId: args.areaId, locationId: toLocation._id,
       });
       await ctx.db.patch(sourceLot._id, { quantityAvailable: sourceLot.quantityAvailable - part.quantity });
       await ctx.db.insert("stockTransferLots", { transferId, sourceLotId: sourceLot._id, destinationLotId, quantity: part.quantity });
@@ -162,7 +160,7 @@ export const create = mutation({
     if (destinationStock) {
       await ctx.db.patch(destinationStock._id, { quantity: destinationStock.quantity + args.quantity });
     } else {
-      await ctx.db.insert("stockByLocation", { productId: args.productId, locationId: args.toLocationId, areaId: toLocation.areaId, quantity: args.quantity });
+      await ctx.db.insert("stockByLocation", { productId: args.productId, locationId: args.toLocationId, areaId: args.areaId, quantity: args.quantity });
     }
 
     const globalStock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).first();
@@ -170,15 +168,15 @@ export const create = mutation({
       productId: args.productId, type: "transfer", quantity: args.quantity,
       previousPhysical: globalStock.physicalQuantity, newPhysical: globalStock.physicalQuantity,
       previousReserved: globalStock.reservedQuantity, newReserved: globalStock.reservedQuantity,
-      userId, areaId: fromLocation.areaId, locationId: args.fromLocationId,
-      toLocationId: args.toLocationId, toAreaId: toLocation.areaId,
-      observation: `Transferência: ${fromArea.name}/${fromLocation.name} → ${toArea.name}/${toLocation.name}`,
+      userId, areaId: args.areaId, locationId: args.fromLocationId,
+      toLocationId: args.toLocationId, toAreaId: args.areaId,
+      observation: `Transferência: ${area.name}/${fromLocation.name} → ${area.name}/${toLocation.name}`,
       timestamp: now,
     });
 
     await ctx.db.insert("auditLogs", {
       userId, action: "transfer_stock", entity: "stockTransfers", entityId: transferId,
-      details: `Transferência de ${args.quantity} ${product.name}: ${fromArea.name}/${fromLocation.name} → ${toArea.name}/${toLocation.name}; ${planned.length} lote(s) com origem rastreável.`,
+      details: `Transferência de ${args.quantity} ${product.name}: ${area.name} — ${fromLocation.name} → ${toLocation.name}; ${planned.length} lote(s) com origem rastreável.`,
       timestamp: now,
     });
     return transferId;
