@@ -91,8 +91,7 @@ export const getById = query({
       .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
     const locations = await Promise.all(sbls.map(async (row: any) => {
       const location = await ctx.db.get(row.locationId);
-      const area = row.areaId && location?.areaId === row.areaId
-        ? await ctx.db.get(row.areaId) : null;
+      const area = row.areaId ? await ctx.db.get(row.areaId) : null;
       const reservations = await ctx.db.query("requestItemReservations")
         .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
       const reservedQuantity = reservations
@@ -170,11 +169,12 @@ export const create = mutation({
     // Estoque atual informado no cadastro (carga inicial com rastreabilidade por lote)
     initialStock: v.optional(v.number()),
     locationId: v.optional(v.id("storageLocations")),
+    initialAreaId: v.optional(v.id("stockAreas")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    const { initialStock, locationId, ...productArgs } = args;
-    let initialAreaId: any = undefined;
+    const { initialStock, locationId, initialAreaId: selectedInitialAreaId, ...productArgs } = args;
+    let initialAreaId: any = selectedInitialAreaId;
     if (!args.name.trim()) throw new Error("Nome do item é obrigatório");
     if (args.ean && !/^\d{8,14}$/.test(args.ean.replace(/\D/g, ""))) {
       throw new Error("EAN/GTIN inválido: use de 8 a 14 dígitos");
@@ -221,11 +221,11 @@ export const create = mutation({
       const location = await ctx.db.get(locationId);
       if (!location) throw new Error("Local de armazenamento não encontrado");
       if (!location.active) throw new Error("O local de armazenamento selecionado está inativo");
-      if (!location.areaId) {
-        throw new Error("O local selecionado ainda não pertence a uma área/subestoque. Classifique o local antes de cadastrar saldo inicial.");
+      if (!selectedInitialAreaId) {
+        throw new Error("Informe a área/subestoque do saldo inicial; ela não é determinada pelo armário.");
       }
-      const area = await ctx.db.get(location.areaId);
-      if (!area || !area.active) throw new Error("A área do local selecionado não existe ou está inativa.");
+      const area = await ctx.db.get(selectedInitialAreaId);
+      if (!area || !area.active) throw new Error("A área/subestoque selecionada não existe ou está inativa.");
       initialAreaId = area._id;
     }
 
@@ -291,6 +291,7 @@ export const create = mutation({
         unitOfMeasure: args.unitOfMeasure,
         lotId: lotId as string,
         locationId,
+        areaId: initialAreaId,
       });
 
       await ctx.db.insert("stockByLocation", {
