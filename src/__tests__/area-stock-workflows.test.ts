@@ -93,6 +93,9 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(create).toContain('ctx.db.insert("stockTransferLots"');
     expect(create).toContain("sourceLotId");
     expect(create).toContain("destinationLotId");
+    expect(create).toContain('ctx.db.insert("stockMovementLots"');
+    expect(create).toContain("lotId: part.lotId");
+    expect(create).toContain('ctx.db.query("lots").collect()');
     expect(stockMovements).toContain("const toArea = m.toAreaId ? await ctx.db.get(m.toAreaId) : null");
   });
 
