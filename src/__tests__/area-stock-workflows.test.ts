@@ -33,9 +33,10 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(schema).toContain('toAreaId: v.optional(v.id("stockAreas"))');
   });
 
-  it("não confirma entrada em área com local físico de outra área", () => {
+  it("valida área e local físico da entrada de forma independente", () => {
     const confirm = mutationBlock(entries, "confirm");
-    expect(confirm).toContain("location.areaId !== entry.areaId");
+    expect(confirm).not.toContain("location.areaId !== entry.areaId");
+    expect(confirm).toContain("!location || !location.active");
     expect(confirm).toContain("locationId: item.locationId");
     expect(confirm).toContain("areaId: entry.areaId");
   });
@@ -44,7 +45,8 @@ describe("estoque por área e local físico — regressões de segurança", () =
     const create = mutationBlock(requests, "create");
     expect(create).toContain('areaId: v.id("stockAreas")');
     expect(create).toContain('sourceLocationId: v.id("storageLocations")');
-    expect(create).toContain("sourceLocation.areaId !== item.areaId");
+    expect(create).not.toContain("sourceLocation.areaId");
+    expect(create).toContain("!sourceLocation || !sourceLocation.active");
   });
 
   it("aprova com reserva FIFO restrita à mesma área e ao mesmo local", () => {
@@ -75,12 +77,13 @@ describe("estoque por área e local físico — regressões de segurança", () =
 
   it("transferência registra áreas e preserva linhagem dos lotes de origem/destino", () => {
     const create = mutationBlock(transfers, "create");
-    expect(create).toContain("fromAreaId: fromLocation.areaId");
-    expect(create).toContain("toAreaId: toLocation.areaId");
+    expect(create).toContain("areaId: v.id(\"stockAreas\")");
+    expect(create).toContain("fromAreaId: args.areaId");
+    expect(create).toContain("toAreaId: args.areaId");
     expect(create).toContain('ctx.db.insert("stockTransferLots"');
     expect(create).toContain("sourceLotId");
     expect(create).toContain("destinationLotId");
-    expect(create).toContain("toAreaId: toLocation.areaId");
+    expect(create).toContain("toAreaId: args.areaId");
     expect(stockMovements).toContain("const toArea = m.toAreaId ? await ctx.db.get(m.toAreaId) : null");
   });
 
@@ -94,13 +97,14 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(quickExit).toContain("lotId: consumed.lotId");
   });
 
-  it("não permite cadastrar ou carregar saldo inicial sem área ativa", () => {
+  it("exige área explícita e independente do local na carga inicial", () => {
     const createProduct = mutationBlock(products, "create");
-    expect(createProduct).toContain("if (!location.areaId)");
-    expect(createProduct).toContain("initialAreaId = area._id");
-    expect(createProduct).toContain("areaId: initialAreaId");
-    expect(stockSetup).toContain("if (!location.areaId)");
-    expect(stockSetup).toContain("A área vinculada ao local");
+    expect(createProduct).toContain('initialAreaId: v.optional(v.id("stockAreas"))');
+    expect(createProduct).toContain("requestedInitialAreaId");
+    expect(createProduct).toContain("resolvedInitialAreaId = area._id");
+    expect(stockSetup).toContain("areaId: v.id(\"stockAreas\")");
+    expect(stockSetup).toContain("const areaId = item.areaId");
+    expect(stockSetup).not.toContain("if (!location.areaId)");
   });
 
   it("devolve cada parcela ao lote e ao subestoque da saída original", () => {
