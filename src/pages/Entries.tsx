@@ -637,8 +637,8 @@ function EntriesPage() {
       setNfeStep("products");
       toast.error(
         areaId
-          ? "Selecione, em cada item da NF-e, um local físico pertencente à área escolhida."
-          : "A entrada sem área só pode usar locais ainda não classificados. Escolha a área antes de prosseguir.",
+          ? "Selecione um local físico ativo para cada item da NF-e."
+          : "Um dos locais físicos selecionados não está disponível. Confira a seleção dos itens.",
       );
       return;
     }
