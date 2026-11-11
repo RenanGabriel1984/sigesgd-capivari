@@ -84,10 +84,9 @@ export const summary = query({
     }
 
     for (const lot of lots) {
-      const location = lot.locationId ? await ctx.db.get(lot.locationId) : null;
-      const hasConsistentAreaAndLocation = !!lot.areaId && !!lot.locationId &&
-        !!location && location.areaId === lot.areaId;
-      const key = hasConsistentAreaAndLocation ? lot.areaId as string : "none";
+      // Área classifica o estoque; locationId informa apenas onde o lote está.
+      // Um mesmo armário pode conter lotes de áreas diferentes.
+      const key = lot.areaId && buckets.has(lot.areaId as string) ? lot.areaId as string : "none";
       const current =
         buckets.get(key) ??
         {
@@ -136,21 +135,22 @@ export const unclassifiedLots = query({
     for (const lot of lots) {
       if (!lot.active || lot.quantityAvailable <= 0) continue;
       const location = lot.locationId ? await ctx.db.get(lot.locationId) : null;
-      const consistent = !!lot.areaId && !!lot.locationId &&
-        !!location && location.areaId === lot.areaId;
-      if (consistent) continue;
-
-      const product = await ctx.db.get(lot.productId);
       const entry = await ctx.db.get(lot.entryId);
       const entryItems = await ctx.db.query("entryItems")
         .withIndex("by_entry", (q: any) => q.eq("entryId", lot.entryId)).collect();
       const entryItem = entryItems.find((item: any) =>
         item.lotId === lot._id || item.lotId === lot.lotNumber
       ) ?? null;
-      const currentArea = lot.areaId ? await ctx.db.get(lot.areaId) : null;
       const suggestedLocationId = lot.locationId ?? entryItem?.locationId ?? null;
       const suggestedLocation = suggestedLocationId ? await ctx.db.get(suggestedLocationId) : null;
-      const suggestedAreaId = lot.areaId ?? suggestedLocation?.areaId ?? null;
+      const area = lot.areaId ? await ctx.db.get(lot.areaId) : (entry?.areaId ? await ctx.db.get(entry.areaId) : null);
+      const hasArea = !!area && area.active;
+      const hasLocation = !!suggestedLocation && suggestedLocation.active;
+      if (hasArea && hasLocation) continue;
+
+      const product = await ctx.db.get(lot.productId);
+      const currentArea = lot.areaId ? await ctx.db.get(lot.areaId) : null;
+      const suggestedAreaId = lot.areaId ?? entry?.areaId ?? null;
 
       pending.push({
         lotId: lot._id,
@@ -162,11 +162,11 @@ export const unclassifiedLots = query({
         entryNumber: entry?.entryNumber ?? null,
         invoiceNumber: lot.invoiceNumber ?? entry?.invoiceNumber ?? null,
         currentAreaName: currentArea?.name ?? null,
-        currentLocationName: location?.name ?? null,
+        currentLocationName: location?.name ?? suggestedLocation?.name ?? null,
         suggestedAreaId,
         suggestedLocationId,
-        areaMissing: !lot.areaId,
-        locationMissing: !lot.locationId || !location || location.areaId !== lot.areaId,
+        areaMissing: !hasArea,
+        locationMissing: !hasLocation,
       });
     }
     return pending.sort((a, b) => a.productName.localeCompare(b.productName, "pt-BR") ||
@@ -194,9 +194,10 @@ export const classifyLot = mutation({
     }
     const area = await ctx.db.get(args.areaId);
     const location = await ctx.db.get(args.locationId);
-    if (!area || !area.active || !location || !location.active || location.areaId !== args.areaId) {
-      throw new Error("A área e o local selecionados precisam estar ativos e pertencer um ao outro.");
+    if (!area || !area.active || !location || !location.active) {
+      throw new Error("Selecione uma área e um local físico ativos.");
     }
+    // A área não é propriedade do armário. Não compare location.areaId.
     if (lot.areaId && lot.areaId !== args.areaId) {
       throw new Error("O lote já possui outra área. Use uma transferência de estoque para mudar de área.");
     }
@@ -249,9 +250,9 @@ export const classifyLot = mutation({
     // já estar no bucket classificado. Caso contrário, precisa existir saldo legado.
     const balanceAlreadyClassified = !!lot.areaId && !!alreadyClassifiedRow &&
       alreadyClassifiedRow.quantity >= lot.quantityAvailable && legacyQuantity === 0;
-    if (targetRow && legacyQuantity > 0) {
-      throw new Error("Existem saldos legados e classificados simultaneamente neste produto/local. A classificação automática é ambígua; confira o inventário antes de prosseguir.");
-    }
+    // Permite classificar vários lotes do mesmo produto/local em sequência:
+    // cada lote consome apenas sua quantidade do bucket legado e soma no bucket
+    // da área correspondente. O saldo global nunca é alterado.
     if (!balanceAlreadyClassified && legacyQuantity < lot.quantityAvailable) {
       throw new Error(
         `O saldo legado deste produto/local (${legacyQuantity}) é menor que o saldo do lote (${lot.quantityAvailable}). Nenhuma classificação foi aplicada.`
