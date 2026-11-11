@@ -135,7 +135,7 @@ export const create = mutation({
 
     // Divide cada lote de origem; o novo lote no destino mantém entrada, fornecedor e custo originais.
     for (const part of planned) {
-      const sourceLot = await ctx.db.get(part.lotId as any);
+      const sourceLot: any = await ctx.db.get(part.lotId as any);
       if (!sourceLot || sourceLot.quantityAvailable < part.quantity) throw new Error("Saldo do lote de origem mudou durante a transferência");
       const allNumbers = await ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
       const year = new Date(now).getFullYear();
