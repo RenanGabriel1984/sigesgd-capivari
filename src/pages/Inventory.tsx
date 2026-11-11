@@ -87,6 +87,7 @@ export default function Inventory() {
 
   // Implantação inicial
   const [initialLocationId, setInitialLocationId] = useState("");
+  const [initialAreaId, setInitialAreaId] = useState("");
   const [quantities, setQuantities] = useState<Record<string, string>>({});
 
   // Criação contextual de produto na implantação inicial
@@ -338,10 +339,16 @@ export default function Inventory() {
   };
 
   const handleConfirmInitialLoad = async () => {
-    if (!initialLocationId) { toast.error("Selecione o local de armazenamento"); return; }
+    if (!initialLocationId) { toast.error("Selecione o local físico"); return; }
+    if (!initialAreaId) { toast.error("Selecione a área/subestoque"); return; }
     const items = Object.entries(quantities)
       .filter(([, q]) => Number(q) > 0)
-      .map(([productId, q]) => ({ productId: productId as any, locationId: initialLocationId as any, quantity: Number(q) }));
+      .map(([productId, q]) => ({
+        productId: productId as any,
+        locationId: initialLocationId as any,
+        areaId: initialAreaId as any,
+        quantity: Number(q),
+      }));
     if (items.length === 0) { toast.error("Informe ao menos uma quantidade"); return; }
     setLoadingInitial(true);
     try {
@@ -580,7 +587,18 @@ export default function Inventory() {
                 <CardContent className="py-4">
                   <div className="flex flex-col sm:flex-row sm:items-end gap-4">
                     <div className="w-full sm:max-w-xs">
-                      <Label className="text-xs">Local de armazenamento *</Label>
+                      <Label className="text-xs">Área / Subestoque *</Label>
+                      <Select value={initialAreaId} onValueChange={setInitialAreaId}>
+                        <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione a área" /></SelectTrigger>
+                        <SelectContent>
+                          {areas?.map((area) => (
+                            <SelectItem key={area._id} value={area._id}>{area.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-full sm:max-w-xs">
+                      <Label className="text-xs">Local físico *</Label>
                       <Select value={initialLocationId} onValueChange={setInitialLocationId}>
                         <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione o local" /></SelectTrigger>
                         <SelectContent>
