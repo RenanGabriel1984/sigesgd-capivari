@@ -36,13 +36,14 @@ async function decorateInventory(ctx: any, inv: any) {
   const responsible = await ctx.db.get(inv.responsibleUserId);
   const closedBy = inv.closedByUserId ? await ctx.db.get(inv.closedByUserId) : null;
   const location = inv.locationId ? await ctx.db.get(inv.locationId) : null;
+  const area = inv.areaId ? await ctx.db.get(inv.areaId) : null;
   const category = inv.categoryId ? await ctx.db.get(inv.categoryId) : null;
   const counts = await ctx.db.query("inventoryCounts").withIndex("by_inventory", (q: any) => q.eq("inventoryId", inv._id)).collect();
   const countsWithProduct = await Promise.all(counts.map(async (c: any) => {
     const product = await ctx.db.get(c.productId);
     return { ...c, product };
   }));
-  return { ...inv, responsible, closedBy, location, category, counts: countsWithProduct };
+  return { ...inv, responsible, closedBy, location, area, category, counts: countsWithProduct };
 }
 
 export const list = query({
