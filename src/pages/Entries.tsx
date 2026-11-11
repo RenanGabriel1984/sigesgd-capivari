@@ -628,18 +628,15 @@ function EntriesPage() {
   ) => {
     const invalidIndex = nfeItems.findIndex((row) => {
       if (!row.productId) return true;
-      if (!row.locationId) return !!areaId;
+      if (!row.locationId) return true;
       const location = locationList.find((item) => item._id === row.locationId);
-      if (!location) return true;
-      return areaId ? location.areaId !== areaId : !!location.areaId;
+      return !location || !location.active;
     });
     if (invalidIndex >= 0) {
       setDestinationOpen(false);
       setNfeStep("products");
       toast.error(
-        areaId
-          ? "Selecione, em cada item da NF-e, um local físico pertencente à área escolhida."
-          : "A entrada sem área só pode usar locais ainda não classificados. Escolha a área antes de prosseguir.",
+        "Selecione, em cada item da NF-e, um local físico ativo. A área do estoque é uma classificação independente.",
       );
       return;
     }
@@ -975,12 +972,8 @@ function EntriesPage() {
     }
     for (const item of withProduct) {
       const location = locationList.find((entry) => entry._id === item.locationId);
-      if (areaId && (!location || location.areaId !== areaId)) {
-        toast.error("Cada item precisa de um local físico pertencente à área escolhida.");
-        return;
-      }
-      if (!areaId && location?.areaId) {
-        toast.error("O local selecionado pertence a uma área. Escolha essa área como destino da entrada.");
+      if (!location || !location.active) {
+        toast.error("Selecione um local físico ativo para cada item da entrada.");
         return;
       }
     }
@@ -1328,14 +1321,8 @@ function EntriesPage() {
               <Select value={areaId || "none"} onValueChange={(value) => {
                 const nextAreaId = value === "none" ? "" : value;
                 setAreaId(nextAreaId);
-                const allowedLocations = locationList.filter((location) =>
-                  nextAreaId ? location.areaId === nextAreaId : !location.areaId
-                );
-                setItems((current) => current.map((item) => ({
-                  ...item,
-                  locationId: allowedLocations.some((location) => location._id === item.locationId)
-                    ? item.locationId : "",
-                })));
+                // Área do estoque e local físico são dimensões independentes.
+                // Alterar a área não deve apagar o armário já escolhido em cada item.
               }}>
                 <SelectTrigger className="mt-1 h-10 w-full min-w-0 max-w-full">
                   <SelectValue placeholder="Selecionar área" />
@@ -1384,10 +1371,8 @@ function EntriesPage() {
             <NewEntryItemsEditor
               items={items}
               products={productOptions}
-              locations={locationList.filter((location) =>
-                areaId ? location.areaId === areaId : !location.areaId
-              )}
-              locationRequired={!!areaId}
+              locations={locationList.filter((location) => location.active)}
+              locationRequired={true}
               onUpdateItem={handleManualItemUpdate}
               onAddItem={() => setItems((current) => [...current, emptyEntryItem()])}
               onRemoveItem={(index) =>
