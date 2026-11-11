@@ -8,9 +8,7 @@ async function requireUser(ctx: any) {
 
 async function enrichLocationStock(ctx: any, row: any) {
   const location = await ctx.db.get(row.locationId);
-  const area = row.areaId && location?.areaId === row.areaId
-    ? await ctx.db.get(row.areaId)
-    : null;
+  const area = row.areaId ? await ctx.db.get(row.areaId) : null;
   const reservations = await ctx.db.query("requestItemReservations")
     .withIndex("by_product", (q: any) => q.eq("productId", row.productId))
     .collect();
@@ -59,12 +57,11 @@ export const summary = query({
       const detailed = await Promise.all(entries.map((entry: any) => enrichLocationStock(ctx, entry)));
       return {
         ...location,
-        area: location.areaId ? await ctx.db.get(location.areaId) : null,
         totalItems: detailed.length,
         totalQuantity: detailed.reduce((sum: number, entry: any) => sum + entry.quantity, 0),
         totalReserved: detailed.reduce((sum: number, entry: any) => sum + entry.reservedQuantity, 0),
         totalAvailable: detailed.reduce((sum: number, entry: any) => sum + entry.availableQuantity, 0),
-        classificationPending: !location.areaId || detailed.some((entry: any) => entry.classificationPending),
+        classificationPending: detailed.some((entry: any) => entry.classificationPending),
         balances: detailed,
       };
     }));
