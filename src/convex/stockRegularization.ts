@@ -79,6 +79,7 @@ async function buildRegularizationPlan(ctx: any) {
   const lotPatches: Patch[] = [];
   const itemPatches: Patch[] = [];
   const movementPatches: Patch[] = [];
+  const movementLotPatches: Patch[] = [];
   const returnPatches: Patch[] = [];
   const sblPatches: Patch[] = [];
   const sblInserts: Array<{ productId: string; locationId: string; areaId: string; quantity: number }> = [];
@@ -280,6 +281,17 @@ async function buildRegularizationPlan(ctx: any) {
     }
   }
 
+  // Reservas por lote também bloqueiam a regularização, mesmo se o contador global estiver divergente.
+  const activeReservations: any[] = await ctx.db.query("requestItemReservations").collect();
+  for (const reservation of activeReservations) {
+    if (
+      allTouchedProductIds.has(reservation.productId as string) &&
+      Number(reservation.quantityRemaining) > 0
+    ) {
+      addBlocker(`Há ${reservation.quantityRemaining} unidade(s) reservada(s) no lote ${reservation.lotId}; conclua/cancele a solicitação antes da regularização.`);
+    }
+  }
+
   // Solicitações aprovadas com saldo pendente bloqueiam a regularização.
   // Mesmo que o saldo reservado global esteja zerado, não se deve reclassificar
   // a origem física enquanto houver entrega aprovada ainda não concluída.
@@ -422,27 +434,78 @@ async function buildRegularizationPlan(ctx: any) {
 
   const movements: any[] = await ctx.db.query("stockMovements").collect();
   const movementById = new Map(movements.map((movement: any) => [movement._id as string, movement]));
+  const movementLotLinks: any[] = await ctx.db.query("stockMovementLots").collect();
+  const linksByMovement = new Map<string, any[]>();
+  for (const link of movementLotLinks) {
+    const key = String(link.movementId);
+    const current = linksByMovement.get(key) ?? [];
+    current.push(link);
+    linksByMovement.set(key, current);
+  }
+
   for (const movement of movements) {
     if (!allTouchedProductIds.has(movement.productId as string)) continue;
-    const lot = resolveLot(movement.lotId, lotById, lotByNumber);
-    if (!lot || lot.productId !== movement.productId) {
-      addBlocker(`Movimentação ${movement._id} sem lote verificável correspondente ao produto.`);
-      continue;
+    const links = linksByMovement.get(String(movement._id)) ?? [];
+    const sources: Array<{ lot: any; link?: any }> = [];
+
+    if (links.length > 0) {
+      const linkedQuantity = links.reduce((sum: number, link: any) => sum + Number(link.quantity), 0);
+      if (Math.abs(linkedQuantity - Number(movement.quantity)) > 1e-9) {
+        addBlocker(`Movimentação ${movement._id}: soma dos lotes vinculados (${linkedQuantity}) diverge da quantidade (${movement.quantity}).`);
+      }
+      for (const link of links) {
+        const lot = resolveLot(link.lotId, lotById, lotByNumber);
+        if (!lot || lot.productId !== movement.productId) {
+          addBlocker(`Movimentação ${movement._id} possui vínculo com lote ausente ou de outro produto.`);
+          continue;
+        }
+        sources.push({ lot, link });
+      }
+    } else {
+      const lot = resolveLot(movement.lotId, lotById, lotByNumber);
+      if (!lot || lot.productId !== movement.productId) {
+        addBlocker(`Movimentação ${movement._id} sem lote verificável correspondente ao produto.`);
+        continue;
+      }
+      sources.push({ lot });
     }
-    const override = targetLotMeta.get(lot._id as string);
-    const areaId = override?.areaId ?? lot.areaId;
-    const locationId = override?.locationId ?? lot.locationId;
-    if (!areaId || !locationId) {
-      addBlocker(`Movimentação ${movement._id}: lote ${lot.lotNumber} sem área/local.`);
-      continue;
+
+    const pairs: AreaLocation[] = [];
+    for (const source of sources) {
+      const override = targetLotMeta.get(source.lot._id as string);
+      const areaId = override?.areaId ?? source.lot.areaId;
+      const locationId = override?.locationId ?? source.lot.locationId;
+      if (!areaId || !locationId) {
+        addBlocker(`Movimentação ${movement._id}: lote ${source.lot.lotNumber} sem área/local.`);
+        continue;
+      }
+      if (source.link) {
+        if (source.link.areaId && source.link.areaId !== areaId) {
+          addBlocker(`Vínculo de lote da movimentação ${movement._id} já possui área divergente.`);
+        }
+        if (source.link.locationId && source.link.locationId !== locationId) {
+          addBlocker(`Vínculo de lote da movimentação ${movement._id} já possui local divergente.`);
+        }
+        addPatch(movementLotPatches, source.link._id, source.link, { areaId, locationId });
+      }
+      pairs.push({ areaId: String(areaId), locationId: String(locationId) });
     }
-    if (movement.areaId && movement.areaId !== areaId) {
-      addBlocker(`Movimentação ${movement._id} já possui área diferente da área do lote.`);
+
+    const uniquePairs = new Map(pairs.map((pair) => [keyOf(pair.areaId, pair.locationId), pair]));
+    if (uniquePairs.size === 1) {
+      const pair = [...uniquePairs.values()][0];
+      if (movement.areaId && movement.areaId !== pair.areaId) {
+        addBlocker(`Movimentação ${movement._id} já possui área diferente dos lotes vinculados.`);
+      }
+      if (movement.locationId && movement.locationId !== pair.locationId) {
+        addBlocker(`Movimentação ${movement._id} já possui local diferente dos lotes vinculados.`);
+      }
+      addPatch(movementPatches, movement._id, movement, pair);
+    } else if (uniquePairs.size > 1 && (movement.areaId || movement.locationId)) {
+      // Uma movimentação multi-lote com origens distintas não pode carregar
+      // uma única área/local; a trilha individual fica em stockMovementLots.
+      addPatch(movementPatches, movement._id, movement, { areaId: undefined, locationId: undefined });
     }
-    if (movement.locationId && movement.locationId !== locationId) {
-      addBlocker(`Movimentação ${movement._id} já possui local diferente do local do lote.`);
-    }
-    addPatch(movementPatches, movement._id, movement, { areaId, locationId });
   }
 
   const returns: any[] = await ctx.db.query("returns").collect();
@@ -458,9 +521,22 @@ async function buildRegularizationPlan(ctx: any) {
       addBlocker(`Devolução ${returnRow._id} não aponta para uma saída válida do mesmo produto.`);
       continue;
     }
-    const lot = resolveLot(exit.lotId, lotById, lotByNumber);
-    if (!lot) {
-      addBlocker(`Devolução ${returnRow._id}: lote da saída original não pode ser resolvido.`);
+    const exitLinks = linksByMovement.get(String(exit._id)) ?? [];
+    const exitLots = exitLinks
+      .map((link: any) => resolveLot(link.lotId, lotById, lotByNumber))
+      .filter((lot: any) => lot && lot.productId === exit.productId);
+    if (exitLinks.length > 0 && exitLots.length !== exitLinks.length) {
+      addBlocker(`Devolução ${returnRow._id}: a trilha multi-lote da saída original está incompleta.`);
+      continue;
+    }
+    const candidateLots = exitLots.length > 0
+      ? exitLots
+      : [resolveLot(exit.lotId, lotById, lotByNumber)].filter(Boolean);
+    const lot = returnRow.lotId
+      ? resolveLot(returnRow.lotId, lotById, lotByNumber)
+      : candidateLots.length === 1 ? candidateLots[0] : null;
+    if (!lot || lot.productId !== exit.productId || !candidateLots.some((candidate: any) => candidate._id === lot._id)) {
+      addBlocker(`Devolução ${returnRow._id}: informe/vincule o lote exato consumido pela saída original.`);
       continue;
     }
     const override = targetLotMeta.get(lot._id as string);
@@ -469,9 +545,6 @@ async function buildRegularizationPlan(ctx: any) {
     if (!areaId || !locationId) {
       addBlocker(`Devolução ${returnRow._id}: lote original sem área/local.`);
       continue;
-    }
-    if (returnRow.lotId && returnRow.lotId !== lot._id) {
-      addBlocker(`Devolução ${returnRow._id} já aponta para outro lote.`);
     }
     if (returnRow.areaId && returnRow.areaId !== areaId) {
       addBlocker(`Devolução ${returnRow._id} já possui área divergente.`);
@@ -495,7 +568,7 @@ async function buildRegularizationPlan(ctx: any) {
 
   const patchCount =
     lotPatches.length + itemPatches.length + movementPatches.length +
-    returnPatches.length + sblPatches.length + sblInserts.length;
+    movementLotPatches.length + returnPatches.length + sblPatches.length + sblInserts.length;
 
   return {
     blockers,
@@ -506,6 +579,7 @@ async function buildRegularizationPlan(ctx: any) {
       stockByLocationUpdates: sblPatches.length,
       stockByLocationInserts: sblInserts.length,
       stockMovements: movementPatches.length,
+      stockMovementLots: movementLotPatches.length,
       returns: returnPatches.length,
       totalWrites: patchCount,
     },
@@ -533,7 +607,7 @@ async function buildRegularizationPlan(ctx: any) {
       movementQuantitiesWillChange: false,
       stockByLocationPairTotalsWillChange: false,
     },
-    internal: { lotPatches, itemPatches, movementPatches, returnPatches, sblPatches, sblInserts },
+    internal: { lotPatches, itemPatches, movementPatches, movementLotPatches, returnPatches, sblPatches, sblInserts },
   };
 }
 
@@ -567,13 +641,14 @@ export const apply = mutation({
     }
 
     const {
-      lotPatches, itemPatches, movementPatches,
+      lotPatches, itemPatches, movementPatches, movementLotPatches,
       returnPatches, sblPatches, sblInserts,
     } = plan.internal;
     for (const update of lotPatches) await ctx.db.patch(update.id as any, update.fields);
     for (const update of itemPatches) await ctx.db.patch(update.id as any, update.fields);
     for (const update of sblPatches) await ctx.db.patch(update.id as any, update.fields);
     for (const row of sblInserts) await ctx.db.insert("stockByLocation", row as any);
+    for (const update of movementLotPatches) await ctx.db.patch(update.id as any, update.fields);
     for (const update of movementPatches) await ctx.db.patch(update.id as any, update.fields);
     for (const update of returnPatches) await ctx.db.patch(update.id as any, update.fields);
 
@@ -586,7 +661,7 @@ export const apply = mutation({
         details:
           `Regularização de área/local concluída. Lotes: ${plan.changes.lots}; itens de entrada: ${plan.changes.entryItems}; ` +
           `saldos atualizados: ${plan.changes.stockByLocationUpdates}; saldos criados: ${plan.changes.stockByLocationInserts}; ` +
-          `movimentações: ${plan.changes.stockMovements}; devoluções: ${plan.changes.returns}. ` +
+          `movimentações: ${plan.changes.stockMovements}; vínculos de lotes: ${plan.changes.stockMovementLots}; devoluções: ${plan.changes.returns}. ` +
           "Quantidades globais, reservas, lotes e movimentos preservados; totais por produto/local preservados.",
         timestamp: Date.now(),
       });
