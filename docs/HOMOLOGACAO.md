@@ -181,3 +181,45 @@ associação manual).
   pode ser gerado após a URL do staging existir.
 - **Produção modificada?** Não: nenhum deploy de funções, nenhuma mutação de
   banco, nenhuma confirmação de nota, nenhuma alteração de estoque.
+
+
+---
+
+## 6. Atualização da homologação — 11/11/2026
+
+### Backend Convex
+
+- O Vercel criou o deployment de Preview associado à branch `codex/stock-areas-phase1`.
+- Deployment: `brilliant-bullfrog-982`.
+- URL: `https://brilliant-bullfrog-982.convex.cloud`.
+- O comando `convex deploy` concluiu com sucesso e confirmou a publicação das funções.
+- O log confirmou a inclusão dos índices das tabelas do módulo de água (`waterParticipants`, `waterPeriods`, `waterReceipts`, `waterShares`, `waterPayments` e `waterContainerMovements`).
+- Nenhuma publicação no backend de produção foi solicitada ou realizada nesta etapa.
+
+### Configuração de build no Vercel (Preview)
+
+A branch de homologação precisa usar o script `scripts/build-homolog.mjs`, pois ele gera e valida especificamente `dist-homolog/`.
+
+Build Command esperado:
+
+```bash
+if [ "$VERCEL_ENV" = "preview" ] && [ "$VERCEL_GIT_COMMIT_REF" = "codex/stock-areas-phase1" ]; then npx convex deploy --cmd "bun scripts/build-homolog.mjs" --cmd-url-env-var-name VITE_CONVEX_URL; else bun run build; fi
+```
+
+Output Directory do projeto de homologação: `dist-homolog`.
+
+Variáveis esperadas no Preview:
+- `CONVEX_DEPLOY_KEY`: segredo Preview criado para a homologação; nunca registrar seu valor neste documento.
+- `VITE_APP_ENV=homologacao`.
+- `VITE_CONVEX_URL`: injetada pelo comando `convex deploy` durante a compilação; deve resolver para o backend de Preview, nunca para o backend oficial.
+
+### Diagnóstico do build
+
+Um build anterior executou `bun run build`, gerou `dist/` e falhou porque o projeto Vercel procurava `dist-homolog/`. A correção é executar `scripts/build-homolog.mjs` na condição de Preview da branch indicada. O build final de frontend ainda precisa alcançar status `Ready` antes dos testes de interface.
+
+### Limites de segurança
+
+- Não alterar as variáveis de Production.
+- Não usar Promote nem publicar o frontend no domínio oficial.
+- Não executar seeds, importações ou mutações de dados reais.
+- Testes funcionais devem usar exclusivamente o backend `brilliant-bullfrog-982` e registros fictícios identificados como homologação.
