@@ -278,8 +278,8 @@ function EstoqueTab() {
                     <TableCell className="text-muted-foreground">{extractColor(f.familyName) ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{f.baseUnit}</TableCell>
                     <TableCell className="text-right font-semibold tabular-nums">
-                      {f.baseStock}
-                      <PacksApproximation family={f} />
+                      {f.baseAvailableInArea}
+                      <PacksApproximation family={{ ...f, baseStock: f.baseAvailableInArea }} />
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
                       {f.minimumStock != null && f.minimumStock > 0 ? f.minimumStock : "—"}
@@ -516,8 +516,8 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
             <div>
               <p className="text-xs text-muted-foreground">Estoque disponível</p>
               <p className="font-semibold tabular-nums">
-                {family.baseStock}
-                <PacksApproximation family={family} />
+                {family.baseAvailableInArea}
+                <PacksApproximation family={{ ...family, baseStock: family.baseAvailableInArea }} />
               </p>
             </div>
             <div>
@@ -548,7 +548,7 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
           <div>
             <Label>Quantidade em {family.baseUnit} *</Label>
             <Input
-              type="number" min={1} max={family.baseStock} value={quantity}
+              type="number" min={1} max={family.baseAvailableInArea} value={quantity}
               onChange={(e) => setQuantity(e.target.value)}
               aria-invalid={!check.ok}
             />
@@ -944,7 +944,7 @@ function PlanejamentoReposicaoTab() {
     () =>
       families.map((f) =>
         buildEstimatedNeedRow({
-          currentStock: f.baseStock,
+          currentStock: f.baseAvailableInArea,
           minimumStock: f.minimumStock,
           idealStock: f.idealStock,
           monthlyConsumptionTarget: f.monthlyConsumptionTarget ?? null,
@@ -981,8 +981,8 @@ function PlanejamentoReposicaoTab() {
                 <TableRow key={f.familyKey}>
                   <TableCell className="font-medium">{f.familyName}</TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {f.baseStock}
-                    <PacksApproximation family={f} />
+                    {f.baseAvailableInArea}
+                    <PacksApproximation family={{ ...f, baseStock: f.baseAvailableInArea }} />
                   </TableCell>
                   <TableCell className="text-right tabular-nums text-muted-foreground">
                     {f.minimumStock != null ? f.minimumStock : "—"}
