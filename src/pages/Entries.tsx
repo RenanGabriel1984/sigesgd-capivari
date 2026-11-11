@@ -627,19 +627,14 @@ function EntriesPage() {
     areaId: string,
   ) => {
     const invalidIndex = nfeItems.findIndex((row) => {
-      if (!row.productId) return true;
-      if (!row.locationId) return !!areaId;
+      if (!row.productId || !row.locationId) return true;
       const location = locationList.find((item) => item._id === row.locationId);
-      return !location;
+      return !location || !location.active;
     });
     if (invalidIndex >= 0) {
       setDestinationOpen(false);
       setNfeStep("products");
-      toast.error(
-        areaId
-          ? "Selecione um local físico ativo para cada item da NF-e."
-          : "Um dos locais físicos selecionados não está disponível. Confira a seleção dos itens.",
-      );
+      toast.error("Associe cada item da NF-e a um local físico ativo. A área é uma classificação independente do armário.");
       return;
     }
     setNfeDestination({ materialType, areaId });
@@ -974,12 +969,8 @@ function EntriesPage() {
     }
     for (const item of withProduct) {
       const location = locationList.find((entry) => entry._id === item.locationId);
-      if (areaId && !location) {
-        toast.error("Cada item precisa de um local físico ativo quando a entrada possui área definida.");
-        return;
-      }
-      if (item.locationId && !location) {
-        toast.error("Um dos locais físicos selecionados não está mais disponível.");
+      if (!location || !location.active) {
+        toast.error("Selecione um local físico ativo para cada item da entrada.");
         return;
       }
     }
@@ -1327,7 +1318,8 @@ function EntriesPage() {
               <Select value={areaId || "none"} onValueChange={(value) => {
                 const nextAreaId = value === "none" ? "" : value;
                 setAreaId(nextAreaId);
-                // A área classifica o material; o local físico permanece independente.
+                // Alterar a área não altera a localização física selecionada.
+                // Um mesmo armário pode armazenar produtos de áreas diferentes.
               }}>
                 <SelectTrigger className="mt-1 h-10 w-full min-w-0 max-w-full">
                   <SelectValue placeholder="Selecionar área" />
@@ -1377,7 +1369,7 @@ function EntriesPage() {
               items={items}
               products={productOptions}
               locations={locationList}
-              locationRequired={!!areaId}
+              locationRequired
               onUpdateItem={handleManualItemUpdate}
               onAddItem={() => setItems((current) => [...current, emptyEntryItem()])}
               onRemoveItem={(index) =>
