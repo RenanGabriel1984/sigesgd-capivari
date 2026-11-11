@@ -79,7 +79,7 @@ async function performInitialLoad(
     if (!location || !location.active) {
       throw new Error("A carga inicial precisa apontar para um local físico ativo.");
     }
-    const selectedAreaId = item.areaId ?? location.areaId;
+    const selectedAreaId = item.areaId;
     if (!selectedAreaId) {
       throw new Error(`Informe a área/subestoque do material armazenado em "${location.name}". O local físico não define a área.`);
     }
@@ -148,7 +148,7 @@ async function performInitialLoad(
       if (!location || !location.active) {
         throw new Error("O local físico precisa continuar ativo para concluir a carga inicial.");
       }
-      const areaId = item.areaId ?? location.areaId;
+      const areaId = item.areaId;
       if (!areaId) {
         throw new Error(`Informe a área do produto ${item.productId}; o armário não determina o subestoque.`);
       }
