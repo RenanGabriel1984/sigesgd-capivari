@@ -89,9 +89,9 @@ O plano confere:
 - os 10 metadados de unidade autorizados;
 - saldo global contra lotes ativos;
 - saldo por produto/local contra a distribuição por área;
-- movimentações que tenham lote verificável;
-- devoluções vinculadas à saída original;
-- reservas globais e solicitações aprovadas ainda não entregues.
+ - movimentações com lote único ou trilha completa em `stockMovementLots`, validando a soma das quantidades vinculadas;
+- devoluções vinculadas à saída original e ao lote exato; devolução de saída multi-lote sem lote individual bloqueia a prévia;
+- reservas globais, reservas por lote (`requestItemReservations`) e solicitações aprovadas ainda não entregues.
 
 A rotina não altera `stock.physicalQuantity`, `stock.reservedQuantity`, quantidades de lotes, quantidades de entrada, quantidades de movimentações ou datas. Os totais existentes de `stockByLocation` por produto/local devem fechar antes e permanecer idênticos após a divisão por área.
 
