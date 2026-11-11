@@ -168,12 +168,13 @@ export const create = mutation({
     hasSerial: v.optional(v.boolean()),
     // Estoque atual informado no cadastro (carga inicial com rastreabilidade por lote)
     initialStock: v.optional(v.number()),
+    initialAreaId: v.optional(v.id("stockAreas")),
     locationId: v.optional(v.id("storageLocations")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    const { initialStock, locationId, ...productArgs } = args;
-    let initialAreaId: any = undefined;
+    const { initialStock, initialAreaId: requestedInitialAreaId, locationId, ...productArgs } = args;
+    let resolvedInitialAreaId: any = undefined;
     if (!args.name.trim()) throw new Error("Nome do item é obrigatório");
     if (args.ean && !/^\d{8,14}$/.test(args.ean.replace(/\D/g, ""))) {
       throw new Error("EAN/GTIN inválido: use de 8 a 14 dígitos");
@@ -220,12 +221,12 @@ export const create = mutation({
       const location = await ctx.db.get(locationId);
       if (!location) throw new Error("Local de armazenamento não encontrado");
       if (!location.active) throw new Error("O local de armazenamento selecionado está inativo");
-      if (!location.areaId) {
-        throw new Error("O local selecionado ainda não pertence a uma área/subestoque. Classifique o local antes de cadastrar saldo inicial.");
+      if (!requestedInitialAreaId) {
+        throw new Error("Informe a área/subestoque do estoque inicial separadamente do local físico.");
       }
-      const area = await ctx.db.get(location.areaId);
-      if (!area || !area.active) throw new Error("A área do local selecionado não existe ou está inativa.");
-      initialAreaId = area._id;
+      const area = await ctx.db.get(requestedInitialAreaId);
+      if (!area || !area.active) throw new Error("A área do estoque inicial não existe ou está inativa.");
+      resolvedInitialAreaId = area._id;
     }
 
     // Toners de kit original de 4 cores (VersaLink, AltaLink, Lexmark CX735,
@@ -261,7 +262,7 @@ export const create = mutation({
         entryNumber,
         receivedAt: now,
         originType: "initial_inventory",
-        areaId: initialAreaId,
+        areaId: resolvedInitialAreaId,
         responsibleUserId: userId,
         observation: `Estoque inicial cadastrado junto com o item "${args.name}"`,
         status: "confirmed",
@@ -278,7 +279,7 @@ export const create = mutation({
         quantityAvailable: initialStock,
         receivedAt: now,
         active: true,
-        areaId: initialAreaId,
+        areaId: resolvedInitialAreaId,
         locationId,
         observation: `Carga inicial cadastrada junto com o item — ${initialStock} unidades`,
       });
@@ -295,7 +296,7 @@ export const create = mutation({
       await ctx.db.insert("stockByLocation", {
         productId: id,
         locationId,
-        areaId: initialAreaId,
+        areaId: resolvedInitialAreaId,
         quantity: initialStock,
       });
 
@@ -312,7 +313,7 @@ export const create = mutation({
         userId,
         entryId,
         lotId: lotId as string,
-        areaId: initialAreaId,
+        areaId: resolvedInitialAreaId,
         locationId,
         observation: `Estoque inicial — lote ${lotNumber} — ${initialStock} unidades (cadastro do item)`,
         timestamp: now,
