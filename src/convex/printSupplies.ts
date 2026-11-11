@@ -88,10 +88,8 @@ function invariantDivergences(t: GlobalTotals): string[] {
 
 /* ═══ Migração histórica (idempotente, auditada, com guarda de saldo) ═══════ */
 
-export const migrateTIGeralToImpressoras = mutation({
-  args: {},
-  handler: async (ctx) => migrateTIGeralToImpressorasImpl(ctx),
-});
+// A migração histórica não é exposta ao cliente. A regularização atual e auditada
+// em stockRegularization.ts é o único fluxo permitido para classificar estoque.
 
 /**
  * Variante INTERNAL para execução assistida via CLI (`convex run`), que não
