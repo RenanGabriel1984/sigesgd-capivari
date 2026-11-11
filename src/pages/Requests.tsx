@@ -194,8 +194,8 @@ export default function Requests() {
       if (!item.areaId) { toast.error("Selecione a área/subestoque de cada item"); return; }
       if (!item.sourceLocationId) { toast.error("Selecione o local físico de origem de cada item"); return; }
       const location = (storageLocations ?? []).find((entry: any) => entry._id === item.sourceLocationId);
-      if (!location || location.areaId !== item.areaId) {
-        toast.error("O local físico selecionado não pertence à área escolhida");
+      if (!location || !location.active) {
+        toast.error("Selecione um local físico ativo para a retirada.");
         return;
       }
     }
@@ -768,7 +768,7 @@ export default function Requests() {
                           <Select value={item.sourceLocationId} onValueChange={(value) => updateItem(i, "sourceLocationId", value)} disabled={!item.areaId}>
                             <SelectTrigger><SelectValue placeholder="Selecione o local" /></SelectTrigger>
                             <SelectContent>
-                              {(storageLocations ?? []).filter((location: any) => location.areaId === item.areaId).map((location: any) => (
+                              {(storageLocations ?? []).filter((location: any) => location.active).map((location: any) => (
                                 <SelectItem key={location._id} value={location._id}>{location.name}</SelectItem>
                               ))}
                             </SelectContent>
