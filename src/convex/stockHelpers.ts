@@ -16,6 +16,7 @@ export interface SheetRow {
   brand: string;
   quantity: number;
   unitOfMeasure: string;
+  areaName: string;
   observation: string;
 }
 
@@ -34,10 +35,10 @@ export interface SheetRow {
  * Linhas sem produto são ignoradas; quantidade inválida vira 0.
  */
 /** Divide a linha nos 5 primeiros campos; o restante vira o 6º (observação). */
-function splitWithRest(line: string, sep: string): string[] {
+function splitWithRest(line: string, sep: string, maxSeparators = 5): string[] {
   const out: string[] = [];
   let rest = line;
-  for (let k = 0; k < 5; k++) {
+  for (let k = 0; k < maxSeparators; k++) {
     const idx = rest.indexOf(sep);
     if (idx === -1) break;
     out.push(rest.slice(0, idx));
@@ -63,20 +64,25 @@ export function parseSheetText(text: string): SheetRow[] {
 
   const rows: SheetRow[] = [];
   let isFirstLine = true;
+  let hasAreaColumn = false;
   for (const line of lines) {
-    const cols = splitWithRest(line, sep).map(clean);
+    // A coluna Área só é interpretada quando declarada no cabeçalho. Isso
+    // preserva observações legadas que podem conter ponto e vírgula.
+    const headerOrLegacyCols = splitWithRest(line, sep, 6).map(clean);
     if (isFirstLine) {
-      const first = (cols[0] ?? "").toLowerCase();
-      if (["local", "localização", "localizacao", "location", "localidade"].includes(first)) {
+      const header = (headerOrLegacyCols[0] ?? "").toLowerCase();
+      if (["local", "localização", "localizacao", "location", "localidade"].includes(header)) {
+        hasAreaColumn = headerOrLegacyCols.some((value) =>
+          /^(área|area|subestoque)$/i.test(value.trim())
+        );
         isFirstLine = false;
         continue;
       }
       isFirstLine = false;
     }
+
+    const cols = splitWithRest(line, sep, hasAreaColumn ? 6 : 5).map(clean);
     if (!cols[1]) continue;
-    // splitWithRest garante no máximo 6 campos: cols[5] é a observação
-    // integral (com separadores internos preservados).
-    const observation = cols[5] ?? "";
     const [locationName, productName, brand, quantity, unitOfMeasure] = cols;
     rows.push({
       locationName: locationName ?? "",
@@ -84,7 +90,8 @@ export function parseSheetText(text: string): SheetRow[] {
       brand: brand ?? "",
       quantity: Math.max(0, Number((quantity ?? "").replace(",", ".")) || 0),
       unitOfMeasure: unitOfMeasure || "un",
-      observation,
+      areaName: hasAreaColumn ? (cols[5] ?? "") : "",
+      observation: hasAreaColumn ? (cols[6] ?? "") : (cols[5] ?? ""),
     });
   }
   return rows;
