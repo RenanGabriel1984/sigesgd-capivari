@@ -670,6 +670,9 @@ const schema = defineSchema(
     inventoryCounts: defineTable({
       inventoryId: v.id("inventories"),
       productId: v.id("products"),
+      // Snapshot do bucket contado: área lógica e local físico independentes.
+      areaId: v.optional(v.id("stockAreas")),
+      locationId: v.optional(v.id("storageLocations")),
       lotId: v.optional(v.string()),
       systemQuantity: v.number(),
       countedQuantity: v.optional(v.number()),
