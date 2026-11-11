@@ -17,6 +17,7 @@ const areaDefinitions = read("src/lib/stock-areas.ts");
 const regularization = read("src/convex/stockRegularization.ts");
 const storageLocations = read("src/convex/storageLocations.ts");
 const inventoryPage = read("src/pages/Inventory.tsx");
+const transfersPage = read("src/pages/StockTransfers.tsx");
 
 function mutationBlock(source: string, name: string): string {
   const start = source.indexOf(`export const ${name} = mutation({`);
@@ -90,6 +91,9 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(create).toContain("sourceLotId");
     expect(create).toContain("destinationLotId");
     expect(create).toContain("Origem e destino não podem ser a mesma área e o mesmo local.");
+    expect(transfersPage).toContain("fromAreaId: fromAreaId as any");
+    expect(transfersPage).toContain("toAreaId: toAreaId as any");
+    expect(transfersPage).toContain("Local físico");
     expect(stockMovements).toContain("const toArea = m.toAreaId ? await ctx.db.get(m.toAreaId) : null");
   });
 
