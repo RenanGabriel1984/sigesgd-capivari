@@ -154,9 +154,7 @@ export const create = mutation({
       if (!area || !area.active) throw new Error("Selecione uma área/subestoque ativa para cada item.");
       const sourceLocation = await ctx.db.get(item.sourceLocationId);
       if (!sourceLocation || !sourceLocation.active) throw new Error("Selecione um local físico ativo para cada item.");
-      if (sourceLocation.areaId !== item.areaId) {
-        throw new Error(`O local "${sourceLocation.name}" não pertence à área "${area.name}".`);
-      }
+      // Área do estoque e local físico são escolhidos separadamente.
 
       const product = await ctx.db.get(item.productId);
       if (!product) throw new Error("Produto não encontrado");
@@ -290,7 +288,7 @@ export const approve = mutation({
 
       const area = await ctx.db.get(requestItem.areaId!);
       const location = await ctx.db.get(requestItem.sourceLocationId);
-      if (!area || !area.active || !location || !location.active || location.areaId !== requestItem.areaId) {
+      if (!area || !area.active || !location || !location.active) {
         throw new Error(`A área ou o local físico de "${productName}" não está válido.`);
       }
 
