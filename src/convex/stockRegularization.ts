@@ -510,6 +510,7 @@ async function buildRegularizationPlan(ctx: any) {
 
   const returns: any[] = await ctx.db.query("returns").collect();
   const returnedByExit = new Map<string, number>();
+  const returnedByExitLot = new Map<string, { exitId: string; lotId: string; quantity: number }>();
   for (const returnRow of returns) {
     if (!allTouchedProductIds.has(returnRow.productId as string)) continue;
     if (!returnRow.exitMovementId) {
@@ -553,6 +554,13 @@ async function buildRegularizationPlan(ctx: any) {
       addBlocker(`Devolução ${returnRow._id} já possui local físico divergente.`);
     }
     returnedByExit.set(exit._id as string, (returnedByExit.get(exit._id as string) ?? 0) + Number(returnRow.quantity));
+    const exitLotKey = keyOf(exit._id as string, lot._id as string);
+    const priorLotReturn = returnedByExitLot.get(exitLotKey);
+    returnedByExitLot.set(exitLotKey, {
+      exitId: exit._id as string,
+      lotId: lot._id as string,
+      quantity: (priorLotReturn?.quantity ?? 0) + Number(returnRow.quantity),
+    });
     addPatch(returnPatches, returnRow._id, returnRow, {
       lotId: lot._id,
       areaId,
@@ -563,6 +571,16 @@ async function buildRegularizationPlan(ctx: any) {
     const exit: any = movementById.get(exitId);
     if (returned > Number(exit.quantity)) {
       addBlocker(`Devoluções vinculadas à saída ${exitId} (${returned}) excedem a quantidade da saída (${exit.quantity}).`);
+    }
+  }
+  for (const returned of returnedByExitLot.values()) {
+    const exitLinks = linksByMovement.get(returned.exitId) ?? [];
+    const consumedFromLot = exitLinks.length > 0
+      ? exitLinks.filter((link: any) => String(link.lotId) === returned.lotId)
+          .reduce((sum: number, link: any) => sum + Number(link.quantity), 0)
+      : Number(movementById.get(returned.exitId)?.quantity ?? 0);
+    if (returned.quantity > consumedFromLot) {
+      addBlocker(`Devoluções da saída ${returned.exitId} para o lote ${returned.lotId} (${returned.quantity}) excedem o consumo desse lote (${consumedFromLot}).`);
     }
   }
 
