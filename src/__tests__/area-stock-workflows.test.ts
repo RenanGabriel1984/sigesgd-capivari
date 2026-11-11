@@ -14,6 +14,9 @@ const stockMovements = read("src/convex/stockMovements.ts");
 const products = read("src/convex/products.ts");
 const returns = read("src/convex/returns.ts");
 const areaDefinitions = read("src/lib/stock-areas.ts");
+const regularization = read("src/convex/stockRegularization.ts");
+const storageLocations = read("src/convex/storageLocations.ts");
+const inventoryPage = read("src/pages/Inventory.tsx");
 
 function mutationBlock(source: string, name: string): string {
   const start = source.indexOf(`export const ${name} = mutation({`);
@@ -123,6 +126,28 @@ describe("estoque por área e local físico — regressões de segurança", () =
     for (const areaName of ["TI Geral", "Impressoras", "Limpeza", "Copa e Cozinha", "Água Mineral"]) {
       expect(areaDefinitions).toContain(areaName);
     }
+  });
+
+  it("trata locais físicos como independentes das áreas", () => {
+    const createLocation = mutationBlock(storageLocations, "create");
+    const updateLocation = mutationBlock(storageLocations, "update");
+    expect(createLocation).not.toContain("areaId:");
+    expect(updateLocation).not.toContain("areaId:");
+    expect(stockAreas).not.toContain("location.areaId === lot.areaId");
+    expect(inventoryPage).toContain("Área padrão para as linhas importadas");
+    expect(inventoryPage).toContain("areaId: r.areaId as any");
+  });
+
+  it("prepara regularização histórica protegida e sem alterar quantidades", () => {
+    expect(regularization).toContain('INITIAL_ENTRY_NUMBER = "ENT-2026-000001"');
+    expect(regularization).toContain('GOMAQ_ENTRY_NUMBER = "ENT-2026-000002"');
+    expect(regularization).toContain("REGULARIZAR_SIGESGD_2026");
+    expect(regularization).toContain("requestItemReservations");
+    expect(regularization).toContain("stockMovementLots");
+    const apply = mutationBlock(regularization, "applyAuditedInitialStockRegularization");
+    expect(apply).not.toContain("physicalQuantity:");
+    expect(apply).not.toContain("quantityAvailable:");
+    expect(apply).toContain("buildRegularizationPlan(ctx)");
   });
 
   it("classificação manual não altera saldo global e exige conferência do saldo legado", () => {
