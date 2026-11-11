@@ -37,7 +37,7 @@ describe("regularização histórica de área/local", () => {
   });
 
   it("confere soma por produto/local antes de dividir o saldo entre áreas", () => {
-    expect(migration).toContain("existingTotal !== expectedTotal");
+    expect(migration).toContain("Math.abs(existingTotal - expectedTotal)");
     expect(migration).toContain("stockByLocationPairTotalsWillChange: false");
     expect(migration).toContain("stockByLocationUpdates");
     expect(migration).toContain("stockByLocationInserts");
