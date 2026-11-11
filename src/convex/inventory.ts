@@ -36,13 +36,14 @@ async function decorateInventory(ctx: any, inv: any) {
   const responsible = await ctx.db.get(inv.responsibleUserId);
   const closedBy = inv.closedByUserId ? await ctx.db.get(inv.closedByUserId) : null;
   const location = inv.locationId ? await ctx.db.get(inv.locationId) : null;
+  const area = inv.areaId ? await ctx.db.get(inv.areaId) : null;
   const category = inv.categoryId ? await ctx.db.get(inv.categoryId) : null;
   const counts = await ctx.db.query("inventoryCounts").withIndex("by_inventory", (q: any) => q.eq("inventoryId", inv._id)).collect();
   const countsWithProduct = await Promise.all(counts.map(async (c: any) => {
     const product = await ctx.db.get(c.productId);
     return { ...c, product };
   }));
-  return { ...inv, responsible, closedBy, location, category, counts: countsWithProduct };
+  return { ...inv, responsible, closedBy, location, area, category, counts: countsWithProduct };
 }
 
 export const list = query({
@@ -71,6 +72,7 @@ export const create = mutation({
   args: {
     observation: v.optional(v.string()),
     locationId: v.optional(v.id("storageLocations")),
+    areaId: v.optional(v.id("stockAreas")),
     categoryId: v.optional(v.id("categories")),
     productIds: v.optional(v.array(v.id("products"))),
   },
@@ -85,10 +87,15 @@ export const create = mutation({
     }
 
     // ── Validar escopo ──
+    if (!!args.locationId !== !!args.areaId) {
+      throw new Error("Para inventário por localização, selecione a área e o local físico. Para inventário geral, deixe ambos vazios.");
+    }
     if (args.locationId) {
       const location = await ctx.db.get(args.locationId);
       if (!location) throw new Error("Local de armazenamento não encontrado");
       if (!location.active) throw new Error("O local de armazenamento selecionado está inativo");
+      const area = await ctx.db.get(args.areaId!);
+      if (!area || !area.active) throw new Error("A área/subestoque selecionada está inativa ou não existe.");
     }
     if (args.categoryId) {
       const category = await ctx.db.get(args.categoryId);
@@ -106,6 +113,7 @@ export const create = mutation({
       status: "draft",
       observation: args.observation || undefined,
       locationId: args.locationId,
+      areaId: args.areaId,
       categoryId: args.categoryId,
       productIds: args.productIds && args.productIds.length > 0 ? args.productIds : undefined,
       createdAt: now,
@@ -121,7 +129,7 @@ export const create = mutation({
     }
 
     const scopeLabel = [
-      args.locationId ? `local ${args.locationId}` : "todos os locais",
+      args.locationId ? `área ${args.areaId} / local ${args.locationId}` : "todos os locais e áreas",
       args.categoryId ? `categoria ${args.categoryId}` : "",
       args.productIds && args.productIds.length > 0 ? `${args.productIds.length} produto(s) selecionado(s)` : "",
     ].filter(Boolean).join(", ");
@@ -131,7 +139,9 @@ export const create = mutation({
       let systemQuantity = stock?.physicalQuantity ?? 0;
       if (args.locationId) {
         const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", product._id)).collect();
-        systemQuantity = sbls.find((s) => s.locationId === args.locationId)?.quantity ?? 0;
+        systemQuantity = sbls
+          .filter((s: any) => s.locationId === args.locationId && s.areaId === args.areaId)
+          .reduce((sum: number, s: any) => sum + s.quantity, 0);
       }
       await ctx.db.insert("inventoryCounts", {
         inventoryId,
@@ -250,6 +260,9 @@ export const close = mutation({
     const inv = await ctx.db.get(args.inventoryId);
     if (!inv) throw new Error("Inventário não encontrado");
     if (inv.status !== "review") throw new Error("Inventário deve estar em revisão para ser fechado");
+    if (inv.locationId && !inv.areaId) {
+      throw new Error("Este inventário foi criado antes do escopo por área. Cancele-o e abra outro selecionando área e local físico.");
+    }
 
     const counts = await ctx.db.query("inventoryCounts").withIndex("by_inventory", (q: any) => q.eq("inventoryId", args.inventoryId)).collect();
     const countsWithDiff = counts.filter((c) => c.difference !== null && c.difference !== undefined && c.difference !== 0);
@@ -269,15 +282,28 @@ export const close = mutation({
       let newPhysical: number;
 
       if (inv.locationId) {
-        // ── Inventário por local: ajusta o saldo do local e recalcula o global ──
+        // O bucket é identificado por produto + área + local físico.
         const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
-        const sbl = sbls.find((s) => s.locationId === inv.locationId);
+        const matchingRows = sbls.filter((s: any) => s.locationId === inv.locationId && s.areaId === inv.areaId);
+        const reservations = await ctx.db.query("requestItemReservations")
+          .withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
+        const reservedInScope = reservations
+          .filter((reservation: any) => reservation.locationId === inv.locationId && reservation.areaId === inv.areaId)
+          .reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0);
+        if (counted < reservedInScope) {
+          throw new Error(`A contagem de "${countProduct?.name ?? "item"}" (${counted}) ficaria abaixo das ${reservedInScope} unidade(s) reservada(s) nesta área/local.`);
+        }
+        if (matchingRows.length > 1) {
+          throw new Error("Há linhas duplicadas de saldo para o mesmo produto/área/local. Regularize-as antes de fechar o inventário.");
+        }
+        const sbl = matchingRows[0];
         if (sbl) {
           await ctx.db.patch(sbl._id, { quantity: counted });
         } else if (counted > 0) {
           await ctx.db.insert("stockByLocation", {
             productId: count.productId,
             locationId: inv.locationId,
+            areaId: inv.areaId,
             quantity: counted,
           });
         }
@@ -316,7 +342,9 @@ export const close = mutation({
         previousReserved: reserved,
         newReserved: reserved,
         userId,
-        observation: `Ajuste via inventário ${inv.inventoryNumber}${scopeSuffix}. Diferença: ${count.difference! >= 0 ? "+" : ""}${count.difference}. Justificativa: ${justification}`,
+        areaId: inv.areaId,
+        locationId: inv.locationId,
+        observation: `Ajuste via inventário ${inv.inventoryNumber}${scopeSuffix}. Área: ${inv.areaId ?? "geral"}. Diferença: ${count.difference! >= 0 ? "+" : ""}${count.difference}. Justificativa: ${justification}`,
         timestamp: now,
       });
 
