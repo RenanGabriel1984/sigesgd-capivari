@@ -223,3 +223,16 @@ Um build anterior executou `bun run build`, gerou `dist/` e falhou porque o proj
 - Não usar Promote nem publicar o frontend no domínio oficial.
 - Não executar seeds, importações ou mutações de dados reais.
 - Testes funcionais devem usar exclusivamente o backend `brilliant-bullfrog-982` e registros fictícios identificados como homologação.
+
+
+## 7. Atualização de autenticação do Preview — 11/11/2026
+
+O backend isolado de Preview `brilliant-bullfrog-982` recebeu as funções do projeto e as tabelas do módulo de água. O frontend de homologação chegou a gerar um build válido (versão 0.7.0, build `72b8d79`).
+
+**Bloqueio atual:** a emissão de sessão pelo Convex Auth no Preview falha com `Missing environment variable JWT_PRIVATE_KEY`. O usuário administrador de homologação foi criado somente no banco isolado, mas não consegue concluir o login enquanto a chave de assinatura não existir nesse deployment.
+
+- Este erro pertence ao Preview e não comprova falha de senha nem de usuário na produção.
+- As credenciais de produção não são compartilhadas com o banco de homologação.
+- Não copiar a chave de produção para Preview e não alterar variáveis do ambiente Production.
+- A homologação permanece **não aprovada para operação** até a configuração segura da chave exclusivamente no deployment de Preview e a repetição dos testes de login.
+- Nenhuma chave foi gerada, exibida ou alterada durante a auditoria desta branch.
