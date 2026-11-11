@@ -131,12 +131,19 @@ export default function Inventory() {
   const sheetRows = useMemo(() => {
     const parsed = parseSheetText(sheetText);
     const locByName = new Map((locations ?? []).map((l) => [l.name.trim().toLowerCase(), l]));
+    const areaByName = new Map((areas ?? []).map((area) => [area.name.trim().toLowerCase(), area]));
     return parsed.map((row) => {
       const location = locByName.get(row.locationName.trim().toLowerCase());
+      const area = areaByName.get(row.areaName.trim().toLowerCase());
       const productId = matchSheetProduct(products ?? [], row.productName);
-      return { ...row, locationId: location?._id ?? null, productId };
+      return {
+        ...row,
+        locationId: location?._id ?? null,
+        areaId: area?._id ?? null,
+        productId,
+      };
     });
-  }, [sheetText, locations, products]);
+  }, [sheetText, locations, areas, products]);
 
   if (inventories === undefined) {
     return (
@@ -304,14 +311,15 @@ export default function Inventory() {
     }
   };
 
-  const sheetValidRows = sheetRows.filter((r) => r.locationId && r.quantity > 0);
+  const sheetValidRows = sheetRows.filter((r) => r.locationId && r.areaId && r.quantity > 0);
   const sheetMatched = sheetRows.filter((r) => r.productId).length;
-  const sheetNew = sheetRows.filter((r) => !r.productId && r.locationId && r.quantity > 0).length;
+  const sheetNew = sheetRows.filter((r) => !r.productId && r.locationId && r.areaId && r.quantity > 0).length;
   const sheetUnknownLocations = sheetRows.filter((r) => !r.locationId).length;
+  const sheetUnknownAreas = sheetRows.filter((r) => !r.areaId).length;
 
   const handleImportSheet = async () => {
     if (sheetValidRows.length === 0) {
-      toast.error("Nenhuma linha válida (verifique local e quantidade)");
+      toast.error("Nenhuma linha válida (verifique área, local e quantidade)");
       return;
     }
     setImporting(true);
@@ -319,6 +327,7 @@ export default function Inventory() {
       const res = await importInitialSheet({
         rows: sheetValidRows.map((r) => ({
           locationId: r.locationId as any,
+          areaId: r.areaId as any,
           productName: r.productName,
           brand: r.brand || undefined,
           quantity: r.quantity,
@@ -850,14 +859,14 @@ export default function Inventory() {
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 Cole as linhas da planilha (separadas por <code>;</code> ou <code>,</code>). Colunas:
-                <strong> Localização; Produto; Marca; Quantidade; Unidade; Observação</strong>.
-                Produtos existentes são associados pelo nome — novos produtos são cadastrados automaticamente (categoria "Diversos").
+                <strong> Localização; Produto; Marca; Quantidade; Unidade; Área; Observação</strong>.
+                Informe uma área cadastrada em cada linha. Produtos existentes são associados pelo nome — novos produtos são cadastrados automaticamente (categoria "Diversos").
               </p>
               <Textarea
                 value={sheetText}
                 onChange={(e) => setSheetText(e.target.value)}
                 rows={8}
-                placeholder={"Localização; Produto; Marca; Quantidade; Unidade; Observação\nArmário TI 01; Cabo HDMI; Exbom; 8; un; Caixa original\nArmário TI 02; Mouse óptico; Multilaser; 5; un;"}
+                placeholder={"Localização; Produto; Marca; Quantidade; Unidade; Área; Observação\nArmário TI 01; Cabo HDMI; Exbom; 8; un; TI Geral; Caixa original\nArmário TI 02; Toner; Xerox; 1; un; Impressoras;"}
                 className="font-mono text-xs"
               />
               {sheetText.trim() && (
@@ -870,11 +879,15 @@ export default function Inventory() {
                     {sheetUnknownLocations > 0 && (
                       <Badge variant="destructive">{sheetUnknownLocations} com local não reconhecido</Badge>
                     )}
+                    {sheetUnknownAreas > 0 && (
+                      <Badge variant="destructive">{sheetUnknownAreas} sem área reconhecida</Badge>
+                    )}
                   </div>
                   <div className="overflow-x-auto max-h-48 overflow-y-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
+                          <TableHead className="text-xs">Área</TableHead>
                           <TableHead className="text-xs">Local</TableHead>
                           <TableHead className="text-xs">Produto</TableHead>
                           <TableHead className="text-xs">Qtd</TableHead>
@@ -884,12 +897,15 @@ export default function Inventory() {
                       <TableBody>
                         {sheetRows.map((r, i) => (
                           <TableRow key={i}>
+                            <TableCell className="text-xs">{r.areaName || "—"}</TableCell>
                             <TableCell className="text-xs">{r.locationName || "—"}</TableCell>
                             <TableCell className="text-xs">{r.productName}</TableCell>
                             <TableCell className="text-xs font-mono">{r.quantity}</TableCell>
                             <TableCell>
                               {!r.locationId ? (
                                 <Badge variant="destructive" className="text-[10px]">Local não reconhecido</Badge>
+                              ) : !r.areaId ? (
+                                <Badge variant="destructive" className="text-[10px]">Área não reconhecida</Badge>
                               ) : r.productId ? (
                                 <Badge variant="secondary" className="text-[10px]">Existente</Badge>
                               ) : (
