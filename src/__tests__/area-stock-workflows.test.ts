@@ -155,6 +155,9 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(regularization).toContain("Quantidade inválida no item/lote");
     expect(regularization).toContain("Reserva ativa não corresponde à área/local/lote");
     expect(regularization).toContain("Foram resolvidos ");
+    expect(regularization).toContain("Os totais documentais das entradas mudaram");
+    expect(regularization).toContain("A distribuição documental da entrada inicial entre os dois armários");
+    expect(regularization).toContain("EXPECTED_AREA_IDS");
     expect(regularization.match(/^  \"[^\"]+\": \"(?:TI Geral|Impressoras)\"[,]?$/gm)?.length).toBe(53);
     const apply = mutationBlock(regularization, "applyAuditedInitialStockRegularization");
     expect(apply).not.toContain("physicalQuantity:");
