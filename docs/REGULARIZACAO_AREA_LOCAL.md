@@ -89,7 +89,8 @@ O plano confere:
 - os 10 metadados de unidade autorizados;
 - saldo global contra lotes ativos;
 - saldo por produto/local contra a distribuição por área;
- - movimentações com lote único ou trilha completa em `stockMovementLots`, validando a soma das quantidades vinculadas;
+- movimentações com lote único ou trilha completa em `stockMovementLots`, validando a soma das quantidades vinculadas;
+- transferências históricas sem `stockMovementLots` são resolvidas apenas quando o vínculo `stockTransfers` → `stockTransferLots` coincide de forma única com produto, quantidade, origem, destino e instante da movimentação;
 - devoluções vinculadas à saída original e ao lote exato; devolução de saída multi-lote sem lote individual bloqueia a prévia;
 - reservas globais, reservas por lote (`requestItemReservations`) e solicitações aprovadas ainda não entregues.
 
