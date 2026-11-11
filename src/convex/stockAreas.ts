@@ -236,6 +236,14 @@ export const classifyLot = mutation({
     )) {
       throw new Error("Há movimentação histórica com área/local divergente deste lote. Regularize a trilha documental antes de classificar.");
     }
+    const movementLotLinks = await ctx.db.query("stockMovementLots")
+      .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+    if (movementLotLinks.some((link: any) =>
+      (link.areaId && link.areaId !== args.areaId) ||
+      (link.locationId && link.locationId !== args.locationId)
+    )) {
+      throw new Error("Há vínculo de movimentação por lote com área/local divergente. Regularize a trilha antes de classificar.");
+    }
 
     const productStock = await ctx.db.query("stock")
       .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).first();
@@ -303,6 +311,46 @@ export const classifyLot = mutation({
         await ctx.db.patch(movement._id, {
           areaId: args.areaId,
           locationId: args.locationId,
+        });
+      }
+    }
+    for (const link of movementLotLinks) {
+      if (link.areaId !== args.areaId || link.locationId !== args.locationId) {
+        await ctx.db.patch(link._id, {
+          areaId: args.areaId,
+          locationId: args.locationId,
+        });
+      }
+    }
+
+    // Movimentos multi-lote não têm um único lotId. Só recebem área/local
+    // quando TODOS os lotes vinculados já concordam com a mesma combinação.
+    const relatedMovementIds = [...new Set(movementLotLinks.map((link: any) => link.movementId as string))];
+    for (const movementId of relatedMovementIds) {
+      const allLinks = await ctx.db.query("stockMovementLots")
+        .withIndex("by_movement", (q: any) => q.eq("movementId", movementId as any)).collect();
+      const linkedPairs: Array<{ areaId: string; locationId: string }> = [];
+      for (const link of allLinks) {
+        const linkedLot: any = link.lotId === lot._id ? lot : await ctx.db.get(link.lotId);
+        if (!linkedLot?.areaId || !linkedLot?.locationId) continue;
+        linkedPairs.push({ areaId: linkedLot._id === lot._id ? args.areaId as string : linkedLot.areaId as string,
+          locationId: linkedLot._id === lot._id ? args.locationId as string : linkedLot.locationId as string });
+      }
+      if (linkedPairs.length !== allLinks.length || linkedPairs.length === 0) continue;
+      const common = linkedPairs[0];
+      if (linkedPairs.some((pair) => pair.areaId !== common.areaId || pair.locationId !== common.locationId)) continue;
+      const movement: any = await ctx.db.get(movementId as any);
+      if (!movement) continue;
+      if (
+        (movement.areaId && movement.areaId !== common.areaId) ||
+        (movement.locationId && movement.locationId !== common.locationId)
+      ) {
+        throw new Error("A movimentação multi-lote possui área/local divergente dos lotes vinculados.");
+      }
+      if (movement.areaId !== common.areaId || movement.locationId !== common.locationId) {
+        await ctx.db.patch(movement._id, {
+          areaId: common.areaId as any,
+          locationId: common.locationId as any,
         });
       }
     }
