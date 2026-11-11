@@ -269,7 +269,7 @@ export default function WaterPage() {
                       <input type="checkbox" disabled={!person.active} checked={checkedParticipantIds.has(person._id)} onChange={(event) => {
                         const next = new Set(checkedParticipantIds);
                         if (event.target.checked) next.add(person._id); else next.delete(person._id);
-                        void runAction("Participantes do período atualizados", () => setPeriodParticipants({ periodId: activePeriodId as any, participantIds: [...next] }));
+                        void runAction("Participantes do período atualizados", () => setPeriodParticipants({ periodId: activePeriodId as any, participantIds: [...next] as any }));
                       }} />
                       {person.name}
                     </label>)}
