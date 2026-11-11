@@ -415,27 +415,19 @@ export const confirm = mutation({
       );
     }
 
-    if (!entry.areaId) {
-      for (const item of items) {
-        if (!item.locationId) continue;
-        const location = await ctx.db.get(item.locationId);
-        if (location?.areaId) {
-          throw new Error(`O local "${location.name}" pertence a uma área. Classifique a entrada com essa área antes de confirmar.`);
-        }
-      }
+    const selectedArea = entry.areaId ? await ctx.db.get(entry.areaId) : null;
+    if (entry.areaId && (!selectedArea || !selectedArea.active)) {
+      throw new Error("A área/subestoque da entrada não existe ou está inativa.");
     }
-    if (entry.areaId) {
-      const selectedArea = await ctx.db.get(entry.areaId);
-      if (!selectedArea || !selectedArea.active) throw new Error("A área/subestoque da entrada não existe ou está inativa.");
-      for (const item of items) {
-        if (!item.locationId) {
-          const product = await ctx.db.get(item.productId);
-          throw new Error(`Selecione o local físico para "${product?.name ?? "o item"}" antes de confirmar esta entrada.`);
-        }
+    for (const item of items) {
+      if (entry.areaId && !item.locationId) {
+        const product = await ctx.db.get(item.productId);
+        throw new Error(`Selecione o local físico para "${product?.name ?? "o item"}" antes de confirmar esta entrada.`);
+      }
+      if (item.locationId) {
         const location = await ctx.db.get(item.locationId);
-        if (!location || !location.active) throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
-        if (location.areaId !== entry.areaId) {
-          throw new Error(`O local "${location.name}" não pertence à área "${selectedArea.name}".`);
+        if (!location || !location.active) {
+          throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
         }
       }
     }
