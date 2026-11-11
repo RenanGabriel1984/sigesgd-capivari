@@ -46,23 +46,26 @@ export default function StockTransfersPage() {
   const transfers = useQuery(api.stockTransfers.list);
   const products = useQuery(api.products.listActive);
   const locations = useQuery(api.storageLocations.listActive);
+  const areas = useQuery(api.stockAreas.listActive);
   const createTransfer = useMutation(api.stockTransfers.create);
 
   const [showNew, setShowNew] = useState(false);
   const [productId, setProductId] = useState("");
+  const [fromAreaId, setFromAreaId] = useState("");
   const [fromLocationId, setFromLocationId] = useState("");
+  const [toAreaId, setToAreaId] = useState("");
   const [toLocationId, setToLocationId] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [observation, setObservation] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    if (!productId || !fromLocationId || !toLocationId) {
-      toast.error("Selecione o produto, local de origem e destino");
+    if (!productId || !fromAreaId || !fromLocationId || !toAreaId || !toLocationId) {
+      toast.error("Selecione o produto, área e local físico de origem e destino");
       return;
     }
-    if (fromLocationId === toLocationId) {
-      toast.error("Origem e destino não podem ser o mesmo local");
+    if (fromLocationId === toLocationId && fromAreaId === toAreaId) {
+      toast.error("Origem e destino não podem ser a mesma combinação de área e local");
       return;
     }
     if (quantity <= 0) {
@@ -76,6 +79,8 @@ export default function StockTransfersPage() {
         productId: productId as any,
         fromLocationId: fromLocationId as any,
         toLocationId: toLocationId as any,
+        fromAreaId: fromAreaId as any,
+        toAreaId: toAreaId as any,
         quantity,
         observation: observation || undefined,
       });
@@ -91,7 +96,9 @@ export default function StockTransfersPage() {
 
   const resetForm = () => {
     setProductId("");
+    setFromAreaId("");
     setFromLocationId("");
+    setToAreaId("");
     setToLocationId("");
     setQuantity(1);
     setObservation("");
@@ -104,7 +111,7 @@ export default function StockTransfersPage() {
           <div>
             <h1 className="text-2xl tracking-tight font-bold">Transferências</h1>
             <p className="text-sm text-muted-foreground">
-              Transfere estoque entre locais físicos.
+              Transfere estoque entre áreas/subestoques e locais físicos, que são dimensões independentes.
             </p>
           </div>
           {(user?.role === "admin" || user?.role === "stock_manager") && (
@@ -199,36 +206,56 @@ export default function StockTransfersPage() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Local de Origem</Label>
-                  <select
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    value={fromLocationId}
-                    onChange={(e) => setFromLocationId(e.target.value)}
-                  >
-                    <option value="">Origem...</option>
-                    {(locations ?? []).map((l: any) => (
-                      <option key={l._id} value={l._id}>
-                        {l.area?.name ? `${l.area.name} / ` : "Sem área / "}{l.name}
-                      </option>
-                    ))}
-                  </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2 rounded-md border p-3">
+                  <p className="text-sm font-medium">Origem</p>
+                  <div>
+                    <Label>Área / Subestoque</Label>
+                    <select
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={fromAreaId}
+                      onChange={(e) => setFromAreaId(e.target.value)}
+                    >
+                      <option value="">Selecione a área...</option>
+                      {(areas ?? []).map((a: any) => <option key={a._id} value={a._id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Local físico</Label>
+                    <select
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={fromLocationId}
+                      onChange={(e) => setFromLocationId(e.target.value)}
+                    >
+                      <option value="">Selecione o local...</option>
+                      {(locations ?? []).map((l: any) => <option key={l._id} value={l._id}>{l.name}</option>)}
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <Label>Local de Destino</Label>
-                  <select
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    value={toLocationId}
-                    onChange={(e) => setToLocationId(e.target.value)}
-                  >
-                    <option value="">Destino...</option>
-                    {(locations ?? []).map((l: any) => (
-                      <option key={l._id} value={l._id}>
-                        {l.area?.name ? `${l.area.name} / ` : "Sem área / "}{l.name}
-                      </option>
-                    ))}
-                  </select>
+                <div className="space-y-2 rounded-md border p-3">
+                  <p className="text-sm font-medium">Destino</p>
+                  <div>
+                    <Label>Área / Subestoque</Label>
+                    <select
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={toAreaId}
+                      onChange={(e) => setToAreaId(e.target.value)}
+                    >
+                      <option value="">Selecione a área...</option>
+                      {(areas ?? []).map((a: any) => <option key={a._id} value={a._id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Local físico</Label>
+                    <select
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={toLocationId}
+                      onChange={(e) => setToLocationId(e.target.value)}
+                    >
+                      <option value="">Selecione o local...</option>
+                      {(locations ?? []).map((l: any) => <option key={l._id} value={l._id}>{l.name}</option>)}
+                    </select>
+                  </div>
                 </div>
               </div>
 
