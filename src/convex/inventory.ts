@@ -36,13 +36,14 @@ async function decorateInventory(ctx: any, inv: any) {
   const responsible = await ctx.db.get(inv.responsibleUserId);
   const closedBy = inv.closedByUserId ? await ctx.db.get(inv.closedByUserId) : null;
   const location = inv.locationId ? await ctx.db.get(inv.locationId) : null;
+  const area = inv.areaId ? await ctx.db.get(inv.areaId) : null;
   const category = inv.categoryId ? await ctx.db.get(inv.categoryId) : null;
   const counts = await ctx.db.query("inventoryCounts").withIndex("by_inventory", (q: any) => q.eq("inventoryId", inv._id)).collect();
   const countsWithProduct = await Promise.all(counts.map(async (c: any) => {
     const product = await ctx.db.get(c.productId);
     return { ...c, product };
   }));
-  return { ...inv, responsible, closedBy, location, category, counts: countsWithProduct };
+  return { ...inv, responsible, closedBy, location, area, category, counts: countsWithProduct };
 }
 
 export const list = query({
@@ -259,6 +260,9 @@ export const close = mutation({
     const inv = await ctx.db.get(args.inventoryId);
     if (!inv) throw new Error("Inventário não encontrado");
     if (inv.status !== "review") throw new Error("Inventário deve estar em revisão para ser fechado");
+    if (inv.locationId && !inv.areaId) {
+      throw new Error("Este inventário foi criado antes do escopo por área. Cancele-o e abra outro selecionando área e local físico.");
+    }
 
     const counts = await ctx.db.query("inventoryCounts").withIndex("by_inventory", (q: any) => q.eq("inventoryId", args.inventoryId)).collect();
     const countsWithDiff = counts.filter((c) => c.difference !== null && c.difference !== undefined && c.difference !== 0);
@@ -278,14 +282,9 @@ export const close = mutation({
       let newPhysical: number;
 
       if (inv.locationId) {
-        // Inventário por local exige a área registrada no cabeçalho. Inventários
-        // legados sem área não podem ajustar um bucket ambíguo.
-        if (!inv.areaId) {
-          throw new Error("Este inventário foi criado antes do escopo por área. Cancele-o e abra outro selecionando área e local físico.");
-        }
+        // O bucket é identificado por produto + área + local físico.
         const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
         const matchingRows = sbls.filter((s: any) => s.locationId === inv.locationId && s.areaId === inv.areaId);
-        const currentAreaQuantity = matchingRows.reduce((sum: number, row: any) => sum + row.quantity, 0);
         const reservations = await ctx.db.query("requestItemReservations")
           .withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
         const reservedInScope = reservations
