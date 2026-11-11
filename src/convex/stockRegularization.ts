@@ -442,6 +442,17 @@ async function buildRegularizationPlan(ctx: any) {
     current.push(link);
     linksByMovement.set(key, current);
   }
+  // Movimentações antigas de transferência não tinham stockMovementLots.
+  // Recupera a origem pelo vínculo histórico stockTransfers → stockTransferLots.
+  const transfers: any[] = await ctx.db.query("stockTransfers").collect();
+  const transferLots: any[] = await ctx.db.query("stockTransferLots").collect();
+  const transferLotsByTransfer = new Map<string, any[]>();
+  for (const link of transferLots) {
+    const key = String(link.transferId);
+    const current = transferLotsByTransfer.get(key) ?? [];
+    current.push(link);
+    transferLotsByTransfer.set(key, current);
+  }
 
   for (const movement of movements) {
     if (!allTouchedProductIds.has(movement.productId as string)) continue;
@@ -460,6 +471,43 @@ async function buildRegularizationPlan(ctx: any) {
           continue;
         }
         sources.push({ lot, link });
+      }
+    } else if (movement.type === "transfer") {
+      const matches = transfers.filter((transfer: any) =>
+        transfer.productId === movement.productId &&
+        Number(transfer.quantity) === Number(movement.quantity) &&
+        transfer.fromLocationId === movement.locationId &&
+        transfer.toLocationId === movement.toLocationId &&
+        (transfer.fromAreaId ?? undefined) === (movement.areaId ?? undefined) &&
+        (transfer.toAreaId ?? undefined) === (movement.toAreaId ?? undefined) &&
+        transfer.createdAt === movement.timestamp
+      );
+      if (matches.length !== 1) {
+        addBlocker(`Transferência histórica da movimentação ${movement._id} não pôde ser identificada de forma única.`);
+        continue;
+      }
+      const transfer = matches[0];
+      const transferLinks = transferLotsByTransfer.get(String(transfer._id)) ?? [];
+      if (transferLinks.length > 0) {
+        const linkedQuantity = transferLinks.reduce((sum: number, link: any) => sum + Number(link.quantity), 0);
+        if (Math.abs(linkedQuantity - Number(movement.quantity)) > 1e-9) {
+          addBlocker(`Transferência ${transfer._id}: soma dos lotes de origem diverge da movimentação.`);
+        }
+        for (const link of transferLinks) {
+          const lot = resolveLot(link.sourceLotId, lotById, lotByNumber, movement.productId as string);
+          if (!lot || lot.productId !== movement.productId) {
+            addBlocker(`Transferência ${transfer._id} possui lote de origem ausente ou de outro produto.`);
+            continue;
+          }
+          sources.push({ lot });
+        }
+      } else {
+        const lot = resolveLot(transfer.lotId, lotById, lotByNumber, movement.productId as string);
+        if (!lot || lot.productId !== movement.productId) {
+          addBlocker(`Transferência ${transfer._id} não possui vínculo verificável com lote de origem.`);
+          continue;
+        }
+        sources.push({ lot });
       }
     } else {
       const lot = resolveLot(movement.lotId, lotById, lotByNumber, movement.productId as string);
