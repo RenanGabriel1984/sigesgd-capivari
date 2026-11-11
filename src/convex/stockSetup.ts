@@ -28,14 +28,19 @@ async function requireAdmin(ctx: any) {
 /**
  * Generate lot number: LOT-YYYY-NNNNNN
  */
-async function generateLotNumber(ctx: any, productId: string): Promise<string> {
+async function generateLotNumber(ctx: any, _productId: string): Promise<string> {
   const year = new Date().getFullYear();
+  const prefix = `LOT-${year}-`;
   const existingLots = await ctx.db
     .query("lots")
-    .withIndex("by_product", (q: any) => q.eq("productId", productId))
+    .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix))
     .collect();
-  const seq = existingLots.length + 1;
-  return `LOT-${year}-${String(seq).padStart(6, "0")}`;
+  const maxSequence = existingLots.reduce((max: number, lot: any) => {
+    if (!lot.lotNumber?.startsWith(prefix)) return max;
+    const sequence = Number(lot.lotNumber.slice(prefix.length));
+    return Number.isSafeInteger(sequence) && sequence > max ? sequence : max;
+  }, 0);
+  return `${prefix}${String(maxSequence + 1).padStart(6, "0")}`;
 }
 
 /**
