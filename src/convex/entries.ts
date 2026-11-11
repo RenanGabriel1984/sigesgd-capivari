@@ -415,29 +415,21 @@ export const confirm = mutation({
       );
     }
 
-    if (!entry.areaId) {
-      for (const item of items) {
-        if (!item.locationId) continue;
-        const location = await ctx.db.get(item.locationId);
-        if (location?.areaId) {
-          throw new Error(`O local "${location.name}" pertence a uma área. Classifique a entrada com essa área antes de confirmar.`);
-        }
+    const areaByEntryItem = new Map<string, string | undefined>();
+    for (const item of items) {
+      if (!item.locationId) {
+        const product = await ctx.db.get(item.productId);
+        throw new Error(`Selecione o local físico para "${product?.name ?? "o item"}" antes de confirmar esta entrada.`);
       }
-    }
-    if (entry.areaId) {
-      const selectedArea = await ctx.db.get(entry.areaId);
-      if (!selectedArea || !selectedArea.active) throw new Error("A área/subestoque da entrada não existe ou está inativa.");
-      for (const item of items) {
-        if (!item.locationId) {
-          const product = await ctx.db.get(item.productId);
-          throw new Error(`Selecione o local físico para "${product?.name ?? "o item"}" antes de confirmar esta entrada.`);
-        }
-        const location = await ctx.db.get(item.locationId);
-        if (!location || !location.active) throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
-        if (location.areaId !== entry.areaId) {
-          throw new Error(`O local "${location.name}" não pertence à área "${selectedArea.name}".`);
-        }
+      const location = await ctx.db.get(item.locationId);
+      if (!location || !location.active) throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
+      const itemAreaId = item.areaId ?? entry.areaId;
+      if (itemAreaId) {
+        const area = await ctx.db.get(itemAreaId);
+        if (!area || !area.active) throw new Error("A área/subestoque do item não existe ou está inativa.");
       }
+      // Área e local são dimensões independentes: não consultar location.areaId.
+      areaByEntryItem.set(item._id as string, itemAreaId);
     }
     const now = Date.now();
     const confirmedItemDetails: string[] = [];
@@ -469,7 +461,7 @@ export const confirm = mutation({
         active: true,
         observation: item.observation,
         materialType: entry.materialType,
-        areaId: entry.areaId,
+        areaId: areaByEntryItem.get(item._id as string),
         locationId: item.locationId,
       });
 
@@ -496,14 +488,14 @@ export const confirm = mutation({
         const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
         const sbl = sblList.find((s: any) =>
           s.locationId === item.locationId &&
-          (s.areaId ?? undefined) === (entry.areaId ?? undefined)
+          (s.areaId ?? undefined) === (areaByEntryItem.get(item._id as string) ?? undefined)
         );
         if (sbl) {
           await ctx.db.patch(sbl._id, { quantity: sbl.quantity + item.quantity });
         } else {
           await ctx.db.insert("stockByLocation", {
             productId: item.productId, locationId: item.locationId,
-            quantity: item.quantity, areaId: entry.areaId,
+            quantity: item.quantity, areaId: areaByEntryItem.get(item._id as string),
           });
         }
       }
@@ -520,7 +512,7 @@ export const confirm = mutation({
         userId,
         entryId: args.entryId,
         lotId: lotNumber,
-        areaId: entry.areaId,
+        areaId: areaByEntryItem.get(item._id as string),
         locationId: item.locationId,
         documentNumber: entry.invoiceNumber,
         observation: `Entrada ${entry.entryNumber} — Lote ${lotNumber}`,
