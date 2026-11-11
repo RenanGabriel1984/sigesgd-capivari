@@ -415,7 +415,7 @@ export default function ReturnsPage() {
                       {selectedExit.area?.name ?? "Área de origem"} / {selectedExit.location?.name ?? "Local físico de origem"}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      A devolução retorna ao mesmo subestoque e local da saída. Para mudar o local depois, utilize Transferências.
+                      A devolução retorna ao mesmo subestoque e local físico da saída. Para mudar o destino depois, utilize Transferências.
                     </p>
                   </div>
                 ) : (
@@ -427,9 +427,9 @@ export default function ReturnsPage() {
                       onChange={(e) => setLocationId(e.target.value)}
                     >
                       <option value="">Sem alteração de local</option>
-                      {(locations ?? []).filter((l: any) => !l.areaId).map((l: any) => (
+                      {(locations ?? []).filter((l: any) => l.active).map((l: any) => (
                         <option key={l._id} value={l._id}>
-                          {l.name} — sem área classificada
+                          {l.name}
                         </option>
                       ))}
                     </select>
