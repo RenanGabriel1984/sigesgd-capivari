@@ -627,6 +627,8 @@ const schema = defineSchema(
       materialType: v.optional(materialTypeValidator),
       areaId: v.optional(v.id("stockAreas")),
       locationId: v.optional(v.id("storageLocations")),
+      // Origem do lote quando uma embalagem fechada é reclassificada em unidades avulsas.
+      reclassifiedFromLotId: v.optional(v.id("lots")),
     }).index("by_product", ["productId"])
       .index("by_entry", ["entryId"])
       .index("by_location", ["locationId"])
