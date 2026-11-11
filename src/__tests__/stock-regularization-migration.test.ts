@@ -29,7 +29,7 @@ describe("regularização histórica de área/local", () => {
     expect(migration).toContain('ctx.db.query("requestItemReservations")');
     expect(migration).toContain('ctx.db.query("stockMovementLots")');
     expect(migration).toContain("movementLotPatches");
-    expect(migration).toContain("Informe/vincule o lote exato consumido pela saída original.");
+    expect(migration).toContain("informe/vincule o lote exato consumido pela saída original.");
   });
 
   it("preserva saldos globais, lotes e quantidades das movimentações", () => {
