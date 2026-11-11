@@ -1,4 +1,4 @@
-name: SIGESGD — qualidade das correções de estoque
+name: SIGESGD — testes e build sem publicação
 
 on:
   push:
@@ -34,9 +34,6 @@ jobs:
 
       - name: Instalar dependências
         run: bun install --frozen-lockfile
-
-      - name: Gerar tipos Convex localmente
-        run: bunx convex codegen
 
       - name: Executar testes Vitest
         run: bunx vitest run
