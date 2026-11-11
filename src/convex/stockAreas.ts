@@ -222,6 +222,20 @@ export const classifyLot = mutation({
     if (sourceLocationId !== args.locationId) {
       throw new Error("O local registrado para este lote difere do local selecionado. Faça uma transferência física auditável antes da classificação.");
     }
+    if (linkedEntryItem?.areaId && linkedEntryItem.areaId !== args.areaId) {
+      throw new Error("O item da entrada já possui outra área registrada. Confira a origem documental antes de reclassificar o lote.");
+    }
+
+    const lotMovements = (await ctx.db.query("stockMovements")
+      .withIndex("by_product", (q: any) => q.eq("productId", lot.productId))
+      .collect())
+      .filter((movement: any) => movement.lotId === lot._id || movement.lotId === lot.lotNumber);
+    if (lotMovements.some((movement: any) =>
+      (movement.areaId && movement.areaId !== args.areaId) ||
+      (movement.locationId && movement.locationId !== args.locationId)
+    )) {
+      throw new Error("Há movimentação histórica com área/local divergente deste lote. Regularize a trilha documental antes de classificar.");
+    }
 
     const productStock = await ctx.db.query("stock")
       .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).first();
@@ -281,12 +295,23 @@ export const classifyLot = mutation({
     }
 
     await ctx.db.patch(lot._id, { areaId: args.areaId, locationId: args.locationId });
+    if (linkedEntryItem && linkedEntryItem.areaId !== args.areaId) {
+      await ctx.db.patch(linkedEntryItem._id, { areaId: args.areaId });
+    }
+    for (const movement of lotMovements) {
+      if (movement.areaId !== args.areaId || movement.locationId !== args.locationId) {
+        await ctx.db.patch(movement._id, {
+          areaId: args.areaId,
+          locationId: args.locationId,
+        });
+      }
+    }
     await ctx.db.insert("auditLogs", {
       userId,
       action: "update",
       entity: "lots",
       entityId: lot._id,
-      details: `Classificação manual do lote ${lot.lotNumber}: ${lot.quantityAvailable} unidade(s) → ${area.name} / ${location.name}. Saldo global inalterado.`,
+      details: `Classificação manual do lote ${lot.lotNumber}: ${lot.quantityAvailable} unidade(s) → ${area.name} / ${location.name}. Item de entrada e ${lotMovements.length} movimentação(ões) vinculados; saldo global inalterado.`,
       timestamp: Date.now(),
     });
     return lot._id;
