@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { verifyPassword } from "./auth/passwords";
 import { generateExitNumber } from "./stockHelpers";
 import { requirePermission, requireRequestAction } from "./rbac";
+import type { Id } from "./_generated/dataModel";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { planFifoAreaLotAllocation } from "../lib/area-stock";
@@ -33,7 +34,7 @@ async function enrichRequest(ctx: any, r: any) {
     .collect();
   const itemsWithProduct = await Promise.all(
     items.map(async (item: any) => {
-      const product = await ctx.db.get(item.productId);
+      const product = await ctx.db.get(item.productId as Id<"products">);
       const printer = item.targetPrinterId ? await ctx.db.get(item.targetPrinterId) : null;
       const area = item.areaId ? await ctx.db.get(item.areaId) : null;
       const sourceLocation = item.sourceLocationId ? await ctx.db.get(item.sourceLocationId) : null;
@@ -573,14 +574,14 @@ export const deliver = mutation({
         const reservations = await ctx.db.query("requestItemReservations")
           .withIndex("by_requestItem", (q: any) => q.eq("requestItemId", input.itemId)).collect();
         const rows = await Promise.all(reservations.map(async (reservation: any) => ({
-          reservation, lot: await ctx.db.get(reservation.lotId),
+          reservation, lot: await ctx.db.get(reservation.lotId as Id<"lots">),
         })));
         rows.sort((a: any,b: any)=>(a.lot?.receivedAt??0)-(b.lot?.receivedAt??0) ||
           (a.lot?.lotNumber??"").localeCompare(b.lot?.lotNumber??""));
         for (const row of rows) {
           if (remaining <= 0) break;
-          const reservation = await ctx.db.get(row.reservation._id);
-          const lot = await ctx.db.get(row.reservation.lotId);
+          const reservation = await ctx.db.get(row.reservation._id as Id<"requestItemReservations">);
+          const lot = await ctx.db.get(row.reservation.lotId as Id<"lots">);
           if (!reservation || !lot) throw new Error("Lote/reserva desapareceu durante a entrega.");
           const consume = Math.min(reservation.quantityRemaining, remaining);
           if (consume <= 0) continue;
