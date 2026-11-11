@@ -87,6 +87,8 @@ export default function Inventory() {
 
   // Implantação inicial
   const [initialLocationId, setInitialLocationId] = useState("");
+  const [initialAreaId, setInitialAreaId] = useState("");
+  const [sheetDefaultAreaId, setSheetDefaultAreaId] = useState("");
   const [quantities, setQuantities] = useState<Record<string, string>>({});
 
   // Criação contextual de produto na implantação inicial
@@ -133,9 +135,21 @@ export default function Inventory() {
     return parsed.map((row) => {
       const location = locByName.get(row.locationName.trim().toLowerCase());
       const productId = matchSheetProduct(products ?? [], row.productName);
-      return { ...row, locationId: location?._id ?? null, productId };
+      const explicitArea = row.areaName
+        ? (stockAreas ?? []).find((area) => area.name.trim().toLowerCase() === row.areaName!.trim().toLowerCase())
+        : null;
+      const fallbackArea = !row.areaName && sheetDefaultAreaId
+        ? (stockAreas ?? []).find((area) => area._id === sheetDefaultAreaId)
+        : null;
+      return {
+        ...row,
+        locationId: location?._id ?? null,
+        productId,
+        areaId: (row.areaName ? explicitArea?._id : fallbackArea?._id) ?? null,
+        unknownAreaName: !!row.areaName && !explicitArea,
+      };
     });
-  }, [sheetText, locations, products]);
+  }, [sheetText, locations, products, stockAreas, sheetDefaultAreaId]);
 
   if (inventories === undefined) {
     return (
@@ -299,14 +313,19 @@ export default function Inventory() {
     }
   };
 
-  const sheetValidRows = sheetRows.filter((r) => r.locationId && r.quantity > 0);
+  const sheetValidRows = sheetRows.filter((r) => r.locationId && r.areaId && r.quantity > 0);
   const sheetMatched = sheetRows.filter((r) => r.productId).length;
   const sheetNew = sheetRows.filter((r) => !r.productId && r.locationId && r.quantity > 0).length;
   const sheetUnknownLocations = sheetRows.filter((r) => !r.locationId).length;
+  const sheetUnknownAreas = sheetRows.filter((r) => r.unknownAreaName || (!r.areaId && r.quantity > 0)).length;
 
   const handleImportSheet = async () => {
+    if (sheetUnknownAreas > 0 || sheetUnknownLocations > 0) {
+      toast.error("Corrija as áreas e os locais pendentes na planilha antes de importar.");
+      return;
+    }
     if (sheetValidRows.length === 0) {
-      toast.error("Nenhuma linha válida (verifique local e quantidade)");
+      toast.error("Nenhuma linha válida (verifique área, local e quantidade)");
       return;
     }
     setImporting(true);
@@ -314,6 +333,7 @@ export default function Inventory() {
       const res = await importInitialSheet({
         rows: sheetValidRows.map((r) => ({
           locationId: r.locationId as any,
+          areaId: r.areaId as any,
           productName: r.productName,
           brand: r.brand || undefined,
           quantity: r.quantity,
@@ -335,9 +355,10 @@ export default function Inventory() {
 
   const handleConfirmInitialLoad = async () => {
     if (!initialLocationId) { toast.error("Selecione o local de armazenamento"); return; }
+    if (!initialAreaId) { toast.error("Selecione a área/subestoque dos itens carregados"); return; }
     const items = Object.entries(quantities)
       .filter(([, q]) => Number(q) > 0)
-      .map(([productId, q]) => ({ productId: productId as any, locationId: initialLocationId as any, quantity: Number(q) }));
+      .map(([productId, q]) => ({ productId: productId as any, locationId: initialLocationId as any, areaId: initialAreaId as any, quantity: Number(q) }));
     if (items.length === 0) { toast.error("Informe ao menos uma quantidade"); return; }
     setLoadingInitial(true);
     try {
@@ -582,6 +603,17 @@ export default function Inventory() {
                         <SelectContent>
                           {locations?.map((l) => (
                             <SelectItem key={l._id} value={l._id}>{l.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-full sm:max-w-xs">
+                      <Label className="text-xs">Área / Subestoque *</Label>
+                      <Select value={initialAreaId} onValueChange={setInitialAreaId}>
+                        <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione a área" /></SelectTrigger>
+                        <SelectContent>
+                          {(stockAreas ?? []).map((area) => (
+                            <SelectItem key={area._id} value={area._id}>{area.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -832,9 +864,20 @@ export default function Inventory() {
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
                 Cole as linhas da planilha (separadas por <code>;</code> ou <code>,</code>). Colunas:
-                <strong> Localização; Produto; Marca; Quantidade; Unidade; Observação</strong>.
+                <strong> Localização; Produto; Marca; Quantidade; Unidade; Área; Observação</strong>.
+                A coluna Área é opcional quando você escolher uma área padrão abaixo; o formato antigo continua aceito.
                 Produtos existentes são associados pelo nome — novos produtos são cadastrados automaticamente (categoria "Diversos").
               </p>
+              <div>
+                <Label>Área padrão para linhas sem área informada</Label>
+                <Select value={sheetDefaultAreaId || "none"} onValueChange={(value) => setSheetDefaultAreaId(value === "none" ? "" : value)}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione a área padrão" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Não aplicar padrão</SelectItem>
+                    {(stockAreas ?? []).map((area) => <SelectItem key={area._id} value={area._id}>{area.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
               <Textarea
                 value={sheetText}
                 onChange={(e) => setSheetText(e.target.value)}
@@ -852,12 +895,16 @@ export default function Inventory() {
                     {sheetUnknownLocations > 0 && (
                       <Badge variant="destructive">{sheetUnknownLocations} com local não reconhecido</Badge>
                     )}
+                    {sheetUnknownAreas > 0 && (
+                      <Badge variant="destructive">{sheetUnknownAreas} com área pendente ou não reconhecida</Badge>
+                    )}
                   </div>
                   <div className="overflow-x-auto max-h-48 overflow-y-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead className="text-xs">Local</TableHead>
+                          <TableHead className="text-xs">Área</TableHead>
                           <TableHead className="text-xs">Produto</TableHead>
                           <TableHead className="text-xs">Qtd</TableHead>
                           <TableHead className="text-xs">Situação</TableHead>
@@ -867,11 +914,16 @@ export default function Inventory() {
                         {sheetRows.map((r, i) => (
                           <TableRow key={i}>
                             <TableCell className="text-xs">{r.locationName || "—"}</TableCell>
+                            <TableCell className="text-xs">{r.areaName || (r.areaId ? (stockAreas ?? []).find((area) => area._id === r.areaId)?.name : "—")}</TableCell>
                             <TableCell className="text-xs">{r.productName}</TableCell>
                             <TableCell className="text-xs font-mono">{r.quantity}</TableCell>
                             <TableCell>
                               {!r.locationId ? (
                                 <Badge variant="destructive" className="text-[10px]">Local não reconhecido</Badge>
+                              ) : r.unknownAreaName ? (
+                                <Badge variant="destructive" className="text-[10px]">Área não reconhecida</Badge>
+                              ) : !r.areaId ? (
+                                <Badge variant="destructive" className="text-[10px]">Área pendente</Badge>
                               ) : r.productId ? (
                                 <Badge variant="secondary" className="text-[10px]">Existente</Badge>
                               ) : (
@@ -888,7 +940,7 @@ export default function Inventory() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => { setSheetOpen(false); setSheetText(""); }}>Cancelar</Button>
-              <Button onClick={handleImportSheet} disabled={importing || sheetValidRows.length === 0}>
+              <Button onClick={handleImportSheet} disabled={importing || sheetValidRows.length === 0 || sheetUnknownAreas > 0 || sheetUnknownLocations > 0}>
                 {importing ? "Importando..." : `Confirmar importação (${sheetValidRows.length} linha(s))`}
               </Button>
             </DialogFooter>
