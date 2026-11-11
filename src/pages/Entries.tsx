@@ -630,8 +630,7 @@ function EntriesPage() {
       if (!row.productId) return true;
       if (!row.locationId) return !!areaId;
       const location = locationList.find((item) => item._id === row.locationId);
-      if (!location) return true;
-      return areaId ? location.areaId !== areaId : !!location.areaId;
+      return !location;
     });
     if (invalidIndex >= 0) {
       setDestinationOpen(false);
@@ -975,12 +974,12 @@ function EntriesPage() {
     }
     for (const item of withProduct) {
       const location = locationList.find((entry) => entry._id === item.locationId);
-      if (areaId && (!location || location.areaId !== areaId)) {
-        toast.error("Cada item precisa de um local físico pertencente à área escolhida.");
+      if (areaId && !location) {
+        toast.error("Cada item precisa de um local físico ativo quando a entrada possui área definida.");
         return;
       }
-      if (!areaId && location?.areaId) {
-        toast.error("O local selecionado pertence a uma área. Escolha essa área como destino da entrada.");
+      if (item.locationId && !location) {
+        toast.error("Um dos locais físicos selecionados não está mais disponível.");
         return;
       }
     }
@@ -1328,14 +1327,7 @@ function EntriesPage() {
               <Select value={areaId || "none"} onValueChange={(value) => {
                 const nextAreaId = value === "none" ? "" : value;
                 setAreaId(nextAreaId);
-                const allowedLocations = locationList.filter((location) =>
-                  nextAreaId ? location.areaId === nextAreaId : !location.areaId
-                );
-                setItems((current) => current.map((item) => ({
-                  ...item,
-                  locationId: allowedLocations.some((location) => location._id === item.locationId)
-                    ? item.locationId : "",
-                })));
+                // A área classifica o material; o local físico permanece independente.
               }}>
                 <SelectTrigger className="mt-1 h-10 w-full min-w-0 max-w-full">
                   <SelectValue placeholder="Selecionar área" />
@@ -1384,9 +1376,7 @@ function EntriesPage() {
             <NewEntryItemsEditor
               items={items}
               products={productOptions}
-              locations={locationList.filter((location) =>
-                areaId ? location.areaId === areaId : !location.areaId
-              )}
+              locations={locationList}
               locationRequired={!!areaId}
               onUpdateItem={handleManualItemUpdate}
               onAddItem={() => setItems((current) => [...current, emptyEntryItem()])}
