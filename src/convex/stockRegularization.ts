@@ -156,6 +156,12 @@ async function buildRegularizationPlan(ctx: any) {
         blockers.push("O vínculo item → lote não confere em " + entry.entryNumber + ".");
         continue;
       }
+      if (!Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0 ||
+          !Number.isFinite(Number(lot.quantityReceived)) || !Number.isFinite(Number(lot.quantityAvailable)) ||
+          Number(lot.quantityAvailable) < 0 || Number(lot.quantityAvailable) > Number(lot.quantityReceived)) {
+        blockers.push("Quantidade inválida no item/lote " + lot.lotNumber + ".");
+        continue;
+      }
       const product = await getProduct(item.productId);
       if (!product) {
         blockers.push("Produto não encontrado para o lote " + lot.lotNumber + ".");
@@ -352,12 +358,30 @@ async function buildRegularizationPlan(ctx: any) {
     if (!requestCache.has(requestId)) requestCache.set(requestId, await ctx.db.get(item.requestId));
     const request = requestCache.get(requestId);
     if (!request) throw new Error("Reserva aponta para solicitação inexistente.");
-    if (reservation.quantityRemaining > 0 && request.status !== "approved") {
+    if (String(item.productId) !== String(reservation.productId)) {
+      throw new Error("A reserva e o item de solicitação apontam para produtos diferentes.");
+    }
+    const remaining = Number(reservation.quantityRemaining);
+    if (!Number.isFinite(remaining) || remaining < 0) {
+      throw new Error("Reserva contém quantidade restante inválida.");
+    }
+    if (remaining > 0 && request.status !== "approved") {
       throw new Error("Existe reserva restante vinculada a solicitação que não está aprovada.");
     }
-    reservationByItem.set(itemId, (reservationByItem.get(itemId) ?? 0) + Number(reservation.quantityRemaining));
+    if (remaining > 0) {
+      const reservedLot = lotById.get(String(reservation.lotId));
+      const resolvedLot = reservedLot ? targetLots.get(reservedLot._id as string) : null;
+      const reservedAreaId = resolvedLot?.areaId ?? reservedLot?.lot.areaId;
+      const reservedLocationId = resolvedLot?.locationId ?? resolvedLot?.lot.locationId;
+      if (!reservedLot || reservedLot.productId !== item.productId ||
+          reservedAreaId !== item.areaId || reservedLocationId !== item.sourceLocationId ||
+          reservation.areaId !== item.areaId || reservation.locationId !== item.sourceLocationId) {
+        throw new Error("Reserva ativa não corresponde à área/local/lote do item de solicitação.");
+      }
+    }
+    reservationByItem.set(itemId, (reservationByItem.get(itemId) ?? 0) + remaining);
     const productId = String(reservation.productId);
-    reservationByProduct.set(productId, (reservationByProduct.get(productId) ?? 0) + Number(reservation.quantityRemaining));
+    reservationByProduct.set(productId, (reservationByProduct.get(productId) ?? 0) + remaining);
   }
 
   const approvedRequests = await ctx.db.query("requests")
@@ -382,6 +406,15 @@ async function buildRegularizationPlan(ctx: any) {
     }
   }
 
+  const stockProductIds = new Set(stockRows.map((stock: any) => String(stock.productId)));
+  for (const productId of new Set([
+    ...Array.from(reservationByProduct.keys()),
+    ...Array.from(legacyOutstandingByProduct.keys()),
+  ])) {
+    if (!stockProductIds.has(productId)) {
+      throw new Error("Há solicitação/reserva sem registro global de estoque para o produto " + productId + ".");
+    }
+  }
   for (const stock of stockRows) {
     const reservedByLots = reservationByProduct.get(stock.productId as string) ?? 0;
     const reservedLegacy = legacyOutstandingByProduct.get(stock.productId as string) ?? 0;
