@@ -112,7 +112,7 @@ export default function StorageLocations() {
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground mb-1">
-                    Tipo: local físico independente das áreas de estoque
+                    Uso físico: independente da área/subestoque
                   </p>
                   {loc.description && (
                     <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{loc.description}</p>
@@ -149,7 +149,7 @@ export default function StorageLocations() {
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              O local físico representa um armário, prateleira ou outro espaço. Ele pode armazenar materiais de várias áreas/subestoques.
+              O local físico pode armazenar materiais de diferentes áreas/subestoques.
             </p>
             <div>
               <Label>Descrição</Label>
