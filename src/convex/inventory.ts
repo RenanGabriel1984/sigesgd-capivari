@@ -71,6 +71,7 @@ export const create = mutation({
   args: {
     observation: v.optional(v.string()),
     locationId: v.optional(v.id("storageLocations")),
+    areaId: v.optional(v.id("stockAreas")),
     categoryId: v.optional(v.id("categories")),
     productIds: v.optional(v.array(v.id("products"))),
   },
@@ -90,6 +91,11 @@ export const create = mutation({
       if (!location) throw new Error("Local de armazenamento não encontrado");
       if (!location.active) throw new Error("O local de armazenamento selecionado está inativo");
     }
+    if (args.areaId) {
+      const area = await ctx.db.get(args.areaId);
+      if (!area || !area.active) throw new Error("A área/subestoque selecionada está inativa ou não existe.");
+      if (!args.locationId) throw new Error("Para inventariar uma área sem misturar armários, selecione também o local físico.");
+    }
     if (args.categoryId) {
       const category = await ctx.db.get(args.categoryId);
       if (!category) throw new Error("Categoria não encontrada");
@@ -106,6 +112,7 @@ export const create = mutation({
       status: "draft",
       observation: args.observation || undefined,
       locationId: args.locationId,
+      areaId: args.areaId,
       categoryId: args.categoryId,
       productIds: args.productIds && args.productIds.length > 0 ? args.productIds : undefined,
       createdAt: now,
@@ -122,6 +129,7 @@ export const create = mutation({
 
     const scopeLabel = [
       args.locationId ? `local ${args.locationId}` : "todos os locais",
+      args.areaId ? `área ${args.areaId}` : "",
       args.categoryId ? `categoria ${args.categoryId}` : "",
       args.productIds && args.productIds.length > 0 ? `${args.productIds.length} produto(s) selecionado(s)` : "",
     ].filter(Boolean).join(", ");
@@ -131,11 +139,16 @@ export const create = mutation({
       let systemQuantity = stock?.physicalQuantity ?? 0;
       if (args.locationId) {
         const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", product._id)).collect();
-        systemQuantity = sbls.find((s) => s.locationId === args.locationId)?.quantity ?? 0;
+        systemQuantity = sbls
+          .filter((row: any) => row.locationId === args.locationId &&
+            (!args.areaId || (row.areaId ?? undefined) === args.areaId))
+          .reduce((sum: number, row: any) => sum + row.quantity, 0);
       }
       await ctx.db.insert("inventoryCounts", {
         inventoryId,
         productId: product._id,
+        areaId: args.areaId,
+        locationId: args.locationId,
         systemQuantity,
       });
     }
@@ -269,21 +282,31 @@ export const close = mutation({
       let newPhysical: number;
 
       if (inv.locationId) {
-        // ── Inventário por local: ajusta o saldo do local e recalcula o global ──
+        // Inventário de armário sem área mistura buckets diferentes. Se houver
+        // divergência, bloqueia o fechamento para não atribuir a diferença à
+        // área errada: o operador deve abrir a contagem por área/local.
+        const areaId = count.areaId ?? inv.areaId;
+        if (!areaId) {
+          throw new Error(`O inventário do local "${locationScope?.name ?? inv.locationId}" encontrou diferença para "${countProduct?.name ?? "item"}". Selecione também a área do estoque e refaça a contagem para ajustar o bucket correto.`);
+        }
         const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
-        const sbl = sbls.find((s) => s.locationId === inv.locationId);
+        const sbl = sbls.find((row: any) => row.locationId === inv.locationId && (row.areaId ?? undefined) === areaId);
         if (sbl) {
           await ctx.db.patch(sbl._id, { quantity: counted });
         } else if (counted > 0) {
           await ctx.db.insert("stockByLocation", {
             productId: count.productId,
             locationId: inv.locationId,
+            areaId,
             quantity: counted,
           });
         }
         const allSbl = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
-        newPhysical = allSbl.reduce((sum, s) => sum + s.quantity, 0);
+        newPhysical = allSbl.reduce((sum, row) => sum + row.quantity, 0);
       } else {
+        if (inv.areaId) {
+          throw new Error("Inventário restrito a uma área sem local físico não pode ajustar a distribuição entre armários. Selecione também um local físico.");
+        }
         // ── Inventário geral: saldo global é a contagem ──
         newPhysical = counted;
       }
@@ -316,6 +339,8 @@ export const close = mutation({
         previousReserved: reserved,
         newReserved: reserved,
         userId,
+        areaId: count.areaId ?? inv.areaId,
+        locationId: count.locationId ?? inv.locationId,
         observation: `Ajuste via inventário ${inv.inventoryNumber}${scopeSuffix}. Diferença: ${count.difference! >= 0 ? "+" : ""}${count.difference}. Justificativa: ${justification}`,
         timestamp: now,
       });
