@@ -96,7 +96,7 @@ async function generateEntryNumber(ctx: any): Promise<string> {
   const existing = await ctx.db.query("entries").withIndex("by_number", (q: any) => q.gte("entryNumber", prefix)).collect();
   const maxNum = existing.reduce((max: number, e: any) => {
     const match = e.entryNumber.match(/^ENT-\d{4}-(\d+)$/);
-    if (match && l.lotNumber.startsWith(prefix)) {
+    if (match && e.entryNumber.startsWith(prefix)) {
       const num = parseInt(match[1], 10);
       return num > max ? num : max;
     }
@@ -112,7 +112,7 @@ async function generateLotNumber(ctx: any): Promise<string> {
   const existing = await ctx.db.query("lots").withIndex("by_number", (q: any) => q.gte("lotNumber", prefix)).collect();
   const maxNum = existing.reduce((max: number, l: any) => {
     const match = l.lotNumber.match(/^LOT-\d{4}-(\d+)$/);
-    if (match) {
+    if (match && l.lotNumber.startsWith(prefix)) {
       const num = parseInt(match[1], 10);
       return num > max ? num : max;
     }
