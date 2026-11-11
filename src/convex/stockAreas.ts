@@ -143,14 +143,23 @@ export const unclassifiedLots = query({
       ) ?? null;
       const suggestedLocationId = lot.locationId ?? entryItem?.locationId ?? null;
       const suggestedLocation = suggestedLocationId ? await ctx.db.get(suggestedLocationId) : null;
-      const area = lot.areaId ? await ctx.db.get(lot.areaId) : (entry?.areaId ? await ctx.db.get(entry.areaId) : null);
+      const area = lot.areaId ? await ctx.db.get(lot.areaId) : null;
+      const suggestedArea = lot.areaId
+        ? area
+        : entryItem?.areaId
+          ? await ctx.db.get(entryItem.areaId)
+          : entry?.areaId
+            ? await ctx.db.get(entry.areaId)
+            : null;
+      // Resumo usa lots.areaId como fonte da verdade; se a área só está no
+      // cabeçalho/item da entrada, o lote continua pendente até o vínculo ser gravado.
       const hasArea = !!area && area.active;
       const hasLocation = !!suggestedLocation && suggestedLocation.active;
       if (hasArea && hasLocation) continue;
 
       const product = await ctx.db.get(lot.productId);
       const currentArea = lot.areaId ? await ctx.db.get(lot.areaId) : null;
-      const suggestedAreaId = lot.areaId ?? entry?.areaId ?? null;
+      const suggestedAreaId = lot.areaId ?? (suggestedArea?._id as string | undefined) ?? entry?.areaId ?? null;
 
       pending.push({
         lotId: lot._id,
