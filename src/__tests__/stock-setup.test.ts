@@ -4,10 +4,33 @@
  * Valida rastreabilidade por lote na carga inicial e consumo FIFO na saída.
  */
 import { describe, it, expect } from "vitest";
+import { parseSheetText } from "../convex/stockHelpers";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // INITIAL STOCK LOAD + LOT TRACEABILITY TESTS
 // ═══════════════════════════════════════════════════════════════════════════
+
+describe("Planilha de inventário — área independente do local físico", () => {
+  it("lê a coluna opcional Área sem perder observações com separadores", () => {
+    const rows = parseSheetText(
+      "Localização; Produto; Marca; Quantidade; Unidade; Área; Observação\\n" +
+      "Armário TI 02; Toner CX735; Lexmark; 1; un; Impressoras; Parte do kit; CX735"
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].areaName).toBe("Impressoras");
+    expect(rows[0].observation).toBe("Parte do kit; CX735");
+  });
+
+  it("mantém compatibilidade com planilhas antigas de seis colunas", () => {
+    const rows = parseSheetText(
+      "Localização; Produto; Marca; Quantidade; Unidade; Observação\\n" +
+      "Armário TI 01; Cabo HDMI; Exbom; 8; un; Caixa original; lacrada"
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].areaName).toBeUndefined();
+    expect(rows[0].observation).toBe("Caixa original; lacrada");
+  });
+});
 
 describe("Initial Stock Load — Lot Traceability", () => {
   it("DG. Initial load creates a lot with correct quantities", () => {
