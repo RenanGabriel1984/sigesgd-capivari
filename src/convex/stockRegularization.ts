@@ -135,6 +135,28 @@ async function buildRegularizationPlan(ctx: any) {
     throw new Error("A quantidade de itens das entradas auditadas mudou (esperado: 53 iniciais e 8 Gomaq). Regularização bloqueada.");
   }
 
+  const initialQuantity = initialItems.reduce((sum: number, item: any) => sum + Number(item.quantity), 0);
+  const gomaqQuantity = gomaqItems.reduce((sum: number, item: any) => sum + Number(item.quantity), 0);
+  if (!near(initialQuantity, 2803) || !near(gomaqQuantity, 535)) {
+    throw new Error("Os totais documentais das entradas mudaram (esperado: 2.803 inicial e 535 Gomaq). Regularização bloqueada.");
+  }
+  const initialByLocation = new Map<string, { count: number; quantity: number }>();
+  for (const item of initialItems) {
+    const id = String(item.locationId ?? "");
+    const current = initialByLocation.get(id) ?? { count: 0, quantity: 0 };
+    current.count += 1;
+    current.quantity += Number(item.quantity);
+    initialByLocation.set(id, current);
+  }
+  const initialCabinetOne = initialByLocation.get("n5711zfag2vgm24hm5qd9yn42s8e54ej");
+  const initialCabinetTwo = initialByLocation.get("n576x4v2v08tyzvzef21qk3m8h8e5y2f");
+  if (!initialCabinetOne || initialCabinetOne.count !== 34 || !near(initialCabinetOne.quantity, 2597) ||
+      !initialCabinetTwo || initialCabinetTwo.count !== 19 || !near(initialCabinetTwo.quantity, 206)) {
+    throw new Error("A distribuição documental da entrada inicial entre os dois armários diverge da auditoria.");
+  }
+  if (gomaqItems.some((item: any) => item.locationId !== "n576x4v2v08tyzvzef21qk3m8h8e5y2f")) {
+    throw new Error("Os itens Gomaq não estão todos vinculados ao Armário TI 02, como na auditoria.");
+  }
   const allLots = await ctx.db.query("lots").collect();
   const lotById = new Map<string, any>(allLots.map((lot: any) => [lot._id as string, lot]));
   const lotByNumber = new Map<string, any>(allLots.map((lot: any) => [lot.lotNumber, lot]));
