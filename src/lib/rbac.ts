@@ -94,6 +94,10 @@ export const APP_PERMISSIONS = [
   "supply_requests.view",
   "supply_requests.manage",
 
+  // Controle interno da compra coletiva e rateio de água mineral.
+  "water.view",
+  "water.manage",
+
   "movements.view",
 
   "reports.view",
@@ -150,6 +154,8 @@ const STOCK_MANAGER_ACCESS: readonly AppPermission[] = [
   // Solicitação mensal de suprimentos
   "supply_requests.view",
   "supply_requests.manage",
+  "water.view",
+  "water.manage",
   // Movimentações
   "entries.view",
   "entries.create",
@@ -193,6 +199,7 @@ const DIRECTOR_ACCESS: readonly AppPermission[] = [
   "stock_parameters.view",
   "packaging_parameters.view",
   "supply_requests.view",
+  "water.view",
   "requests.view",
   "requests.approve",
   "requests.reject",
@@ -291,6 +298,7 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
   "/organization": "organizations.view",
   "/users": "users.view",
   "/suppliers": "suppliers.view",
+  "/water": "water.view",
   "/printers": "printers.view",
   "/reports": "reports.view",
   "/audit": "audit.view",

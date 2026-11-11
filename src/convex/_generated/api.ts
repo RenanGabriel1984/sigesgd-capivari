@@ -56,6 +56,7 @@ import type * as storageLocations from "../storageLocations.js";
 import type * as suppliers from "../suppliers.js";
 import type * as supplyRequests from "../supplyRequests.js";
 import type * as users from "../users.js";
+import type * as water from "../water.js";
 
 import type {
   ApiFromModules,
@@ -113,6 +114,7 @@ const fullApi: ApiFromModules<{
   suppliers: typeof suppliers;
   supplyRequests: typeof supplyRequests;
   users: typeof users;
+  water: typeof water;
 }> = anyApi as any;
 
 /**

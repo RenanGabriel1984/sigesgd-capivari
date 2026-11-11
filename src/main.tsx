@@ -38,6 +38,7 @@ const Requests = lazy(() => import("./pages/Requests.tsx"));
 const ReturnsPage = lazy(() => import("./pages/Returns.tsx"));
 const StockTransfersPage = lazy(() => import("./pages/StockTransfers.tsx"));
 const GomaQPage = lazy(() => import("./pages/GomaQ.tsx"));
+const WaterPage = lazy(() => import("./pages/Water.tsx"));
 const AssetsPage = lazy(() => import("./pages/Assets.tsx"));
 const AssetDetailPage = lazy(() => import("./pages/AssetDetail.tsx"));
 const LicensesPage = lazy(() => import("./pages/Licenses.tsx"));
@@ -145,6 +146,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/returns" element={<RequireAuth><RequirePermission><ReturnsPage /></RequirePermission></RequireAuth>} />
               <Route path="/transfers" element={<RequireAuth><RequirePermission><StockTransfersPage /></RequirePermission></RequireAuth>} />
               <Route path="/gomaq" element={<RequireAuth><RequirePermission><GomaQPage /></RequirePermission></RequireAuth>} />
+              <Route path="/water" element={<RequireAuth><RequirePermission><WaterPage /></RequirePermission></RequireAuth>} />
               <Route path="/assets" element={<RequireAuth><RequirePermission><AssetsPage /></RequirePermission></RequireAuth>} />
               <Route path="/assets/:id" element={<RequireAuth><RequirePermission><AssetDetailPage /></RequirePermission></RequireAuth>} />
               <Route path="/licenses" element={<RequireAuth><RequirePermission><LicensesPage /></RequirePermission></RequireAuth>} />

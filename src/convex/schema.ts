@@ -993,6 +993,74 @@ const schema = defineSchema(
       lockedUntil: v.optional(v.number()),
     }).index("by_email", ["email"]),
 
+    // ── Controle interno de água mineral, independente do estoque institucional ──
+    waterParticipants: defineTable({
+      name: v.string(),
+      active: v.boolean(),
+      observation: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_name", ["name"])
+      .index("by_active", ["active"]),
+
+    waterPeriods: defineTable({
+      title: v.string(),
+      cadence: v.union(v.literal("monthly"), v.literal("bimonthly"), v.literal("custom")),
+      startAt: v.number(),
+      endAt: v.number(),
+      participantIds: v.array(v.id("waterParticipants")),
+      status: v.union(v.literal("open"), v.literal("closed")),
+      totalValueCents: v.optional(v.number()),
+      createdBy: v.id("users"),
+      createdAt: v.number(),
+      closedAt: v.optional(v.number()),
+    }).index("by_status", ["status"])
+      .index("by_startAt", ["startAt"]),
+
+    waterReceipts: defineTable({
+      periodId: v.id("waterPeriods"),
+      receivedAt: v.number(),
+      gallonsReceived: v.number(),
+      emptyGallonsReturned: v.number(),
+      totalValueCents: v.number(),
+      sourceName: v.optional(v.string()),
+      paidByName: v.optional(v.string()),
+      observation: v.optional(v.string()),
+      createdBy: v.id("users"),
+      createdAt: v.number(),
+    }).index("by_period", ["periodId"])
+      .index("by_receivedAt", ["receivedAt"]),
+
+    waterContainerMovements: defineTable({
+      type: v.union(v.literal("consumption"), v.literal("return"), v.literal("adjustment")),
+      date: v.number(),
+      fullDelta: v.number(),
+      emptyDelta: v.number(),
+      observation: v.optional(v.string()),
+      createdBy: v.id("users"),
+      createdAt: v.number(),
+    }).index("by_date", ["date"]),
+
+    waterShares: defineTable({
+      periodId: v.id("waterPeriods"),
+      participantId: v.id("waterParticipants"),
+      participantName: v.string(),
+      amountDueCents: v.number(),
+      createdAt: v.number(),
+    }).index("by_period", ["periodId"])
+      .index("by_participant", ["participantId"]),
+
+    waterPayments: defineTable({
+      shareId: v.id("waterShares"),
+      amountCents: v.number(),
+      paidAt: v.number(),
+      method: v.optional(v.string()),
+      observation: v.optional(v.string()),
+      createdBy: v.id("users"),
+      createdAt: v.number(),
+    }).index("by_share", ["shareId"])
+      .index("by_paidAt", ["paidAt"]),
+
     // ── Audit Log ──
     auditLogs: defineTable({
       userId: v.optional(v.id("users")),

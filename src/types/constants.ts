@@ -178,6 +178,8 @@ const PERMISSION_FLAGS = {
   // Solicitação mensal de suprimentos (documento de planejamento)
   canViewSupplyRequests: "supply_requests.view",
   canManageSupplyRequests: "supply_requests.manage",
+  canViewWater: "water.view",
+  canManageWater: "water.manage",
   canManageAssets: "equipment.manage",
   canManageLicenses: "licenses.manage",
 
