@@ -46,6 +46,7 @@ type InventoryView = Doc<"inventories"> & {
   responsible: Doc<"users"> | null;
   closedBy: Doc<"users"> | null;
   location: Doc<"storageLocations"> | null;
+  area: Doc<"stockAreas"> | null;
   category: Doc<"categories"> | null;
   counts: InventoryCountView[];
 };
@@ -465,6 +466,7 @@ export default function Inventory() {
                           <span>Criado: {new Date(inv.createdAt).toLocaleDateString("pt-BR")}</span>
                           <span>Responsável: {inv.responsible?.name ?? "—"}</span>
                           {inv.location && <span>Local: {inv.location.name}</span>}
+                          {inv.area && <span>Área: {inv.area.name}</span>}
                           {inv.category && <span>Categoria: {inv.category.name}</span>}
                           <span>{inv.counts.length} itens</span>
                           {uncounted.length > 0 && (
