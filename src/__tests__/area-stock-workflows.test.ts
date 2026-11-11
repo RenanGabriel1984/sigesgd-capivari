@@ -78,15 +78,18 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(quickExit).toContain("lot.quantityAvailable - reserved");
   });
 
-  it("transferência registra áreas e preserva linhagem dos lotes de origem/destino", () => {
+  it("transferência registra áreas de origem/destino e preserva a linhagem dos lotes", () => {
     const create = mutationBlock(transfers, "create");
-    expect(create).toContain("areaId: v.id(\"stockAreas\")");
-    expect(create).toContain("fromAreaId: args.areaId");
-    expect(create).toContain("toAreaId: args.areaId");
+    expect(create).toContain('fromAreaId: v.id("stockAreas")');
+    expect(create).toContain('toAreaId: v.id("stockAreas")');
+    expect(create).toContain("fromAreaId: args.fromAreaId");
+    expect(create).toContain("toAreaId: args.toAreaId");
+    expect(create).toContain("lot.areaId !== args.fromAreaId");
+    expect(create).toContain("areaId: args.toAreaId");
     expect(create).toContain('ctx.db.insert("stockTransferLots"');
     expect(create).toContain("sourceLotId");
     expect(create).toContain("destinationLotId");
-    expect(create).toContain("toAreaId: args.areaId");
+    expect(create).toContain("Origem e destino não podem ser a mesma área e o mesmo local.");
     expect(stockMovements).toContain("const toArea = m.toAreaId ? await ctx.db.get(m.toAreaId) : null");
   });
 
