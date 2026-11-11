@@ -170,10 +170,11 @@ export const create = mutation({
     // Estoque atual informado no cadastro (carga inicial com rastreabilidade por lote)
     initialStock: v.optional(v.number()),
     locationId: v.optional(v.id("storageLocations")),
+    initialAreaId: v.optional(v.id("stockAreas")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    const { initialStock, locationId, ...productArgs } = args;
+    const { initialStock, locationId, initialAreaId: requestedInitialAreaId, ...productArgs } = args;
     let initialAreaId: any = undefined;
     if (!args.name.trim()) throw new Error("Nome do item é obrigatório");
     if (args.ean && !/^\d{8,14}$/.test(args.ean.replace(/\D/g, ""))) {
@@ -221,12 +222,12 @@ export const create = mutation({
       const location = await ctx.db.get(locationId);
       if (!location) throw new Error("Local de armazenamento não encontrado");
       if (!location.active) throw new Error("O local de armazenamento selecionado está inativo");
-      if (!location.areaId) {
-        throw new Error("O local selecionado ainda não pertence a uma área/subestoque. Classifique o local antes de cadastrar saldo inicial.");
+      const selectedAreaId = requestedInitialAreaId ?? location.areaId;
+      if (selectedAreaId) {
+        const area = await ctx.db.get(selectedAreaId);
+        if (!area || !area.active) throw new Error("A área selecionada para o saldo inicial não existe ou está inativa.");
+        initialAreaId = area._id;
       }
-      const area = await ctx.db.get(location.areaId);
-      if (!area || !area.active) throw new Error("A área do local selecionado não existe ou está inativa.");
-      initialAreaId = area._id;
     }
 
     // Toners de kit original de 4 cores (VersaLink, AltaLink, Lexmark CX735,
@@ -290,6 +291,7 @@ export const create = mutation({
         quantity: initialStock,
         unitOfMeasure: args.unitOfMeasure,
         lotId: lotId as string,
+        areaId: initialAreaId,
         locationId,
       });
 
