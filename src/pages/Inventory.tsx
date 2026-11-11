@@ -57,6 +57,7 @@ export default function Inventory() {
 
   const inventories = useQuery(api.inventory.list) as InventoryView[] | undefined;
   const locations = useQuery(api.storageLocations.listActive);
+  const stockAreas = useQuery(api.stockAreas.listActive);
   const products = useQuery(api.products.listActive);
   const categories = useQuery(api.categories.listActive);
   const initialStatus = useQuery(api.stockSetup.getInitialLoadStatus, canInitialLoad ? {} : "skip");
@@ -79,6 +80,7 @@ export default function Inventory() {
   // Novo inventário com escopo (local/categoria/produtos)
   const [createOpen, setCreateOpen] = useState(false);
   const [invLocationId, setInvLocationId] = useState("");
+  const [invAreaId, setInvAreaId] = useState("");
   const [invCategoryId, setInvCategoryId] = useState("");
   const [invProductIds, setInvProductIds] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
@@ -164,12 +166,13 @@ export default function Inventory() {
       const id = await createInventory({
         observation: "Inventário criado",
         locationId: invLocationId ? (invLocationId as any) : undefined,
+        areaId: invAreaId ? (invAreaId as any) : undefined,
         categoryId: invCategoryId ? (invCategoryId as any) : undefined,
         productIds: invProductIds.length > 0 ? (invProductIds as any) : undefined,
       });
       toast.success("Inventário criado com sucesso");
       setCreateOpen(false);
-      setInvLocationId(""); setInvCategoryId(""); setInvProductIds([]);
+      setInvLocationId(""); setInvAreaId(""); setInvCategoryId(""); setInvProductIds([]);
       setViewId(id as string);
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao criar inventário");
@@ -690,6 +693,21 @@ export default function Inventory() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div>
+                <Label>Área / Subestoque (opcional)</Label>
+                <Select value={invAreaId || "all"} onValueChange={(value) => setInvAreaId(value === "all" ? "" : value)} disabled={!invLocationId}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Todas as áreas" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as áreas do local</SelectItem>
+                    {(stockAreas ?? []).map((area) => (
+                      <SelectItem key={area._id} value={area._id}>{area.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Para ajustar diferenças no inventário de um armário, selecione também a área. Sem área, a contagem será apenas conferência do total do local.
+                </p>
               </div>
               <div>
                 <Label>Categoria (opcional)</Label>
