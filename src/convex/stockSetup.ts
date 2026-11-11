@@ -458,8 +458,7 @@ export const productLocationSummary = query({
     for (const row of rows) {
       const location = await ctx.db.get(row.locationId);
       if (!location) continue;
-      const area = row.areaId && location.areaId === row.areaId
-        ? await ctx.db.get(row.areaId) : null;
+      const area = row.areaId ? await ctx.db.get(row.areaId) : null;
       const reservations = await ctx.db.query("requestItemReservations")
         .withIndex("by_product", (q: any) => q.eq("productId", row.productId))
         .collect();
@@ -510,8 +509,8 @@ export const quickExit = mutation({
     if (!product || !product.active) throw new Error("Produto não encontrado ou inativo");
     const area = await ctx.db.get(args.areaId);
     const location = await ctx.db.get(args.locationId);
-    if (!area || !area.active || !location || !location.active || location.areaId !== args.areaId) {
-      throw new Error("A área/local selecionado não está ativo ou não corresponde.");
+    if (!area || !area.active || !location || !location.active) {
+      throw new Error("A área e o local selecionados precisam estar ativos.");
     }
     const stock = await ctx.db.query("stock")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).first();
