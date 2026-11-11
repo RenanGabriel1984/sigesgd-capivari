@@ -85,7 +85,7 @@ export const update = mutation({
 
     // areaId é aceito apenas para compatibilidade com clientes antigos e
     // deliberadamente ignorado: uma localização física não pertence a uma área.
-    const updates: Record<string, unknown> = {};
+    const updates: Record<string, any> = {};
     if (args.name !== undefined) updates.name = args.name;
     if (args.description !== undefined) updates.description = args.description;
     if (args.active !== undefined) updates.active = args.active;
