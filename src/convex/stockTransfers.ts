@@ -71,10 +71,10 @@ export const create = mutation({
     if (!fromLocation || !fromLocation.active) throw new Error("Local de origem não encontrado ou inativo");
     if (!toLocation || !toLocation.active) throw new Error("Local de destino não encontrado ou inativo");
 
-    // Compatibilidade temporária: clientes antigos podem usar o areaId legado.
-    // A nova interface sempre informa a área explicitamente.
-    const fromAreaId = args.fromAreaId ?? fromLocation.areaId;
-    const toAreaId = args.toAreaId ?? toLocation.areaId;
+    // Área de origem e destino deve ser explícita. Nunca inferir subestoque
+    // pelo armário, mesmo que o campo legado storageLocations.areaId exista.
+    const fromAreaId = args.fromAreaId;
+    const toAreaId = args.toAreaId;
     if (!fromAreaId || !toAreaId) {
       throw new Error("Selecione a área/subestoque de origem e destino da transferência.");
     }
