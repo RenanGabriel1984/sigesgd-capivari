@@ -580,6 +580,9 @@ const schema = defineSchema(
       productId: v.id("products"),
       quantity: v.number(),
       unitOfMeasure: v.string(),
+      // Área do item pode diferir de outros itens da mesma entrada.
+      // O cabeçalho da entrada continua sendo o padrão quando este campo falta.
+      areaId: v.optional(v.id("stockAreas")),
       unitCost: v.optional(v.number()),
       totalCost: v.optional(v.number()),
       brand: v.optional(v.string()),
