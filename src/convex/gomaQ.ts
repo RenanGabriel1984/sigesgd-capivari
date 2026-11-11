@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { PRINT_AREA_ID } from "./printSupplies";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -135,10 +136,11 @@ export const monthlyOrder = query({
       const product = rawProduct as any;
       if (!product.name || !product.categoryId) return null;
 
-      const stock = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", pid))
-        .first();
+      const [stock, lots, reservations] = await Promise.all([
+        ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", pid)).first(),
+        ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", pid)).collect(),
+        ctx.db.query("requestItemReservations").withIndex("by_product", (q: any) => q.eq("productId", pid)).collect(),
+      ]);
 
       const compatEntries = allCompat.filter((c: any) => c.productId === pid);
       const compatibleModels = compatEntries.map((c: any) => c.printerModel);
@@ -146,15 +148,25 @@ export const monthlyOrder = query({
       const physical = stock?.physicalQuantity ?? 0;
       const reserved = stock?.reservedQuantity ?? 0;
       const available = physical - reserved;
+      const areaLots = lots.filter((lot: any) => lot.areaId === PRINT_AREA_ID);
+      const areaLotIds = new Set(areaLots.map((lot: any) => String(lot._id)));
+      const areaPhysical = areaLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+      const areaReserved = (reservations as any[])
+        .filter((reservation: any) => areaLotIds.has(String(reservation.lotId)))
+        .reduce((sum: number, reservation: any) => {
+          const remaining = Number(reservation.quantityRemaining);
+          return Number.isFinite(remaining) && remaining > 0 ? sum + remaining : sum;
+        }, 0);
+      const availableInArea = Math.max(0, areaPhysical - areaReserved);
 
       const idealStock = product.idealStock ?? 0;
       const standardQty = product.standardOrderQuantity;
 
       let suggestedQty: number;
       if (standardQty && standardQty > 0) {
-        suggestedQty = physical < idealStock ? standardQty : 0;
+        suggestedQty = availableInArea < idealStock ? standardQty : 0;
       } else {
-        suggestedQty = Math.max(idealStock - physical, 0);
+        suggestedQty = Math.max(idealStock - availableInArea, 0);
       }
 
       return {
@@ -166,7 +178,10 @@ export const monthlyOrder = query({
         compatibleModels,
         physicalQuantity: physical,
         reservedQuantity: reserved,
-        availableQuantity: available,
+        availableQuantity: availableInArea,
+        globalAvailableQuantity: available,
+        areaPhysicalQuantity: areaPhysical,
+        areaReservedQuantity: areaReserved,
         idealStock,
         minimumStock: product.minimumStock,
         standardOrderQuantity: standardQty,
