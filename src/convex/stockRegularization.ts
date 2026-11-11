@@ -371,8 +371,8 @@ async function buildRegularizationPlan(ctx: any) {
     if (remaining > 0) {
       const reservedLot = lotById.get(String(reservation.lotId));
       const resolvedLot = reservedLot ? targetLots.get(reservedLot._id as string) : null;
-      const reservedAreaId = resolvedLot?.areaId ?? reservedLot?.lot.areaId;
-      const reservedLocationId = resolvedLot?.locationId ?? resolvedLot?.lot.locationId;
+      const reservedAreaId = resolvedLot?.areaId ?? reservedLot?.areaId;
+      const reservedLocationId = resolvedLot?.locationId ?? reservedLot?.locationId;
       if (!reservedLot || reservedLot.productId !== item.productId ||
           reservedAreaId !== item.areaId || reservedLocationId !== item.sourceLocationId ||
           reservation.areaId !== item.areaId || reservation.locationId !== item.sourceLocationId) {
