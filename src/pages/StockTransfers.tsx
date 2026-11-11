@@ -45,11 +45,13 @@ export default function StockTransfersPage() {
   const { user } = useAuth();
   const transfers = useQuery(api.stockTransfers.list);
   const products = useQuery(api.products.listActive);
+  const areas = useQuery(api.stockAreas.listActive);
   const locations = useQuery(api.storageLocations.listActive);
   const createTransfer = useMutation(api.stockTransfers.create);
 
   const [showNew, setShowNew] = useState(false);
   const [productId, setProductId] = useState("");
+  const [areaId, setAreaId] = useState("");
   const [fromLocationId, setFromLocationId] = useState("");
   const [toLocationId, setToLocationId] = useState("");
   const [quantity, setQuantity] = useState(1);
@@ -57,8 +59,8 @@ export default function StockTransfersPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    if (!productId || !fromLocationId || !toLocationId) {
-      toast.error("Selecione o produto, local de origem e destino");
+    if (!productId || !areaId || !fromLocationId || !toLocationId) {
+      toast.error("Selecione o produto, a área/subestoque, o local de origem e o destino");
       return;
     }
     if (fromLocationId === toLocationId) {
@@ -74,6 +76,7 @@ export default function StockTransfersPage() {
     try {
       await createTransfer({
         productId: productId as any,
+        areaId: areaId as any,
         fromLocationId: fromLocationId as any,
         toLocationId: toLocationId as any,
         quantity,
@@ -91,6 +94,7 @@ export default function StockTransfersPage() {
 
   const resetForm = () => {
     setProductId("");
+    setAreaId("");
     setFromLocationId("");
     setToLocationId("");
     setQuantity(1);
@@ -199,9 +203,23 @@ export default function StockTransfersPage() {
                 </select>
               </div>
 
+              <div>
+                <Label>Área / Subestoque</Label>
+                <select
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={areaId}
+                  onChange={(e) => setAreaId(e.target.value)}
+                >
+                  <option value="">Selecione a área...</option>
+                  {(areas ?? []).map((area: any) => (
+                    <option key={area._id} value={area._id}>{area.name}</option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label>Local de Origem</Label>
+                  <Label>Local físico de Origem</Label>
                   <select
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={fromLocationId}
@@ -216,7 +234,7 @@ export default function StockTransfersPage() {
                   </select>
                 </div>
                 <div>
-                  <Label>Local de Destino</Label>
+                  <Label>Local físico de Destino</Label>
                   <select
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={toLocationId}
