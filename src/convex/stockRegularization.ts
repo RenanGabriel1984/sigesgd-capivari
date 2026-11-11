@@ -4,6 +4,14 @@ import { requirePermission } from "./rbac";
 
 const INITIAL_ENTRY_NUMBER = "ENT-2026-000001";
 const GOMAQ_ENTRY_NUMBER = "ENT-2026-000002";
+const EXPECTED_AREA_IDS = {
+  "TI Geral": "q971w9jkmz8rsqr3vsr2as0dps8eyqns",
+  "Impressoras": "q97b7737gv98ajm8qqpmjmzjs18ezb58",
+} as const;
+const EXPECTED_INITIAL_LOCATIONS: Record<string, string> = {
+  n5711zfag2vgm24hm5qd9yn42s8e54ej: "Armário TI 01",
+  n576x4v2v08tyzvzef21qk3m8h8e5y2f: "Armário TI 02",
+};
 
 const INITIAL_AREAS: Record<string, "TI Geral" | "Impressoras"> = {
   "Cooler para processador Intel": "TI Geral",
@@ -111,6 +119,10 @@ async function buildRegularizationPlan(ctx: any) {
   }
   const printerArea = printerAreas[0];
   const generalArea = generalAreas[0];
+  if (String(printerArea._id) !== EXPECTED_AREA_IDS.Impressoras ||
+      String(generalArea._id) !== EXPECTED_AREA_IDS["TI Geral"]) {
+    throw new Error("Os identificadores das áreas não correspondem aos dados da auditoria do deployment esperado.");
+  }
   if (gomaqEntry.areaId !== printerArea._id) {
     throw new Error("A entrada Gomaq não está vinculada à área Impressoras esperada. Nenhuma alteração foi preparada.");
   }
@@ -184,6 +196,11 @@ async function buildRegularizationPlan(ctx: any) {
       const location = await getLocation(item.locationId);
       if (!location || !location.active) {
         blockers.push("O local físico do item " + product.name + " não existe ou está inativo.");
+        continue;
+      }
+      const expectedLocationName = EXPECTED_INITIAL_LOCATIONS[String(location._id)];
+      if (!expectedLocationName || location.name !== expectedLocationName) {
+        blockers.push("O local físico do item " + product.name + " não corresponde a um dos dois armários da auditoria.");
         continue;
       }
       if (lot.locationId && lot.locationId !== item.locationId) {
