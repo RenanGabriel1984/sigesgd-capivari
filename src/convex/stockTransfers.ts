@@ -135,6 +135,14 @@ export const create = mutation({
 
     const destinationStock = locationRows.find((row: any) => row.locationId === args.toLocationId && row.areaId === toAreaId);
     const now = Date.now();
+    const year = new Date(now).getFullYear();
+    const prefix = `LOT-${year}-`;
+    const allNumbers = await ctx.db.query("lots").collect();
+    let maxSequence = allNumbers.reduce((max: number, item: any) => {
+      if (!item.lotNumber?.startsWith(prefix)) return max;
+      const n = Number(item.lotNumber.slice(prefix.length));
+      return Number.isSafeInteger(n) && n > max ? n : max;
+    }, 0);
     const transferId = await ctx.db.insert("stockTransfers", {
       productId: args.productId, lotId: planned.length === 1 ? planned[0].lotId as any : undefined,
       fromLocationId: args.fromLocationId, toLocationId: args.toLocationId,
@@ -146,16 +154,9 @@ export const create = mutation({
     for (const part of planned) {
       const sourceLot = await ctx.db.get(part.lotId);
       if (!sourceLot || sourceLot.quantityAvailable < part.quantity) throw new Error("Saldo do lote de origem mudou durante a transferência");
-      const allNumbers = await ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
-      const year = new Date(now).getFullYear();
-      const prefix = `LOT-${year}-`;
-      const maxSequence = allNumbers.reduce((max: number, item: any) => {
-        if (!item.lotNumber?.startsWith(prefix)) return max;
-        const n = Number(item.lotNumber.slice(prefix.length));
-        return Number.isSafeInteger(n) && n > max ? n : max;
-      }, 0);
+      maxSequence += 1;
       const destinationLotId = await ctx.db.insert("lots", {
-        lotNumber: `${prefix}${String(maxSequence + 1).padStart(6, "0")}`,
+        lotNumber: `${prefix}${String(maxSequence).padStart(6, "0")}`,
         productId: sourceLot.productId, entryId: sourceLot.entryId,
         brand: sourceLot.brand, model: sourceLot.model, specification: sourceLot.specification,
         quantityReceived: part.quantity, quantityAvailable: part.quantity,
@@ -177,15 +178,27 @@ export const create = mutation({
       await ctx.db.insert("stockByLocation", { productId: args.productId, locationId: args.toLocationId, areaId: toAreaId as any, quantity: args.quantity });
     }
 
-    if (globalStock) await ctx.db.insert("stockMovements", {
-      productId: args.productId, type: "transfer", quantity: args.quantity,
-      previousPhysical: globalStock.physicalQuantity, newPhysical: globalStock.physicalQuantity,
-      previousReserved: globalStock.reservedQuantity, newReserved: globalStock.reservedQuantity,
-      userId, areaId: fromAreaId as any, locationId: args.fromLocationId,
-      toLocationId: args.toLocationId, toAreaId: toAreaId as any,
-      observation: `Transferência: ${fromArea.name}/${fromLocation.name} → ${toArea.name}/${toLocation.name}`,
-      timestamp: now,
-    });
+    if (globalStock) {
+      const movementId = await ctx.db.insert("stockMovements", {
+        productId: args.productId, type: "transfer", quantity: args.quantity,
+        previousPhysical: globalStock.physicalQuantity, newPhysical: globalStock.physicalQuantity,
+        previousReserved: globalStock.reservedQuantity, newReserved: globalStock.reservedQuantity,
+        userId, areaId: fromAreaId as any, locationId: args.fromLocationId,
+        toLocationId: args.toLocationId, toAreaId: toAreaId as any,
+        observation: `Transferência: ${fromArea.name}/${fromLocation.name} → ${toArea.name}/${toLocation.name}`,
+        timestamp: now,
+      });
+      // Preserva a origem exata de cada lote consumido pela transferência.
+      for (const part of planned) {
+        await ctx.db.insert("stockMovementLots", {
+          movementId,
+          lotId: part.lotId,
+          quantity: part.quantity,
+          areaId: fromAreaId as any,
+          locationId: args.fromLocationId,
+        });
+      }
+    }
 
     await ctx.db.insert("auditLogs", {
       userId, action: "transfer_stock", entity: "stockTransfers", entityId: transferId,
