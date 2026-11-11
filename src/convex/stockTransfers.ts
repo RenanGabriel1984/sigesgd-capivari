@@ -92,7 +92,7 @@ export const create = mutation({
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
     const sourceStock = locationRows.find((row: any) => row.locationId === args.fromLocationId && row.areaId === args.areaId);
     if (!sourceStock || sourceStock.quantity < args.quantity) {
-      throw new Error(`Estoque insuficiente em "${fromArea.name}" / "${fromLocation.name}". Disponível: ${sourceStock?.quantity ?? 0}.`);
+      throw new Error(`Estoque insuficiente em "${area.name}" / "${fromLocation.name}". Disponível: ${sourceStock?.quantity ?? 0}.`);
     }
 
     const productLots = await ctx.db.query("lots")
@@ -163,8 +163,7 @@ export const create = mutation({
       await ctx.db.insert("stockByLocation", { productId: args.productId, locationId: args.toLocationId, areaId: args.areaId, quantity: args.quantity });
     }
 
-    const globalStock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).first();
-    if (globalStock) await ctx.db.insert("stockMovements", {
+    await ctx.db.insert("stockMovements", {
       productId: args.productId, type: "transfer", quantity: args.quantity,
       previousPhysical: globalStock.physicalQuantity, newPhysical: globalStock.physicalQuantity,
       previousReserved: globalStock.reservedQuantity, newReserved: globalStock.reservedQuantity,
