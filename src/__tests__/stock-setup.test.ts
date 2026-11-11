@@ -13,7 +13,7 @@ import { parseSheetText } from "../convex/stockHelpers";
 describe("Planilha de inventário — área independente do local físico", () => {
   it("lê a coluna opcional Área sem perder observações com separadores", () => {
     const rows = parseSheetText(
-      "Localização; Produto; Marca; Quantidade; Unidade; Área; Observação\\n" +
+      "Localização; Produto; Marca; Quantidade; Unidade; Área; Observação\n" +
       "Armário TI 02; Toner CX735; Lexmark; 1; un; Impressoras; Parte do kit; CX735"
     );
     expect(rows).toHaveLength(1);
@@ -23,7 +23,7 @@ describe("Planilha de inventário — área independente do local físico", () =
 
   it("mantém compatibilidade com planilhas antigas de seis colunas", () => {
     const rows = parseSheetText(
-      "Localização; Produto; Marca; Quantidade; Unidade; Observação\\n" +
+      "Localização; Produto; Marca; Quantidade; Unidade; Observação\n" +
       "Armário TI 01; Cabo HDMI; Exbom; 8; un; Caixa original; lacrada"
     );
     expect(rows).toHaveLength(1);
