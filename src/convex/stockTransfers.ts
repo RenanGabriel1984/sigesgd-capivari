@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import type { Id } from "./_generated/dataModel";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -122,12 +123,12 @@ export const create = mutation({
     }
     candidates.sort((a, b) => a.lot.receivedAt - b.lot.receivedAt || a.lot.lotNumber.localeCompare(b.lot.lotNumber));
 
-    const planned: Array<{ lotId: string; quantity: number }> = [];
+    const planned: Array<{ lotId: Id<"lots">; quantity: number }> = [];
     let remaining = args.quantity;
     for (const candidate of candidates) {
       if (remaining <= 0) break;
       const quantity = Math.min(candidate.free, remaining);
-      planned.push({ lotId: candidate.lot._id, quantity });
+      planned.push({ lotId: candidate.lot._id as Id<"lots">, quantity });
       remaining -= quantity;
     }
     if (remaining > 0) throw new Error(`Lotes livres insuficientes na origem. Faltam ${remaining} unidade(s); transferências não podem consumir quantidades reservadas.`);
@@ -143,7 +144,7 @@ export const create = mutation({
 
     // Divide cada lote de origem; o novo lote no destino mantém entrada, fornecedor e custo originais.
     for (const part of planned) {
-      const sourceLot = await ctx.db.get(part.lotId as any);
+      const sourceLot = await ctx.db.get(part.lotId);
       if (!sourceLot || sourceLot.quantityAvailable < part.quantity) throw new Error("Saldo do lote de origem mudou durante a transferência");
       const allNumbers = await ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
       const year = new Date(now).getFullYear();
@@ -176,7 +177,6 @@ export const create = mutation({
       await ctx.db.insert("stockByLocation", { productId: args.productId, locationId: args.toLocationId, areaId: toAreaId as any, quantity: args.quantity });
     }
 
-    const globalStock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).first();
     if (globalStock) await ctx.db.insert("stockMovements", {
       productId: args.productId, type: "transfer", quantity: args.quantity,
       previousPhysical: globalStock.physicalQuantity, newPhysical: globalStock.physicalQuantity,
