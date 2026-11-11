@@ -344,14 +344,14 @@ export default function StockAreas() {
                 >
                   <option value="">Selecione o local...</option>
                   {(storageLocations ?? []).filter((location: any) =>
-                    location.active && location.areaId === classificationAreaId
+                    location.active
                   ).map((location: any) => (
                     <option key={location._id} value={location._id}>{location.name}</option>
                   ))}
                 </select>
               </div>
               <p className="text-xs text-muted-foreground">
-                Esta ação apenas separa o saldo legado no local/área escolhidos. Não altera a quantidade global.
+                Esta ação classifica área e local físico independentemente. O saldo global não é alterado.
                 Não use para mover fisicamente o material entre locais; para isso, registre uma transferência.
               </p>
             </div>
