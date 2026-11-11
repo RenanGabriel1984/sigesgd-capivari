@@ -244,8 +244,8 @@ describe("PRINT-DISP — Regra de saldo e de mínimo", () => {
 });
 
 describe("PRINT-DISP — A retirada é uma SAÍDA real, não transferência", () => {
-  it("PRINT-DISP-02: retirada não remove o produto da área Impressoras", () => {
-    // Nenhuma escrita em `stockByLocation`, `products` ou nas áreas.
+  it("PRINT-DISP-02: retirada preserva a área e atualiza o saldo do local físico", () => {
+    // A interface apenas solicita a operação; não altera livros-razão no cliente.
     const submitBody = dialog.slice(
       dialog.indexOf("const submit = async"),
       dialog.indexOf("return (")
@@ -254,14 +254,16 @@ describe("PRINT-DISP — A retirada é uma SAÍDA real, não transferência", ()
     expect(submitBody).not.toContain("delete");
     expect(submitBody).not.toContain("patch");
 
-    // O backend só DEBITO saldo: não apaga registro de estoque/local.
+    // O backend não apaga produtos, áreas, locais, lotes ou saldos.
     expect(withdrawBlock).not.toContain("db.delete");
     expect(withdrawFamilyBlock).not.toContain("db.delete");
     expect(withdrawBlock).toContain("physicalQuantity: newPhysical");
-    // E nenhuma das duas mutations altera produtos/áreas/locais.
+    expect(backend).toContain("changeSupplyLocationQuantity");
+    expect(backend).toContain('ctx.db.query("stockByLocation")');
+    expect(backend).toContain('ctx.db.patch(matches[0]._id, { quantity: Math.max(0, next) })');
+    expect(backend).toContain('areaId: PRINT_AREA_ID');
     for (const block of [withdrawBlock, withdrawFamilyBlock]) {
       expect(block).not.toContain('db.patch(product');
-      expect(block).not.toContain("stockByLocation");
     }
   });
 
@@ -270,7 +272,7 @@ describe("PRINT-DISP — A retirada é uma SAÍDA real, não transferência", ()
     expect(withdrawBlock).toContain('type: "exit"');
     expect(withdrawBlock).toContain("previousPhysical");
     expect(withdrawBlock).toContain("newPhysical");
-    expect(withdrawBlock).toContain("newPhysical = previousPhysical - args.quantity");
+    expect(withdrawBlock).toContain("const newPhysical = previousPhysical - quantity");
 
     // Auditoria obrigatória.
     expect(withdrawBlock).toContain('action: "move_stock"');
@@ -290,15 +292,14 @@ describe("PRINT-DISP — A retirada é uma SAÍDA real, não transferência", ()
 
   it("PRINT-DISP-04: FIFO e lotId preservados", () => {
     // Lotes consumidos em ordem de recebimento (FIFO)…
-    expect(withdrawBlock).toContain("sort((a, b) => a.receivedAt - b.receivedAt)");
-    expect(withdrawBlock).toContain("quantityAvailable");
-    expect(withdrawBlock).toContain("lot.quantityAvailable - take");
+    expect(backend).toContain("sort((a: any, b: any) => a.receivedAt - b.receivedAt)");
+    expect(backend).toContain("Number(lot.quantityAvailable) - take");
     // …e o lotId do 1º lote consumido vai para a movimentação.
-    expect(withdrawBlock).toContain("lotId: consumedLots[0].lotId");
+    expect(backend).toContain("lotId: input.consumedLots[0]?.lotId");
+    expect(backend).toContain('ctx.db.insert("stockMovementLots"');
 
     // Falha de consistência ABORTA (nenhuma saída parcial registrada).
-    expect(withdrawBlock).toContain("Falha de consistência: lotes insuficientes");
-    expect(withdrawBlock).toContain("Nenhuma saída registrada");
+    expect(backend).toContain("Estoque livre insuficiente na área Impressoras");
   });
 
   it("PRINT-DISP-04b: a abertura de embalagem é um evento explícito e rastreado", () => {
@@ -338,7 +339,7 @@ describe("PRINT-DISP — Backend é a autoridade final", () => {
     }
 
     // A UI apenas antecipa a regra — quem decide é o servidor.
-    expect(dialog).toContain("validateWithdrawal(qty, family.baseStock)");
+    expect(dialog).toContain("validateWithdrawal(qty, family.baseAvailableInArea)");
     const submitBody = dialog.slice(
       dialog.indexOf("const submit = async"),
       dialog.indexOf("return (")
