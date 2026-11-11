@@ -164,9 +164,10 @@ describe("PRINT-EXIT-03 — retirada respeita o backend (autoridade final)", () 
   });
 
   it("FIFO de lotes e lotId estruturado preservados na retirada por família", () => {
-    expect(backend).toContain("sort((a, b) => a.receivedAt - b.receivedAt)");
-    expect(backend).toContain("lotId: consumedLots[0]?.lotId as never");
-    expect(backend).toContain("Falha de consistência: lotes insuficientes");
+    expect(backend).toContain("sort((a: any, b: any) => a.receivedAt - b.receivedAt)");
+    expect(backend).toContain("lotId: input.consumedLots[0]?.lotId");
+    expect(backend).toContain('ctx.db.insert("stockMovementLots"');
+    expect(backend).toContain("Estoque livre insuficiente na área Impressoras");
   });
 
   it("a retirada registra destino, secretaria, departamento, unidade, O.S. e motivo", () => {
@@ -184,7 +185,7 @@ describe("PRINT-EXIT-04 — retirada acima do disponível é bloqueada", () => {
 
   it("backend valida contra o estoque real da família em unidades-base", () => {
     expect(backend).toContain("familyAvailable");
-    expect(backend).toContain("Estoque insuficiente. Disponível: ${familyAvailable} ${conv.baseUnit}");
+    expect(backend).toContain("Estoque livre insuficiente na área Impressoras. Disponível: ${familyAvailable}");
     expect(backend).toContain("Composição insuficiente");
   });
 
@@ -254,7 +255,7 @@ describe("PRINT-UOM-03 — o estoque principal mostra 668 un", () => {
     expect(panel).toContain("f.baseUnit");
     // O saldo em unidades-base é o valor principal; a embalagem entra apenas
     // como camada auxiliar ("≈ N caixas") abaixo dele.
-    expect(panel).toContain("{f.baseStock}");
+    expect(panel).toContain("{f.baseAvailableInArea}");
     expect(panel).toContain("PacksApproximation");
   });
 });
@@ -301,7 +302,7 @@ describe("PRINT-UOM-05 — a retirada trabalha em unidade-base", () => {
   });
 
   it("o backend registra a abertura de embalagem como evento explícito e auditado", () => {
-    expect(backend).toContain("Abertura INTEGRAL");
+    expect(backend).toContain("reclassifiedFromLotId");
     expect(backend).toContain("open_pack");
     expect(backend).toContain("Reclassificação de");
   });
