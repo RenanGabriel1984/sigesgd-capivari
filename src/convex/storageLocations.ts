@@ -41,10 +41,14 @@ export const create = mutation({
   args: {
     name: v.string(),
     description: v.optional(v.string()),
+    // Mantido opcional para compatibilidade com clientes antigos; novos locais
+    // não recebem área. A área pertence ao lote/saldo, não ao armário.
+    areaId: v.optional(v.id("stockAreas")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
     if (!args.name.trim()) throw new Error("Nome do local é obrigatório");
+
     // Check for duplicate name
     const existing = await ctx.db.query("storageLocations").collect();
     if (existing.some((l: any) => l.name.toLowerCase() === args.name.trim().toLowerCase())) {
@@ -71,12 +75,20 @@ export const update = mutation({
     name: v.optional(v.string()),
     description: v.optional(v.string()),
     active: v.optional(v.boolean()),
+    areaId: v.optional(v.id("stockAreas")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    const { id, ...updates } = args;
+    const { id } = args;
     const location = await ctx.db.get(id);
     if (!location) throw new Error("Local não encontrado");
+
+    // areaId é aceito apenas para compatibilidade com clientes antigos e
+    // deliberadamente ignorado: uma localização física não pertence a uma área.
+    const updates: Record<string, any> = {};
+    if (args.name !== undefined) updates.name = args.name;
+    if (args.description !== undefined) updates.description = args.description;
+    if (args.active !== undefined) updates.active = args.active;
 
     if (updates.active === false) {
       const lotsAtLocation = await ctx.db.query("lots")
