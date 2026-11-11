@@ -4,7 +4,7 @@ import {
   formatConsumedLots,
   type LotConsumption,
 } from "../lib/stock-consumption";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import {
   applyImplementationStockStamp,
@@ -634,7 +634,7 @@ export const quickExit = mutation({
  * Cleanup: remove test/homologation data.
  * Preserves users, passwords, auth, schema, audit logs.
  */
-export const cleanupTestData = mutation({
+export const cleanupTestData = internalMutation({
   args: {
     confirm: v.literal(true),
   },
