@@ -434,14 +434,13 @@ export const confirm = mutation({
           throw new Error(`A área selecionada para "${product?.name ?? "o item"}" não existe ou está inativa.`);
         }
       }
-      if (item.locationId) {
-        const location = await ctx.db.get(item.locationId);
-        if (!location || !location.active) {
-          throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
-        }
-      } else if (effectiveAreaId) {
+      if (!item.locationId) {
         const product = await ctx.db.get(item.productId);
         throw new Error(`Selecione o local físico para "${product?.name ?? "o item"}" antes de confirmar esta entrada.`);
+      }
+      const location = await ctx.db.get(item.locationId);
+      if (!location || !location.active) {
+        throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
       }
     }
     const now = Date.now();
