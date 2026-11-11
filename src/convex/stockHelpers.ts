@@ -16,6 +16,7 @@ export interface SheetRow {
   brand: string;
   quantity: number;
   unitOfMeasure: string;
+  areaName?: string;
   observation: string;
 }
 
@@ -23,8 +24,9 @@ export interface SheetRow {
  * Interpreta o texto colado/importado da planilha de inventário físico.
  *
  * Formato aceito (separador `;` ou `,`, cabeçalho opcional):
- *   Localização; Produto; Marca; Quantidade; Unidade; Observação
- *   Armário TI 01; Cabo HDMI; Exbom; 8; un; Caixa original
+ *   Localização; Produto; Marca; Quantidade; Unidade; Área; Observação
+ *   Armário TI 01; Cabo HDMI; Exbom; 8; un; TI Geral; Caixa original
+ * O formato legado de seis colunas continua aceito; a coluna Área é opcional.
  *
  * A Observação é a ÚLTIMA coluna: tudo após o 5º separador é preservado
  * integralmente (inclusive separadores internos e espaços), pois observações
@@ -34,10 +36,10 @@ export interface SheetRow {
  * Linhas sem produto são ignoradas; quantidade inválida vira 0.
  */
 /** Divide a linha nos 5 primeiros campos; o restante vira o 6º (observação). */
-function splitWithRest(line: string, sep: string): string[] {
+function splitWithRest(line: string, sep: string, separators = 5): string[] {
   const out: string[] = [];
   let rest = line;
-  for (let k = 0; k < 5; k++) {
+  for (let k = 0; k < separators; k++) {
     const idx = rest.indexOf(sep);
     if (idx === -1) break;
     out.push(rest.slice(0, idx));
@@ -62,21 +64,17 @@ export function parseSheetText(text: string): SheetRow[] {
   const sep = semicolons >= commas ? ";" : ",";
 
   const rows: SheetRow[] = [];
-  let isFirstLine = true;
+  const headerColumns = splitWithRest(lines[0], sep, 6).map(clean);
+  const hasHeader = ["local", "localização", "localizacao", "location", "localidade"]
+    .includes((headerColumns[0] ?? "").toLowerCase());
+  const hasAreaColumn = hasHeader && ["área", "area"].includes((headerColumns[5] ?? "").toLowerCase());
   for (const line of lines) {
-    const cols = splitWithRest(line, sep).map(clean);
-    if (isFirstLine) {
-      const first = (cols[0] ?? "").toLowerCase();
-      if (["local", "localização", "localizacao", "location", "localidade"].includes(first)) {
-        isFirstLine = false;
-        continue;
-      }
-      isFirstLine = false;
-    }
+    if (hasHeader && line === lines[0]) continue;
+    const cols = splitWithRest(line, sep, hasAreaColumn ? 6 : 5).map(clean);
     if (!cols[1]) continue;
-    // splitWithRest garante no máximo 6 campos: cols[5] é a observação
-    // integral (com separadores internos preservados).
-    const observation = cols[5] ?? "";
+    // Com Área: cols[6] preserva a observação integral. Sem Área, cols[5]
+    // mantém o formato antigo e a preservação dos separadores na observação.
+    const observation = hasAreaColumn ? (cols[6] ?? "") : (cols[5] ?? "");
     const [locationName, productName, brand, quantity, unitOfMeasure] = cols;
     rows.push({
       locationName: locationName ?? "",
@@ -84,6 +82,7 @@ export function parseSheetText(text: string): SheetRow[] {
       brand: brand ?? "",
       quantity: Math.max(0, Number((quantity ?? "").replace(",", ".")) || 0),
       unitOfMeasure: unitOfMeasure || "un",
+      areaName: hasAreaColumn ? (cols[5] || undefined) : undefined,
       observation,
     });
   }
