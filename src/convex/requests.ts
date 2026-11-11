@@ -490,9 +490,10 @@ export const deliver = mutation({
         throw new Error("Quantidade entregue deve ser um número válido maior que zero.");
       }
       if (input.quantityDelivered > item.quantityApproved) {
-        throw new Error(`Quantidade entregue excede a aprovada para "${(await ctx.db.get(item.productId))?.name ?? "item"}".`);
+        const productForMessage: any = await ctx.db.get(item.productId as any);
+        throw new Error(`Quantidade entregue excede a aprovada para "${productForMessage?.name ?? "item"}".`);
       }
-      const product = await ctx.db.get(item.productId);
+      const product: any = await ctx.db.get(item.productId as any);
       if (product?.hasSerial) {
         const serials = input.serialNumbers ?? [];
         if (serials.length !== input.quantityDelivered || serials.some((value: string) => !value.trim())) {
@@ -572,15 +573,18 @@ export const deliver = mutation({
       if (item.areaId) {
         const reservations = await ctx.db.query("requestItemReservations")
           .withIndex("by_requestItem", (q: any) => q.eq("requestItemId", input.itemId)).collect();
-        const rows = await Promise.all(reservations.map(async (reservation: any) => ({
-          reservation, lot: await ctx.db.get(reservation.lotId),
-        })));
+        const rows: Array<{ reservation: any; lot: any }> = await Promise.all(
+          reservations.map(async (reservation: any) => ({
+            reservation,
+            lot: await ctx.db.get(reservation.lotId as any) as any,
+          }))
+        );
         rows.sort((a: any,b: any)=>(a.lot?.receivedAt??0)-(b.lot?.receivedAt??0) ||
           (a.lot?.lotNumber??"").localeCompare(b.lot?.lotNumber??""));
         for (const row of rows) {
           if (remaining <= 0) break;
-          const reservation = await ctx.db.get(row.reservation._id);
-          const lot = await ctx.db.get(row.reservation.lotId);
+          const reservation: any = await ctx.db.get(row.reservation._id as any);
+          const lot: any = await ctx.db.get(row.reservation.lotId as any);
           if (!reservation || !lot) throw new Error("Lote/reserva desapareceu durante a entrega.");
           const consume = Math.min(reservation.quantityRemaining, remaining);
           if (consume <= 0) continue;
@@ -722,7 +726,7 @@ export const cancel = mutation({
         if (release > 0) {
           const key = item.productId as string;
           releaseByProduct.set(key, (releaseByProduct.get(key) ?? 0) + release);
-          const product = await ctx.db.get(item.productId);
+          const product: any = await ctx.db.get(item.productId as any);
           details.push(`${product?.name ?? "item"}: -${release}`);
         }
       }
