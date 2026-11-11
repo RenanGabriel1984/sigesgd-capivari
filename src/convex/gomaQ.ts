@@ -1,4 +1,4 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { PRINT_AREA_ID } from "./printSupplies";
@@ -15,16 +15,15 @@ async function requireManagerOrAdmin(ctx: any) {
   return requirePermission(ctx, "gomaq.manage", { entity: "gomaQ" });
 }
 
-function generateExchangeNumber(): string {
-  const year = new Date().getFullYear();
-  const seq = Math.floor(Math.random() * 999999).toString().padStart(6, "0");
-  return `TRO-${year}-${seq}`;
-}
-
-function generateCollectionNumber(): string {
-  const year = new Date().getFullYear();
-  const seq = Math.floor(Math.random() * 999999).toString().padStart(6, "0");
-  return `COL-${year}-${seq}`;
+async function generateCollectionNumber(ctx: any): Promise<string> {
+  const prefix = `COL-${new Date().getFullYear()}-`;
+  const collections = await ctx.db.query("gomaQCollections").collect();
+  const maxSequence = collections.reduce((max: number, item: any) => {
+    if (!item.collectionNumber?.startsWith(prefix)) return max;
+    const sequence = Number(item.collectionNumber.slice(prefix.length));
+    return Number.isSafeInteger(sequence) && sequence > max ? sequence : max;
+  }, 0);
+  return `${prefix}${String(maxSequence + 1).padStart(6, "0")}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -198,7 +197,12 @@ export const monthlyOrder = query({
 // MUTATIONS
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const createExchange = mutation({
+/**
+ * Fluxo legado desativado: a troca antiga debitava estoque global sem
+ * respeitar área, reservas por lote, saldo por local e rastreabilidade multi-lote.
+ * A retirada operacional deve ocorrer por printSupplies.withdraw/withdrawFamily.
+ */
+export const createExchange = internalMutation({
   args: {
     productId: v.id("products"),
     printerId: v.id("printers"),
@@ -210,139 +214,8 @@ export const createExchange = mutation({
     organizationId: v.optional(v.id("organizations")),
     observation: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
-    const { userId, user } = await requireManagerOrAdmin(ctx);
-
-    if (args.quantityDelivered <= 0) throw new Error("Quantidade entregue deve ser maior que zero");
-    if (args.quantityEmptyReceived < 0) throw new Error("Quantidade de carcaças não pode ser negativa");
-
-    // Validate product
-    const product = await ctx.db.get(args.productId);
-    if (!product) throw new Error("Produto não encontrado");
-
-    // Validate printer
-    const printer = await ctx.db.get(args.printerId);
-    if (!printer) throw new Error("Impressora não encontrada");
-
-    // Validate stock (check available = physical - reserved)
-    const stock = await ctx.db
-      .query("stock")
-      .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
-    const availableStock = stock.physicalQuantity - stock.reservedQuantity;
-    if (availableStock < args.quantityDelivered) {
-      throw new Error(`Estoque insuficiente. Disponível: ${availableStock} (físico: ${stock.physicalQuantity}, reservado: ${stock.reservedQuantity}). Necessário: ${args.quantityDelivered}`);
-    }
-
-    // Validate receiver — either userId or free-text name is required
-    if (args.receivedByUserId) {
-      const receiver = await ctx.db.get(args.receivedByUserId);
-      if (!receiver) throw new Error("Usuário recebedor não encontrado");
-    } else if (!args.receivedByName?.trim()) {
-      throw new Error("Informe o nome do recebedor ou selecione um usuário");
-    }
-
-    const now = Date.now();
-    const exchangeNumber = generateExchangeNumber();
-
-    // FIFO Lot Consumption (before stock reduction — mirrors requests.deliver pattern)
-    let remainingToConsume = args.quantityDelivered;
-    let consumedLotId: string | undefined;
-    const lots = await ctx.db
-      .query("lots")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
-      .collect();
-    const sortedLots = lots
-      .filter((l: any) => l.quantityAvailable > 0)
-      .sort((a: any, b: any) => a.receivedAt - b.receivedAt || a.lotNumber.localeCompare(b.lotNumber));
-
-    for (const lot of sortedLots) {
-      if (remainingToConsume <= 0) break;
-      const consumeFromLot = Math.min(lot.quantityAvailable, remainingToConsume);
-      if (consumeFromLot <= 0) continue;
-      await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consumeFromLot });
-      if (!consumedLotId) consumedLotId = lot._id;
-      remainingToConsume -= consumeFromLot;
-    }
-
-    if (remainingToConsume > 0) {
-      throw new Error(`Lotes insuficientes. Faltam ${remainingToConsume} unidades sem lote disponível.`);
-    }
-
-    // Re-read stock for concurrency safety (double-check pattern)
-    const freshStock = await ctx.db
-      .query("stock")
-      .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!freshStock) throw new Error("Registro de estoque desapareceu durante a troca");
-    if (freshStock.physicalQuantity < args.quantityDelivered) {
-      throw new Error(`Estoque insuficiente (concorrência). Físico: ${freshStock.physicalQuantity}. Necessário: ${args.quantityDelivered}.`);
-    }
-    if (freshStock.reservedQuantity > freshStock.physicalQuantity - args.quantityDelivered) {
-      throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}. Disponível: ${freshStock.physicalQuantity}.`);
-    }
-
-    // Reduce global stock
-    const newPhysical = freshStock.physicalQuantity - args.quantityDelivered;
-    const newReserved = freshStock.reservedQuantity;
-    await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical });
-
-    // Create stock movement
-    await ctx.db.insert("stockMovements", {
-      productId: args.productId,
-      type: "exit",
-      quantity: args.quantityDelivered,
-      previousPhysical: freshStock.physicalQuantity,
-      newPhysical,
-      previousReserved: freshStock.reservedQuantity,
-      newReserved,
-      userId,
-      observation: `Troca Gomaq — ${printer.name} (${printer.model})`,
-      timestamp: now,
-    });
-
-    // Create exchange record
-    const exchangeId = await ctx.db.insert("gomaQExchanges", {
-      exchangeNumber,
-      productId: args.productId,
-      lotId: consumedLotId as any,
-      printerId: args.printerId,
-      quantityDelivered: args.quantityDelivered,
-      quantityEmptyReceived: args.quantityEmptyReceived,
-      deliveredByUserId: userId,
-      receivedByUserId: args.receivedByUserId,
-      receivedByName: args.receivedByName?.trim(),
-      requestId: args.requestId,
-      organizationId: args.organizationId,
-      exchangedAt: now,
-      observation: args.observation,
-    });
-
-    // Create empty cartridge records
-    if (args.quantityEmptyReceived > 0) {
-      await ctx.db.insert("gomaQEmptyCartridges", {
-        productId: args.productId,
-        printerId: args.printerId,
-        quantity: args.quantityEmptyReceived,
-        generatedAt: now,
-        sourceExchangeId: exchangeId as any,
-        status: "awaiting_collection",
-        createdByUserId: userId,
-      });
-    }
-
-    // Audit
-    await ctx.db.insert("auditLogs", {
-      userId,
-      action: "gomaq_exchange",
-      entity: "gomaQExchanges",
-      entityId: exchangeId,
-      details: `Troca: ${args.quantityDelivered} ${product.name} → ${printer.name}. Carcaças: ${args.quantityEmptyReceived}`,
-      timestamp: now,
-    });
-
-    return exchangeId;
+  handler: async (_ctx, _args) => {
+    throw new Error("Fluxo legado de troca desativado. Registre a retirada pela Gestão de Suprimentos de Impressão.");
   },
 });
 
@@ -372,7 +245,7 @@ export const createCollection = mutation({
 
     // Create collection record
     const collectionId = await ctx.db.insert("gomaQCollections", {
-      collectionNumber: generateCollectionNumber(),
+      collectionNumber: await generateCollectionNumber(ctx),
       collectedAt: now,
       responsibleUserId: userId,
       observation: args.observation,
