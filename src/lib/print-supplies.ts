@@ -82,6 +82,8 @@ export interface SupplyRowInput {
   idealStock: number | null | undefined;
   /** Quantidade do produto que está FISICAMENTE na área Impressoras. */
   inArea?: number;
+  /** Saldo livre na área Impressoras após reservas por lote. */
+  availableInArea?: number;
 }
 
 export interface SupplyRow extends SupplyRowInput {
@@ -97,12 +99,13 @@ export interface SupplyRow extends SupplyRowInput {
 
 export function buildSupplyRow(input: SupplyRowInput): SupplyRow {
   const type = classifySupplyType(input.productName);
-  const status = stockStatus(input.currentStock, input.minimumStock);
+  const operationalStock = input.availableInArea ?? input.inArea ?? input.currentStock;
+  const status = stockStatus(operationalStock, input.minimumStock);
   const parametersDefined =
     input.minimumStock != null && input.minimumStock > 0 &&
     input.idealStock != null && input.idealStock > 0;
   const suggestedReorder = parametersDefined
-    ? Math.max(0, (input.idealStock as number) - input.currentStock)
+    ? Math.max(0, (input.idealStock as number) - operationalStock)
     : null;
   return {
     ...input,
@@ -128,7 +131,7 @@ export interface SupplyCardTotals {
 
 export function computeCardTotals(rows: SupplyRow[]): SupplyCardTotals {
   const by = (t: SupplyType) =>
-    rows.filter((r) => r.type === t).reduce((s, r) => s + r.currentStock, 0);
+    rows.filter((r) => r.type === t).reduce((s, r) => s + (r.inArea ?? r.currentStock), 0);
   return {
     toners: by("Toner"),
     cartoes: by("Cartão"),
@@ -455,6 +458,7 @@ export interface SupplyFamilyInput {
    */
   monthlyConsumptionTarget?: number | null;
   inArea: number;
+  availableInArea?: number;
   /** Conversão explicitamente configurada (null = sem conversão). */
   packaging: PackagingConversion | null;
 }
@@ -466,6 +470,7 @@ export interface FamilyMember {
   unitOfMeasure: string;
   currentStock: number;
   inArea: number;
+  availableInArea: number;
   packaging: PackagingConversion | null;
   /** Quantidade expressa em unidades-base (sem conversão = quantidade própria). */
   baseUnits: number;
@@ -485,6 +490,8 @@ export interface SupplyFamily {
   baseStock: number;
   /** Estoque fisicamente na área Impressoras (unidades-base). */
   baseStockInArea: number;
+  /** Saldo livre na área Impressoras, descontadas as reservas por lote. */
+  baseAvailableInArea: number;
   /** Detalhamento legível da composição física, ex.: "13 caixas fechadas + 18 un. avulsas". */
   compositionLabel: string;
   /** Registros originais — NUNCA descartados (rastreabilidade). */
@@ -557,11 +564,13 @@ export function buildSupplyFamilies(inputs: SupplyFamilyInput[]): SupplyFamily[]
       unitOfMeasure: m.unitOfMeasure,
       currentStock: m.currentStock,
       inArea: m.inArea,
+      availableInArea: m.availableInArea ?? m.inArea,
       packaging: m.packaging,
       baseUnits: m.packaging ? m.currentStock * m.packaging.factor : m.currentStock,
     }));
     const baseStock = members.reduce((s, m) => s + m.baseUnits, 0);
     const baseStockInArea = members.reduce((s, m) => s + (m.packaging ? m.inArea * m.packaging.factor : m.inArea), 0);
+    const baseAvailableInArea = members.reduce((s, m) => s + (m.packaging ? m.availableInArea * m.packaging.factor : m.availableInArea), 0);
     const baseUnit = members.find((m) => m.packaging)?.packaging?.baseUnit ?? first.unitOfMeasure;
     const mins = membersInput.map((m) => m.minimumStock);
     const ideals = membersInput.map((m) => m.idealStock);
@@ -575,10 +584,10 @@ export function buildSupplyFamilies(inputs: SupplyFamilyInput[]): SupplyFamily[]
       : null;
     const parametersDefined = minimumStock != null && idealStock != null && minimumStock > 0;
     const withdrawMember =
-      members.find((m) => m.packaging && m.currentStock > 0) ??
-      members.find((m) => m.currentStock > 0) ??
+      members.find((m) => m.packaging && m.availableInArea > 0) ??
+      members.find((m) => m.availableInArea > 0) ??
       members[0];
-    const status = stockStatus(baseStock, minimumStock);
+    const status = stockStatus(baseAvailableInArea, minimumStock);
     families.push({
       familyKey,
       familyName: first.productName.replace(/\s*[—\-–]\s*(caixa\s*fechada|unidade\s*avulsa|caixa|unidade)\s*$/i, "").trim(),
@@ -588,6 +597,7 @@ export function buildSupplyFamilies(inputs: SupplyFamilyInput[]): SupplyFamily[]
       baseUnit,
       baseStock,
       baseStockInArea,
+      baseAvailableInArea,
       compositionLabel: compositionLabelFor(members),
       members,
       minimumStock,
@@ -595,7 +605,7 @@ export function buildSupplyFamilies(inputs: SupplyFamilyInput[]): SupplyFamily[]
       monthlyConsumptionTarget,
       status,
       withdrawMemberId: withdrawMember.productId,
-      suggestedReorder: parametersDefined ? Math.max(0, idealStock! - baseStock) : null,
+      suggestedReorder: parametersDefined ? Math.max(0, idealStock! - baseAvailableInArea) : null,
       parametersDefined,
     });
   }
