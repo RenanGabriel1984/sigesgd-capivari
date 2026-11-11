@@ -172,7 +172,7 @@ export const create = mutation({
       }
       const sourceLocation: any = await ctx.db.get(exit.locationId);
       if (!sourceLocation || !sourceLocation.active) {
-        throw new Error("O local físico da saída original não existe ou está inativo. Regularize a localização antes da devolução.");
+        throw new Error("O local físico da saída original não existe ou está inativo.");
       }
       if (args.locationId && args.locationId !== exit.locationId) {
         throw new Error("A devolução deve voltar ao local físico de origem. Para mudar o local, registre uma transferência após a devolução.");
