@@ -54,7 +54,7 @@ export default function Exit() {
   const [secretaria, setSecretaria] = useState("");
   const [departamento, setDepartamento] = useState("");
   const [unidade, setUnidade] = useState("");
-  const [locationId, setLocationId] = useState("");
+  const [locationSelection, setLocationSelection] = useState("");
   const [reason, setReason] = useState<string>(REASONS[0]);
   const [osNumber, setOsNumber] = useState("");
   const [observation, setObservation] = useState("");
@@ -88,7 +88,9 @@ export default function Exit() {
   const selectedProduct: ProductRow | undefined =
     products?.find((p) => p._id === productId) ?? undefined;
   const selectedLocation = selectedProduct
-    ? (locationsByProduct.get(selectedProduct._id as string) ?? []).find((location) => location.locationId === locationId)
+    ? (locationsByProduct.get(selectedProduct._id as string) ?? []).find(
+        (location) => `${location.areaId ?? ""}::${location.locationId}` === locationSelection,
+      )
     : undefined;
   const globalAvailable = selectedProduct
     ? Math.max(0, (selectedProduct.stock?.physicalQuantity ?? 0) - (selectedProduct.stock?.reservedQuantity ?? 0))
@@ -123,7 +125,7 @@ export default function Exit() {
       return;
     }
     setProductId(id);
-    setLocationId(locs[0].locationId);
+    setLocationSelection(`${locs[0].areaId}::${locs[0].locationId}`);
     setStep(1);
   };
 
@@ -131,7 +133,7 @@ export default function Exit() {
     if (!selectedProduct) return;
     if (qty <= 0) { toast.error("Informe uma quantidade maior que zero"); return; }
     if (qty > available) { toast.error(`Disponível: ${available} ${UNIT_LABELS[selectedProduct.unitOfMeasure] ?? selectedProduct.unitOfMeasure}`); return; }
-    if (!selectedLocation?.areaId || !locationId) {
+    if (!selectedLocation?.areaId || !selectedLocation.locationId) {
       toast.error("Selecione uma área e um local físico classificados antes de confirmar.");
       return;
     }
@@ -141,7 +143,7 @@ export default function Exit() {
         productId: selectedProduct._id as any,
         areaId: selectedLocation.areaId as any,
         quantity: qty,
-        locationId: locationId as any,
+        locationId: selectedLocation.locationId as any,
         destination: destination || "Não informado",
         receiverName: receiverName.trim() || (activeUsers.find((u: any) => u._id === receiverId)?.name ?? user?.name ?? "Não informado"),
         reason,
@@ -158,7 +160,7 @@ export default function Exit() {
 
   const reset = () => {
     setStep(0); setSearch(""); setProductId(null); setQuantity("1");
-    setSecretaria(""); setDepartamento(""); setUnidade(""); setLocationId("");
+    setSecretaria(""); setDepartamento(""); setUnidade(""); setLocationSelection("");
     setReason(REASONS[0]); setOsNumber(""); setObservation(""); setResult(null);
   };
 
@@ -257,7 +259,7 @@ export default function Exit() {
                           {locs.length > 0 && (
                             <div className="flex flex-wrap gap-1 mt-2">
                               {locs.map((l) => (
-                                <Badge key={l.locationId} variant="outline" className="text-[10px] gap-1">
+                                <Badge key={`${l.areaId}::${l.locationId}`} variant="outline" className="text-[10px] gap-1">
                                   <MapPin className="h-2.5 w-2.5" /> {l.areaName} / {l.locationName} · {l.quantity}
                                 </Badge>
                               ))}
@@ -345,11 +347,14 @@ export default function Exit() {
                   {selectedProduct && (
                     <div>
                       <Label className="text-sm font-medium">De qual local?</Label>
-                      <Select value={locationId} onValueChange={setLocationId}>
+                      <Select value={locationSelection} onValueChange={setLocationSelection}>
                         <SelectTrigger className="mt-1"><SelectValue placeholder="Qualquer local" /></SelectTrigger>
                         <SelectContent>
                           {(locationsByProduct.get(selectedProduct._id as string) ?? []).filter((l) => l.areaId).map((l) => (
-                            <SelectItem key={l.locationId} value={l.locationId}>
+                            <SelectItem
+                              key={`${l.areaId}::${l.locationId}`}
+                              value={`${l.areaId}::${l.locationId}`}
+                            >
                               {l.areaName} / {l.locationName} · {l.quantity} disponível
                             </SelectItem>
                           ))}
