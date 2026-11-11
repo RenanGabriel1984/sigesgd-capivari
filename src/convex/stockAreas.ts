@@ -331,10 +331,15 @@ export const classifyLot = mutation({
         .withIndex("by_movement", (q: any) => q.eq("movementId", movementId as any)).collect();
       const linkedPairs: Array<{ areaId: string; locationId: string }> = [];
       for (const link of allLinks) {
-        const linkedLot: any = link.lotId === lot._id ? lot : await ctx.db.get(link.lotId);
-        if (!linkedLot?.areaId || !linkedLot?.locationId) continue;
-        linkedPairs.push({ areaId: linkedLot._id === lot._id ? args.areaId as string : linkedLot.areaId as string,
-          locationId: linkedLot._id === lot._id ? args.locationId as string : linkedLot.locationId as string });
+        const isCurrentLot = link.lotId === lot._id;
+        const linkedLot: any = isCurrentLot ? lot : await ctx.db.get(link.lotId);
+        const linkedAreaId = isCurrentLot ? args.areaId : linkedLot?.areaId;
+        const linkedLocationId = isCurrentLot ? args.locationId : linkedLot?.locationId;
+        if (!linkedAreaId || !linkedLocationId) continue;
+        linkedPairs.push({
+          areaId: linkedAreaId as string,
+          locationId: linkedLocationId as string,
+        });
       }
       if (linkedPairs.length !== allLinks.length || linkedPairs.length === 0) continue;
       const common = linkedPairs[0];
