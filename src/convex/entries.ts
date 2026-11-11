@@ -9,6 +9,7 @@ import {
   normalizeInvoiceNumber,
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
+import type { Id } from "./_generated/dataModel";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -428,7 +429,7 @@ export const confirm = mutation({
       const effectiveAreaId = item.areaId ?? entry.areaId;
       itemAreas.set(item._id as string, effectiveAreaId as string | undefined);
       if (effectiveAreaId) {
-        const area = await ctx.db.get(effectiveAreaId as any);
+        const area = await ctx.db.get(effectiveAreaId as Id<"stockAreas">);
         if (!area || !area.active) {
           const product = await ctx.db.get(item.productId);
           throw new Error(`A área selecionada para "${product?.name ?? "o item"}" não existe ou está inativa.`);
