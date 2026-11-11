@@ -41,13 +41,17 @@ export const create = mutation({
   args: {
     name: v.string(),
     description: v.optional(v.string()),
-    areaId: v.id("stockAreas"),
+    areaId: v.optional(v.id("stockAreas")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
     if (!args.name.trim()) throw new Error("Nome do local é obrigatório");
-    const area = await ctx.db.get(args.areaId);
-    if (!area || !area.active) throw new Error("Selecione uma área/subestoque ativa para o local.");
+    // areaId é mantido apenas como metadado legado de compatibilidade.
+    // A classificação efetiva pertence ao lote/saldo, nunca ao armário.
+    if (args.areaId) {
+      const area = await ctx.db.get(args.areaId);
+      if (!area || !area.active) throw new Error("A referência de área legada não existe ou está inativa.");
+    }
 
     // Check for duplicate name
     const existing = await ctx.db.query("storageLocations").collect();
@@ -86,22 +90,9 @@ export const update = mutation({
 
     if (updates.areaId !== undefined) {
       const area = await ctx.db.get(updates.areaId);
-      if (!area || !area.active) throw new Error("A área selecionada não existe ou está inativa.");
-      if (location.areaId && location.areaId !== updates.areaId) {
-        throw new Error("A área de um local já classificado não pode ser trocada diretamente. Use uma transferência/classificação auditável.");
-      }
-      if (!location.areaId) {
-        const lotsAtLocation = await ctx.db.query("lots")
-          .withIndex("by_location", (q: any) => q.eq("locationId", id)).collect();
-        if (lotsAtLocation.some((lot: any) => lot.areaId && lot.areaId !== updates.areaId)) {
-          throw new Error("Há lotes neste local já vinculados a outra área. Não é seguro atribuir uma área diferente ao local.");
-        }
-        const balancesAtLocation = await ctx.db.query("stockByLocation")
-          .withIndex("by_location", (q: any) => q.eq("locationId", id)).collect();
-        if (balancesAtLocation.some((row: any) => row.areaId && row.areaId !== updates.areaId)) {
-          throw new Error("Há saldos neste local já vinculados a outra área. Regularize a classificação antes de alterar o local.");
-        }
-      }
+      if (!area || !area.active) throw new Error("A referência de área legada não existe ou está inativa.");
+      // Não compara a área do local com lotes/saldos: um mesmo local físico
+      // pode armazenar materiais de várias áreas/subestoques.
     }
 
     if (updates.active === false) {
