@@ -25,6 +25,8 @@ A rotina abrange exclusivamente as entradas auditadas:
 - `ENT-2026-000001`: implantação inicial, 53 itens/lotes.
 - `ENT-2026-000002`: entrada Gomaq, 8 itens/lotes.
 
+A pré-validação também fixa os identificadores das áreas e dos dois armários auditados e confere a distribuição documental da entrada inicial (34 itens / 2.597 unidades no Armário TI 01; 19 itens / 206 unidades no Armário TI 02) e da Gomaq (8 itens / 535 unidades no Armário TI 02). Os totais documentais esperados são 2.803 unidades na entrada inicial e 535 na Gomaq.
+
 A classificação inicial usa os 53 nomes de produtos da planilha de carga original (36 TI Geral e 17 Impressoras). As unidades de medida são corrigidas apenas nos dez itens cuja unidade da linha de entrada divergiu da planilha original. Não há conversão nem alteração de quantidade.
 
 A pré-validação verifica vínculos item→lote, áreas, locais, quantidades, saldos globais, saldos por produto/local, reservas, solicitações aprovadas, movimentações, vínculos de lote das saídas e a devolução registrada.
