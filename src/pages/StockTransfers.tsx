@@ -111,7 +111,7 @@ export default function StockTransfersPage() {
           <div>
             <h1 className="text-2xl tracking-tight font-bold">Transferências</h1>
             <p className="text-sm text-muted-foreground">
-              Transfere estoque entre locais físicos.
+              Transfere estoque entre áreas/subestoques e locais físicos, preservando a rastreabilidade dos lotes.
             </p>
           </div>
           {(user?.role === "admin" || user?.role === "stock_manager") && (
