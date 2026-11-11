@@ -211,10 +211,11 @@ export const getSupplyDashboard = query({
     // stock.mutate — nenhum ganho de permissão por esta tela.
     await requirePermission(ctx, "stock.view");
 
-    const [products, stock, lots] = await Promise.all([
+    const [products, stock, lots, reservations] = await Promise.all([
       ctx.db.query("products").collect(),
       ctx.db.query("stock").collect(),
       ctx.db.query("lots").collect(),
+      ctx.db.query("requestItemReservations").collect(),
     ]);
 
     const supplyProducts = products.filter((p) => p.categoryId === SUPPLY_CATEGORY_ID);
@@ -222,9 +223,22 @@ export const getSupplyDashboard = query({
 
     // Lotes da área Impressoras por produto (recorte operacional).
     const areaLots = new Map<string, number>();
+    const areaLotIds = new Map<string, Set<string>>();
     for (const lot of lots) {
       if (lot.areaId !== PRINT_AREA_ID || !supplyIds.has(lot.productId)) continue;
       areaLots.set(lot.productId, (areaLots.get(lot.productId) ?? 0) + lot.quantityAvailable);
+      const ids = areaLotIds.get(lot.productId) ?? new Set<string>();
+      ids.add(String(lot._id));
+      areaLotIds.set(lot.productId, ids);
+    }
+    const areaReserved = new Map<string, number>();
+    for (const reservation of reservations as any[]) {
+      const productId = String(reservation.productId);
+      if (!supplyIds.has(productId) || !areaLotIds.get(productId)?.has(String(reservation.lotId))) continue;
+      const quantity = Number(reservation.quantityRemaining);
+      if (Number.isFinite(quantity) && quantity > 0) {
+        areaReserved.set(productId, (areaReserved.get(productId) ?? 0) + quantity);
+      }
     }
 
     // Estoque global por produto (o recorte é sobre lotes; o saldo exibido
@@ -238,6 +252,7 @@ export const getSupplyDashboard = query({
       .map((p) => {
         const current = stockByProduct.get(p._id)?.physical ?? 0;
         const inArea = areaLots.get(p._id) ?? 0;
+        const availableInArea = Math.max(0, inArea - (areaReserved.get(p._id) ?? 0));
         return buildSupplyRow({
           productId: p._id as string,
           productName: p.name,
@@ -247,7 +262,8 @@ export const getSupplyDashboard = query({
           currentStock: current,
           minimumStock: p.minimumStock ?? 0,
           idealStock: p.idealStock ?? 0,
-          inArea: inArea,
+          inArea,
+          availableInArea,
         });
       })
       .sort((a, b) => a.type.localeCompare(b.type) || a.productName.localeCompare(b.productName));
@@ -258,6 +274,7 @@ export const getSupplyDashboard = query({
     const familyInputs: SupplyFamilyInput[] = supplyProducts.map((p) => {
       const current = stockByProduct.get(p._id)?.physical ?? 0;
       const inArea = areaLots.get(p._id) ?? 0;
+      const availableInArea = Math.max(0, inArea - (areaReserved.get(p._id) ?? 0));
       return {
         productId: p._id as string,
         productName: p.name,
@@ -270,6 +287,7 @@ export const getSupplyDashboard = query({
         // Parâmetro MANUAL de consumo mensal (nunca calculado aqui).
         monthlyConsumptionTarget: p.monthlyConsumptionTarget ?? null,
         inArea,
+        availableInArea,
         packaging: readPackagingConversion(p),
       };
     });
