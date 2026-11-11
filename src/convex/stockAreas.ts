@@ -84,8 +84,8 @@ export const summary = query({
     }
 
     for (const lot of lots) {
-      // Área e local físico são dimensões independentes. A área vem do lote;
-      // a localização só informa onde o material está guardado.
+      // Área classifica o material; localização informa somente onde está guardado.
+      // Um mesmo armário pode conter lotes de áreas diferentes.
       const key = lot.areaId && buckets.has(lot.areaId as string)
         ? lot.areaId as string
         : "none";
@@ -136,6 +136,11 @@ export const unclassifiedLots = query({
     const pending = [];
     for (const lot of lots) {
       if (!lot.active || lot.quantityAvailable <= 0) continue;
+      const location = lot.locationId ? await ctx.db.get(lot.locationId) : null;
+      const area = lot.areaId ? await ctx.db.get(lot.areaId) : null;
+      const consistent = !!area?.active && !!lot.locationId && !!location?.active;
+      if (consistent) continue;
+
       const product = await ctx.db.get(lot.productId);
       const entry = await ctx.db.get(lot.entryId);
       const entryItems = await ctx.db.query("entryItems")
@@ -143,13 +148,11 @@ export const unclassifiedLots = query({
       const entryItem = entryItems.find((item: any) =>
         item.lotId === lot._id || item.lotId === lot.lotNumber
       ) ?? null;
-      const suggestedLocationId = lot.locationId ?? entryItem?.locationId ?? null;
-      const location = suggestedLocationId ? await ctx.db.get(suggestedLocationId) : null;
-      const hasValidArea = !!lot.areaId && !!(await ctx.db.get(lot.areaId));
-      const hasValidLocation = !!location && location.active;
-      if (hasValidArea && hasValidLocation) continue;
       const currentArea = lot.areaId ? await ctx.db.get(lot.areaId) : null;
-      const suggestedAreaId = lot.areaId ?? entry?.areaId ?? null;
+      const suggestedLocationId = lot.locationId ?? entryItem?.locationId ?? null;
+      // Nunca inferir a área a partir do armário. A entrada/item pode fornecer
+      // a área de negócio; caso contrário, a classificação exige escolha explícita.
+      const suggestedAreaId = lot.areaId ?? entryItem?.areaId ?? entry?.areaId ?? null;
 
       pending.push({
         lotId: lot._id,
@@ -164,8 +167,8 @@ export const unclassifiedLots = query({
         currentLocationName: location?.name ?? null,
         suggestedAreaId,
         suggestedLocationId,
-        areaMissing: !hasValidArea,
-        locationMissing: !suggestedLocationId || !location || !location.active,
+        areaMissing: !lot.areaId || !currentArea?.active,
+        locationMissing: !lot.locationId || !location?.active,
       });
     }
     return pending.sort((a, b) => a.productName.localeCompare(b.productName, "pt-BR") ||
@@ -194,7 +197,7 @@ export const classifyLot = mutation({
     const area = await ctx.db.get(args.areaId);
     const location = await ctx.db.get(args.locationId);
     if (!area || !area.active || !location || !location.active) {
-      throw new Error("A área e o local selecionados precisam estar ativos.");
+      throw new Error("Selecione uma área/subestoque e um local físico ativos.");
     }
     if (lot.areaId && lot.areaId !== args.areaId) {
       throw new Error("O lote já possui outra área. Use uma transferência de estoque para mudar de área.");
@@ -218,6 +221,28 @@ export const classifyLot = mutation({
     const sourceLocationId = lot.locationId ?? linkedEntryItem?.locationId ?? args.locationId;
     if (sourceLocationId !== args.locationId) {
       throw new Error("O local registrado para este lote difere do local selecionado. Faça uma transferência física auditável antes da classificação.");
+    }
+    if (linkedEntryItem?.areaId && linkedEntryItem.areaId !== args.areaId) {
+      throw new Error("O item da entrada já possui outra área registrada. Confira a origem documental antes de reclassificar o lote.");
+    }
+
+    const lotMovements = (await ctx.db.query("stockMovements")
+      .withIndex("by_product", (q: any) => q.eq("productId", lot.productId))
+      .collect())
+      .filter((movement: any) => movement.lotId === lot._id || movement.lotId === lot.lotNumber);
+    if (lotMovements.some((movement: any) =>
+      (movement.areaId && movement.areaId !== args.areaId) ||
+      (movement.locationId && movement.locationId !== args.locationId)
+    )) {
+      throw new Error("Há movimentação histórica com área/local divergente deste lote. Regularize a trilha documental antes de classificar.");
+    }
+    const movementLotLinks = await ctx.db.query("stockMovementLots")
+      .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+    if (movementLotLinks.some((link: any) =>
+      (link.areaId && link.areaId !== args.areaId) ||
+      (link.locationId && link.locationId !== args.locationId)
+    )) {
+      throw new Error("Há vínculo de movimentação por lote com área/local divergente. Regularize a trilha antes de classificar.");
     }
 
     const productStock = await ctx.db.query("stock")
@@ -248,6 +273,9 @@ export const classifyLot = mutation({
     // já estar no bucket classificado. Caso contrário, precisa existir saldo legado.
     const balanceAlreadyClassified = !!lot.areaId && !!alreadyClassifiedRow &&
       alreadyClassifiedRow.quantity >= lot.quantityAvailable && legacyQuantity === 0;
+    if (targetRow && legacyQuantity > 0) {
+      throw new Error("Existem saldos legados e classificados simultaneamente neste produto/local. A classificação automática é ambígua; confira o inventário antes de prosseguir.");
+    }
     if (!balanceAlreadyClassified && legacyQuantity < lot.quantityAvailable) {
       throw new Error(
         `O saldo legado deste produto/local (${legacyQuantity}) é menor que o saldo do lote (${lot.quantityAvailable}). Nenhuma classificação foi aplicada.`
@@ -275,12 +303,68 @@ export const classifyLot = mutation({
     }
 
     await ctx.db.patch(lot._id, { areaId: args.areaId, locationId: args.locationId });
+    if (linkedEntryItem && linkedEntryItem.areaId !== args.areaId) {
+      await ctx.db.patch(linkedEntryItem._id, { areaId: args.areaId });
+    }
+    for (const movement of lotMovements) {
+      if (movement.areaId !== args.areaId || movement.locationId !== args.locationId) {
+        await ctx.db.patch(movement._id, {
+          areaId: args.areaId,
+          locationId: args.locationId,
+        });
+      }
+    }
+    for (const link of movementLotLinks) {
+      if (link.areaId !== args.areaId || link.locationId !== args.locationId) {
+        await ctx.db.patch(link._id, {
+          areaId: args.areaId,
+          locationId: args.locationId,
+        });
+      }
+    }
+
+    // Movimentos multi-lote não têm um único lotId. Só recebem área/local
+    // quando TODOS os lotes vinculados já concordam com a mesma combinação.
+    const relatedMovementIds = [...new Set(movementLotLinks.map((link: any) => link.movementId as string))];
+    for (const movementId of relatedMovementIds) {
+      const allLinks = await ctx.db.query("stockMovementLots")
+        .withIndex("by_movement", (q: any) => q.eq("movementId", movementId as any)).collect();
+      const linkedPairs: Array<{ areaId: string; locationId: string }> = [];
+      for (const link of allLinks) {
+        const isCurrentLot = link.lotId === lot._id;
+        const linkedLot: any = isCurrentLot ? lot : await ctx.db.get(link.lotId);
+        const linkedAreaId = isCurrentLot ? args.areaId : linkedLot?.areaId;
+        const linkedLocationId = isCurrentLot ? args.locationId : linkedLot?.locationId;
+        if (!linkedAreaId || !linkedLocationId) continue;
+        linkedPairs.push({
+          areaId: linkedAreaId as string,
+          locationId: linkedLocationId as string,
+        });
+      }
+      if (linkedPairs.length !== allLinks.length || linkedPairs.length === 0) continue;
+      const common = linkedPairs[0];
+      if (linkedPairs.some((pair) => pair.areaId !== common.areaId || pair.locationId !== common.locationId)) continue;
+      const movement: any = await ctx.db.get(movementId as any);
+      if (!movement) continue;
+      if (
+        (movement.areaId && movement.areaId !== common.areaId) ||
+        (movement.locationId && movement.locationId !== common.locationId)
+      ) {
+        throw new Error("A movimentação multi-lote possui área/local divergente dos lotes vinculados.");
+      }
+      if (movement.areaId !== common.areaId || movement.locationId !== common.locationId) {
+        await ctx.db.patch(movement._id, {
+          areaId: common.areaId as any,
+          locationId: common.locationId as any,
+        });
+      }
+    }
     await ctx.db.insert("auditLogs", {
       userId,
       action: "update",
       entity: "lots",
       entityId: lot._id,
-      details: `Classificação manual do lote ${lot.lotNumber}: ${lot.quantityAvailable} unidade(s) → ${area.name} / ${location.name}. Saldo global inalterado.`,
+      details: `Classificação manual do lote ${lot.lotNumber}: ${lot.quantityAvailable} unidade(s) → ${area.name} / ${location.name}. Item de entrada e ${lotMovements.length} movimentação(ões) vinculados; saldo global inalterado.`,
       timestamp: Date.now(),
     });
     return lot._id;
