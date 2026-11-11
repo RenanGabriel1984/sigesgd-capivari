@@ -23,18 +23,17 @@ export interface SheetRow {
 /**
  * Interpreta o texto colado/importado da planilha de inventário físico.
  *
- * Formato aceito (separador `;` ou `,`, cabeçalho opcional):
- *   Localização; Produto; Marca; Quantidade; Unidade; Observação
- *   Armário TI 01; Cabo HDMI; Exbom; 8; un; Caixa original
+ * Formato aceito (separador `;` ou `,`, cabeçalho recomendado):
+ *   Legado: Localização; Produto; Marca; Quantidade; Unidade; Observação
+ *   Atual:  Localização; Produto; Marca; Quantidade; Unidade; Área; Observação
  *
- * A Observação é a ÚLTIMA coluna: tudo após o 5º separador é preservado
- * integralmente (inclusive separadores internos e espaços), pois observações
- * reais contêm `;` — ex.: "Parte do kit original e 4 cores; CX735",
- * "Cat5E; 5 caixas com 100".
+ * A coluna Área só é reconhecida quando declarada no cabeçalho. A Observação
+ * permanece como última coluna e preserva separadores internos, sem confundir
+ * observações antigas com a nova coluna de área.
  *
  * Linhas sem produto são ignoradas; quantidade inválida vira 0.
  */
-/** Divide a linha nos 5 primeiros campos; o restante vira o 6º (observação). */
+/** Divide os campos fixos; preserva o restante da última coluna. */
 function splitWithRest(line: string, sep: string, maxSeparators = 5): string[] {
   const out: string[] = [];
   let rest = line;
