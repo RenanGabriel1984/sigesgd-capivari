@@ -119,6 +119,11 @@ async function buildRegularizationPlan(ctx: any) {
   if (gomaqEntry && printerArea && gomaqEntry.areaId !== printerArea._id) {
     addBlocker('A entrada Gomaq 372043 não está vinculada à área "Impressoras".');
   }
+  const gomaqItemQuantity = gomaqItems.reduce((sum: number, item: any) => sum + Number(item.quantity), 0);
+  const gomaqLotQuantity = gomaqLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityReceived), 0);
+  if (gomaqItemQuantity !== 535 || gomaqLotQuantity !== 535) {
+    addBlocker(`NF Gomaq 372043 diverge do total físico auditado de 535 unidades (itens: ${gomaqItemQuantity}; lotes: ${gomaqLotQuantity}).`);
+  }
 
   const manifestByName = new Map(INITIAL_STOCK_MANIFEST.map((row) => [normalize(row.productName), row]));
   const usedManifestNames = new Set<string>();
@@ -272,6 +277,24 @@ async function buildRegularizationPlan(ctx: any) {
     const allTargetLots = [...initialLots, ...gomaqLots];
     if (new Set(allTargetLots.map((lot: any) => lot._id)).size !== 61) {
       addBlocker("Os dois escopos não contêm 61 lotes distintos.");
+    }
+  }
+
+  // Solicitações aprovadas com saldo pendente bloqueiam a regularização.
+  // Mesmo que o saldo reservado global esteja zerado, não se deve reclassificar
+  // a origem física enquanto houver entrega aprovada ainda não concluída.
+  const approvedRequests: any[] = await ctx.db.query("requests")
+    .withIndex("by_status", (q: any) => q.eq("status", "approved")).collect();
+  for (const request of approvedRequests) {
+    const requestItems: any[] = await ctx.db.query("requestItems")
+      .withIndex("by_request", (q: any) => q.eq("requestId", request._id)).collect();
+    for (const item of requestItems) {
+      if (
+        allTouchedProductIds.has(item.productId as string) &&
+        Number(item.quantityApproved) > Number(item.quantityDelivered ?? 0)
+      ) {
+        addBlocker(`Há solicitação aprovada ${request._id} com entrega pendente do produto ${item.productId}; conclua/cancele antes da regularização.`);
+      }
     }
   }
 
