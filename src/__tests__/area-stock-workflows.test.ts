@@ -15,6 +15,11 @@ const products = read("src/convex/products.ts");
 const returns = read("src/convex/returns.ts");
 const areaDefinitions = read("src/lib/stock-areas.ts");
 const stockLocations = read("src/convex/stockLocations.ts");
+const exitPage = read("src/pages/Exit.tsx");
+const stockAreasPage = read("src/pages/StockAreas.tsx");
+const requestsPage = read("src/pages/Requests.tsx");
+const transfersPage = read("src/pages/StockTransfers.tsx");
+const inventory = read("src/convex/inventory.ts");
 
 function mutationBlock(source: string, name: string): string {
   const start = source.indexOf(`export const ${name} = mutation({`);
@@ -127,6 +132,27 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(stockLocations).toContain("const area = row.areaId ? await ctx.db.get(row.areaId) : null");
     expect(stockLocations).not.toContain("location?.areaId === row.areaId");
     expect(stockAreas).not.toContain("location.areaId !== lot.areaId");
+  });
+
+  it("seleciona saídas pelo par área + local, sem colidir no mesmo armário", () => {
+    expect(exitPage).toContain('${location.areaId ?? ""}::${location.locationId}');
+    expect(exitPage).toContain('${l.areaId}::${l.locationId}');
+    expect(exitPage).toContain("locationId: selectedLocation.locationId");
+  });
+
+  it("solicitações e transferências oferecem locais físicos sem filtrar por área legada", () => {
+    expect(requestsPage).toContain("location.active");
+    expect(requestsPage).not.toContain("location.areaId === item.areaId");
+    expect(transfersPage).toContain("fromAreaId: fromAreaId as any");
+    expect(transfersPage).toContain("toAreaId: toAreaId as any");
+    expect(transfersPage).toContain("Selecione a área...");
+  });
+
+  it("inventários e classificação permitem escolher área e armário separadamente", () => {
+    expect(inventory).toContain("inv.locationId && !inv.areaId");
+    expect(inventory).toContain("s.locationId === inv.locationId && s.areaId === inv.areaId");
+    expect(stockAreasPage).toContain("location.active");
+    expect(stockAreasPage).not.toContain("location.areaId === classificationAreaId");
   });
 
   it("mantém as cinco áreas de estoque aprovadas como estrutura padrão", () => {
