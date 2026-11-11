@@ -1,640 +1,602 @@
-import { mutation, query } from "./_generated/server";
+/**
+ * Regularização histórica única de área/local do estoque.
+ *
+ * A mutation é idempotente e só corrige referências/metadados:
+ * - lotes e itens da entrada: área e local físico;
+ * - saldos por produto/local: subdivisão por área, preservando o total por par;
+ * - movimentos/devoluções: referências à área/local/lote já existente;
+ * - 10 unidades de medida comprovadamente divergentes na planilha inicial.
+ *
+ * NÃO altera stock.physicalQuantity, stock.reservedQuantity, quantityReceived,
+ * quantityAvailable, quantidades dos itens de entrada ou quantidade das movimentações.
+ * stockByLocation.quantity só pode ser redistribuído entre áreas do MESMO
+ * produto/local; o total do par é validado antes de qualquer escrita.
+ *
+ * Execute somente depois de publicar o schema que inclui entryItems.areaId,
+ * requestItemReservations e stockMovementLots.
+ */
+
+import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import {
+  INITIAL_ENTRY_NUMBER,
+  GOMAQ_ENTRY_NUMBER,
+  GOMAQ_INVOICE_NUMBER,
+  INITIAL_STOCK_MANIFEST,
+  INITIAL_ENTRY_UOM_REPAIRS,
+  summarizeInitialStockManifest,
+} from "../lib/stock-regularization-manifest";
 
-const INITIAL_ENTRY_NUMBER = "ENT-2026-000001";
-const GOMAQ_ENTRY_NUMBER = "ENT-2026-000002";
-const EXPECTED_AREA_IDS = {
-  "TI Geral": "q971w9jkmz8rsqr3vsr2as0dps8eyqns",
-  "Impressoras": "q97b7737gv98ajm8qqpmjmzjs18ezb58",
-} as const;
-const EXPECTED_INITIAL_LOCATIONS: Record<string, string> = {
-  n5711zfag2vgm24hm5qd9yn42s8e54ej: "Armário TI 01",
-  n576x4v2v08tyzvzef21qk3m8h8e5y2f: "Armário TI 02",
-};
+const CONFIRMATION = "REGULARIZAR_SIGESGD_AREA_LOCAL_V1";
 
-const INITIAL_AREAS: Record<string, "TI Geral" | "Impressoras"> = {
-  "Cooler para processador Intel": "TI Geral",
-  "Teclado KB 110 com fio": "TI Geral",
-  "Teclado com fio": "TI Geral",
-  "Kit teclado e mouse": "TI Geral",
-  "Teclado numérico": "TI Geral",
-  "Leitor de DVD": "TI Geral",
-  "Cartão PVC para crachá": "Impressoras",
-  "Mouse com fio": "TI Geral",
-  "Mouse wireless": "TI Geral",
-  "Pasta térmica": "TI Geral",
-  "Conector RJ45 Cat5E": "TI Geral",
-  "Conector RJ45 blindado CAT5": "TI Geral",
-  "Conector RJ45": "TI Geral",
-  "Cadeado chave tetra": "TI Geral",
-  "Jogo de chaves — 6 peças": "TI Geral",
-  "Jogo de chaves — 8 peças": "TI Geral",
-  "Módulo para tomada": "TI Geral",
-  "Caixa com tampa de sobrepor para tomada": "TI Geral",
-  "Limpa contato": "TI Geral",
-  "Keystone Jack para RJ45": "TI Geral",
-  "Conector linear de emenda para cabo RJ45 CAT6": "TI Geral",
-  "Hub USB 3.0": "TI Geral",
-  "Fita isolante": "TI Geral",
-  "Adaptador HDMI para VGA": "TI Geral",
-  "Cabo adaptador DisplayPort para VGA": "TI Geral",
-  "Pilha AAA": "TI Geral",
-  "Teclado": "TI Geral",
-  "Switch JetStream 8 portas": "TI Geral",
-  "Switch 26 portas": "TI Geral",
-  "Switch 5 portas 10/100 PoE": "TI Geral",
-  "Telefone VoIP TIP 125I": "TI Geral",
-  "Telefone VoIP V5502": "TI Geral",
-  "RouterBoard": "TI Geral",
-  "Telefone VoIP TIP 125I — Montado": "TI Geral",
-  "Protetor de crachá — caixa fechada": "Impressoras",
-  "Protetor de crachá — unidade avulsa": "Impressoras",
-  "Mousepad": "TI Geral",
-  "Abraçadeira de nylon": "TI Geral",
-  "Telefone": "TI Geral",
-  "Toner VersaLink — Preto": "Impressoras",
-  "Toner VersaLink — Ciano": "Impressoras",
-  "Toner VersaLink — Magenta": "Impressoras",
-  "Toner VersaLink — Amarelo": "Impressoras",
-  "Toner AltaLink — Preto": "Impressoras",
-  "Toner AltaLink — Ciano": "Impressoras",
-  "Toner AltaLink — Magenta": "Impressoras",
-  "Toner AltaLink — Amarelo": "Impressoras",
-  "Toner CX735 — Magenta": "Impressoras",
-  "Toner CX735 — Amarelo": "Impressoras",
-  "Etiqueta para impressão adesiva": "Impressoras",
-  "Ribbon para impressora de etiqueta adesiva": "Impressoras",
-  "Papel para impressora térmica": "Impressoras",
-  "Toner Lexmark XM5365": "Impressoras",
-};
+type AreaLocation = { areaId: string; locationId: string };
+type Patch = { id: string; fields: Record<string, any> };
 
-const INITIAL_UNIT_CORRECTIONS: Record<string, string> = {
-  "Kit teclado e mouse": "kit",
-  "Pasta térmica": "pote",
-  "Jogo de chaves — 6 peças": "kit",
-  "Jogo de chaves — 8 peças": "kit",
-  "Fita isolante": "rolo",
-  "Protetor de crachá — caixa fechada": "caixa",
-  "Abraçadeira de nylon": "pacote",
-  "Etiqueta para impressão adesiva": "rolo",
-  "Ribbon para impressora de etiqueta adesiva": "rolo",
-  "Papel para impressora térmica": "rolo",
-};
+const keyOf = (...parts: string[]) => parts.join("|");
+const normalize = (value?: string | null) => (value ?? "").trim().toLocaleLowerCase("pt-BR");
 
-type PatchAction = { id: any; fields: Record<string, any> };
-type StockRowAction =
-  | { type: "patch"; id: any; areaId: any; quantity: number }
-  | { type: "insert"; productId: any; locationId: any; areaId: any; quantity: number };
-type MovementLotAction = { movementId: any; lotId: any; quantity: number; areaId: any; locationId: any };
-
-function near(a: number, b: number): boolean {
-  return Math.abs(a - b) < 0.000001;
+function addPatch(target: Patch[], id: string, current: Record<string, any>, fields: Record<string, any>) {
+  const changed: Record<string, any> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (current[key] !== value) changed[key] = value;
+  }
+  if (Object.keys(changed).length) target.push({ id, fields: changed });
 }
 
-function keyOf(...parts: string[]): string {
-  return parts.join("|");
+function resolveLot(reference: unknown, byId: Map<string, any>, byNumber: Map<string, any>) {
+  if (typeof reference !== "string" || !reference.trim()) return null;
+  return byId.get(reference) ?? byNumber.get(reference) ?? null;
 }
 
 async function buildRegularizationPlan(ctx: any) {
   const blockers: string[] = [];
-  const entries = await ctx.db.query("entries").collect();
-  const initialEntry = entries.find((entry: any) => entry.entryNumber === INITIAL_ENTRY_NUMBER);
-  const gomaqEntry = entries.find((entry: any) => entry.entryNumber === GOMAQ_ENTRY_NUMBER);
-  if (!initialEntry || !gomaqEntry) {
-    throw new Error("As duas entradas auditadas não foram encontradas. Regularização bloqueada.");
-  }
-  if (initialEntry.status !== "confirmed" || initialEntry.originType !== "initial_inventory") {
-    throw new Error("A entrada inicial não está no estado esperado. Regularização bloqueada.");
-  }
-  if (gomaqEntry.status !== "confirmed" || gomaqEntry.originType !== "purchase") {
-    throw new Error("A entrada Gomaq não está no estado esperado. Regularização bloqueada.");
-  }
-
-  const areas = await ctx.db.query("stockAreas").collect();
-  const printerAreas = areas.filter((area: any) => area.name === "Impressoras" && area.active);
-  const generalAreas = areas.filter((area: any) => area.name === "TI Geral" && area.active);
-  if (printerAreas.length !== 1 || generalAreas.length !== 1) {
-    throw new Error("É necessário existir exatamente uma área ativa chamada Impressoras e uma chamada TI Geral.");
-  }
-  const printerArea = printerAreas[0];
-  const generalArea = generalAreas[0];
-  if (String(printerArea._id) !== EXPECTED_AREA_IDS.Impressoras ||
-      String(generalArea._id) !== EXPECTED_AREA_IDS["TI Geral"]) {
-    throw new Error("Os identificadores das áreas não correspondem aos dados da auditoria do deployment esperado.");
-  }
-  if (gomaqEntry.areaId !== printerArea._id) {
-    throw new Error("A entrada Gomaq não está vinculada à área Impressoras esperada. Nenhuma alteração foi preparada.");
-  }
-
-  const initialItems = await ctx.db.query("entryItems")
-    .withIndex("by_entry", (q: any) => q.eq("entryId", initialEntry._id)).collect();
-  const gomaqItems = await ctx.db.query("entryItems")
-    .withIndex("by_entry", (q: any) => q.eq("entryId", gomaqEntry._id)).collect();
-  if (initialItems.length !== 53 || gomaqItems.length !== 8) {
-    throw new Error("A quantidade de itens das entradas auditadas mudou (esperado: 53 iniciais e 8 Gomaq). Regularização bloqueada.");
-  }
-
-  const initialQuantity = initialItems.reduce((sum: number, item: any) => sum + Number(item.quantity), 0);
-  const gomaqQuantity = gomaqItems.reduce((sum: number, item: any) => sum + Number(item.quantity), 0);
-  if (!near(initialQuantity, 2803) || !near(gomaqQuantity, 535)) {
-    throw new Error("Os totais documentais das entradas mudaram (esperado: 2.803 inicial e 535 Gomaq). Regularização bloqueada.");
-  }
-  const initialByLocation = new Map<string, { count: number; quantity: number }>();
-  for (const item of initialItems) {
-    const id = String(item.locationId ?? "");
-    const current = initialByLocation.get(id) ?? { count: 0, quantity: 0 };
-    current.count += 1;
-    current.quantity += Number(item.quantity);
-    initialByLocation.set(id, current);
-  }
-  const initialCabinetOne = initialByLocation.get("n5711zfag2vgm24hm5qd9yn42s8e54ej");
-  const initialCabinetTwo = initialByLocation.get("n576x4v2v08tyzvzef21qk3m8h8e5y2f");
-  if (!initialCabinetOne || initialCabinetOne.count !== 34 || !near(initialCabinetOne.quantity, 2597) ||
-      !initialCabinetTwo || initialCabinetTwo.count !== 19 || !near(initialCabinetTwo.quantity, 206)) {
-    throw new Error("A distribuição documental da entrada inicial entre os dois armários diverge da auditoria.");
-  }
-  if (gomaqItems.some((item: any) => item.locationId !== "n576x4v2v08tyzvzef21qk3m8h8e5y2f")) {
-    throw new Error("Os itens Gomaq não estão todos vinculados ao Armário TI 02, como na auditoria.");
-  }
-  const allLots = await ctx.db.query("lots").collect();
-  const lotById = new Map<string, any>(allLots.map((lot: any) => [lot._id as string, lot]));
-  const lotByNumber = new Map<string, any>(allLots.map((lot: any) => [lot.lotNumber, lot]));
-  const locationsCache = new Map<string, any>();
-  const productsCache = new Map<string, any>();
-  const targetLots = new Map<string, { lot: any; areaId: any; locationId: any; productName: string }>();
-  const lotPatches: PatchAction[] = [];
-  const unitPatches: PatchAction[] = [];
-  const expectedByProductLocationArea = new Map<string, { productId: any; locationId: any; areaId: any; quantity: number }>();
-  const targetProductIds = new Set<string>();
-
-  async function getLocation(locationId: any) {
-    const id = String(locationId);
-    if (!locationsCache.has(id)) locationsCache.set(id, await ctx.db.get(locationId));
-    return locationsCache.get(id);
-  }
-  async function getProduct(productId: any) {
-    const id = String(productId);
-    if (!productsCache.has(id)) productsCache.set(id, await ctx.db.get(productId));
-    return productsCache.get(id);
-  }
-
-  const processItems = async (items: any[], entry: any, isInitial: boolean) => {
-    for (const item of items) {
-      if (!item.lotId || typeof item.lotId !== "string") {
-        blockers.push("Há item sem vínculo textual ao lote em " + entry.entryNumber + ".");
-        continue;
-      }
-      const lot = lotById.get(item.lotId);
-      if (!lot || lot.entryId !== entry._id || lot.productId !== item.productId) {
-        blockers.push("O vínculo item → lote não confere em " + entry.entryNumber + ".");
-        continue;
-      }
-      if (!Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0 ||
-          !Number.isFinite(Number(lot.quantityReceived)) || !Number.isFinite(Number(lot.quantityAvailable)) ||
-          Number(lot.quantityAvailable) < 0 || Number(lot.quantityAvailable) > Number(lot.quantityReceived)) {
-        blockers.push("Quantidade inválida no item/lote " + lot.lotNumber + ".");
-        continue;
-      }
-      const product = await getProduct(item.productId);
-      if (!product) {
-        blockers.push("Produto não encontrado para o lote " + lot.lotNumber + ".");
-        continue;
-      }
-      const areaName = isInitial ? INITIAL_AREAS[product.name] : "Impressoras";
-      if (!areaName) {
-        blockers.push("Produto sem classificação original explícita na planilha inicial: " + product.name + ".");
-        continue;
-      }
-      const areaId = areaName === "Impressoras" ? printerArea._id : generalArea._id;
-      if (lot.areaId && lot.areaId !== areaId) {
-        blockers.push("O lote " + lot.lotNumber + " já possui área diferente da classificação documental.");
-        continue;
-      }
-      if (!item.locationId) {
-        blockers.push("O item " + product.name + " da entrada " + entry.entryNumber + " não possui local físico registrado.");
-        continue;
-      }
-      const location = await getLocation(item.locationId);
-      if (!location || !location.active) {
-        blockers.push("O local físico do item " + product.name + " não existe ou está inativo.");
-        continue;
-      }
-      const expectedLocationName = EXPECTED_INITIAL_LOCATIONS[String(location._id)];
-      if (!expectedLocationName || location.name !== expectedLocationName) {
-        blockers.push("O local físico do item " + product.name + " não corresponde a um dos dois armários da auditoria.");
-        continue;
-      }
-      if (lot.locationId && lot.locationId !== item.locationId) {
-        blockers.push("O lote " + lot.lotNumber + " já aponta para um local físico diferente do item da entrada.");
-        continue;
-      }
-      if (!near(Number(lot.quantityReceived), Number(item.quantity))) {
-        blockers.push("A quantidade recebida do lote " + lot.lotNumber + " diverge do item da entrada.");
-        continue;
-      }
-
-      targetProductIds.add(item.productId as string);
-      targetLots.set(lot._id as string, { lot, areaId, locationId: item.locationId, productName: product.name });
-
-      const fields: Record<string, any> = {};
-      if (lot.areaId !== areaId) fields.areaId = areaId;
-      if (lot.locationId !== item.locationId) fields.locationId = item.locationId;
-      if (Object.keys(fields).length) lotPatches.push({ id: lot._id, fields });
-
-      if (isInitial && INITIAL_UNIT_CORRECTIONS[product.name]) {
-        const expectedUnit = INITIAL_UNIT_CORRECTIONS[product.name];
-        if (item.unitOfMeasure === "un") {
-          unitPatches.push({ id: item._id, fields: { unitOfMeasure: expectedUnit } });
-        } else if (item.unitOfMeasure !== expectedUnit) {
-          blockers.push("Unidade divergente inesperada para " + product.name + ": " + item.unitOfMeasure + ".");
-        }
-      }
-
-      const groupKey = keyOf(item.productId as string, item.locationId as string, areaId as string);
-      const current = expectedByProductLocationArea.get(groupKey) ?? {
-        productId: item.productId, locationId: item.locationId, areaId, quantity: 0,
-      };
-      current.quantity += Number(lot.quantityAvailable);
-      expectedByProductLocationArea.set(groupKey, current);
-    }
+  const addBlocker = (message: string) => {
+    if (!blockers.includes(message)) blockers.push(message);
   };
 
-  await processItems(initialItems, initialEntry, true);
-  await processItems(gomaqItems, gomaqEntry, false);
-  if (targetLots.size !== 61) {
-    blockers.push("Foram resolvidos " + targetLots.size + " dos 61 lotes auditados.");
+  const areas = await ctx.db.query("stockAreas").collect();
+  const areaByName = new Map(areas.map((area: any) => [normalize(area.name), area]));
+  const generalArea: any = areaByName.get(normalize("TI Geral"));
+  const printerArea: any = areaByName.get(normalize("Impressoras"));
+  if (!generalArea?.active) addBlocker('Área ativa "TI Geral" não encontrada.');
+  if (!printerArea?.active) addBlocker('Área ativa "Impressoras" não encontrada.');
+
+  const locations = await ctx.db.query("storageLocations").collect();
+  const locationByName = new Map(locations.map((location: any) => [normalize(location.name), location]));
+  const cabinet1: any = locationByName.get(normalize("Armário TI 01"));
+  const cabinet2: any = locationByName.get(normalize("Armário TI 02"));
+  if (!cabinet1?.active) addBlocker('Local físico ativo "Armário TI 01" não encontrado.');
+  if (!cabinet2?.active) addBlocker('Local físico ativo "Armário TI 02" não encontrado.');
+
+  const initialEntry: any = await ctx.db.query("entries")
+    .withIndex("by_number", (q: any) => q.eq("entryNumber", INITIAL_ENTRY_NUMBER)).first();
+  const gomaqEntry: any = await ctx.db.query("entries")
+    .withIndex("by_number", (q: any) => q.eq("entryNumber", GOMAQ_ENTRY_NUMBER)).first();
+  if (!initialEntry) addBlocker(`Entrada ${INITIAL_ENTRY_NUMBER} não encontrada.`);
+  if (!gomaqEntry) addBlocker(`Entrada ${GOMAQ_ENTRY_NUMBER} não encontrada.`);
+
+  const lotPatches: Patch[] = [];
+  const itemPatches: Patch[] = [];
+  const movementPatches: Patch[] = [];
+  const returnPatches: Patch[] = [];
+  const sblPatches: Patch[] = [];
+  const sblInserts: Array<{ productId: string; locationId: string; areaId: string; quantity: number }> = [];
+  const targetLotMeta = new Map<string, AreaLocation>();
+  const allTouchedProductIds = new Set<string>();
+  const itemUomChanges: Array<{ productName: string; from: string; to: string }> = [];
+  const itemLocationDistribution = new Map<string, { rows: number; quantity: number }>();
+  const areaDistribution = new Map<string, { rows: number; quantity: number }>();
+
+  const initialItems: any[] = initialEntry
+    ? await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", initialEntry._id)).collect()
+    : [];
+  const initialLots: any[] = initialEntry
+    ? await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", initialEntry._id)).collect()
+    : [];
+  const gomaqItems: any[] = gomaqEntry
+    ? await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", gomaqEntry._id)).collect()
+    : [];
+  const gomaqLots: any[] = gomaqEntry
+    ? await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", gomaqEntry._id)).collect()
+    : [];
+
+  if (initialEntry && (initialEntry.status !== "confirmed" || initialEntry.originType !== "initial_inventory")) {
+    addBlocker("A entrada inicial não está confirmada como initial_inventory.");
   }
-  if (blockers.length) {
-    throw new Error("Pré-validação interrompida:\n- " + blockers.join("\n- "));
+  if (initialEntry?.areaId) {
+    addBlocker("A entrada inicial possui área no cabeçalho, mas a planilha contém áreas mistas. O cabeçalho não será sobrescrito.");
+  }
+  if (initialItems.length !== 53 || initialLots.length !== 53) {
+    addBlocker(`Carga inicial fora do manifesto: encontrados ${initialItems.length} itens e ${initialLots.length} lotes; esperado 53/53.`);
+  }
+  if (gomaqEntry && (gomaqEntry.status !== "confirmed" || gomaqEntry.invoiceNumber !== GOMAQ_INVOICE_NUMBER)) {
+    addBlocker("A entrada Gomaq não corresponde à NF 372043 confirmada.");
+  }
+  if (gomaqItems.length !== 8 || gomaqLots.length !== 8) {
+    addBlocker(`NF Gomaq 372043 fora do esperado: encontrados ${gomaqItems.length} itens e ${gomaqLots.length} lotes; esperado 8/8.`);
+  }
+  if (gomaqEntry && printerArea && gomaqEntry.areaId !== printerArea._id) {
+    addBlocker('A entrada Gomaq 372043 não está vinculada à área "Impressoras".');
+  }
+  const gomaqItemQuantity = gomaqItems.reduce((sum: number, item: any) => sum + Number(item.quantity), 0);
+  const gomaqLotQuantity = gomaqLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityReceived), 0);
+  if (gomaqItemQuantity !== 535 || gomaqLotQuantity !== 535) {
+    addBlocker(`NF Gomaq 372043 diverge do total físico auditado de 535 unidades (itens: ${gomaqItemQuantity}; lotes: ${gomaqLotQuantity}).`);
   }
 
-  // Todos os demais lotes dos produtos abrangidos precisam estar classificados.
-  // A migração não adivinha a área/local de lotes que não pertencem às duas entradas.
-  const allTargetProductLots = allLots.filter((lot: any) => targetProductIds.has(lot.productId as string));
-  const expectedPhysicalByProduct = new Map<string, number>();
-  for (const lot of allTargetProductLots) {
-    const resolved = targetLots.get(lot._id as string);
-    const areaId = resolved?.areaId ?? lot.areaId;
-    const locationId = resolved?.locationId ?? lot.locationId;
-    if (lot.quantityAvailable > 0) {
-      if (!lot.active) throw new Error("Lote inativo com saldo positivo encontrado: " + lot.lotNumber + ".");
-      if (!areaId || !locationId) {
-        throw new Error("Há lote adicional com saldo positivo sem área/local nos produtos abrangidos: " + lot.lotNumber + ". Regularize-o separadamente antes.");
-      }
-      const location = await getLocation(locationId);
-      const area = await ctx.db.get(areaId);
-      if (!location?.active || !area?.active) {
-        throw new Error("Área ou local inválido no lote " + lot.lotNumber + ".");
-      }
-      const pKey = lot.productId as string;
-      expectedPhysicalByProduct.set(pKey, (expectedPhysicalByProduct.get(pKey) ?? 0) + Number(lot.quantityAvailable));
-      const groupKey = keyOf(pKey, String(locationId), String(areaId));
-      const current = expectedByProductLocationArea.get(groupKey) ?? {
-        productId: lot.productId, locationId, areaId, quantity: 0,
-      };
-      if (!resolved) current.quantity += Number(lot.quantityAvailable);
-      expectedByProductLocationArea.set(groupKey, current);
+  const manifestByName = new Map(INITIAL_STOCK_MANIFEST.map((row) => [normalize(row.productName), row]));
+  const usedManifestNames = new Set<string>();
+  const initialLotById = new Map(initialLots.map((lot: any) => [lot._id as string, lot]));
+  const initialLotByNumber = new Map(initialLots.map((lot: any) => [lot.lotNumber as string, lot]));
+
+  for (const item of initialItems) {
+    const product: any = await ctx.db.get(item.productId);
+    if (!product) {
+      addBlocker(`Produto do item inicial ${item._id} não encontrado.`);
+      continue;
     }
-  }
-
-  const stockRows = await ctx.db.query("stock").collect();
-  for (const productId of targetProductIds) {
-    const stock = stockRows.find((row: any) => row.productId === productId);
-    if (!stock) throw new Error("Registro global de estoque ausente para produto abrangido: " + productId + ".");
-    const expected = expectedPhysicalByProduct.get(productId) ?? 0;
-    if (!near(Number(stock.physicalQuantity), expected)) {
-      throw new Error("Saldo global divergente para produto " + productId + ": banco=" + stock.physicalQuantity + ", lotes=" + expected + ".");
+    const productName = product.name as string;
+    const manifest = manifestByName.get(normalize(productName));
+    if (!manifest) {
+      addBlocker(`Produto "${productName}" não consta no manifesto da carga inicial.`);
+      continue;
     }
-  }
+    if (usedManifestNames.has(normalize(productName))) {
+      addBlocker(`Produto "${productName}" aparece duplicado na entrada inicial, mas o manifesto espera uma linha única.`);
+      continue;
+    }
+    usedManifestNames.add(normalize(productName));
 
-  // Reparticiona o saldo legado por área usando a soma exata dos lotes.
-  const sblRows = await ctx.db.query("stockByLocation").collect();
-  const stockRowActions: StockRowAction[] = [];
-  const expectedLocationKeys = new Set<string>();
-  for (const group of expectedByProductLocationArea.values()) {
-    if (group.quantity <= 0) continue;
-    expectedLocationKeys.add(keyOf(String(group.productId), String(group.locationId)));
-  }
-  for (const productId of targetProductIds) {
-    const productRows = sblRows.filter((row: any) => row.productId === productId);
-    const locationIds = new Set<string>([
-      ...productRows.map((row: any) => String(row.locationId)),
-      ...Array.from(expectedLocationKeys)
-        .filter((key) => key.startsWith(String(productId) + "|"))
-        .map((key) => key.split("|")[1]),
-    ]);
-    for (const locationId of locationIds) {
-      const rows = productRows.filter((row: any) => String(row.locationId) === locationId);
-      const expectedGroups = Array.from(expectedByProductLocationArea.values())
-        .filter((group) => String(group.productId) === String(productId) &&
-          String(group.locationId) === locationId && group.quantity > 0)
-        .sort((a, b) => String(a.areaId).localeCompare(String(b.areaId)));
-      const expectedTotal = expectedGroups.reduce((sum, group) => sum + group.quantity, 0);
-      const currentTotal = rows.reduce((sum: number, row: any) => sum + Number(row.quantity), 0);
-      if (rows.some((row: any) => !Number.isFinite(Number(row.quantity)) || Number(row.quantity) < 0)) {
-        throw new Error("Saldo por localização inválido para produto " + productId + " / local " + locationId + ".");
-      }
-      if (!near(currentTotal, expectedTotal)) {
-        throw new Error("Saldo por localização não fecha com os lotes para produto " + productId + " / local " + locationId + ": banco=" + currentTotal + ", lotes=" + expectedTotal + ".");
-      }
-      if (expectedGroups.length === 0) continue;
-      const allLegacy = rows.every((row: any) => !row.areaId);
-      const allClassified = rows.every((row: any) => !!row.areaId);
-      if (allLegacy) {
-        if (rows.length !== 1) {
-          throw new Error("Há mais de uma linha legada de saldo para produto/local. A distribuição não será inferida.");
-        }
-        stockRowActions.push({
-          type: "patch", id: rows[0]._id,
-          areaId: expectedGroups[0].areaId,
-          quantity: expectedGroups[0].quantity,
-        });
-        for (const group of expectedGroups.slice(1)) {
-          stockRowActions.push({
-            type: "insert", productId: group.productId,
-            locationId: group.locationId, areaId: group.areaId, quantity: group.quantity,
-          });
-        }
-      } else if (allClassified) {
-        const seenAreas = new Set<string>();
-        const currentByArea = new Map<string, number>();
-        for (const row of rows) {
-          const areaKey = String(row.areaId);
-          if (seenAreas.has(areaKey)) {
-            throw new Error("Há linhas duplicadas por produto/local/área. Corrija a duplicidade antes da regularização.");
-          }
-          seenAreas.add(areaKey);
-          currentByArea.set(areaKey, Number(row.quantity));
-        }
-        const expectedByArea = new Map(expectedGroups.map((group) => [String(group.areaId), group.quantity]));
-        if (currentByArea.size !== expectedByArea.size ||
-            Array.from(expectedByArea.entries()).some(([areaId, quantity]) =>
-              !currentByArea.has(areaId) || !near(currentByArea.get(areaId)!, quantity)
-            )) {
-          throw new Error("A distribuição de saldo por área já classificada diverge dos lotes para produto " + productId + " / local " + locationId + ".");
-        }
+    if (Number(item.quantity) !== manifest.quantity) {
+      addBlocker(`Quantidade do item "${productName}" diverge da planilha (${item.quantity} / ${manifest.quantity}).`);
+    }
+    if (product.unitOfMeasure !== manifest.unitOfMeasure) {
+      addBlocker(`Unidade do cadastro de "${productName}" diverge da planilha (${product.unitOfMeasure} / ${manifest.unitOfMeasure}); nenhuma unidade será alterada automaticamente.`);
+    }
+    if (item.unitOfMeasure !== manifest.unitOfMeasure) {
+      if (
+        INITIAL_ENTRY_UOM_REPAIRS[productName] === manifest.unitOfMeasure &&
+        item.unitOfMeasure === "un" &&
+        product.unitOfMeasure === manifest.unitOfMeasure
+      ) {
+        itemPatches.push({ id: item._id, fields: { unitOfMeasure: manifest.unitOfMeasure } });
+        itemUomChanges.push({ productName, from: item.unitOfMeasure, to: manifest.unitOfMeasure });
       } else {
-        throw new Error("Há mistura de linhas classificadas e legadas para produto " + productId + " / local " + locationId + ".");
+        addBlocker(`Unidade do item "${productName}" diverge da planilha de forma não prevista (${item.unitOfMeasure} / ${manifest.unitOfMeasure}).`);
       }
+    }
+
+    const location: any = item.locationId ? await ctx.db.get(item.locationId) : null;
+    const expectedLocation = locationByName.get(normalize(manifest.locationName)) as any;
+    if (!expectedLocation?.active) {
+      addBlocker(`Local físico esperado "${manifest.locationName}" não está ativo.`);
+    }
+    if (!location || !location.active) {
+      addBlocker(`Item "${productName}" não possui local físico válido registrado.`);
+    } else if (normalize(location.name) !== normalize(manifest.locationName)) {
+      addBlocker(`Local físico de "${productName}" diverge da planilha (${location.name} / ${manifest.locationName}).`);
+    }
+
+    const lot = resolveLot(item.lotId, initialLotById, initialLotByNumber);
+    if (!lot) {
+      addBlocker(`Item "${productName}" não aponta para lote verificável.`);
+      continue;
+    }
+    if (lot.entryId !== initialEntry?._id || lot.productId !== item.productId || Number(lot.quantityReceived) !== manifest.quantity) {
+      addBlocker(`Lote ${lot.lotNumber} não corresponde ao item "${productName}" em entrada/produto/quantidade.`);
+      continue;
+    }
+    if (!location || !expectedLocation?.active || !generalArea?.active || !printerArea?.active) continue;
+
+    const area: any = areaByName.get(normalize(manifest.areaName));
+    const target = { areaId: area._id as string, locationId: location._id as string };
+    if (lot.areaId && lot.areaId !== target.areaId) {
+      addBlocker(`Lote ${lot.lotNumber} já possui área diferente do manifesto.`);
+    }
+    if (lot.locationId && lot.locationId !== target.locationId) {
+      addBlocker(`Lote ${lot.lotNumber} já possui local físico diferente do item de entrada.`);
+    }
+    if (item.areaId && item.areaId !== target.areaId) {
+      addBlocker(`Item da entrada "${productName}" já possui outra área.`);
+    }
+
+    targetLotMeta.set(lot._id as string, target);
+    addPatch(lotPatches, lot._id, lot, target);
+    addPatch(itemPatches, item._id, item, { areaId: target.areaId });
+
+    allTouchedProductIds.add(item.productId as string);
+    const areaSummary = areaDistribution.get(manifest.areaName) ?? { rows: 0, quantity: 0 };
+    areaSummary.rows += 1;
+    areaSummary.quantity += manifest.quantity;
+    areaDistribution.set(manifest.areaName, areaSummary);
+    const locationSummary = itemLocationDistribution.get(manifest.locationName) ?? { rows: 0, quantity: 0 };
+    locationSummary.rows += 1;
+    locationSummary.quantity += manifest.quantity;
+    itemLocationDistribution.set(manifest.locationName, locationSummary);
+  }
+
+  for (const row of INITIAL_STOCK_MANIFEST) {
+    if (!usedManifestNames.has(normalize(row.productName))) {
+      addBlocker(`Produto "${row.productName}" do manifesto não foi encontrado na entrada inicial.`);
     }
   }
 
-  // Confere reservas e solicitações aprovadas; esta rotina nunca altera reservas.
-  const reservations = await ctx.db.query("requestItemReservations").collect();
-  const reservationByItem = new Map<string, number>();
-  const reservationByProduct = new Map<string, number>();
-  const requestItemCache = new Map<string, any>();
-  const requestCache = new Map<string, any>();
-  for (const reservation of reservations) {
-    const itemId = String(reservation.requestItemId);
-    if (!requestItemCache.has(itemId)) {
-      requestItemCache.set(itemId, await ctx.db.get(reservation.requestItemId));
-    }
-    const item = requestItemCache.get(itemId);
-    if (!item) throw new Error("Reserva aponta para item de solicitação inexistente.");
-    const requestId = String(item.requestId);
-    if (!requestCache.has(requestId)) requestCache.set(requestId, await ctx.db.get(item.requestId));
-    const request = requestCache.get(requestId);
-    if (!request) throw new Error("Reserva aponta para solicitação inexistente.");
-    if (String(item.productId) !== String(reservation.productId)) {
-      throw new Error("A reserva e o item de solicitação apontam para produtos diferentes.");
-    }
-    const remaining = Number(reservation.quantityRemaining);
-    if (!Number.isFinite(remaining) || remaining < 0) {
-      throw new Error("Reserva contém quantidade restante inválida.");
-    }
-    if (remaining > 0 && request.status !== "approved") {
-      throw new Error("Existe reserva restante vinculada a solicitação que não está aprovada.");
-    }
-    if (remaining > 0) {
-      const reservedLot = lotById.get(String(reservation.lotId));
-      const resolvedLot = reservedLot ? targetLots.get(reservedLot._id as string) : null;
-      const reservedAreaId = resolvedLot?.areaId ?? reservedLot?.areaId;
-      const reservedLocationId = resolvedLot?.locationId ?? reservedLot?.locationId;
-      if (!reservedLot || reservedLot.productId !== item.productId ||
-          reservedAreaId !== item.areaId || reservedLocationId !== item.sourceLocationId ||
-          reservation.areaId !== item.areaId || reservation.locationId !== item.sourceLocationId) {
-        throw new Error("Reserva ativa não corresponde à área/local/lote do item de solicitação.");
-      }
-    }
-    reservationByItem.set(itemId, (reservationByItem.get(itemId) ?? 0) + remaining);
-    const productId = String(reservation.productId);
-    reservationByProduct.set(productId, (reservationByProduct.get(productId) ?? 0) + remaining);
+  const manifestSummary = summarizeInitialStockManifest();
+  const actualAreaRows = areaDistribution.get("Impressoras")?.rows ?? 0;
+  const actualAreaQuantity = areaDistribution.get("Impressoras")?.quantity ?? 0;
+  const actualGeneralRows = areaDistribution.get("TI Geral")?.rows ?? 0;
+  const actualGeneralQuantity = areaDistribution.get("TI Geral")?.quantity ?? 0;
+  if (actualAreaRows !== manifestSummary.printerRows || actualAreaQuantity !== manifestSummary.printerQuantity) {
+    addBlocker("Distribuição de Impressoras da entrada inicial não fecha com o manifesto 17 lotes / 884 unidades.");
+  }
+  if (actualGeneralRows !== manifestSummary.generalRows || actualGeneralQuantity !== manifestSummary.generalQuantity) {
+    addBlocker("Distribuição de TI Geral da entrada inicial não fecha com o manifesto 36 lotes / 1.919 unidades.");
   }
 
-  const approvedRequests = await ctx.db.query("requests")
+  const gomaqLotById = new Map(gomaqLots.map((lot: any) => [lot._id as string, lot]));
+  const gomaqLotByNumber = new Map(gomaqLots.map((lot: any) => [lot.lotNumber as string, lot]));
+  for (const item of gomaqItems) {
+    const product: any = await ctx.db.get(item.productId);
+    if (!product) {
+      addBlocker(`Produto do item Gomaq ${item._id} não encontrado.`);
+      continue;
+    }
+    const location: any = item.locationId ? await ctx.db.get(item.locationId) : null;
+    if (!location || !location.active || normalize(location.name) !== normalize("Armário TI 02")) {
+      addBlocker(`Item Gomaq "${product.name}" não aponta para o Armário TI 02 ativo.`);
+    }
+    const lot = resolveLot(item.lotId, gomaqLotById, gomaqLotByNumber);
+    if (!lot) {
+      addBlocker(`Item Gomaq "${product.name}" não aponta para lote verificável.`);
+      continue;
+    }
+    if (lot.entryId !== gomaqEntry?._id || lot.productId !== item.productId || Number(lot.quantityReceived) !== Number(item.quantity)) {
+      addBlocker(`Lote Gomaq ${lot.lotNumber} não corresponde ao item "${product.name}".`);
+      continue;
+    }
+    if (lot.areaId && lot.areaId !== printerArea?._id) {
+      addBlocker(`Lote Gomaq ${lot.lotNumber} já possui área diferente de Impressoras.`);
+    }
+    if (lot.locationId && lot.locationId !== item.locationId) {
+      addBlocker(`Lote Gomaq ${lot.lotNumber} já possui local físico diferente do item de entrada.`);
+    }
+    if (item.areaId && item.areaId !== printerArea?._id) {
+      addBlocker(`Item Gomaq "${product.name}" já possui outra área.`);
+    }
+    if (location?.active && printerArea?.active) {
+      const target = { areaId: printerArea._id as string, locationId: location._id as string };
+      targetLotMeta.set(lot._id as string, target);
+      addPatch(lotPatches, lot._id, lot, target);
+      addPatch(itemPatches, item._id, item, { areaId: target.areaId });
+      allTouchedProductIds.add(item.productId as string);
+    }
+  }
+
+  if (initialItems.length === 53 && initialLots.length === 53 && gomaqItems.length === 8 && gomaqLots.length === 8) {
+    const allTargetLots = [...initialLots, ...gomaqLots];
+    if (new Set(allTargetLots.map((lot: any) => lot._id)).size !== 61) {
+      addBlocker("Os dois escopos não contêm 61 lotes distintos.");
+    }
+  }
+
+  // Solicitações aprovadas com saldo pendente bloqueiam a regularização.
+  // Mesmo que o saldo reservado global esteja zerado, não se deve reclassificar
+  // a origem física enquanto houver entrega aprovada ainda não concluída.
+  const approvedRequests: any[] = await ctx.db.query("requests")
     .withIndex("by_status", (q: any) => q.eq("status", "approved")).collect();
-  const legacyOutstandingByProduct = new Map<string, number>();
   for (const request of approvedRequests) {
-    const requestItems = await ctx.db.query("requestItems")
+    const requestItems: any[] = await ctx.db.query("requestItems")
       .withIndex("by_request", (q: any) => q.eq("requestId", request._id)).collect();
     for (const item of requestItems) {
-      const outstanding = Math.max(0, Number(item.quantityApproved) - Number(item.quantityDelivered ?? 0));
-      if (item.areaId) {
-        const reserved = reservationByItem.get(item._id as string) ?? 0;
-        if (!near(reserved, outstanding)) {
-          throw new Error("Reserva por lote não fecha com a quantidade aprovada pendente da solicitação " + request._id + ".");
-        }
-      } else {
-        legacyOutstandingByProduct.set(
-          item.productId as string,
-          (legacyOutstandingByProduct.get(item.productId as string) ?? 0) + outstanding
-        );
+      if (
+        allTouchedProductIds.has(item.productId as string) &&
+        Number(item.quantityApproved) > Number(item.quantityDelivered ?? 0)
+      ) {
+        addBlocker(`Há solicitação aprovada ${request._id} com entrega pendente do produto ${item.productId}; conclua/cancele antes da regularização.`);
       }
     }
   }
 
-  const stockProductIds = new Set(stockRows.map((stock: any) => String(stock.productId)));
-  for (const productId of new Set([
-    ...Array.from(reservationByProduct.keys()),
-    ...Array.from(legacyOutstandingByProduct.keys()),
-  ])) {
-    if (!stockProductIds.has(productId)) {
-      throw new Error("Há solicitação/reserva sem registro global de estoque para o produto " + productId + ".");
+  // Validate and prepare area-aware stockByLocation rows. The sum for each
+  // product/location pair MUST remain exactly the same after splitting areas.
+  const expectedGroups = new Map<string, { productId: string; locationId: string; areaId: string; quantity: number }>();
+  const allLotsByProduct = new Map<string, any[]>();
+  for (const productId of allTouchedProductIds) {
+    const lots = await ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", productId as any)).collect();
+    allLotsByProduct.set(productId, lots);
+    for (const lot of lots) {
+      if (!lot.active || Number(lot.quantityAvailable) <= 0) continue;
+      const override = targetLotMeta.get(lot._id as string);
+      const areaId = override?.areaId ?? lot.areaId;
+      const locationId = override?.locationId ?? lot.locationId;
+      if (!areaId || !locationId) {
+        addBlocker(`Produto ${productId}: lote ativo ${lot.lotNumber} com saldo ${lot.quantityAvailable} sem área/local; conciliação cancelada.`);
+        continue;
+      }
+      const k = keyOf(productId, locationId as string, areaId as string);
+      const group = expectedGroups.get(k) ?? {
+        productId, locationId: locationId as string, areaId: areaId as string, quantity: 0,
+      };
+      group.quantity += Number(lot.quantityAvailable);
+      expectedGroups.set(k, group);
     }
-  }
-  for (const stock of stockRows) {
-    const reservedByLots = reservationByProduct.get(stock.productId as string) ?? 0;
-    const reservedLegacy = legacyOutstandingByProduct.get(stock.productId as string) ?? 0;
-    const expectedReserved = reservedByLots + reservedLegacy;
-    if (!near(Number(stock.reservedQuantity), expectedReserved)) {
-      throw new Error("Reserva global divergente para produto " + stock.productId + ": banco=" + stock.reservedQuantity + ", reservas/solicitações=" + expectedReserved + ".");
+
+    const stocks = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId as any)).collect();
+    if (stocks.length !== 1) {
+      addBlocker(`Produto ${productId}: esperado exatamente um registro global de estoque; encontrados ${stocks.length}.`);
+    } else {
+      const lotTotal = lots.filter((lot: any) => lot.active).reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+      if (Number(stocks[0].physicalQuantity) !== lotTotal) {
+        addBlocker(`Produto ${productId}: saldo global (${stocks[0].physicalQuantity}) difere da soma dos lotes (${lotTotal}).`);
+      }
+      if (Number(stocks[0].reservedQuantity) !== 0) {
+        addBlocker(`Produto ${productId}: existem ${stocks[0].reservedQuantity} unidade(s) reservada(s); regularização bloqueada para não afetar solicitações em andamento.`);
+      }
     }
   }
 
-  // Corrige área/local dos movimentos pela referência exata ao lote.
-  const allMovements = await ctx.db.query("stockMovements").collect();
-  const movementPatches: PatchAction[] = [];
-  const movementLotInserts: MovementLotAction[] = [];
-  for (const movement of allMovements) {
-    if (!targetProductIds.has(movement.productId as string)) continue;
-    if (!movement.lotId) throw new Error("Movimentação sem vínculo de lote encontrada no produto abrangido: " + movement._id + ".");
-    const lot = lotById.get(String(movement.lotId)) ?? lotByNumber.get(String(movement.lotId));
-    if (!lot || lot.productId !== movement.productId) {
-      throw new Error("Movimentação não resolve para lote do mesmo produto: " + movement._id + ".");
+  const expectedPairs = new Map<string, Array<{ productId: string; locationId: string; areaId: string; quantity: number }>>();
+  for (const group of expectedGroups.values()) {
+    const pair = keyOf(group.productId, group.locationId);
+    const values = expectedPairs.get(pair) ?? [];
+    values.push(group);
+    expectedPairs.set(pair, values);
+  }
+
+  for (const productId of allTouchedProductIds) {
+    const rows: any[] = await ctx.db.query("stockByLocation")
+      .withIndex("by_product", (q: any) => q.eq("productId", productId as any)).collect();
+    const byLocation = new Map<string, any[]>();
+    for (const row of rows) {
+      const list = byLocation.get(row.locationId as string) ?? [];
+      list.push(row);
+      byLocation.set(row.locationId as string, list);
     }
-    const resolved = targetLots.get(lot._id as string);
-    const areaId = resolved?.areaId ?? lot.areaId;
-    const locationId = resolved?.locationId ?? lot.locationId;
+    const locationIds = new Set<string>([
+      ...rows.map((row: any) => row.locationId as string),
+      ...Array.from(expectedGroups.values()).filter((group) => group.productId === productId).map((group) => group.locationId),
+    ]);
+
+    for (const locationId of locationIds) {
+      const existingRows = byLocation.get(locationId) ?? [];
+      const groups = expectedPairs.get(keyOf(productId, locationId)) ?? [];
+      const expectedTotal = groups.reduce((sum, group) => sum + group.quantity, 0);
+      const existingTotal = existingRows.reduce((sum, row) => sum + Number(row.quantity), 0);
+      if (Math.abs(existingTotal - expectedTotal) > 1e-9) {
+        addBlocker(`Produto ${productId} / local ${locationId}: saldo atual por localização ${existingTotal} difere dos lotes ${expectedTotal}.`);
+        continue;
+      }
+      if (groups.length === 0) {
+        if (existingRows.some((row) => Number(row.quantity) !== 0)) {
+          addBlocker(`Produto ${productId} / local ${locationId}: há saldo sem lote ativo correspondente.`);
+        }
+        continue;
+      }
+
+      const groupByArea = new Map(groups.map((group) => [group.areaId, group]));
+      const assigned = new Map<string, any>();
+      const unassigned: any[] = [];
+      for (const row of existingRows) {
+        if (!row.areaId) {
+          unassigned.push(row);
+          continue;
+        }
+        if (!groupByArea.has(row.areaId)) {
+          addBlocker(`Produto ${productId} / local ${locationId}: saldo já classificado em área sem lote correspondente.`);
+          continue;
+        }
+        if (assigned.has(row.areaId)) {
+          addBlocker(`Produto ${productId} / local ${locationId}: linhas duplicadas para a mesma área.`);
+          continue;
+        }
+        assigned.set(row.areaId, row);
+      }
+
+      for (const group of groups) {
+        let row = assigned.get(group.areaId);
+        if (!row && unassigned.length) {
+          row = unassigned.shift();
+          assigned.set(group.areaId, row);
+        }
+        if (row) {
+          addPatch(sblPatches, row._id, row, { areaId: group.areaId, quantity: group.quantity });
+        } else {
+          sblInserts.push(group);
+        }
+      }
+      if (unassigned.length > 0) {
+        addBlocker(`Produto ${productId} / local ${locationId}: há linhas de saldo excedentes sem área; não serão apagadas nem mescladas automaticamente.`);
+      }
+    }
+  }
+
+  const lotById = new Map<string, any>();
+  const lotByNumber = new Map<string, any>();
+  for (const lots of allLotsByProduct.values()) {
+    for (const lot of lots) {
+      lotById.set(lot._id as string, lot);
+      lotByNumber.set(lot.lotNumber as string, lot);
+    }
+  }
+
+  const movements: any[] = await ctx.db.query("stockMovements").collect();
+  const movementById = new Map(movements.map((movement: any) => [movement._id as string, movement]));
+  for (const movement of movements) {
+    if (!allTouchedProductIds.has(movement.productId as string)) continue;
+    const lot = resolveLot(movement.lotId, lotById, lotByNumber);
+    if (!lot || lot.productId !== movement.productId) {
+      addBlocker(`Movimentação ${movement._id} sem lote verificável correspondente ao produto.`);
+      continue;
+    }
+    const override = targetLotMeta.get(lot._id as string);
+    const areaId = override?.areaId ?? lot.areaId;
+    const locationId = override?.locationId ?? lot.locationId;
     if (!areaId || !locationId) {
-      throw new Error("Movimentação vinculada a lote ainda sem área/local: " + movement._id + ".");
+      addBlocker(`Movimentação ${movement._id}: lote ${lot.lotNumber} sem área/local.`);
+      continue;
     }
     if (movement.areaId && movement.areaId !== areaId) {
-      throw new Error("Movimentação já possui área diferente do lote: " + movement._id + ".");
+      addBlocker(`Movimentação ${movement._id} já possui área diferente da área do lote.`);
     }
     if (movement.locationId && movement.locationId !== locationId) {
-      throw new Error("Movimentação já possui local diferente do lote: " + movement._id + ".");
+      addBlocker(`Movimentação ${movement._id} já possui local diferente do local do lote.`);
     }
-    const fields: Record<string, any> = {};
-    if (movement.areaId !== areaId) fields.areaId = areaId;
-    if (movement.locationId !== locationId) fields.locationId = locationId;
-    if (Object.keys(fields).length) movementPatches.push({ id: movement._id, fields });
+    addPatch(movementPatches, movement._id, movement, { areaId, locationId });
+  }
 
-    if (movement.type === "exit") {
-      const links = await ctx.db.query("stockMovementLots")
-        .withIndex("by_movement", (q: any) => q.eq("movementId", movement._id)).collect();
-      if (links.length === 0) {
-        movementLotInserts.push({
-          movementId: movement._id, lotId: lot._id,
-          quantity: movement.quantity, areaId, locationId,
-        });
-      } else {
-        const linkedQuantity = links.reduce((sum: number, link: any) => sum + Number(link.quantity), 0);
-        if (!near(linkedQuantity, Number(movement.quantity))) {
-          throw new Error("A rastreabilidade de lotes da saída " + movement._id + " não fecha com sua quantidade.");
-        }
-      }
+  const returns: any[] = await ctx.db.query("returns").collect();
+  const returnedByExit = new Map<string, number>();
+  for (const returnRow of returns) {
+    if (!allTouchedProductIds.has(returnRow.productId as string)) continue;
+    if (!returnRow.exitMovementId) {
+      addBlocker(`Devolução ${returnRow._id} não possui vínculo com a saída original.`);
+      continue;
+    }
+    const exit: any = movementById.get(returnRow.exitMovementId as string);
+    if (!exit || exit.type !== "exit" || exit.productId !== returnRow.productId) {
+      addBlocker(`Devolução ${returnRow._id} não aponta para uma saída válida do mesmo produto.`);
+      continue;
+    }
+    const lot = resolveLot(exit.lotId, lotById, lotByNumber);
+    if (!lot) {
+      addBlocker(`Devolução ${returnRow._id}: lote da saída original não pode ser resolvido.`);
+      continue;
+    }
+    const override = targetLotMeta.get(lot._id as string);
+    const areaId = override?.areaId ?? lot.areaId;
+    const locationId = override?.locationId ?? lot.locationId;
+    if (!areaId || !locationId) {
+      addBlocker(`Devolução ${returnRow._id}: lote original sem área/local.`);
+      continue;
+    }
+    if (returnRow.lotId && returnRow.lotId !== lot._id) {
+      addBlocker(`Devolução ${returnRow._id} já aponta para outro lote.`);
+    }
+    if (returnRow.areaId && returnRow.areaId !== areaId) {
+      addBlocker(`Devolução ${returnRow._id} já possui área divergente.`);
+    }
+    if (returnRow.locationId && returnRow.locationId !== locationId) {
+      addBlocker(`Devolução ${returnRow._id} já possui local físico divergente.`);
+    }
+    returnedByExit.set(exit._id as string, (returnedByExit.get(exit._id as string) ?? 0) + Number(returnRow.quantity));
+    addPatch(returnPatches, returnRow._id, returnRow, {
+      lotId: lot._id,
+      areaId,
+      locationId,
+    });
+  }
+  for (const [exitId, returned] of returnedByExit) {
+    const exit: any = movementById.get(exitId);
+    if (returned > Number(exit.quantity)) {
+      addBlocker(`Devoluções vinculadas à saída ${exitId} (${returned}) excedem a quantidade da saída (${exit.quantity}).`);
     }
   }
 
-  // Corrige o documento de devolução pelo movimento de retorno vinculado à saída original.
-  const allReturns = await ctx.db.query("returns").collect();
-  const returnPatches: PatchAction[] = [];
-  for (const record of allReturns) {
-    if (!targetProductIds.has(record.productId as string)) continue;
-    const returnMovements = allMovements.filter((movement: any) =>
-      movement.type === "return" &&
-      movement.exitMovementId === record.exitMovementId &&
-      movement.productId === record.productId &&
-      near(Number(movement.quantity), Number(record.quantity))
-    );
-    if (returnMovements.length !== 1) {
-      throw new Error("Não foi possível identificar unicamente o movimento da devolução " + record._id + ".");
-    }
-    const returnMovement = returnMovements[0];
-    const lot = returnMovement.lotId
-      ? (lotById.get(String(returnMovement.lotId)) ?? lotByNumber.get(String(returnMovement.lotId)))
-      : null;
-    if (!lot || lot.productId !== record.productId) {
-      throw new Error("A devolução " + record._id + " não possui lote recuperável pelo movimento.");
-    }
-    const resolved = targetLots.get(lot._id as string);
-    const areaId = resolved?.areaId ?? lot.areaId;
-    const locationId = resolved?.locationId ?? lot.locationId;
-    if (!areaId || !locationId) throw new Error("Lote de devolução sem área/local: " + lot.lotNumber + ".");
-    if (record.lotId && record.lotId !== lot._id) throw new Error("Devolução já vinculada a outro lote: " + record._id + ".");
-    if (record.areaId && record.areaId !== areaId) throw new Error("Área divergente no documento de devolução: " + record._id + ".");
-    if (record.locationId && record.locationId !== locationId) throw new Error("Local divergente no documento de devolução: " + record._id + ".");
-    const fields: Record<string, any> = {};
-    if (record.lotId !== lot._id) fields.lotId = lot._id;
-    if (record.areaId !== areaId) fields.areaId = areaId;
-    if (record.locationId !== locationId) fields.locationId = locationId;
-    if (Object.keys(fields).length) returnPatches.push({ id: record._id, fields });
-  }
+  const patchCount =
+    lotPatches.length + itemPatches.length + movementPatches.length +
+    returnPatches.length + sblPatches.length + sblInserts.length;
 
-  const hasChanges = lotPatches.length + unitPatches.length + stockRowActions.length +
-    movementPatches.length + movementLotInserts.length + returnPatches.length > 0;
   return {
-    hasChanges,
-    initialAreaDistribution: {
-      tiGeralLots: initialItems.filter((item: any) => {
-        const lot = lotById.get(String(item.lotId));
-        return lot && (targetLots.get(lot._id as string)?.areaId ?? lot.areaId) === generalArea._id;
-      }).length,
-      impressorasLots: initialItems.filter((item: any) => {
-        const lot = lotById.get(String(item.lotId));
-        return lot && (targetLots.get(lot._id as string)?.areaId ?? lot.areaId) === printerArea._id;
-      }).length,
+    blockers,
+    ready: blockers.length === 0,
+    changes: {
+      lots: lotPatches.length,
+      entryItems: itemPatches.length,
+      stockByLocationUpdates: sblPatches.length,
+      stockByLocationInserts: sblInserts.length,
+      stockMovements: movementPatches.length,
+      returns: returnPatches.length,
+      totalWrites: patchCount,
     },
-    counts: {
-      lotsToPatch: lotPatches.length,
-      entryUnitsToCorrect: unitPatches.length,
-      stockRowsToReclassifyOrCreate: stockRowActions.length,
-      movementsToPatch: movementPatches.length,
-      exitLotLinksToCreate: movementLotInserts.length,
-      returnsToPatch: returnPatches.length,
-      productsInScope: targetProductIds.size,
-      targetLots: targetLots.size,
+    source: {
+      initialEntry: INITIAL_ENTRY_NUMBER,
+      initialItems: initialItems.length,
+      initialLots: initialLots.length,
+      gomaqEntry: GOMAQ_ENTRY_NUMBER,
+      gomaqInvoice: GOMAQ_INVOICE_NUMBER,
+      gomaqItems: gomaqItems.length,
+      gomaqLots: gomaqLots.length,
     },
-    lotPatches,
-    unitPatches,
-    stockRowActions,
-    movementPatches,
-    movementLotInserts,
-    returnPatches,
+    expectedManifest: manifestSummary,
+    detectedDistribution: {
+      areas: Object.fromEntries(areaDistribution),
+      locations: Object.fromEntries(itemLocationDistribution),
+      correctedEntryItemUnits: itemUomChanges,
+    },
+    quantityInvariants: {
+      globalStockRowsChecked: allTouchedProductIds.size,
+      stockGlobalQuantitiesWillChange: false,
+      stockReservedQuantitiesWillChange: false,
+      lotQuantitiesWillChange: false,
+      entryQuantitiesWillChange: false,
+      movementQuantitiesWillChange: false,
+      stockByLocationPairTotalsWillChange: false,
+    },
+    internal: { lotPatches, itemPatches, movementPatches, returnPatches, sblPatches, sblInserts },
   };
 }
 
 export const preview = query({
   args: {},
   handler: async (ctx) => {
-    await requirePermission(ctx, "stock.view");
+    await requirePermission(ctx, "stock.view", { entity: "stockRegularization" });
     const plan = await buildRegularizationPlan(ctx);
-    return {
-      ready: true,
-      hasChanges: plan.hasChanges,
-      initialAreaDistribution: plan.initialAreaDistribution,
-      ...plan.counts,
-      writesWillNotChangeQuantities: true,
-      note: "Prévia somente leitura. Saldos globais, quantidades de lotes e reservas não serão alterados.",
-    };
+    const { internal: _internal, ...report } = plan;
+    return report;
   },
 });
 
-export const applyAuditedInitialStockRegularization = mutation({
+export const apply = mutation({
   args: {
-    confirm: v.literal("REGULARIZAR_SIGESGD_2026"),
+    confirmation: v.literal(CONFIRMATION),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requirePermission(ctx, "stock.mutate", { entity: "stockRegularization" });
-    if (args.confirm !== "REGULARIZAR_SIGESGD_2026") {
-      throw new Error("Confirmação explícita ausente.");
+    const { userId, role } = await requirePermission(ctx, "stock.mutate", { entity: "stockRegularization" });
+    if (role !== "admin") {
+      throw new Error("A aplicação da regularização histórica é exclusiva do perfil administrador.");
     }
+    if (args.confirmation !== CONFIRMATION) throw new Error("Confirmação de regularização inválida.");
+
     const plan = await buildRegularizationPlan(ctx);
-    if (!plan.hasChanges) {
-      return { applied: false, alreadyRegularized: true, ...plan.counts };
+    if (plan.blockers.length > 0) {
+      throw new Error(
+        "Regularização interrompida; nenhuma alteração foi aplicada. Corrija primeiro: " +
+        plan.blockers.slice(0, 12).join(" | ")
+      );
     }
 
-    for (const action of plan.lotPatches) await ctx.db.patch(action.id, action.fields);
-    for (const action of plan.unitPatches) await ctx.db.patch(action.id, action.fields);
-    for (const action of plan.stockRowActions) {
-      if (action.type === "patch") {
-        await ctx.db.patch(action.id, { areaId: action.areaId, quantity: action.quantity });
-      } else {
-        await ctx.db.insert("stockByLocation", {
-          productId: action.productId,
-          locationId: action.locationId,
-          areaId: action.areaId,
-          quantity: action.quantity,
-        });
-      }
+    const {
+      lotPatches, itemPatches, movementPatches,
+      returnPatches, sblPatches, sblInserts,
+    } = plan.internal;
+    for (const update of lotPatches) await ctx.db.patch(update.id as any, update.fields);
+    for (const update of itemPatches) await ctx.db.patch(update.id as any, update.fields);
+    for (const update of sblPatches) await ctx.db.patch(update.id as any, update.fields);
+    for (const row of sblInserts) await ctx.db.insert("stockByLocation", row as any);
+    for (const update of movementPatches) await ctx.db.patch(update.id as any, update.fields);
+    for (const update of returnPatches) await ctx.db.patch(update.id as any, update.fields);
+
+    if (plan.changes.totalWrites > 0) {
+      await ctx.db.insert("auditLogs", {
+        userId,
+        action: "update",
+        entity: "stock",
+        entityId: "regularizacao-area-local-v1",
+        details:
+          `Regularização de área/local concluída. Lotes: ${plan.changes.lots}; itens de entrada: ${plan.changes.entryItems}; ` +
+          `saldos atualizados: ${plan.changes.stockByLocationUpdates}; saldos criados: ${plan.changes.stockByLocationInserts}; ` +
+          `movimentações: ${plan.changes.stockMovements}; devoluções: ${plan.changes.returns}. ` +
+          "Quantidades globais, reservas, lotes e movimentos preservados; totais por produto/local preservados.",
+        timestamp: Date.now(),
+      });
     }
-    for (const action of plan.movementPatches) await ctx.db.patch(action.id, action.fields);
-    for (const action of plan.movementLotInserts) await ctx.db.insert("stockMovementLots", action);
-    for (const action of plan.returnPatches) await ctx.db.patch(action.id, action.fields);
 
-    await ctx.db.insert("auditLogs", {
-      userId,
-      action: "update",
-      entity: "stock",
-      details:
-        "Regularização auditada de área/local: " +
-        JSON.stringify(plan.counts) +
-        ". Quantidades físicas, globais e reservas preservadas.",
-      timestamp: Date.now(),
-    });
-
-    return { applied: true, alreadyRegularized: false, ...plan.counts };
+    return {
+      applied: plan.changes.totalWrites > 0,
+      idempotentNoOp: plan.changes.totalWrites === 0,
+      changes: plan.changes,
+      quantityInvariants: plan.quantityInvariants,
+    };
   },
 });
