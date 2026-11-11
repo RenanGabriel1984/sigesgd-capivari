@@ -136,11 +136,6 @@ export const unclassifiedLots = query({
     const pending = [];
     for (const lot of lots) {
       if (!lot.active || lot.quantityAvailable <= 0) continue;
-      const location = lot.locationId ? await ctx.db.get(lot.locationId) : null;
-      const hasValidArea = !!lot.areaId && !!(await ctx.db.get(lot.areaId));
-      const hasValidLocation = !!location && location.active;
-      if (hasValidArea && hasValidLocation) continue;
-
       const product = await ctx.db.get(lot.productId);
       const entry = await ctx.db.get(lot.entryId);
       const entryItems = await ctx.db.query("entryItems")
@@ -148,8 +143,12 @@ export const unclassifiedLots = query({
       const entryItem = entryItems.find((item: any) =>
         item.lotId === lot._id || item.lotId === lot.lotNumber
       ) ?? null;
-      const currentArea = lot.areaId ? await ctx.db.get(lot.areaId) : null;
       const suggestedLocationId = lot.locationId ?? entryItem?.locationId ?? null;
+      const location = suggestedLocationId ? await ctx.db.get(suggestedLocationId) : null;
+      const hasValidArea = !!lot.areaId && !!(await ctx.db.get(lot.areaId));
+      const hasValidLocation = !!location && location.active;
+      if (hasValidArea && hasValidLocation) continue;
+      const currentArea = lot.areaId ? await ctx.db.get(lot.areaId) : null;
       const suggestedAreaId = lot.areaId ?? entry?.areaId ?? null;
 
       pending.push({
@@ -165,7 +164,7 @@ export const unclassifiedLots = query({
         currentLocationName: location?.name ?? null,
         suggestedAreaId,
         suggestedLocationId,
-        areaMissing: !lot.areaId,
+        areaMissing: !hasValidArea,
         locationMissing: !suggestedLocationId || !location || !location.active,
       });
     }
