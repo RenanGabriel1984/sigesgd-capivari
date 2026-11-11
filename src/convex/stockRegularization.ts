@@ -589,7 +589,6 @@ export const applyAuditedInitialStockRegularization = mutation({
       userId,
       action: "update",
       entity: "stock",
-      entityId: undefined,
       details:
         "Regularização auditada de área/local: " +
         JSON.stringify(plan.counts) +
