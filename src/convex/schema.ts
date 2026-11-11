@@ -634,11 +634,13 @@ const schema = defineSchema(
       .index("by_number", ["lotNumber"])
       .index("by_active", ["active"]),
 
-    // ── Storage Locations (Locais de Armazenamento) ──
+    // ── Storage Locations (Locais Físicos de Armazenamento) ──
     storageLocations: defineTable({
       name: v.string(),
       description: v.optional(v.string()),
       active: v.boolean(),
+      // LEGADO: mantido para leitura de registros antigos e compatibilidade.
+      // Não atribuir nem usar para classificar estoque; área pertence ao lote/saldo.
       areaId: v.optional(v.id("stockAreas")),
     }).index("by_active", ["active"])
       .index("by_area", ["areaId"]),
