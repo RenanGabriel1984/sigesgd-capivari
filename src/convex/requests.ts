@@ -155,7 +155,7 @@ export const create = mutation({
       if (!area || !area.active) throw new Error("Selecione uma área/subestoque ativa para cada item.");
       const sourceLocation = await ctx.db.get(item.sourceLocationId);
       if (!sourceLocation || !sourceLocation.active) throw new Error("Selecione um local físico ativo para cada item.");
-      const product = await ctx.db.get(item.productId);
+      const product = await ctx.db.get(item.productId as Id<"products">);
       if (!product) throw new Error("Produto não encontrado");
       if (!product.active) throw new Error(`O item "${product.name}" está inativo`);
       if (typeof item.quantityRequested !== "number" || !isFinite(item.quantityRequested)) {
@@ -491,9 +491,9 @@ export const deliver = mutation({
         throw new Error("Quantidade entregue deve ser um número válido maior que zero.");
       }
       if (input.quantityDelivered > item.quantityApproved) {
-        throw new Error(`Quantidade entregue excede a aprovada para "${(await ctx.db.get(item.productId))?.name ?? "item"}".`);
+        throw new Error(`Quantidade entregue excede a aprovada para "${(await ctx.db.get(item.productId as Id<"products">))?.name ?? "item"}".`);
       }
-      const product = await ctx.db.get(item.productId);
+      const product = await ctx.db.get(item.productId as Id<"products">);
       if (product?.hasSerial) {
         const serials = input.serialNumbers ?? [];
         if (serials.length !== input.quantityDelivered || serials.some((value: string) => !value.trim())) {
@@ -723,7 +723,7 @@ export const cancel = mutation({
         if (release > 0) {
           const key = item.productId as string;
           releaseByProduct.set(key, (releaseByProduct.get(key) ?? 0) + release);
-          const product = await ctx.db.get(item.productId);
+          const product = await ctx.db.get(item.productId as Id<"products">);
           details.push(`${product?.name ?? "item"}: -${release}`);
         }
       }
