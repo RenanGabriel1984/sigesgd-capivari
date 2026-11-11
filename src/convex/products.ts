@@ -91,8 +91,7 @@ export const getById = query({
       .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
     const locations = await Promise.all(sbls.map(async (row: any) => {
       const location = await ctx.db.get(row.locationId);
-      const area = row.areaId && location?.areaId === row.areaId
-        ? await ctx.db.get(row.areaId) : null;
+      const area = row.areaId ? await ctx.db.get(row.areaId) : null;
       const reservations = await ctx.db.query("requestItemReservations")
         .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
       const reservedQuantity = reservations
