@@ -194,8 +194,8 @@ export default function Requests() {
       if (!item.areaId) { toast.error("Selecione a área/subestoque de cada item"); return; }
       if (!item.sourceLocationId) { toast.error("Selecione o local físico de origem de cada item"); return; }
       const location = (storageLocations ?? []).find((entry: any) => entry._id === item.sourceLocationId);
-      if (!location) {
-        toast.error("O local físico selecionado não está disponível");
+      if (!location || !location.active) {
+        toast.error("Selecione um local físico ativo");
         return;
       }
     }
@@ -751,7 +751,9 @@ export default function Requests() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div>
                           <Label className="text-xs">Área / Subestoque *</Label>
-                          <Select value={item.areaId} onValueChange={(value) => updateItem(i, "areaId", value)}>
+                          <Select value={item.areaId} onValueChange={(value) => {
+                            updateItem(i, "areaId", value);
+                          }}>
                             <SelectTrigger><SelectValue placeholder="Selecione a área" /></SelectTrigger>
                             <SelectContent>
                               {(stockAreas ?? []).map((area) => (
@@ -762,10 +764,10 @@ export default function Requests() {
                         </div>
                         <div>
                           <Label className="text-xs">Local físico de origem *</Label>
-                          <Select value={item.sourceLocationId} onValueChange={(value) => updateItem(i, "sourceLocationId", value)}>
+                          <Select value={item.sourceLocationId} onValueChange={(value) => updateItem(i, "sourceLocationId", value)} disabled={!item.areaId}>
                             <SelectTrigger><SelectValue placeholder="Selecione o local" /></SelectTrigger>
                             <SelectContent>
-                              {(storageLocations ?? []).map((location: any) => (
+                              {(storageLocations ?? []).filter((location: any) => location.active).map((location: any) => (
                                 <SelectItem key={location._id} value={location._id}>{location.name}</SelectItem>
                               ))}
                             </SelectContent>
