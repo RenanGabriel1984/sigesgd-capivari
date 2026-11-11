@@ -552,7 +552,10 @@ export const apply = mutation({
     confirmation: v.literal(CONFIRMATION),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requirePermission(ctx, "stock.mutate", { entity: "stockRegularization" });
+    const { userId, role } = await requirePermission(ctx, "stock.mutate", { entity: "stockRegularization" });
+    if (role !== "admin") {
+      throw new Error("A aplicação da regularização histórica é exclusiva do perfil administrador.");
+    }
     if (args.confirmation !== CONFIRMATION) throw new Error("Confirmação de regularização inválida.");
 
     const plan = await buildRegularizationPlan(ctx);
