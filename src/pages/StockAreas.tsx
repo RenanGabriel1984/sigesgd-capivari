@@ -202,8 +202,7 @@ export default function StockAreas() {
                 <p className="font-medium">{noAreaRow.name || NO_AREA_LABEL}</p>
                 <p className="text-muted-foreground text-xs">
                   {noAreaRow.lots} lote(s) · {noAreaRow.quantityAvailable} unidade(s) livres ainda
-                  aguardam classificação consistente de área e local físico. Confira a lista de lotes
-                  pendentes abaixo antes de disponibilizar esse saldo para solicitações.
+                  não possuem área definida. O local físico pode estar preenchido independentemente.
                 </p>
               </div>
             </CardContent>
@@ -217,8 +216,8 @@ export default function StockAreas() {
                 <div>
                   <p className="font-medium text-sm">Lotes pendentes de classificação</p>
                   <p className="text-xs text-muted-foreground">
-                    {unclassifiedLots.length} lote(s) com saldo ainda sem área/local consistente.
-                    Confira fisicamente antes de classificar.
+                    {unclassifiedLots.length} lote(s) com área ou local físico pendente.
+                    Confira a origem e classifique cada dimensão independentemente.
                   </p>
                 </div>
                 <Badge variant="secondary">{unclassifiedLots.reduce((sum, lot) => sum + lot.quantityAvailable, 0)} unidade(s)</Badge>
@@ -328,9 +327,6 @@ export default function StockAreas() {
                   onChange={(event) => {
                     const next = event.target.value;
                     setClassificationAreaId(next);
-                    if (!(storageLocations ?? []).some((location: any) => location._id === classificationLocationId && location.areaId === next)) {
-                      setClassificationLocationId("");
-                    }
                   }}
                 >
                   <option value="">Selecione a área...</option>
@@ -345,7 +341,6 @@ export default function StockAreas() {
                   className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                   value={classificationLocationId}
                   onChange={(event) => setClassificationLocationId(event.target.value)}
-                  disabled={!classificationAreaId}
                 >
                   <option value="">Selecione o local...</option>
                   {(storageLocations ?? []).filter((location: any) =>
