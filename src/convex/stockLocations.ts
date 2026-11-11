@@ -57,10 +57,12 @@ export const summary = query({
       const detailed = await Promise.all(entries.map((entry: any) => enrichLocationStock(ctx, entry)));
       return {
         ...location,
+        area: location.areaId ? await ctx.db.get(location.areaId) : null,
         totalItems: detailed.length,
         totalQuantity: detailed.reduce((sum: number, entry: any) => sum + entry.quantity, 0),
         totalReserved: detailed.reduce((sum: number, entry: any) => sum + entry.reservedQuantity, 0),
         totalAvailable: detailed.reduce((sum: number, entry: any) => sum + entry.availableQuantity, 0),
+        // Pendência é avaliada por saldo/área, nunca por um areaId legado do armário.
         classificationPending: detailed.some((entry: any) => entry.classificationPending),
         balances: detailed,
       };
