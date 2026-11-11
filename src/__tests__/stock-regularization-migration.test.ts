@@ -28,6 +28,9 @@ describe("regularização histórica de área/local", () => {
   it("valida reservas por lote e preserva a trilha de movimentações multi-lote", () => {
     expect(migration).toContain('ctx.db.query("requestItemReservations")');
     expect(migration).toContain('ctx.db.query("stockMovementLots")');
+    expect(migration).toContain('ctx.db.query("stockTransfers")');
+    expect(migration).toContain('ctx.db.query("stockTransferLots")');
+    expect(migration).toContain("Transferência histórica da movimentação");
     expect(migration).toContain("movementLotPatches");
     expect(migration).toContain("keyOf(lot.productId as string, lot.lotNumber as string)");
     expect(migration).toContain("return byId.get(reference) ?? (productId ? byNumber.get(keyOf(productId, reference)) : null) ?? null;");
