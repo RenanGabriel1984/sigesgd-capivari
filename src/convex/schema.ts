@@ -586,6 +586,8 @@ const schema = defineSchema(
       model: v.optional(v.string()),
       specification: v.optional(v.string()),
       lotId: v.optional(v.string()),
+      // Área do item é independente do local físico; ausente preserva entradas legadas.
+      areaId: v.optional(v.id("stockAreas")),
       locationId: v.optional(v.id("storageLocations")),
       photoStorageId: v.optional(v.string()),
       supplierLotNumber: v.optional(v.string()),
