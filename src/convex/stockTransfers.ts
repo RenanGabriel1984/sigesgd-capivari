@@ -137,7 +137,8 @@ export const create = mutation({
     const now = Date.now();
     const year = new Date(now).getFullYear();
     const prefix = `LOT-${year}-`;
-    const allNumbers = await ctx.db.query("lots").collect();
+    const allNumbers = await ctx.db.query("lots")
+      .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix)).collect();
     let maxSequence = allNumbers.reduce((max: number, item: any) => {
       if (!item.lotNumber?.startsWith(prefix)) return max;
       const n = Number(item.lotNumber.slice(prefix.length));
