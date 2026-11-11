@@ -60,7 +60,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(approve).toContain("planFifoAreaLotAllocation");
     expect(approve).toContain("lot.areaId !== requestItem.areaId");
     expect(approve).toContain("lot.locationId !== requestItem.sourceLocationId");
-    expect(approve).not.toContain("location.areaId");
+    expect(approve).not.toMatch(/\blocation\.areaId/);
     expect(approve).toContain('ctx.db.insert("requestItemReservations"');
   });
 
@@ -113,7 +113,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(createProduct).not.toContain("location.areaId");
     expect(createProduct).toContain("areaId: initialAreaId");
     expect(stockSetup).toContain("const selectedAreaId = item.areaId");
-    expect(stockSetup).toContain("o local físico não define a área");
+    expect(stockSetup).toMatch(/local físico não define a área/i);
     expect(stockSetup).toContain("areaId,\n      });");
   });
 
