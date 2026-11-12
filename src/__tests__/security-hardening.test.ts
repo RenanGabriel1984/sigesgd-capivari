@@ -412,9 +412,12 @@ describe("RESET-BF — limite de tentativas na recuperação de senha (§8)", ()
     expect(src).toMatch(/RESET_MAX_ATTEMPTS\s*=\s*\d+/);
   });
 
-  it("RESET-BF-02: o token registra tentativas e é invalidado ao exceder o limite", () => {
+  it("RESET-BF-02: toda tentativa inválida consome o limite e invalida o token ao esgotar", () => {
     expect(src).toMatch(/attempts:\s*0/);
-    expect(src).toMatch(/usedAt:\s*attempts\s*>=\s*RESET_MAX_ATTEMPTS\s*\?\s*Date\.now\(\)/);
+    expect(src).toContain("const activeToken = tokens");
+    expect(src).toContain("nextResetAttempt(");
+    expect(src).toContain("await ctx.db.patch(activeToken._id, attemptUpdate)");
+    expect(src).not.toMatch(/matching\.token === args\.code/);
   });
 
   it("RESET-BF-03: token usado/expirado/esgotado nunca é aceito", () => {
