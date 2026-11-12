@@ -4,8 +4,10 @@ name: Convex — publicar funções em HOMOLOGAÇÃO
 # R32.4 — Publicação MANUAL das funções Convex no ambiente de homologação.
 #
 # DESTINO ÚNICO: tame-alligator-797.convex.cloud
-# (projeto sigesgd-capivari-homologacao). Este arquivo NÃO publica em produção
-# (first-herring-264.convex.cloud) e não deve ser adaptado para fazê-lo.
+# (projeto sigesgd-capivari-homologacao). Este arquivo NÃO publica no projeto
+# principal: savory-sockeye-292 é o slot Production; first-herring-264 é a base
+# operacional atual carregada pelo Freebuff (embora classificada como Development).
+# Também são proibidos os Previews first-starling-943 e brilliant-bullfrog-982.
 #
 # Por que ele vive na `main`: o GitHub só oferece "Run workflow"
 # (workflow_dispatch) para workflows presentes na branch padrão. Criar este
@@ -72,7 +74,7 @@ jobs:
     env:
       ALVO_REF: tame-alligator-797
       ALVO_HOST: tame-alligator-797.convex.cloud
-      HOST_PROIBIDO: first-herring-264.convex.cloud
+      HOSTS_PROIBIDOS: "savory-sockeye-292.convex.cloud first-herring-264.convex.cloud first-starling-943.convex.cloud brilliant-bullfrog-982.convex.cloud first-dinosaur-625.convex.cloud"
 
     steps:
       - name: Checkout (sem credenciais persistidas)
@@ -145,7 +147,7 @@ jobs:
           fi
 
           echo "Alvo confirmado: ${ALVO_REF} (homologação)."
-          echo "Produção (${HOST_PROIBIDO}) não é alvo deste workflow."
+          echo "Produção (${HOSTS_PROIBIDOS}) não é alvo deste workflow."
 
       - name: Instalar dependências (lockfile congelado)
         run: bun install --frozen-lockfile
@@ -179,10 +181,12 @@ jobs:
           # Remove só códigos ANSI do spinner; o texto das mensagens é preservado.
           sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "${log}" > "${limpo}"
 
-          if grep -qF "${HOST_PROIBIDO}" "${limpo}"; then
-            echo "::error::O log menciona o host de PRODUÇÃO (${HOST_PROIBIDO}). Publicação não confirmada."
-            exit 1
-          fi
+          for host in ${HOSTS_PROIBIDOS}; do
+            if grep -qF "${host}" "${limpo}"; then
+              echo "::error::O log menciona um deployment protegido (${host}). Publicação não confirmada."
+              exit 1
+            fi
+          done
 
           if ! grep -qF "Deploying code to deployment:" "${limpo}"; then
             echo "::error::O log não contém o anúncio do deployment alvo. Publicação não confirmada."
@@ -204,7 +208,7 @@ jobs:
             grep -F -A2 "Deploying code to deployment:" "${limpo}"
             echo '```'
             echo ""
-            echo "- produção (\`${HOST_PROIBIDO}\`): não referenciada no log"
+            echo "- produção (\`${HOSTS_PROIBIDOS}\`): não referenciada no log"
             echo ""
             echo "Este workflow não altera variáveis do deployment. Se o login falhar,"
             echo "confira no dashboard de \`${ALVO_REF}\`: JWT_PRIVATE_KEY, JWKS e SITE_URL."

@@ -2,18 +2,29 @@
  * RESOLUÇÃO DA URL DO BACKEND CONVEX (R32.0).
  *
  * Regra:
- *  • Produção (padrão): SEMPRE o deployment oficial fixo. O ambiente de build
- *    da plataforma pode injetar um `VITE_CONVEX_URL` desatualizado (outro
- *    deployment, sem a carga oficial) — esse valor é ignorado de propósito.
+ *  • Operação atual (padrão): mantém o backend que efetivamente contém os
+ *    dados operacionais carregados pelo Freebuff: first-herring-264. Embora o
+ *    painel Convex o classifique como Development, ele é a base atualmente
+ *    utilizada pelo SIGESGD. Não migrar automaticamente para o deployment
+ *    marcado como Production (savory-sockeye-292).
  *  • Homologação: só quando `VITE_APP_ENV=homologacao`. Aí a URL é
- *    OBRIGATÓRIA, precisa ser um deployment Convex válido e NUNCA pode ser o
- *    oficial. Sem isso o app falha fechado (erro explícito) em vez de
- *    consultar dados oficiais achando que está em homologação.
+ *    OBRIGATÓRIA e deve ser exclusivamente tame-alligator-797, no projeto
+ *    Convex separado sigesgd-capivari-homologacao. Outros deployments são
+ *    recusados para evitar apontar o teste a dados operacionais.
  *
  * Usada por `src/main.tsx` (cliente Convex) e pelo diagnóstico da DANFE —
  * assim o host exibido é exatamente o host em uso.
  */
-export const OFFICIAL_CONVEX_URL = "https://first-herring-264.convex.cloud";
+/** Backend operacional atual confirmado pelo proprietário (Freebuff). */
+export const ACTIVE_OPERATIONAL_CONVEX_URL =
+  "https://first-herring-264.convex.cloud";
+
+/** @deprecated Nome legado: este é o backend operacional atual, não o slot Convex Production. */
+export const OFFICIAL_CONVEX_URL = ACTIVE_OPERATIONAL_CONVEX_URL;
+
+/** Único backend permitido para a homologação persistente do projeto separado. */
+export const HOMOLOGATION_CONVEX_URL =
+  "https://tame-alligator-797.convex.cloud";
 
 export interface ConvexUrlEnv {
   VITE_CONVEX_URL?: string;
@@ -29,7 +40,7 @@ export function isHomologacaoEnv(env: ConvexUrlEnv): boolean {
 }
 
 export function resolveConvexUrl(env: ConvexUrlEnv): string {
-  if (!isHomologacaoEnv(env)) return OFFICIAL_CONVEX_URL;
+  if (!isHomologacaoEnv(env)) return ACTIVE_OPERATIONAL_CONVEX_URL;
 
   const raw = String(env.VITE_CONVEX_URL ?? "").trim();
   if (!raw) {
@@ -51,9 +62,9 @@ export function resolveConvexUrl(env: ConvexUrlEnv): string {
     );
   }
 
-  if (url.host === new URL(OFFICIAL_CONVEX_URL).host) {
+  if (url.host !== new URL(HOMOLOGATION_CONVEX_URL).host) {
     throw new Error(
-      "Build de homologação não pode apontar para o deployment oficial — use um backend isolado.",
+      `Build de homologação só pode usar ${new URL(HOMOLOGATION_CONVEX_URL).host}; destino recusado: ${url.host}.`,
     );
   }
 

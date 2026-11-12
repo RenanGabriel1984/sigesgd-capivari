@@ -4,6 +4,28 @@ Documento operacional do ambiente isolado do SIGESGD Capivari.
 Regra mestra: **nada de produção** — sem deploy de funções para o backend em uso,
 sem mutação de dados oficiais, sem confirmação de notas reais.
 
+> **Mapa atualizado em 12/11/2026, confirmado pelo proprietário do SIGESGD.**
+> Esta seção prevalece sobre referências históricas a previews antigos mais abaixo.
+
+## Mapa correto dos ambientes
+
+| Projeto Convex | Ambiente no painel | Deployment | Papel atual |
+|---|---|---|---|
+| `sigesgd-capivari-homologacao` | Production | `tame-alligator-797` | **Backend persistente de homologação**; destino único para o Preview isolado |
+| `sigesgd-capivari-homologacao` | Development (Cloud) | `first-dinosaur-625` | Desenvolvimento separado; não usar como backend do Preview atual |
+| `sigesgd-capivari` | Production | `savory-sockeye-292` | Slot Production do projeto principal; não presumir que contém os dados operacionais atuais |
+| `sigesgd-capivari` | Development (Cloud) | `first-herring-264` | **Banco operacional atual**: o Freebuff carrega os dados utilizados pelo SIGESGD aqui. Preservar integralmente |
+| `sigesgd-capivari` | Preview — `codex/stabilizacao-seguranca` | `first-starling-943` | Preview de branch do projeto principal; não é a homologação persistente |
+| `sigesgd-capivari` | Preview — `codex/stock-areas-phase1` | `brilliant-bullfrog-982` | Preview antigo de outra branch; não é a homologação atual |
+
+### Regras de proteção
+
+- O nome/tipo `Development` do Convex não significa que o deployment esteja sem dados ou possa ser descartado. `first-herring-264` é a base operacional atual confirmada pelo proprietário.
+- Não trocar automaticamente o app para `savory-sockeye-292`. Uma eventual migração do banco operacional para o slot Production exige plano, reconciliação, backup/restauração e autorização específica.
+- O frontend de homologação deste projeto Vercel deve usar somente `tame-alligator-797.convex.cloud`.
+- Builds de homologação devem recusar `savory-sockeye-292`, `first-herring-264`, `first-starling-943`, `brilliant-bullfrog-982` e `first-dinosaur-625`.
+- Nenhum dos deployments do projeto principal pode ser usado como atalho para homologação.
+
 ---
 
 ## 1. Situação verificada em 03/11/2026
@@ -173,14 +195,16 @@ associação manual).
 
 ## 5. Estado da entrega R32.0
 
-- **Ambiente de homologação criado?** Não — bloqueado por exigir login do
-  proprietário (a deploy key do ambiente não cria deployments).
-- **URL de preview separada?** Não disponível (depende do hosting do proprietário).
-- **Build de homologação?** Pipeline validado em dry-run real (artefato gerado
-  fora do projeto com backend fictício e checks aprovados); o build válido só
-  pode ser gerado após a URL do staging existir.
-- **Produção modificada?** Não: nenhum deploy de funções, nenhuma mutação de
-  banco, nenhuma confirmação de nota, nenhuma alteração de estoque.
+- **Ambiente Convex de homologação existe?** Sim: projeto separado
+  `sigesgd-capivari-homologacao`, com Production `tame-alligator-797` e
+  Development `first-dinosaur-625`.
+- **Frontend Preview atual existe?** Sim: o projeto Vercel separado tem Preview
+  READY para o commit `897e25f`; ele deve usar `tame-alligator-797`.
+- **Backend de homologação atualizado com o código atual?** Ainda não
+  comprovado. A atualização das funções/schema de storage continua pendente.
+- **Produção/projeto principal modificados nesta etapa?** Não: nenhum deploy de
+  funções, nenhuma mutação de banco, nenhuma confirmação de nota ou alteração
+  de estoque foi executada neste procedimento.
 
 
 ---
@@ -222,12 +246,19 @@ Um build anterior executou `bun run build`, gerou `dist/` e falhou porque o proj
 - Não alterar as variáveis de Production.
 - Não usar Promote nem publicar o frontend no domínio oficial.
 - Não executar seeds, importações ou mutações de dados reais.
-- Testes funcionais devem usar exclusivamente o backend `brilliant-bullfrog-982` e registros fictícios identificados como homologação.
+- Testes funcionais atuais devem usar exclusivamente o backend persistente
+  `tame-alligator-797` e registros fictícios identificados como homologação.
+  A referência a `brilliant-bullfrog-982` abaixo é histórica e descreve um
+  Preview de outra branch, não o destino atual.
 
 
 ## 7. Atualização de autenticação do Preview — 11/11/2026
 
-O backend isolado de Preview `brilliant-bullfrog-982` recebeu as funções do projeto e as tabelas do módulo de água. O frontend de homologação chegou a gerar um build válido (versão 0.7.0, build `72b8d79`).
+Naquele momento, o Preview de branch `brilliant-bullfrog-982` recebeu funções
+do projeto e tabelas do módulo de água. O frontend chegou a gerar build válido
+(versão 0.7.0, build `72b8d79`). Esse deployment é agora identificado como
+Preview da branch antiga `codex/stock-areas-phase1`; não é o destino da
+homologação persistente atual.
 
 **Bloqueio atual:** a emissão de sessão pelo Convex Auth no Preview falha com `Missing environment variable JWT_PRIVATE_KEY`. O usuário administrador de homologação foi criado somente no banco isolado, mas não consegue concluir o login enquanto a chave de assinatura não existir nesse deployment.
 

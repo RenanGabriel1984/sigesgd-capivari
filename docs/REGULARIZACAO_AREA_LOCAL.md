@@ -4,7 +4,9 @@
 
 - Branch de implementação: `codex/regularizacao-area-local`
 - Base: `codex/stock-areas-phase1` no commit `d58bf2d3945b205354b0d0ca838d9892c16aa664`
-- Backup do deployment `first-herring-264`: realizado e armazenado pelo responsável.
+- Backup do backend operacional `first-herring-264`: realizado e armazenado
+  pelo responsável. Embora o painel o classifique como Development (Cloud),
+  ele contém os dados operacionais carregados pelo Freebuff; preservá-lo.
 - Código: alterações preparadas nesta branch.
 - Backend/frontend: **não publicados** por este procedimento.
 - Banco: **nenhuma mutation de regularização executada**.
