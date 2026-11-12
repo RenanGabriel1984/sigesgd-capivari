@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import type { Id } from "./_generated/dataModel";
+import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -101,24 +102,81 @@ export const create = mutation({
     }
     const globalAvailable = globalStock.physicalQuantity - globalStock.reservedQuantity;
     if (args.quantity > globalAvailable) throw new Error("A quantidade excede o estoque global livre.");
-
-    const locationRows = await ctx.db.query("stockByLocation")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
-    const sourceStock = locationRows.find((row: any) => row.locationId === args.fromLocationId && row.areaId === fromAreaId);
-    if (!sourceStock || sourceStock.quantity < args.quantity) {
-      throw new Error(`Estoque insuficiente em "${fromArea.name}" / "${fromLocation.name}". Disponível: ${sourceStock?.quantity ?? 0}.`);
+    if (isDiscreteStockUnit(product.unitOfMeasure, product.hasSerial) && !Number.isSafeInteger(args.quantity)) {
+      throw new Error(`A quantidade transferida deve ser inteira para a unidade ${product.unitOfMeasure}.`);
     }
 
     const productLots = await ctx.db.query("lots")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
-    const candidates: Array<{ lot: any; free: number }> = [];
+    if (product.hasSerial || productLots.some((lot: any) => lot.materialType === "permanent")) {
+      throw new Error("Material permanente ou com número de série deve ser transferido pelo cadastro individual de equipamentos, não por quantidade agregada.");
+    }
+
+    const locationRows = await ctx.db.query("stockByLocation")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+    const sourceRows = locationRows.filter((row: any) =>
+      row.locationId === args.fromLocationId && row.areaId === fromAreaId
+    );
+    const destinationRows = locationRows.filter((row: any) =>
+      row.locationId === args.toLocationId && row.areaId === toAreaId
+    );
+    if (sourceRows.length !== 1) {
+      throw new Error(sourceRows.length === 0
+        ? "Saldo da origem não encontrado."
+        : "Há saldos duplicados na origem. Regularize a combinação área/local antes de transferir.");
+    }
+    if (destinationRows.length > 1) {
+      throw new Error("Há saldos duplicados no destino. Regularize a combinação área/local antes de transferir.");
+    }
+    const sourceStock = sourceRows[0];
+    const destinationStock = destinationRows[0] ?? null;
+    if (sourceStock.quantity < args.quantity) {
+      throw new Error(`Estoque insuficiente em "${fromArea.name}" / "${fromLocation.name}". Disponível: ${sourceStock.quantity}.`);
+    }
+
+    const sourceLots = productLots.filter((lot: any) =>
+      lot.areaId === fromAreaId && lot.locationId === args.fromLocationId
+    );
+    const destinationLots = productLots.filter((lot: any) =>
+      lot.areaId === toAreaId && lot.locationId === args.toLocationId
+    );
     for (const lot of productLots) {
-      if (!lot.active || lot.areaId !== fromAreaId || lot.locationId !== args.fromLocationId) continue;
-      if (args.lotId && lot._id !== args.lotId) continue;
-      const reservations = await ctx.db.query("requestItemReservations")
-        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
-      const reserved = reservations.reduce((sum: number, item: any) => sum + item.quantityRemaining, 0);
-      const free = Math.max(0, lot.quantityAvailable - reserved);
+      if (lot.active === false && Number(lot.quantityAvailable) > 0) {
+        throw new Error(`O lote ${lot.lotNumber} está inativo com saldo positivo. Regularize antes da transferência.`);
+      }
+    }
+    const sourceLotTotal = sourceLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+    const destinationLotTotal = destinationLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+    if (Math.abs(sourceLotTotal - Number(sourceStock.quantity)) > 1e-9) {
+      throw new Error("O saldo da origem diverge dos lotes registrados. Transferência bloqueada para preservar a rastreabilidade.");
+    }
+    if (Math.abs(destinationLotTotal - Number(destinationStock?.quantity ?? 0)) > 1e-9) {
+      throw new Error("O saldo do destino diverge dos lotes registrados. Regularize antes de transferir.");
+    }
+
+    const reservedByLot = new Map<string, number>();
+    for (const reservation of allReservations as any[]) {
+      const lot = productLots.find((candidate: any) => candidate._id === reservation.lotId);
+      const remaining = Number(reservation.quantityRemaining);
+      if (!lot || !Number.isFinite(remaining) || remaining < 0) {
+        throw new Error("Há reserva inválida ou sem lote correspondente. Transferência bloqueada.");
+      }
+      if (remaining > 0 && (
+        reservation.areaId !== lot.areaId ||
+        reservation.locationId !== lot.locationId ||
+        remaining > Number(lot.quantityAvailable)
+      )) {
+        throw new Error(`A reserva do lote ${lot.lotNumber} não corresponde à área/local ou excede o saldo.`);
+      }
+      reservedByLot.set(String(lot._id), (reservedByLot.get(String(lot._id)) ?? 0) + remaining);
+    }
+
+    const candidates: Array<{ lot: any; free: number }> = [];
+    for (const lot of sourceLots) {
+      if (!lot.active || (args.lotId && lot._id !== args.lotId)) continue;
+      const reserved = reservedByLot.get(String(lot._id)) ?? 0;
+      const free = Number(lot.quantityAvailable) - reserved;
+      if (free < -1e-9) throw new Error(`O lote ${lot.lotNumber} possui reserva superior ao saldo físico.`);
       if (free > 0) candidates.push({ lot, free });
     }
     candidates.sort((a, b) => a.lot.receivedAt - b.lot.receivedAt || a.lot.lotNumber.localeCompare(b.lot.lotNumber));
@@ -133,7 +191,6 @@ export const create = mutation({
     }
     if (remaining > 0) throw new Error(`Lotes livres insuficientes na origem. Faltam ${remaining} unidade(s); transferências não podem consumir quantidades reservadas.`);
 
-    const destinationStock = locationRows.find((row: any) => row.locationId === args.toLocationId && row.areaId === toAreaId);
     const now = Date.now();
     const year = new Date(now).getFullYear();
     const prefix = `LOT-${year}-`;
