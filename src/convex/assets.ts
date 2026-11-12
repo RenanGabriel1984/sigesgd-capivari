@@ -270,6 +270,9 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
     const patrimonyNumber = args.patrimonyNumber?.trim() || undefined;
+    if (patrimonyNumber) {
+      await requirePermission(ctx, "patrimony.assign", { entity: "assets" });
+    }
     const serialNumber = args.serialNumber?.trim() || undefined;
     const macAddress = args.macAddress?.trim().toUpperCase() || undefined;
     await assertAssetIdentifiersAvailable(ctx, { patrimonyNumber, serialNumber, macAddress });
@@ -344,6 +347,12 @@ export const update = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    if (args.patrimonyNumber !== undefined) {
+      await requirePermission(ctx, "patrimony.assign", {
+        entity: "assets",
+        entityId: String(args.assetId),
+      });
+    }
     if (args.assetType !== undefined &&
         !ASSET_TYPES.includes(args.assetType as (typeof ASSET_TYPES)[number])) {
       throw new Error("Tipo de equipamento inválido.");
