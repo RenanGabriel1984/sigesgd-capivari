@@ -37,6 +37,31 @@ describe("recebimento de material permanente com tombamento posterior", () => {
     })).toMatch(/identificação provisória/);
   });
 
+  it("exige série quando o cadastro do produto ativa hasSerial", () => {
+    expect(validateEntryUnits({
+      materialType: "permanent",
+      quantity: 1,
+      units: [{}],
+      requireSerial: true,
+    })).toMatch(/exige número de série/);
+
+    expect(validateEntryUnits({
+      materialType: "permanent",
+      quantity: 1,
+      units: [{ serialNumber: "SN-001" }],
+      requireSerial: true,
+    })).toBeNull();
+  });
+
+  it("não exige série para produtos sem controle individual por serial", () => {
+    expect(validateEntryUnits({
+      materialType: "permanent",
+      quantity: 1,
+      units: [{}],
+      requireSerial: false,
+    })).toBeNull();
+  });
+
   it("rejeita quantidade fracionada ou inválida para bem permanente", () => {
     expect(validateEntryUnits({
       materialType: "permanent",
