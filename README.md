@@ -80,7 +80,7 @@ O estoque é controlado por uma **fonte única de verdade**: a tabela `stock`, c
 
 | Módulo | Status | Descrição |
 |--------|--------|-----------|
-| Autenticação | ✅ Implementado | Credenciais + OTP por e-mail, RBAC (admin, stock_manager, director, secretary, technician) |
+| Autenticação | ✅ Implementado | Credenciais + OTP por e-mail, RBAC (admin, stock_manager, director, secretary, technician, patrimony_manager) |
 | Cadastro de Produtos | ✅ Implementado | CRUD completo, categorias, fornecedores, compatibilidade com impressoras |
 | Estoque | ✅ Implementado | Saldo físico/reservado, fonte única, proteção contra negativo |
 | Entradas | ✅ Implementado | Entradas multi-item, origem, NF, AF, fornecedor, fotos, documentos, lotes automáticos |
@@ -95,7 +95,7 @@ O estoque é controlado por uma **fonte única de verdade**: a tabela `stock`, c
 | Relatórios | ✅ Implementado | Métricas gerais, consumo de toners, movimentações |
 | Painel (Dashboard) | ✅ Implementado | Indicadores, alertas, evolução mensal |
 | Auditoria | ✅ Implementado | Registro completo de todas as operações sensíveis |
-| PWA | ⚠️ Parcial | Manifest + meta tags; Service Worker real pendente |
+| PWA | ✅ Implementado no build | Manifest + Service Worker via vite-plugin-pwa, atualização automática e cache de recursos estáticos; dados do Convex não são cacheados offline |
 
 ---
 

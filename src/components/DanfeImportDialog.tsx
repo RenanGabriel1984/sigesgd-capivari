@@ -944,11 +944,11 @@ export function DanfeImportDialog({
                     type="button"
                     variant="outline"
                     className="gap-2"
-                    disabled={reading || !cameraAvailable}
-                    onClick={() => cameraAvailable && cameraInputRef.current?.click()}
+                    disabled={reading}
+                    onClick={() => cameraInputRef.current?.click()}
                   >
                     <Camera className="h-4 w-4" />
-                    {cameraAvailable ? "Tirar foto da DANFE" : "Câmera não disponível"}
+                    Tirar foto da DANFE
                   </Button>
                   <Button
                     type="button"
@@ -984,13 +984,11 @@ export function DanfeImportDialog({
                 </p>
                 {cameraAvailable ? (
                   <p className="text-xs text-muted-foreground">
-                    No celular, a câmera traseira é aberta direto para capturar a DANFE. Anexar
-                    continua aceitando PDF, foto da galeria e imagem já salva no aparelho.
+                    No celular, use “Tirar foto da DANFE”. Se o navegador não iniciar a câmera, ele poderá abrir a galeria; “Anexar DANFE” continua aceitando PDF e imagens.
                   </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    Este aparelho não detectou câmera disponível. Para importar, anexe um PDF ou
-                    imagem, ou use a entrada manual / Importar NF-e XML.
+                    A detecção automática do aparelho não confirmou a câmera, mas você ainda pode tentar “Tirar foto da DANFE”. Se não abrir, anexe uma imagem/PDF ou use a entrada manual / Importar NF-e XML.
                   </p>
                 )}
               </div>
