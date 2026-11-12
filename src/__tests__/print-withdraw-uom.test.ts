@@ -211,6 +211,46 @@ describe("PRINT-UOM-01 — 13 caixas × 50 + 18 avulsas = 668 unidades", () => {
   });
 });
 
+describe("PRINT-UOM — disponibilidade e parâmetros são consolidados na unidade-base da área", () => {
+  it("separa estoque global, físico em Impressoras e saldo livre reservado", () => {
+    const [family] = buildSupplyFamilies([
+      familyInput({
+        productId: "closed",
+        productName: "Protetor de crachá — caixa fechada",
+        unitOfMeasure: "caixa",
+        currentStock: 20,
+        minimumStock: 2,
+        idealStock: 4,
+        monthlyConsumptionTarget: 3,
+        inArea: 13,
+        availableInArea: 10,
+        packaging: { baseUnit: "un", packagingUnit: "caixa", factor: 50 },
+      }),
+      familyInput({
+        productId: "loose",
+        productName: "Protetor de crachá — unidade avulsa",
+        unitOfMeasure: "un",
+        currentStock: 30,
+        minimumStock: 5,
+        idealStock: 10,
+        monthlyConsumptionTarget: 7,
+        inArea: 18,
+        availableInArea: 16,
+        packaging: null,
+      }),
+    ]);
+
+    expect(family.baseStock).toBe(1030);
+    expect(family.baseStockInArea).toBe(668);
+    expect(family.baseAvailableInArea).toBe(516);
+    expect(family.minimumStock).toBe(105);
+    expect(family.idealStock).toBe(210);
+    expect(family.monthlyConsumptionTarget).toBe(157);
+    expect(family.compositionLabel).toBe("13 caixas fechadas + 18 un. avulsas");
+    expect(family.suggestedReorder).toBe(0);
+  });
+});
+
 describe("PRINT-UOM-02 — protetor aparece agrupado (uma família, não duas linhas soltas)", () => {
   it("os dois registros de apresentação do protetor caem na MESMA família", () => {
     expect(deriveFamilyKey("Protetor de crachá — caixa fechada", "Reflex")).toBe(
