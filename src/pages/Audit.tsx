@@ -253,6 +253,8 @@ export default function Audit() {
                               ? "bg-gray-50 text-gray-700"
                               : log.action === "move_stock"
                               ? "bg-cyan-50 text-cyan-700"
+                              : log.action === "login_failed"
+                              ? "bg-red-50 text-red-700"
                               : log.action === "login"
                               ? "bg-green-50 text-green-700"
                               : ""
