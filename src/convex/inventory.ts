@@ -73,7 +73,7 @@ async function generateInventoryAdjustmentEntryNumber(ctx: any): Promise<string>
   const existing = await ctx.db.query("entries")
     .withIndex("by_number", (q: any) => q.gte("entryNumber", prefix)).collect();
   const max = existing.reduce((value: number, entry: any) => {
-    const match = /^ENT-\\d{4}-(\\d+)$/.exec(entry.entryNumber);
+    const match = /^ENT-\d{4}-(\d+)$/.exec(entry.entryNumber);
     if (!match || !entry.entryNumber.startsWith(prefix)) return value;
     const n = Number(match[1]);
     return Number.isSafeInteger(n) && n > value ? n : value;
@@ -87,7 +87,7 @@ async function generateInventoryAdjustmentLotNumber(ctx: any): Promise<string> {
   const existing = await ctx.db.query("lots")
     .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix)).collect();
   const max = existing.reduce((value: number, lot: any) => {
-    const match = /^LOT-\\d{4}-(\\d+)$/.exec(lot.lotNumber);
+    const match = /^LOT-\d{4}-(\d+)$/.exec(lot.lotNumber);
     if (!match || !lot.lotNumber.startsWith(prefix)) return value;
     const n = Number(match[1]);
     return Number.isSafeInteger(n) && n > value ? n : value;
@@ -325,6 +325,21 @@ export const close = mutation({
 
       const previousPhysical = Number(stock?.physicalQuantity ?? 0);
       const previousReserved = Number(stock?.reservedQuantity ?? 0);
+      const lotById = new Map<string, any>();
+      for (const lot of lots as any[]) {
+        const quantityAvailable = Number(lot.quantityAvailable);
+        if (!Number.isFinite(quantityAvailable) || quantityAvailable < 0) {
+          throw new Error(`Lote inválido encontrado para "${product.name}".`);
+        }
+        if (lot.active === false && quantityAvailable > 0) {
+          throw new Error(`Há lote inativo com saldo positivo para "${product.name}". Regularize antes do inventário.`);
+        }
+        lotById.set(String(lot._id), lot);
+      }
+      const materialType = (lots as any[]).find((lot: any) => lot.materialType)?.materialType;
+      if (product.hasSerial === true || materialType === "permanent") {
+        throw new Error(`O produto "${product.name}" exige controle patrimonial individual. Faça a conferência/regularização pelo cadastro de equipamentos, não por ajuste agregado de estoque.`);
+      }
       const lotTotal = lots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
       if (Math.abs(lotTotal - previousPhysical) > 1e-9) {
         throw new Error(`Integridade de "${product.name}": saldo global (${previousPhysical}) diverge dos lotes (${lotTotal}). Regularize antes de fechar o inventário.`);
@@ -332,8 +347,16 @@ export const close = mutation({
 
       const reservationTotal = reservations.reduce((sum: number, reservation: any) => {
         const remaining = Number(reservation.quantityRemaining);
-        if (!Number.isFinite(remaining) || remaining < 0) {
-          throw new Error(`Há reserva inválida para "${product.name}".`);
+        const reservedLot = lotById.get(String(reservation.lotId));
+        if (!Number.isFinite(remaining) || remaining < 0 || !reservedLot || reservedLot.productId !== count.productId) {
+          throw new Error(`Há reserva inválida ou sem lote correspondente para "${product.name}".`);
+        }
+        if (remaining > 0 && (
+          reservation.areaId !== reservedLot.areaId ||
+          reservation.locationId !== reservedLot.locationId ||
+          remaining > Number(reservedLot.quantityAvailable)
+        )) {
+          throw new Error(`A reserva de "${product.name}" não corresponde à área/local ou excede o saldo do lote.`);
         }
         return sum + remaining;
       }, 0);
