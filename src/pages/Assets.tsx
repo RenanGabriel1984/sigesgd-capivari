@@ -476,7 +476,7 @@ export default function AssetsPage() {
             <div className="space-y-4">
               <div>
                 <Label>Tipo de Equipamento *</Label>
-                <select className="w-full border rounded-md p-2 text-sm" value={form.assetType} onChange={(e) => setForm({ ...form, assetType: e.target.value })}>
+                <select className="w-full border rounded-md p-2 text-sm" value={form.assetType} onChange={(e) => setForm({ ...form, assetType: e.target.value as AssetType })}>
                   {Object.entries(ASSET_TYPE_LABELS).map(([k, v]) => (
                     <option key={k} value={k}>{v}</option>
                   ))}
