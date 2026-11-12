@@ -7,7 +7,7 @@ import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 /** Política de senha (§12). Todas as cinco ACTIONS de definição exigem este mínimo. */
 export const MIN_PASSWORD_LENGTH = 8;
