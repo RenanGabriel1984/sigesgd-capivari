@@ -20,6 +20,17 @@ export const RETURN_CONDITION_VALUES = [
 
 export type ReturnCondition = (typeof RETURN_CONDITION_VALUES)[number];
 
+/**
+ * Somente material explicitamente não utilizado retorna ao saldo disponível.
+ * Material parcialmente usado, defeituoso ou em condição não classificada fica
+ * registrado para avaliação e não pode ser requisitado enquanto estiver assim.
+ */
+export function shouldRestockReturnedMaterial(
+  condition: ReturnCondition | null | undefined,
+): boolean {
+  return condition === "unused";
+}
+
 export const RETURN_CONDITION_LABELS: Record<ReturnCondition, string> = {
   unused: "Não utilizado",
   partially_used: "Utilizado parcialmente",
