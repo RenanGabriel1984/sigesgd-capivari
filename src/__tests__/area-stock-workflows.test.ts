@@ -77,8 +77,8 @@ describe("estoque por área e local físico — regressões de segurança", () =
     const quickExit = mutationBlock(stockSetup, "quickExit");
     expect(quickExit).toContain('areaId: v.id("stockAreas")');
     expect(quickExit).toContain('locationId: v.id("storageLocations")');
-    expect(quickExit).toContain("lot.areaId !== args.areaId");
-    expect(quickExit).toContain("lot.locationId !== args.locationId");
+    expect(quickExit).toContain("lot.areaId === args.areaId && lot.locationId === args.locationId");
+    expect(quickExit).toContain("reservation.areaId !== lot.areaId || reservation.locationId !== lot.locationId");
     expect(quickExit).toContain("lot.quantityAvailable - reserved");
   });
 
@@ -115,7 +115,8 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(createProduct).toContain("Informe a área/subestoque do saldo inicial");
     expect(createProduct).not.toContain("location.areaId");
     expect(createProduct).toContain("areaId: initialAreaId");
-    expect(stockSetup).toContain("const selectedAreaId = item.areaId");
+    expect(stockSetup).toContain("const areaId = item.areaId");
+    expect(stockSetup).toContain("if (!item.areaId || !area?.active)");
     expect(stockSetup).toMatch(/local físico não define a área/i);
     expect(stockSetup).toContain("areaId,\n      });");
   });
@@ -127,7 +128,8 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(createReturn).toContain("lot.areaId !== exit.areaId");
     expect(createReturn).toContain("lot.locationId !== exit.locationId");
     expect(createReturn).toContain("areaId: exit.areaId");
-    expect(createReturn).toContain("quantityAvailable: part.lot.quantityAvailable + part.quantity");
+    expect(createReturn).toContain("applyReturnToLot(");
+    expect(createReturn).toContain("shouldRestockReturnedMaterial(condition)");
     expect(createReturn).toContain("row.locationId === targetLocationId");
   });
 
