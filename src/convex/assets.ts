@@ -387,8 +387,9 @@ export const update = mutation({
 export const assign = mutation({
   args: {
     assetId: v.id("assets"),
-    responsibleUserId: v.optional(v.id("users")),
-    organizationId: v.optional(v.id("organizations")),
+    // undefined = manter; null = limpar; id = atribuir.
+    responsibleUserId: v.optional(v.union(v.id("users"), v.null())),
+    organizationId: v.optional(v.union(v.id("organizations"), v.null())),
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
