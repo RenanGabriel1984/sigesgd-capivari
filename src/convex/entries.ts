@@ -1124,11 +1124,11 @@ export const listPendingPatrimony = query({
       !unit.patrimonyNumber?.trim() && unit.patrimonyRegistrationStatus !== "registered"
     );
     const rows = await Promise.all(pending.map(async (unit: any) => {
-      const entry = await ctx.db.get(unit.entryId);
+      const entry: any = await ctx.db.get(unit.entryId);
       if (!entry || entry.status !== "confirmed") return null;
-      const item = await ctx.db.get(unit.entryItemId);
-      const product = item ? await ctx.db.get(item.productId) : null;
-      const supplier = entry.supplierId ? await ctx.db.get(entry.supplierId) : null;
+      const item: any = await ctx.db.get(unit.entryItemId);
+      const product: any = item ? await ctx.db.get(item.productId) : null;
+      const supplier: any = entry.supplierId ? await ctx.db.get(entry.supplierId) : null;
       return {
         ...unit,
         entryNumber: entry.entryNumber,
