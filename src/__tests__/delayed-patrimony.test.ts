@@ -121,6 +121,12 @@ describe("integração do tombamento com a entrada e o cadastro de ativos", () =
     expect(page).toContain("Pendências de tombamento patrimonial");
   });
 
+  it("não permite gravar patrimônio oficial no rascunho, nem por perfil administrativo", () => {
+    expect(entriesBackend).toContain('args.units.some((unit) => !!unit.patrimonyNumber?.trim())');
+    expect(entriesBackend).toContain("só pode ser atribuído pelo setor de Patrimônio após a confirmação da entrada");
+    expect(entriesBackend).toContain('patrimonyRegistrationStatus: "pending"');
+  });
+
   it("somente permite atribuição pós-confirmação com permissão dedicada", () => {
     expect(entriesBackend).toContain('requirePermission(ctx, "patrimony.assign"');
     expect(entriesBackend).toContain('entry.status !== "confirmed"');
