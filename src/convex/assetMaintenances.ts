@@ -2,7 +2,7 @@ import { requirePermission } from "./rbac";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: consulta de manutenções (visão de equipamentos).
