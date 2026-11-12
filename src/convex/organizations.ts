@@ -2,7 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: organizações visíveis a quem pode consultá-las.
