@@ -364,6 +364,14 @@ export const approve = mutation({
           .collect();
         const allocatedToAreas = existingReservations.reduce((sum: number, reservation: any) =>
           sum + reservation.quantityRemaining, 0);
+        if (existingReservations.some((reservation: any) =>
+          !Number.isFinite(reservation.quantityRemaining) || reservation.quantityRemaining < 0
+        )) {
+          throw new Error(`"${needed.productName}" possui reserva por lote inválida. Regularize antes de aprovar novas solicitações.`);
+        }
+        if (allocatedToAreas - stock.reservedQuantity > 1e-9) {
+          throw new Error(`As reservas por lote de "${needed.productName}" excedem o saldo reservado global. Regularize antes de aprovar.`);
+        }
         const legacyReserved = Math.max(0, stock.reservedQuantity - allocatedToAreas);
         if (legacyReserved > 0) {
           throw new Error(
@@ -528,25 +536,53 @@ export const deliver = mutation({
       }
 
       if (item.areaId) {
+        if (!item.sourceLocationId) {
+          throw new Error("A solicitação classificada precisa manter o local físico de origem.");
+        }
         const reservations = await ctx.db.query("requestItemReservations")
           .withIndex("by_requestItem", (q: any) => q.eq("requestItemId", input.itemId)).collect();
-        const remaining = reservations.reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0);
+        const remaining = reservations.reduce((sum: number, reservation: any) => {
+          if (!Number.isFinite(reservation.quantityRemaining) || reservation.quantityRemaining < 0) {
+            throw new Error("A reserva por lote contém quantidade inválida.");
+          }
+          return sum + reservation.quantityRemaining;
+        }, 0);
         if (remaining < input.quantityDelivered) {
           throw new Error("A reserva por lote está incompleta. Entrega bloqueada para proteger a área/local.");
         }
         for (const reservation of reservations) {
           if (reservation.quantityRemaining <= 0) continue;
+          if (reservation.productId !== item.productId ||
+              reservation.areaId !== item.areaId ||
+              reservation.locationId !== item.sourceLocationId) {
+            throw new Error("A reserva não corresponde ao produto/área/local da solicitação. Entrega bloqueada.");
+          }
           const lot = await ctx.db.get(reservation.lotId);
-          if (!lot || !lot.active || lot.areaId !== item.areaId || lot.locationId !== item.sourceLocationId) {
-            throw new Error("Um lote reservado não pertence mais à área/local de origem. Entrega bloqueada.");
+          if (!lot || !lot.active || lot.productId !== item.productId ||
+              lot.areaId !== item.areaId || lot.locationId !== item.sourceLocationId ||
+              lot.quantityAvailable < reservation.quantityRemaining) {
+            throw new Error("Um lote reservado não pertence mais à área/local ou não possui saldo suficiente. Entrega bloqueada.");
+          }
+          const lotReservations = await ctx.db.query("requestItemReservations")
+            .withIndex("by_lot", (q: any) => q.eq("lotId", reservation.lotId)).collect();
+          const reservedOnLot = lotReservations.reduce((sum: number, row: any) =>
+            sum + Number(row.quantityRemaining), 0);
+          if (!Number.isFinite(reservedOnLot) || reservedOnLot > lot.quantityAvailable + 1e-9) {
+            throw new Error("O total reservado no lote excede o saldo físico. Entrega bloqueada.");
           }
         }
         const locationRows = await ctx.db.query("stockByLocation")
           .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const source = locationRows.find((row: any) =>
+        const matchingSourceRows = locationRows.filter((row: any) =>
           row.locationId === item.sourceLocationId && row.areaId === item.areaId
         );
-        if (!source || source.quantity < input.quantityDelivered) {
+        if (matchingSourceRows.length !== 1) {
+          throw new Error(matchingSourceRows.length === 0
+            ? "Saldo físico insuficiente no local de origem para concluir a entrega."
+            : "Há saldos duplicados no local de origem. Regularize antes de concluir a entrega.");
+        }
+        const source = matchingSourceRows[0];
+        if (!Number.isFinite(source.quantity) || source.quantity < input.quantityDelivered) {
           throw new Error("Saldo físico insuficiente no local de origem para concluir a entrega.");
         }
       } else {
@@ -608,7 +644,11 @@ export const deliver = mutation({
           if (lot.areaId !== item.areaId || lot.locationId !== item.sourceLocationId || lot.quantityAvailable < consume) {
             throw new Error("O lote reservado não possui saldo físico na área/local de origem.");
           }
-          await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consume });
+          const nextLotQuantity = lot.quantityAvailable - consume;
+          await ctx.db.patch(lot._id, {
+            quantityAvailable: nextLotQuantity,
+            active: nextLotQuantity > 0,
+          });
           await ctx.db.patch(reservation._id, {
             quantityRemaining: reservation.quantityRemaining - consume,
             quantityDelivered: reservation.quantityDelivered + consume,
@@ -623,9 +663,13 @@ export const deliver = mutation({
         if (remaining > 0) throw new Error("Reservas por lote insuficientes para concluir a entrega.");
         const locationRows = await ctx.db.query("stockByLocation")
           .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const source = locationRows.find((row: any) =>
+        const matchingSourceRows = locationRows.filter((row: any) =>
           row.locationId === item.sourceLocationId && row.areaId === item.areaId
         );
+        if (matchingSourceRows.length !== 1) {
+          throw new Error("O saldo do local mudou ou está duplicado durante a entrega.");
+        }
+        const source = matchingSourceRows[0];
         if (!source || source.quantity < input.quantityDelivered) throw new Error("Saldo por local insuficiente durante a entrega.");
         await ctx.db.patch(source._id, { quantity: source.quantity - input.quantityDelivered });
       } else {
