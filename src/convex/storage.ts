@@ -176,6 +176,12 @@ export const registerUpload = mutation({
       throw new Error("Este arquivo já está vinculado a outro registro.");
     }
 
+    // Do not let a caller re-register a legacy file ID as their own pending upload.
+    const legacyOwners = await resolveStorageOwners(ctx, [storageId]);
+    if ((legacyOwners.get(storageId) ?? []).length > 0) {
+      throw new Error("Este arquivo já pertence a outro registro.");
+    }
+
     const now = Date.now();
     await ctx.db.insert("storageFiles", {
       storageId,
@@ -210,6 +216,20 @@ export async function attachStorageFile(
     row.ownerType === ownerType && row.ownerId === ownerId
   )) {
     return;
+  }
+
+  // A legacy ID with a different persisted owner cannot be reassigned to a new
+  // entity. A matching old reference is already authorized and needs no rewrite.
+  if (existing.length === 0) {
+    const legacyOwners = await resolveStorageOwners(ctx, [storageId]);
+    const owners = legacyOwners.get(storageId) ?? [];
+    if (owners.length > 0) {
+      const alreadyBelongsToTarget = owners.some((owner) =>
+        owner.ownerType === ownerType && owner.ownerId === ownerId
+      );
+      if (alreadyBelongsToTarget) return;
+      throw new Error("Este arquivo legado já pertence a outro registro.");
+    }
   }
 
   const sameUploaderPending = existing.some((row: any) =>
