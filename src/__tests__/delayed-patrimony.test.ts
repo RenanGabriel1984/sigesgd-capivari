@@ -145,6 +145,12 @@ describe("integração do tombamento com a entrada e o cadastro de ativos", () =
     expect(entriesBackend).toContain("O número de série desta unidade já consta em outro equipamento");
   });
 
+  it("reaproveita equipamento legado somente quando patrimônio e série são compatíveis", () => {
+    expect(entriesBackend).toContain("existingAsset.serialNumber.trim().toLocaleUpperCase");
+    expect(entriesBackend).toContain("serialOwner._id !== existingAsset?._id");
+    expect(entriesBackend).toContain("serialNumber: existingAsset.serialNumber ?? (unit.serialNumber?.trim() || undefined)");
+  });
+
   it("disponibiliza o perfil específico no provisionamento de usuários", () => {
     expect(usersBackend).toContain('v.literal("patrimony_manager")');
     expect(usersBackend).toContain("export const createUser = mutation");
