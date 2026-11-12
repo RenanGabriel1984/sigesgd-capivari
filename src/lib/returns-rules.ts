@@ -92,6 +92,10 @@ export function validateReturnQuantity(args: {
   requested: number;
 }): string | null {
   const { exitQuantity, alreadyReturned, requested } = args;
+  if (!Number.isFinite(exitQuantity) || exitQuantity <= 0 ||
+      !Number.isFinite(alreadyReturned) || alreadyReturned < 0) {
+    return "O saldo da saída original ou das devoluções anteriores é inválido.";
+  }
   if (!Number.isFinite(requested) || requested <= 0) {
     return "Quantidade da devolução deve ser maior que zero";
   }
@@ -223,4 +227,48 @@ export function buildUnresolvableLotMessage(input: {
     ` Identifique o lote antes de devolver. ` +
     `Nenhum estoque foi alterado — a operação foi cancelada integralmente.`
   );
+}
+
+
+/**
+ * A trilha stockMovementLots de uma saída precisa representar exatamente a
+ * quantidade baixada. Um vínculo ausente, duplicado ou com quantidade inválida
+ * impede restaurar o estoque em um lote arbitrário.
+ */
+export function validateExitLotLinks(
+  exitQuantity: number,
+  links: Array<{ lotId: string; quantity: number }>,
+): string | null {
+  if (!Number.isFinite(exitQuantity) || exitQuantity <= 0 || links.length === 0) {
+    return "A saída não possui uma quantidade ou trilha de lotes válida.";
+  }
+  const seen = new Set<string>();
+  let total = 0;
+  for (const link of links) {
+    if (!link.lotId || seen.has(link.lotId)) {
+      return "A trilha de lotes da saída contém vínculo vazio ou duplicado.";
+    }
+    if (!Number.isFinite(link.quantity) || link.quantity <= 0) {
+      return "A trilha de lotes da saída contém quantidade inválida.";
+    }
+    seen.add(link.lotId);
+    total += link.quantity;
+  }
+  if (Math.abs(total - exitQuantity) > 1e-9) {
+    return "A soma dos lotes consumidos não corresponde à quantidade da saída.";
+  }
+  return null;
+}
+
+/** Reintegração em lote: saldo positivo reativa o lote que havia zerado. */
+export function applyReturnToLot(
+  quantityAvailable: number,
+  returnedQuantity: number,
+): { quantityAvailable: number; active: boolean } {
+  if (!Number.isFinite(quantityAvailable) || quantityAvailable < 0 ||
+      !Number.isFinite(returnedQuantity) || returnedQuantity <= 0) {
+    throw new Error("Saldo ou quantidade de devolução do lote inválidos.");
+  }
+  const nextQuantity = quantityAvailable + returnedQuantity;
+  return { quantityAvailable: nextQuantity, active: nextQuantity > 0 };
 }
