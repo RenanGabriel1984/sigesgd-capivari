@@ -407,6 +407,7 @@ export const confirm = mutation({
           quantity: item.quantity,
           units: itemUnits,
           productName: product?.name,
+          requireSerial: product?.hasSerial === true,
         });
         if (unitError) throw new Error(unitError);
       }
