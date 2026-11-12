@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import {
   validateReturnQuantity,
   returnedQuantityForExit,
@@ -154,6 +155,9 @@ export const create = mutation({
 
     const product: any = await ctx.db.get(exit.productId);
     if (!product) throw new Error("Produto da saída não encontrado");
+    if (isDiscreteStockUnit(product.unitOfMeasure, product.hasSerial) && !Number.isSafeInteger(args.quantity)) {
+      throw new Error(`A quantidade devolvida deve ser inteira para a unidade ${product.unitOfMeasure}.`);
+    }
 
     const allReturns = await loadReturns(ctx);
     const alreadyReturned = returnedQuantityForExit(allReturns, exit);
