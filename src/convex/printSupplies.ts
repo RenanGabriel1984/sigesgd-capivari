@@ -250,7 +250,7 @@ export const getSupplyDashboard = query({
       .map((p) => {
         const current = stockByProduct.get(p._id)?.physical ?? 0;
         const inArea = areaLots.get(p._id) ?? 0;
-        const availableInArea = Math.max(0, inArea - (areaReserved.get(p._id) ?? 0));
+        const availableInArea = inArea - (areaReserved.get(p._id) ?? 0);
         return buildSupplyRow({
           productId: p._id as string,
           productName: p.name,
