@@ -565,6 +565,11 @@ export const deliver = mutation({
           }
           const lotReservations = await ctx.db.query("requestItemReservations")
             .withIndex("by_lot", (q: any) => q.eq("lotId", reservation.lotId)).collect();
+          if (lotReservations.some((row: any) =>
+            !Number.isFinite(row.quantityRemaining) || row.quantityRemaining < 0
+          )) {
+            throw new Error("O lote possui reserva com quantidade inválida. Entrega bloqueada.");
+          }
           const reservedOnLot = lotReservations.reduce((sum: number, row: any) =>
             sum + Number(row.quantityRemaining), 0);
           if (!Number.isFinite(reservedOnLot) || reservedOnLot > lot.quantityAvailable + 1e-9) {
