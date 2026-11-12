@@ -171,7 +171,7 @@ async function performInitialLoad(
   const existingEntries = await ctx.db.query("entries").collect();
   const entryPrefix = `ENT-${year}-`;
   const entrySequence = existingEntries.reduce((max: number, entry: any) => {
-    const match = String(entry.entryNumber ?? "").match(/^ENT-\\d{4}-(\\d+)$/);
+    const match = String(entry.entryNumber ?? "").match(/^ENT-\d{4}-(\d+)$/);
     if (!match || !String(entry.entryNumber).startsWith(entryPrefix)) return max;
     const sequence = Number(match[1]);
     return Number.isSafeInteger(sequence) && sequence > max ? sequence : max;
@@ -548,7 +548,7 @@ export const productLocationSummary = query({
         locationName: location.name,
         areaId: area ? area._id as string : null,
         areaName: area?.name ?? "Sem área — pendente de classificação",
-        quantity: Math.max(0, row.quantity - reserved),
+        quantity: row.quantity - reserved,
       });
       byProduct.set(row.productId, entries);
     }
