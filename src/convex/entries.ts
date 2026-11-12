@@ -1106,3 +1106,152 @@ export const setUnits = mutation({
     return args.entryId;
   },
 });
+
+
+// ─── Tombamento posterior pelo setor de Patrimônio ──────────────────────────
+
+const PATRIMONY_ASSET_TYPES = [
+  "desktop", "notebook", "monitor", "server", "printer", "switch",
+  "router", "access_point", "ups", "storage", "phone", "other",
+] as const;
+
+export const listPendingPatrimony = query({
+  args: {},
+  handler: async (ctx) => {
+    await requirePermission(ctx, "patrimony.view", { entity: "entryItemUnits" });
+    const units = await ctx.db.query("entryItemUnits").collect();
+    const pending = units.filter((unit: any) =>
+      !unit.patrimonyNumber?.trim() && unit.patrimonyRegistrationStatus !== "registered"
+    );
+    const rows = await Promise.all(pending.map(async (unit: any) => {
+      const entry = await ctx.db.get(unit.entryId);
+      if (!entry || entry.status !== "confirmed") return null;
+      const item = await ctx.db.get(unit.entryItemId);
+      const product = item ? await ctx.db.get(item.productId) : null;
+      const supplier = entry.supplierId ? await ctx.db.get(entry.supplierId) : null;
+      return {
+        ...unit,
+        entryNumber: entry.entryNumber,
+        invoiceNumber: entry.invoiceNumber,
+        invoiceDate: entry.invoiceDate,
+        receivedAt: entry.receivedAt,
+        supplierName: supplier?.tradeName ?? supplier?.legalName ?? null,
+        productName: product?.name ?? "Produto não encontrado",
+        itemQuantity: item?.quantity ?? null,
+      };
+    }));
+    return rows.filter((row): row is NonNullable<typeof row> => row !== null)
+      .sort((a: any, b: any) => a.createdAt - b.createdAt);
+  },
+});
+
+export const assignPatrimony = mutation({
+  args: {
+    entryItemUnitId: v.id("entryItemUnits"),
+    patrimonyNumber: v.string(),
+    assetType: v.union(...PATRIMONY_ASSET_TYPES.map((value) => v.literal(value))),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "patrimony.assign", {
+      entity: "entryItemUnits", entityId: String(args.entryItemUnitId),
+    });
+    const patrimonyNumber = args.patrimonyNumber.trim();
+    if (!patrimonyNumber || patrimonyNumber.length > 80) {
+      throw new Error("Informe um número de patrimônio válido (até 80 caracteres).");
+    }
+    const normalized = patrimonyNumber.toLocaleUpperCase("pt-BR");
+    const unit = await ctx.db.get(args.entryItemUnitId);
+    if (!unit) throw new Error("Unidade recebida não encontrada.");
+    const entry = await ctx.db.get(unit.entryId);
+    if (!entry || entry.status !== "confirmed") {
+      throw new Error("O tombamento só pode ocorrer após a confirmação da entrada.");
+    }
+    if (unit.patrimonyNumber?.trim()) {
+      throw new Error("Esta unidade já possui patrimônio. Correções exigem procedimento próprio e histórico.");
+    }
+
+    const [units, assets] = await Promise.all([
+      ctx.db.query("entryItemUnits").collect(),
+      ctx.db.query("assets").collect(),
+    ]);
+    if (units.some((row: any) =>
+      row._id !== args.entryItemUnitId &&
+      row.patrimonyNumber?.trim().toLocaleUpperCase("pt-BR") === normalized
+    )) {
+      throw new Error("Este número já está associado a outra unidade recebida.");
+    }
+    const existingAsset = assets.find((asset: any) =>
+      asset.patrimonyNumber?.trim().toLocaleUpperCase("pt-BR") === normalized
+    );
+    if (existingAsset?.entryItemUnitId && existingAsset.entryItemUnitId !== args.entryItemUnitId) {
+      throw new Error("Este número já está vinculado a outro equipamento.");
+    }
+
+    const item = await ctx.db.get(unit.entryItemId);
+    const product = await ctx.db.get(unit.productId);
+    if (!item || !product) throw new Error("Produto ou item da entrada não encontrado.");
+    const now = Date.now();
+    const organizationId = unit.unidadeId ?? unit.departamentoId ?? unit.secretariaId;
+    let assetId: any;
+
+    if (existingAsset) {
+      // Reaproveita o cadastro legado para não criar um segundo ativo.
+      assetId = existingAsset._id;
+      await ctx.db.patch(assetId, {
+        entryId: unit.entryId,
+        entryItemId: unit.entryItemId,
+        entryItemUnitId: args.entryItemUnitId,
+        patrimonyNumber,
+        updatedAt: now,
+      });
+      await ctx.db.insert("assetHistory", {
+        assetId, eventType: "assigned", userId,
+        previousStatus: existingAsset.status,
+        newStatus: existingAsset.status,
+        observation: `Vinculado à entrada ${entry.entryNumber}; tombamento ${patrimonyNumber}`,
+        timestamp: now,
+      });
+    } else {
+      assetId = await ctx.db.insert("assets", {
+        patrimonyNumber,
+        serialNumber: unit.serialNumber?.trim() || undefined,
+        entryId: unit.entryId,
+        entryItemId: unit.entryItemId,
+        entryItemUnitId: args.entryItemUnitId,
+        assetType: args.assetType,
+        manufacturer: unit.manufacturer?.trim() || product.manufacturer || undefined,
+        model: unit.model?.trim() || product.model || undefined,
+        organizationId,
+        storageLocationId: unit.locationId,
+        status: "active",
+        acquisitionDate: unit.acquisitionDate || entry.invoiceDate || undefined,
+        observation: unit.observation || `Recebido na entrada ${entry.entryNumber}`,
+        active: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("assetHistory", {
+        assetId, eventType: "created", userId,
+        newOrganizationId: organizationId,
+        newStatus: "active",
+        observation: `Criado a partir da entrada ${entry.entryNumber}; tombamento ${patrimonyNumber}`,
+        timestamp: now,
+      });
+    }
+
+    await ctx.db.patch(args.entryItemUnitId, {
+      patrimonyNumber,
+      patrimonyRegistrationStatus: "registered",
+      patrimonyAssignedAt: now,
+      patrimonyAssignedByUserId: userId,
+      assetId,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId, action: "asset_assign", entity: "entryItemUnits",
+      entityId: args.entryItemUnitId,
+      details: `Tombamento ${patrimonyNumber} atribuído à unidade da entrada ${entry.entryNumber}; ativo ${assetId}`,
+      timestamp: now,
+    });
+    return assetId;
+  },
+});
