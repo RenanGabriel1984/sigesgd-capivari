@@ -155,8 +155,8 @@ describe("PRINT-09 — retirada registra lotId", () => {
     expect(backend).toContain('ctx.db.insert("stockMovementLots"');
   });
   it("consome lotes FIFO por recebimento e registra todos na observation", () => {
-    expect(backend).toMatch(/sort\(\(a, b\) => a\.receivedAt - b\.receivedAt\)/);
-    expect(backend).toContain("Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(\", \")}");
+    expect(backend).toMatch(/sort\(\(a: any, b: any\) => a\.receivedAt - b\.receivedAt\)/);
+    expect(backend).toContain("Lotes: ${input.consumedLots.map((lot) => `${lot.lotNumber}(${lot.qty})`).join(\", \")}");
   });
 });
 
