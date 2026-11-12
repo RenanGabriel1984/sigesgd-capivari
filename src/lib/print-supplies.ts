@@ -509,15 +509,19 @@ export interface SupplyFamily {
 }
 
 /** Rótulo da composição física, ex.: "13 caixas fechadas + 18 un. avulsas". */
-export function compositionLabelFor(members: FamilyMember[]): string {  const parts: string[] = [];
+export function compositionLabelFor(members: FamilyMember[]): string {
+  const parts: string[] = [];
   for (const m of members) {
-    if (m.currentStock <= 0) continue;
+    // A composição descreve somente o recorte físico da área Impressoras,
+    // nunca o saldo global do produto que também pode estar em outras áreas.
+    const quantity = m.inArea;
+    if (quantity <= 0) continue;
     if (m.packaging) {
-      const plural = m.currentStock > 1 ? "s" : "";
-      parts.push(`${m.currentStock} ${m.packaging.packagingUnit}${plural} fechada${plural}`);
+      const plural = quantity > 1 ? "s" : "";
+      parts.push(`${quantity} ${m.packaging.packagingUnit}${plural} fechada${plural}`);
     } else {
-      const plural = m.currentStock > 1 ? "s" : "a";
-      parts.push(`${m.currentStock} ${m.unitOfMeasure}. avulsa${plural}`);
+      const plural = quantity > 1 ? "s" : "a";
+      parts.push(`${quantity} ${m.unitOfMeasure}. avulsa${plural}`);
     }
   }
   return parts.join(" + ") || "—";
