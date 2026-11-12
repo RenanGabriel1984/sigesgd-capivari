@@ -333,7 +333,7 @@ export const update = mutation({
     assetId: v.id("assets"),
     patrimonyNumber: v.optional(v.string()),
     serialNumber: v.optional(v.string()),
-    assetType: v.optional(v.string()),
+    assetType: v.optional(v.union(...ASSET_TYPES.map((value) => v.literal(value)))),
     manufacturer: v.optional(v.string()),
     model: v.optional(v.string()),
     hostname: v.optional(v.string()),
@@ -395,18 +395,27 @@ export const assign = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    if (asset.status === "disposed" || asset.status === "lost") {
+      throw new Error("Equipamento baixado ou extraviado não pode receber nova atribuição. Regularize o status primeiro.");
+    }
 
+    const nextResponsibleUserId = args.responsibleUserId === undefined
+      ? asset.responsibleUserId
+      : args.responsibleUserId ?? undefined;
+    const nextOrganizationId = args.organizationId === undefined
+      ? asset.organizationId
+      : args.organizationId ?? undefined;
     await assertAssetReferences(ctx, {
-      organizationId: args.organizationId,
-      responsibleUserId: args.responsibleUserId,
+      organizationId: nextOrganizationId,
+      responsibleUserId: nextResponsibleUserId,
     });
     const now = Date.now();
     const previousResponsible = asset.responsibleUserId;
     const previousOrg = asset.organizationId;
 
     await ctx.db.patch(args.assetId, {
-      responsibleUserId: args.responsibleUserId || undefined,
-      organizationId: args.organizationId || undefined,
+      responsibleUserId: nextResponsibleUserId,
+      organizationId: nextOrganizationId,
       updatedAt: now,
     });
 
@@ -415,9 +424,9 @@ export const assign = mutation({
       eventType: "assigned",
       userId,
       previousOrganizationId: previousOrg || undefined,
-      newOrganizationId: args.organizationId || asset.organizationId || undefined,
+      newOrganizationId: nextOrganizationId || undefined,
       previousResponsibleUserId: previousResponsible || undefined,
-      newResponsibleUserId: args.responsibleUserId || asset.responsibleUserId || undefined,
+      newResponsibleUserId: nextResponsibleUserId || undefined,
       observation: args.observation || undefined,
       timestamp: now,
     });
@@ -446,6 +455,9 @@ export const transfer = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    if (asset.status === "disposed" || asset.status === "lost") {
+      throw new Error("Equipamento baixado ou extraviado não pode ser transferido. Regularize o status primeiro.");
+    }
 
     await assertAssetReferences(ctx, {
       organizationId: args.organizationId,
