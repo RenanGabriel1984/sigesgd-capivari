@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission, effectiveRole } from "./rbac";
 import {
+  canAttachPendingStorageFile,
   canReadStorageFile,
   type StorageOwnerType,
 } from "../lib/storage-access";
@@ -196,9 +197,11 @@ export const registerUpload = mutation({
       .withIndex("by_storageId", (q: any) => q.eq("storageId", storageId))
       .collect();
 
-    if (existing.some((row: any) =>
-      row.ownerType === "pending" && String(row.uploaderUserId) === String(userId)
-    )) {
+    if (
+      existing.length === 1 &&
+      existing[0].ownerType === "pending" &&
+      String(existing[0].uploaderUserId) === String(userId)
+    ) {
       return storageId;
     }
     if (existing.length > 0) {
@@ -261,15 +264,19 @@ export async function attachStorageFile(
     }
   }
 
-  const sameUploaderPending = existing.some((row: any) =>
-    row.ownerType === "pending" && String(row.uploaderUserId) === userId
-  );
-  const sameUploaderLinked = existing.some((row: any) =>
-    row.ownerType !== "pending" && String(row.uploaderUserId) === userId
-  );
-
-  if (existing.length > 0 && !sameUploaderPending && !sameUploaderLinked) {
-    throw new Error("O arquivo não pertence ao usuário que está vinculando o documento.");
+  // Only an uploader-owned pending file may be attached to a new entity.
+  // A file already linked to any business record cannot be shared or reassigned
+  // implicitly, even by the user who originally uploaded it.
+  if (existing.length > 0 && !canAttachPendingStorageFile({
+    userId,
+    existingOwners: existing.map((row: any) => ({
+      ownerType: row.ownerType as StorageOwnerType,
+      uploaderUserId: row.uploaderUserId ? String(row.uploaderUserId) : undefined,
+    })),
+  })) {
+    throw new Error(
+      "Este arquivo já está vinculado a outro registro ou não pertence ao usuário que está vinculando o documento.",
+    );
   }
 
   const url = await ctx.storage.getUrl(storageId as any);

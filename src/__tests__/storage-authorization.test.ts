@@ -1,10 +1,40 @@
 import { describe, expect, it } from "vitest";
 import {
+  canAttachPendingStorageFile,
   canReadStorageFile,
   getStorageOwnerPermission,
 } from "@/lib/storage-access";
 
 describe("autorização contextual de arquivos", () => {
+  it("permite vincular somente arquivo pendente enviado pelo próprio usuário", () => {
+    expect(canAttachPendingStorageFile({
+      userId: "user-a",
+      existingOwners: [{ ownerType: "pending", uploaderUserId: "user-a" }],
+    })).toBe(true);
+    expect(canAttachPendingStorageFile({
+      userId: "user-b",
+      existingOwners: [{ ownerType: "pending", uploaderUserId: "user-a" }],
+    })).toBe(false);
+  });
+
+  it("impede reutilizar ou compartilhar implicitamente arquivo já vinculado, inclusive pelo próprio remetente", () => {
+    expect(canAttachPendingStorageFile({
+      userId: "user-a",
+      existingOwners: [{ ownerType: "entry", uploaderUserId: "user-a" }],
+    })).toBe(false);
+    expect(canAttachPendingStorageFile({
+      userId: "user-a",
+      existingOwners: [
+        { ownerType: "pending", uploaderUserId: "user-a" },
+        { ownerType: "product", uploaderUserId: "user-a" },
+      ],
+    })).toBe(false);
+    expect(canAttachPendingStorageFile({
+      userId: "user-a",
+      existingOwners: [],
+    })).toBe(false);
+  });
+
   it("mapeia cada tipo de documento para a permissão da entidade proprietária", () => {
     expect(getStorageOwnerPermission("entry")).toBe("entries.view");
     expect(getStorageOwnerPermission("entryItem")).toBe("entries.view");
