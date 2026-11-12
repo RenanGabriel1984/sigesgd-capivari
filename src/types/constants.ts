@@ -1,7 +1,7 @@
 import type { Id } from "@/convex/_generated/dataModel";
 
 // ─── Roles ───────────────────────────────────────────────────────────────────
-export type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+export type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   admin: "Administrador",
@@ -9,6 +9,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   director: "Diretor",
   secretary: "Secretário",
   technician: "Técnico",
+  patrimony_manager: "Responsável pelo Patrimônio",
 };
 
 export const ROLE_LABELS_EN: Record<UserRole, string> = {
@@ -17,6 +18,7 @@ export const ROLE_LABELS_EN: Record<UserRole, string> = {
   director: "Director",
   secretary: "Secretary",
   technician: "Technician",
+  patrimony_manager: "Patrimony Manager",
 };
 
 // ─── Organization Types ──────────────────────────────────────────────────────
@@ -182,6 +184,7 @@ const PERMISSION_FLAGS = {
   canViewWater: "water.view",
   canManageWater: "water.manage",
   canManageAssets: "equipment.manage",
+  canViewPatrimony: "patrimony.view",
   canManageLicenses: "licenses.manage",
 
   canCreateEntries: "entries.create",
@@ -212,6 +215,7 @@ export const PERMISSIONS: Record<AppRole, Permissions> = {
   stock_manager: derivePermissions("stock_manager"),
   director: derivePermissions("director"),
   technician: derivePermissions("technician"),
+  patrimony_manager: derivePermissions("patrimony_manager"),
 };
 
 export function getPermissions(role: UserRole | undefined): Permissions {
