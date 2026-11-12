@@ -87,7 +87,7 @@ describe("recebimento de material permanente com tombamento posterior", () => {
 describe("perfil específico do setor de Patrimônio", () => {
   it("recebe somente permissões do fluxo de tombamento e acesso básico", () => {
     const permissions = getRolePermissions("patrimony_manager");
-    expect(permissions).toContain("dashboard.view");
+    expect(permissions).not.toContain("dashboard.view");
     expect(permissions).toContain("patrimony.view");
     expect(permissions).toContain("patrimony.assign");
     expect(permissions).toContain("settings.view");
