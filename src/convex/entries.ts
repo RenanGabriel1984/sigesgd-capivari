@@ -796,65 +796,117 @@ export const reverse = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
-    if (!args.reason.trim()) throw new Error("O motivo do estorno é obrigatório");
+    const reason = args.reason.trim();
+    if (!reason) throw new Error("O motivo do estorno é obrigatório");
 
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "confirmed") throw new Error("Apenas entradas confirmadas podem ser estornadas");
 
-    const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
+    const [items, entryLots] = await Promise.all([
+      ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect(),
+      ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect(),
+    ]);
+    if (items.length === 0) throw new Error("Entrada confirmada não possui itens para estornar");
+
     const now = Date.now();
     const reversalDetails: string[] = [];
+    const reversedLotIds = new Set<string>();
 
     for (const item of items) {
       const product = await ctx.db.get(item.productId);
-
-      // Check stock — cannot reverse if consumed
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
+      const stock = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
       if (!stock) throw new Error(`Registro de estoque não encontrado para "${product?.name ?? "item"}"`);
 
-      if (stock.physicalQuantity < item.quantity) {
-        throw new Error(
-          `Não é possível estornar "${product?.name ?? "item"}": parte do material já foi consumida. ` +
-          `Saldo atual: ${stock.physicalQuantity}. Quantidade da entrada: ${item.quantity}. ` +
-          `Diferença consumida: ${item.quantity - stock.physicalQuantity}.`
-        );
+      // O estorno precisa atingir o lote criado por ESTE item da entrada.
+      // Nunca usa outro lote do mesmo produto para compensar uma entrada consumida.
+      let lot: any = null;
+      if (item.lotId) {
+        lot = await ctx.db.get(item.lotId as Id<"lots">);
+        if (!lot) lot = entryLots.find((candidate: any) => candidate.lotNumber === item.lotId) ?? null;
       }
+      if (!lot) {
+        const candidates = entryLots.filter((candidate: any) => candidate.productId === item.productId);
+        if (candidates.length === 1) lot = candidates[0];
+        else {
+          throw new Error(
+            `Não é possível estornar "${product?.name ?? "item"}": o lote original não está identificado de forma única. Regularize a rastreabilidade antes do estorno.`,
+          );
+        }
+      }
+      if (
+        lot.entryId !== args.entryId ||
+        lot.productId !== item.productId ||
+        reversedLotIds.has(String(lot._id)) ||
+        lot.active === false
+      ) {
+        throw new Error(`Não é possível estornar "${product?.name ?? "item"}": o lote de origem está inválido ou já foi utilizado no estorno.`);
+      }
+      reversedLotIds.add(String(lot._id));
 
-      // Check reservation integrity
-      if (stock.reservedQuantity > 0 && stock.physicalQuantity - item.quantity < stock.reservedQuantity) {
+      const lotReservations = await ctx.db.query("requestItemReservations")
+        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+      const reservedInLot = lotReservations.reduce(
+        (sum: number, reservation: any) => sum + Number(reservation.quantityRemaining ?? 0),
+        0,
+      );
+      const lotAfter = Number(lot.quantityAvailable) - Number(item.quantity);
+      if (lotAfter < reservedInLot || lotAfter < 0) {
         throw new Error(
-          `Não é possível estornar "${product?.name ?? "item"}": a reserva atual (${stock.reservedQuantity}) consumiria mais que o saldo restante.`
+          `Não é possível estornar "${product?.name ?? "item"}": o lote original foi parcialmente consumido, transferido ou reservado. Saldo do lote: ${lot.quantityAvailable}; quantidade da entrada: ${item.quantity}; reserva remanescente: ${reservedInLot}.`,
         );
       }
 
       const newPhysical = stock.physicalQuantity - item.quantity;
-      await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+      if (newPhysical < 0 || newPhysical < stock.reservedQuantity) {
+        throw new Error(
+          `Não é possível estornar "${product?.name ?? "item"}": o saldo global restante ficaria abaixo das reservas. Saldo atual: ${stock.physicalQuantity}; reservado: ${stock.reservedQuantity}; entrada: ${item.quantity}.`,
+        );
+      }
 
-      // Reverse stock by location (same location used at confirmation)
-      if (item.locationId) {
-        const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const sbl = sblList.find((s: any) => s.locationId === item.locationId);
-        if (sbl && sbl.quantity < item.quantity) {
+      const lotAreaId = lot.areaId ?? undefined;
+      const lotLocationId = lot.locationId ?? undefined;
+      if ((item.areaId ?? undefined) !== lotAreaId || (item.locationId ?? undefined) !== lotLocationId) {
+        throw new Error(`Não é possível estornar "${product?.name ?? "item"}": área/local do item diverge do lote original.`);
+      }
+
+      let locationStock: any = null;
+      if (lotLocationId) {
+        const locationRows = await ctx.db.query("stockByLocation")
+          .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        const matchingRows = locationRows.filter((row: any) =>
+          row.locationId === lotLocationId && (row.areaId ?? undefined) === lotAreaId
+        );
+        if (matchingRows.length !== 1) {
           throw new Error(
-            `Não é possível estornar "${product?.name ?? "item"}" no local: saldo do local (${sbl.quantity}) é menor que a quantidade da entrada (${item.quantity}). ` +
-            `Faça um inventário/transferência para regularizar a localização antes de estornar.`
+            `Não é possível estornar "${product?.name ?? "item"}": o saldo no local físico de origem está ausente ou duplicado para a área correta.`,
           );
         }
-        if (sbl) {
-          await ctx.db.patch(sbl._id, { quantity: sbl.quantity - item.quantity });
+        locationStock = matchingRows[0];
+        const scopeReservations = (await ctx.db.query("requestItemReservations")
+          .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect())
+          .filter((reservation: any) =>
+            reservation.locationId === lotLocationId && reservation.areaId === lotAreaId
+          )
+          .reduce((sum: number, reservation: any) => sum + Number(reservation.quantityRemaining ?? 0), 0);
+        if (locationStock.quantity - item.quantity < scopeReservations) {
+          throw new Error(
+            `Não é possível estornar "${product?.name ?? "item"}": a redução deixaria o local abaixo das reservas existentes.`,
+          );
         }
       }
 
-      // Mark related lots as inactive
-      const lots = await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
-      for (const lot of lots) {
-        if (lot.productId === item.productId) {
-          await ctx.db.patch(lot._id, { active: false, quantityAvailable: 0 });
-        }
+      // Somente após validar lote, reservas e origem física são aplicadas as escritas.
+      await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+      await ctx.db.patch(lot._id, {
+        quantityAvailable: lotAfter,
+        active: lotAfter > 0,
+      });
+      if (locationStock) {
+        await ctx.db.patch(locationStock._id, { quantity: locationStock.quantity - item.quantity });
       }
 
-      // Create reversal movement
       await ctx.db.insert("stockMovements", {
         productId: item.productId,
         type: "adjustment",
@@ -865,18 +917,23 @@ export const reverse = mutation({
         newReserved: stock.reservedQuantity,
         userId,
         entryId: args.entryId,
-        observation: `Estorno da entrada ${entry.entryNumber}. Motivo: ${args.reason.trim()}`,
+        lotId: lot._id as string,
+        areaId: lotAreaId as any,
+        locationId: lotLocationId as any,
+        observation: `Estorno da entrada ${entry.entryNumber} — lote ${lot.lotNumber}. Motivo: ${reason}`,
         timestamp: now,
       });
 
-      reversalDetails.push(`${product?.name ?? "item"}: -${item.quantity}`);
+      reversalDetails.push(`${product?.name ?? "item"}: -${item.quantity} (${lot.lotNumber})`);
     }
 
     await ctx.db.patch(args.entryId, { status: "reversed", updatedAt: now });
-
     await ctx.db.insert("auditLogs", {
-      userId,      action: "reverse_entry", entity: "entries", entityId: args.entryId,
-      details: `Entrada ${entry.entryNumber} estornada. Itens: ${reversalDetails.join("; ")}. Motivo: ${args.reason.trim()}`,
+      userId,
+      action: "reverse_entry",
+      entity: "entries",
+      entityId: args.entryId,
+      details: `Entrada ${entry.entryNumber} estornada. Itens: ${reversalDetails.join("; ")}. Motivo: ${reason}`,
       timestamp: now,
     });
 
