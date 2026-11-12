@@ -27,7 +27,7 @@ export interface EntryPatrimonyDialogProps {
   open: boolean;
   entryId: string | null;
   entryNumber?: string;
-  products: Array<{ _id: string; name: string }>;
+  products: Array<{ _id: string; name: string; hasSerial?: boolean }>;
   locations: Array<{ _id: string; name: string }>;
   organizations: Array<{ _id: string; name: string; type?: string; active?: boolean }>;
   onClose: () => void;
@@ -81,6 +81,7 @@ export function EntryPatrimonyDialog({
         quantity: Number(item.quantity) || 0,
         units,
         productName: product?.name,
+        requireSerial: product?.hasSerial === true,
       });
       if (error) return error;
     }
