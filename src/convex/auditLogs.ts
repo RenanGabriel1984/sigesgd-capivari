@@ -10,7 +10,6 @@ async function requireUser(ctx: any) {
 
 const DEFAULT_AUDIT_LIMIT = 100;
 const MAX_AUDIT_LIMIT = 500;
-const MAX_AUDIT_SCAN = 5_000;
 
 function validateLimit(limit: number | undefined, fallback: number): number {
   const value = limit ?? fallback;
