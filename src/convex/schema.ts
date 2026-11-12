@@ -728,6 +728,9 @@ const schema = defineSchema(
       reason: v.string(),
       // Condição do material devolvido
       condition: v.optional(returnConditionValidator),
+      // false = recebido para avaliação/quarentena; não compõe o saldo utilizável.
+      // Opcional para preservar a leitura de devoluções históricas já lançadas.
+      restocked: v.optional(v.boolean()),
       // Área e local de destino da devolução; preservam o subestoque de origem.
       areaId: v.optional(v.id("stockAreas")),
       locationId: v.optional(v.id("storageLocations")),
