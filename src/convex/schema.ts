@@ -789,7 +789,8 @@ const schema = defineSchema(
     }).index("by_entry", ["entryId"])
       .index("by_entryItem", ["entryItemId"])
       .index("by_product", ["productId"])
-      .index("by_asset", ["assetId"]),
+      .index("by_asset", ["assetId"])
+      .index("by_registration_status", ["patrimonyRegistrationStatus"]),
 
     // ── Stock by Location (Estoque por Local de Armazenamento) ──
     stockByLocation: defineTable({
