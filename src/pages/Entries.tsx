@@ -1845,6 +1845,7 @@ function EntriesPage() {
         products={productOptions.map((product) => ({
           _id: product._id,
           name: product.name,
+          hasSerial: product.hasSerial,
         }))}
         locations={locationList.map((location) => ({
           _id: location._id,
