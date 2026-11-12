@@ -105,6 +105,9 @@ const NAV_SECTIONS: NavSection[] = [
   // "Impressoras" abre a Gestão de Suprimentos de Impressão (tela antes
   // chamada "Impressoras / Gomaq"); o fornecedor de cada entrada continua
   // sendo dado cadastral/histórico.
+  { title: "Patrimônio", items: [
+    { label: "Pendências de tombamento", href: "/patrimony", icon: ClipboardCheck, permission: "canViewPatrimony" },
+  ]},
   { title: "Equipamentos", items: [
     { label: "Impressoras", href: "/gomaq", icon: Printer, permission: "canManageGomaQ", permission2: "canManageAssets" },
     { label: "Computadores", href: "/assets?categoria=computadores", icon: Monitor, permission: "canManageAssets" },
