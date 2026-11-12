@@ -252,10 +252,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     localStorage.setItem("estoque-sggd-pwa-dismissed", "1");
   };
 
-  const pendingCount = useQuery(api.requests.pendingCount);
-  const belowMinItems = useQuery(api.products.belowMinimum);
   const role = (user?.role ?? "technician") as UserRole;
   const permissions = getPermissions(role);
+  const pendingCount = useQuery(
+    api.requests.pendingCount,
+    permissions.canViewRequests ? {} : "skip",
+  );
+  const belowMinItems = useQuery(
+    api.products.belowMinimum,
+    permissions.canViewStock ? {} : "skip",
+  );
   const alertCount = belowMinItems?.length ?? 0;
 
   // ── Mobile menu ────────────────────────────────────────────────────────────
