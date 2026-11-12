@@ -576,13 +576,24 @@ export function buildSupplyFamilies(inputs: SupplyFamilyInput[]): SupplyFamily[]
     const baseStockInArea = members.reduce((s, m) => s + (m.packaging ? m.inArea * m.packaging.factor : m.inArea), 0);
     const baseAvailableInArea = members.reduce((s, m) => s + (m.packaging ? m.availableInArea * m.packaging.factor : m.availableInArea), 0);
     const baseUnit = members.find((m) => m.packaging)?.packaging?.baseUnit ?? first.unitOfMeasure;
-    const mins = membersInput.map((m) => m.minimumStock);
-    const ideals = membersInput.map((m) => m.idealStock);
+    // Parâmetros de embalagem também precisam ser convertidos para a unidade-base
+    // antes de agregar a família (caixas + unidades avulsas não podem ser somadas cruas).
+    const mins = membersInput.map((m) => m.minimumStock > 0
+      ? m.minimumStock * (m.packaging?.factor ?? 1)
+      : m.minimumStock);
+    const ideals = membersInput.map((m) => m.idealStock > 0
+      ? m.idealStock * (m.packaging?.factor ?? 1)
+      : m.idealStock);
     const allConfigured = mins.every((v) => v > 0) && ideals.every((v) => v > 0);
     const minimumStock = allConfigured ? mins.reduce((a, b) => a + b, 0) : null;
     const idealStock = allConfigured ? ideals.reduce((a, b) => a + b, 0) : null;
-    // Consumo mensal: agregado apenas se TODOS os membros tiverem o parâmetro.
-    const monthlies = membersInput.map((m) => m.monthlyConsumptionTarget ?? null);
+    // Consumo mensal: agregar somente quando todos os membros tiverem parâmetro;
+    // converter o parâmetro de caixas para a unidade-base, quando aplicável.
+    const monthlies = membersInput.map((m) =>
+      m.monthlyConsumptionTarget == null
+        ? null
+        : m.monthlyConsumptionTarget * (m.packaging?.factor ?? 1)
+    );
     const monthlyConsumptionTarget = monthlies.every((v) => v !== null && v > 0)
       ? (monthlies as number[]).reduce((a, b) => a + b, 0)
       : null;
