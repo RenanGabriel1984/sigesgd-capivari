@@ -4,7 +4,7 @@ import { v } from "convex/values";
 import { maskLicenseKey } from "../lib/license-keys";
 import { licenseQuantityError, canAssignLicenseToAsset } from "../lib/license-quantity";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: consulta de licenças.
