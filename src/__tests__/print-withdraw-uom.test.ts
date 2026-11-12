@@ -523,7 +523,7 @@ describe("PRINT-UOM-14 — nenhuma duplicação de estoque é criada", () => {
   });
 
   it("a abertura de caixa é reclassificação rastreável, não criação de estoque duplicado", () => {
-    expect(backend).toContain("const openedUnits = openPacks * conversion.factor");
+    expect(backend).toContain("openedUnits = openPacks * conversion.factor");
     expect(backend).toContain("reclassifiedFromLotId: source.lotId");
     expect(backend).toContain("await changeSupplyLocationQuantity");
     expect(backend).toContain('type: "adjustment"');
