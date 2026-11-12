@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: consultas de inventário.
