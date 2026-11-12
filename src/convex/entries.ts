@@ -1188,6 +1188,19 @@ export const assignPatrimony = mutation({
       throw new Error("Este número já está vinculado a outro equipamento.");
     }
 
+    const normalizedSerial = unit.serialNumber?.trim().toLocaleUpperCase("pt-BR");
+    if (normalizedSerial) {
+      const serialOwner = assets.find((asset: any) =>
+        asset.serialNumber?.trim().toLocaleUpperCase("pt-BR") === normalizedSerial &&
+        asset.entryItemUnitId !== args.entryItemUnitId
+      );
+      if (serialOwner) {
+        throw new Error(
+          "O número de série desta unidade já consta em outro equipamento. Faça a conciliação do cadastro existente antes do tombamento.",
+        );
+      }
+    }
+
     const item = await ctx.db.get(unit.entryItemId);
     const product = await ctx.db.get(unit.productId);
     if (!item || !product) throw new Error("Produto ou item da entrada não encontrado.");
