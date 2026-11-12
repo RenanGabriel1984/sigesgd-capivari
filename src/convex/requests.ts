@@ -10,7 +10,7 @@ import { planFifoAreaLotAllocation } from "../lib/area-stock";
 import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import { validateRequestItemReservationLedger } from "../lib/request-reservation-ledger";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: requisições são visíveis a quem pode consultá-las; a query
