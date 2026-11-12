@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { tonerKitObservation, generateNextEntryNumber, generateNextLotNumber } from "./stockHelpers";
 import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
+import { validateProductStockSemanticsChange } from "../lib/product-stock-semantics";
 import { requirePermission } from "./rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
@@ -368,12 +369,58 @@ export const update = mutation({
       }
     }
 
+    // Unidade de medida e controle serial alteram o significado de todo o
+    // histórico de quantidades. Só podem ser definidos livremente antes de
+    // existir qualquer movimentação, lote, reserva ou uso patrimonial.
+    if (updates.unitOfMeasure !== undefined) {
+      updates.unitOfMeasure = updates.unitOfMeasure.trim();
+      if (!updates.unitOfMeasure) throw new Error("A unidade de medida não pode ficar vazia.");
+    }
+    const unitChanged = updates.unitOfMeasure !== undefined &&
+      updates.unitOfMeasure !== product.unitOfMeasure;
+    const serialChanged = updates.hasSerial !== undefined &&
+      updates.hasSerial !== product.hasSerial;
+    if (unitChanged || serialChanged) {
+      const [
+        stockRows, lots, movements, entryItems, requestItems,
+        locationRows, assetParts, transfers, returns,
+      ] = await Promise.all([
+        ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("stockMovements").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("entryItems").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("requestItems").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("assetParts").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("stockTransfers").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("returns").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+      ]);
+      const hasStockHistory =
+        lots.length > 0 || movements.length > 0 || entryItems.length > 0 ||
+        requestItems.length > 0 || locationRows.length > 0 || assetParts.length > 0 ||
+        transfers.length > 0 || returns.length > 0 ||
+        stockRows.some((row: any) =>
+          Number(row.physicalQuantity) !== 0 || Number(row.reservedQuantity) !== 0
+        );
+      const semanticsError = validateProductStockSemanticsChange({
+        currentUnit: product.unitOfMeasure,
+        nextUnit: updates.unitOfMeasure,
+        currentHasSerial: product.hasSerial ?? false,
+        nextHasSerial: updates.hasSerial,
+        hasStockHistory,
+      });
+      if (semanticsError) throw new Error(semanticsError);
+    }
+
     // Validate stock values
     if (updates.minimumStock !== undefined && updates.minimumStock < 0) throw new Error("Estoque mínimo não pode ser negativo");
     if (updates.idealStock !== undefined && updates.idealStock < 0) throw new Error("Estoque ideal não pode ser negativo");
     if (updates.maximumStock !== undefined && updates.maximumStock < 0) throw new Error("Estoque máximo não pode ser negativo");
 
-    if (updates.name) updates.name = updates.name.trim();
+    if (updates.name !== undefined) {
+      updates.name = updates.name.trim();
+      if (!updates.name) throw new Error("O nome do item não pode ficar vazio.");
+    }
 
     await ctx.db.patch(id, updates);
     const action = updates.active === false ? "deactivate" : updates.active === true ? "activate" : "update";
