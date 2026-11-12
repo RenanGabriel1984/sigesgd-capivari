@@ -90,7 +90,7 @@ async function requireManagerOrAdmin(ctx: any) {
 export const list = query({
   args: {
     status: v.optional(v.string()),
-    assetType: v.optional(v.string()),
+    assetType: v.optional(v.union(...ASSET_TYPES.map((value) => v.literal(value)))),
     organizationId: v.optional(v.id("organizations")),
     responsibleUserId: v.optional(v.id("users")),
     search: v.optional(v.string()),
@@ -344,6 +344,10 @@ export const update = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    if (args.assetType !== undefined &&
+        !ASSET_TYPES.includes(args.assetType as (typeof ASSET_TYPES)[number])) {
+      throw new Error("Tipo de equipamento inválido.");
+    }
 
     const patrimonyNumber = args.patrimonyNumber === undefined
       ? asset.patrimonyNumber : args.patrimonyNumber.trim() || undefined;
