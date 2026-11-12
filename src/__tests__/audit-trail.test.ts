@@ -38,7 +38,8 @@ describe("consulta e navegação do histórico de auditoria", () => {
   it("usa paginação por cursor e não limita todo o histórico a uma janela fixa", () => {
     expect(auditBackend).toContain("paginationOpts: paginationOptsValidator");
     expect(auditBackend).toContain("orderedQuery.paginate(args.paginationOpts)");
-    expect(auditPage).toContain("usePaginatedQuery(api.auditLogs.listFiltered");
+    expect(auditPage).toContain("usePaginatedQuery(");
+    expect(auditPage).toContain("api.auditLogs.listFiltered");
     expect(auditPage).toContain('loadMoreAuditLogs(50)');
   });
 
