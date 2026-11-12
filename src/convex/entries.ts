@@ -1023,7 +1023,7 @@ export const setUnits = mutation({
     })),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireStockManagerOrAdmin(ctx);
+    const { userId, role } = await requireStockManagerOrAdmin(ctx);
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem registrar unidades patrimoniais");
@@ -1042,6 +1042,10 @@ export const setUnits = mutation({
       if (!itemIds.has(u.entryItemId as string)) {
         throw new Error("Item informado não pertence a esta entrada");
       }
+    }
+
+    if (role !== "admin" && role !== "secretary" && args.units.some((unit) => !!unit.patrimonyNumber?.trim())) {
+      throw new Error("O número oficial de patrimônio deve ser informado pelo setor de Patrimônio.");
     }
 
     // Patrimônio não pode se repetir dentro da mesma entrada
@@ -1069,6 +1073,9 @@ export const setUnits = mutation({
         entryItemId: u.entryItemId,
         productId: item.productId,
         patrimonyNumber: u.patrimonyNumber?.trim() || undefined,
+        patrimonyRegistrationStatus: u.patrimonyNumber?.trim() ? "registered" : "pending",
+        patrimonyAssignedAt: u.patrimonyNumber?.trim() ? now : undefined,
+        patrimonyAssignedByUserId: u.patrimonyNumber?.trim() ? userId : undefined,
         serialNumber: u.serialNumber?.trim() || undefined,
         manufacturer: u.manufacturer?.trim() || undefined,
         model: u.model?.trim() || undefined,
