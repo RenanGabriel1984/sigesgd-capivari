@@ -1190,11 +1190,19 @@ export const assignPatrimony = mutation({
 
     const normalizedSerial = unit.serialNumber?.trim().toLocaleUpperCase("pt-BR");
     if (normalizedSerial) {
+      if (
+        existingAsset?.serialNumber &&
+        existingAsset.serialNumber.trim().toLocaleUpperCase("pt-BR") !== normalizedSerial
+      ) {
+        throw new Error(
+          "O patrimônio informado já pertence a um equipamento com outro número de série. Faça a conciliação do cadastro antes do tombamento.",
+        );
+      }
       const serialOwner = assets.find((asset: any) =>
         asset.serialNumber?.trim().toLocaleUpperCase("pt-BR") === normalizedSerial &&
         asset.entryItemUnitId !== args.entryItemUnitId
       );
-      if (serialOwner) {
+      if (serialOwner && serialOwner._id !== existingAsset?._id) {
         throw new Error(
           "O número de série desta unidade já consta em outro equipamento. Faça a conciliação do cadastro existente antes do tombamento.",
         );
@@ -1216,6 +1224,7 @@ export const assignPatrimony = mutation({
         entryItemId: unit.entryItemId,
         entryItemUnitId: args.entryItemUnitId,
         patrimonyNumber,
+        serialNumber: existingAsset.serialNumber ?? unit.serialNumber?.trim() || undefined,
         updatedAt: now,
       });
       await ctx.db.insert("assetHistory", {
