@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { findEquipmentCategory, buildRelatedStockProducts } from "../lib/equipment-categories";
 import type { RelatedStockProduct } from "../lib/equipment-categories";
+import { maskLicenseKey } from "../lib/license-keys";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -109,7 +110,8 @@ export const relatedStockByCategory = query({
 export const get = query({
   args: { assetId: v.id("assets") },
   handler: async (ctx, args) => {
-    const { userId } = await requireUser(ctx);
+    const { userId, role } = await requireUser(ctx);
+    const isAdmin = role === "admin";
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
 
@@ -134,7 +136,15 @@ export const get = query({
       .collect();
     const licensesWithDetails = await Promise.all(assignments.map(async (a: any) => {
       const license = await ctx.db.get(a.licenseId);
-      return { ...a, license };
+      if (!license) return { ...a, license: null };
+      return {
+        ...a,
+        license: {
+          ...license,
+          // A chave completa é restrita ao mesmo perfil autorizado em /licenses.
+          key: license.key ? (isAdmin ? license.key : maskLicenseKey(license.key)) : undefined,
+        },
+      };
     }));
 
     // Get maintenances
