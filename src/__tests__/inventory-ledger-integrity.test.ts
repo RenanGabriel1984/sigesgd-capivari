@@ -34,7 +34,12 @@ describe("integridade do fechamento de inventário", () => {
     expect(close).toContain("await ctx.db.patch(reduction.lot._id");
   });
 
-  it("aumento de contagem cria entrada/lote rastreável, sem alterar quantidade fiscal antiga", () => {
+  it("bloqueia ajuste positivo em inventário geral sem destino área/local", () => {
+    expect(close).toContain("delta > 0 && !inv.locationId");
+    expect(close).toContain("exige inventário por área e local físico");
+  });
+
+  it("aumento de contagem em inventário localizado cria entrada/lote rastreável", () => {
     expect(close).toContain('ctx.db.insert("entries"');
     expect(close).toContain('originType: "other"');
     expect(close).toContain('ctx.db.insert("entryItems"');
