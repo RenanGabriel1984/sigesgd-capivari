@@ -1,7 +1,12 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
-import { splitWaterCostCents } from "../lib/water-control";
+import {
+  splitWaterCostCents,
+  validateWaterPeriodRange,
+  validateWaterReceiptDate,
+  isValidWaterTimestamp,
+} from "../lib/water-control";
 
 async function currentContainerBalance(ctx: any) {
   const [receipts, movements] = await Promise.all([
@@ -118,6 +123,7 @@ export const updateParticipant = mutation({
     if (args.name !== undefined) {
       const name = args.name.trim();
       if (!name) throw new Error("O nome não pode ficar vazio.");
+      if (name.length > 120) throw new Error("O nome deve ter no máximo 120 caracteres.");
       const all = await ctx.db.query("waterParticipants").collect();
       if (all.some((person: any) => person._id !== args.participantId && person.name.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"))) {
         throw new Error("Já existe uma pessoa cadastrada com esse nome.");
@@ -144,7 +150,15 @@ export const createPeriod = mutation({
     const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterPeriods" });
     const title = args.title.trim();
     if (!title) throw new Error("Informe o nome do período.");
-    if (args.endAt < args.startAt) throw new Error("A data final não pode ser anterior à inicial.");
+    if (title.length > 120) throw new Error("O nome do período deve ter no máximo 120 caracteres.");
+    const dateError = validateWaterPeriodRange(args.startAt, args.endAt);
+    if (dateError) throw new Error(dateError);
+    const allPeriods = await ctx.db.query("waterPeriods").collect();
+    if (allPeriods.some((period: any) =>
+      args.startAt <= period.endAt && args.endAt >= period.startAt
+    )) {
+      throw new Error("O intervalo informado se sobrepõe a outro período de rateio já cadastrado.");
+    }
     const open = await ctx.db.query("waterPeriods").withIndex("by_status", (q) => q.eq("status", "open")).first();
     if (open) throw new Error("Feche o período atual antes de abrir outro.");
     const participantIds = [...new Set(args.participantIds)];
@@ -194,6 +208,8 @@ export const createReceipt = mutation({
     const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterReceipts" });
     const period = await ctx.db.get(args.periodId);
     if (!period || period.status !== "open") throw new Error("Selecione um período de rateio aberto.");
+    const receiptDateError = validateWaterReceiptDate(args.receivedAt, period.startAt, period.endAt);
+    if (receiptDateError) throw new Error(receiptDateError);
     if (!Number.isSafeInteger(args.gallonsReceived) || args.gallonsReceived <= 0) throw new Error("A quantidade de galões recebidos deve ser um inteiro maior que zero.");
     if (!Number.isSafeInteger(args.emptyGallonsReturned) || args.emptyGallonsReturned < 0) throw new Error("A quantidade de vazios devolvidos deve ser um inteiro não negativo.");
     if (!Number.isSafeInteger(args.totalValueCents) || args.totalValueCents < 0) throw new Error("Informe um valor válido.");
@@ -227,6 +243,7 @@ export const recordContainerMovement = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterContainerMovements" });
+    if (!isValidWaterTimestamp(args.date)) throw new Error("A data da movimentação é inválida.");
     if (!Number.isSafeInteger(args.fullDelta) || !Number.isSafeInteger(args.emptyDelta)) throw new Error("As quantidades devem ser números inteiros.");
     if (args.type === "consumption" && (args.fullDelta >= 0 || args.emptyDelta !== -args.fullDelta)) {
       throw new Error("No consumo, galões cheios saem e a mesma quantidade entra como vazios.");
@@ -293,6 +310,7 @@ export const recordPayment = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterPayments", entityId: args.shareId });
     if (!Number.isSafeInteger(args.amountCents) || args.amountCents <= 0) throw new Error("O valor do pagamento deve ser maior que zero.");
+    if (!isValidWaterTimestamp(args.paidAt)) throw new Error("A data do pagamento é inválida.");
     const share = await ctx.db.get(args.shareId);
     if (!share) throw new Error("Parcela de rateio não encontrada.");
     const payments = await ctx.db.query("waterPayments").withIndex("by_share", (q) => q.eq("shareId", args.shareId)).collect();
