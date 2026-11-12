@@ -70,7 +70,7 @@ export const REQUEST_STATUS_COLORS: Record<RequestStatusType, string> = {
 };
 
 // ─── Audit Actions ───────────────────────────────────────────────────────────
-export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update" | "confirm_entry" | "reverse_entry" | "open_inventory" | "count_inventory" | "close_inventory" | "return_stock" | "reverse_exit" | "transfer_stock" | "gomaq_exchange" | "gomaq_collection"  | "gomaq_order"
+export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "login_failed" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update" | "confirm_entry" | "reverse_entry" | "open_inventory" | "count_inventory" | "close_inventory" | "return_stock" | "reverse_exit" | "transfer_stock" | "gomaq_exchange" | "gomaq_collection"  | "gomaq_order"
   | "asset_create"
   | "asset_update"
   | "asset_assign"
@@ -91,7 +91,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   reject: "Rejeição",
   cancel: "Cancelamento",
   move_stock: "Movimentação",
-  login: "Login",
+  login: "Login realizado",
+  login_failed: "Falha de login",
   logout: "Logout",
   deliver: "Entrega",
   password_change: "Alteração de Senha",
