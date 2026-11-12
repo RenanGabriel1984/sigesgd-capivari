@@ -255,16 +255,16 @@ describe("Tipo de material e patrimônio", () => {
         quantity: 2,
         units: [{ patrimonyNumber: "000001" }],
       })
-    ).toContain("uma unidade patrimonial por unidade recebida");
+    ).toContain("identificação provisória por unidade recebida");
   });
 
-  it("material permanente exige número de patrimônio em cada unidade", () => {
+  it("material permanente pode ser recebido antes do tombamento oficial", () => {
     const error = validateEntryUnits({
       materialType: "permanent",
       quantity: 2,
-      units: [{ patrimonyNumber: "000001" }, { serialNumber: "SN-9" }],
+      units: [{ serialNumber: "SN-1" }, { serialNumber: "SN-9" }],
     });
-    expect(error).toContain("precisa do número de patrimônio");
+    expect(error).toBeNull();
   });
 
   it("aceita o mesmo produto com vários patrimônios/terminais diferentes", () => {
