@@ -9,6 +9,8 @@ const entriesBackend = readFileSync(resolve(root, "src/convex/entries.ts"), "utf
 const schema = readFileSync(resolve(root, "src/convex/schema.ts"), "utf8");
 const usersBackend = readFileSync(resolve(root, "src/convex/users.ts"), "utf8");
 const page = readFileSync(resolve(root, "src/pages/Patrimony.tsx"), "utf8");
+const assetsBackend = readFileSync(resolve(root, "src/convex/assets.ts"), "utf8");
+const routeGuard = readFileSync(resolve(root, "src/components/RequirePermission.tsx"), "utf8");
 
 describe("recebimento de material permanente com tombamento posterior", () => {
   it("permite confirmar unidade recebida sem número oficial de patrimônio", () => {
@@ -110,5 +112,15 @@ describe("integração do tombamento com a entrada e o cadastro de ativos", () =
     expect(usersBackend).toContain('v.literal("patrimony_manager")');
     expect(usersBackend).toContain("export const createUser = mutation");
     expect(usersBackend).toContain("role: args.role");
+  });
+
+  it("bloqueia tombamento pelo CRUD genérico de ativos sem a permissão patrimonial", () => {
+    expect(assetsBackend).toContain('requirePermission(ctx, "patrimony.assign", { entity: "assets" })');
+    expect(assetsBackend).toContain('entityId: String(args.assetId)');
+  });
+
+  it("direciona o perfil patrimonial à sua fila, sem abrir o dashboard de estoque", () => {
+    expect(routeGuard).toContain('user.role === "patrimony_manager"');
+    expect(routeGuard).toContain('<Navigate to="/patrimony" replace />');
   });
 });
