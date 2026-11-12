@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { usePaginatedQuery } from "convex/react";
+import { usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,6 +25,7 @@ import {
 import { Shield, Filter } from "lucide-react";
 import { AUDIT_ACTION_LABELS, type AuditAction } from "@/types/constants";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { Id } from "@/convex/_generated/dataModel";
 
 const ALL_ACTIONS = [
   "create",
@@ -91,6 +92,8 @@ const ENTITY_OPTIONS = [
 export default function Audit() {
   const [actionFilter, setActionFilter] = useState("all");
   const [entityFilter, setEntityFilter] = useState("all");
+  const [userFilter, setUserFilter] = useState("all");
+  const auditUsers = useQuery(api.users.listUserOptions);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -102,6 +105,7 @@ export default function Audit() {
   } = usePaginatedQuery(
     api.auditLogs.listFiltered,
     {
+      userId: userFilter !== "all" ? userFilter as Id<"users"> : undefined,
       action: actionFilter !== "all" ? actionFilter : undefined,
       entity: entityFilter !== "all" ? entityFilter : undefined,
       startDate: startDate ? new Date(startDate).getTime() : undefined,
@@ -110,11 +114,12 @@ export default function Audit() {
     { initialNumItems: 50 },
   );
 
-  const hasFilters = !!(actionFilter !== "all" || entityFilter !== "all" || startDate || endDate);
+  const hasFilters = !!(userFilter !== "all" || actionFilter !== "all" || entityFilter !== "all" || startDate || endDate);
 
   const clearFilters = () => {
     setActionFilter("all");
     setEntityFilter("all");
+    setUserFilter("all");
     setStartDate("");
     setEndDate("");
   };
@@ -149,7 +154,23 @@ export default function Audit() {
         {showFilters && (
           <Card className="border-border/50">
             <CardContent className="p-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                <div>
+                  <Label className="text-xs">Usuário / Login</Label>
+                  <Select value={userFilter} onValueChange={setUserFilter}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Todos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos os usuários</SelectItem>
+                      {(auditUsers ?? []).map((auditUser: any) => (
+                        <SelectItem key={auditUser._id} value={auditUser._id}>
+                          {auditUser.name ?? "Usuário sem nome"}{auditUser.role ? ` — ${auditUser.role}` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div>
                   <Label className="text-xs">Ação</Label>
                   <Select value={actionFilter} onValueChange={setActionFilter}>
