@@ -10,6 +10,7 @@ import {
   normalizeInvoiceNumber,
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
+import { attachStorageFile } from "./storage";
 import type { Id } from "./_generated/dataModel";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
@@ -317,8 +318,15 @@ export const create = mutation({
       updatedAt: now,
     });
 
+    if (args.documentStorageId) {
+      await attachStorageFile(ctx, args.documentStorageId, "entry", String(entryId), String(userId));
+    }
+    if (args.xmlStorageId) {
+      await attachStorageFile(ctx, args.xmlStorageId, "entry", String(entryId), String(userId));
+    }
+
     for (const item of args.items) {
-      await ctx.db.insert("entryItems", {
+      const itemId = await ctx.db.insert("entryItems", {
         entryId,
         productId: item.productId,
         quantity: item.quantity,
@@ -340,6 +348,9 @@ export const create = mutation({
         matchScore: item.matchScore,
         associationType: item.associationType,
       });
+      if (item.photoStorageId) {
+        await attachStorageFile(ctx, item.photoStorageId, "entryItem", String(itemId), String(userId));
+      }
     }
 
     await ctx.db.insert("auditLogs", {
@@ -525,6 +536,9 @@ export const confirm = mutation({
         areaId: itemAreaId as any,
         locationId: item.locationId,
       });
+      if (item.photoStorageId) {
+        await attachStorageFile(ctx, item.photoStorageId, "lot", String(lotId), String(userId));
+      }
 
       // Rastreabilidade Entrada → EntryItem → Lote → Movimentação.
       // Sem este back-patch, `entryItems.lotId` ficava ausente (foi o caso dos
@@ -663,6 +677,9 @@ export const addItem = mutation({
       associationType: args.associationType,
     });
 
+    if (args.photoStorageId) {
+      await attachStorageFile(ctx, args.photoStorageId, "entryItem", String(itemId), String(userId));
+    }
     await ctx.db.patch(args.entryId, { updatedAt: Date.now() });
     await ctx.db.insert("auditLogs", {
       userId, action: "update", entity: "entryItems", entityId: itemId,
@@ -733,6 +750,9 @@ export const updateItem = mutation({
     if (args.associationType !== undefined) updates.associationType = args.associationType;
 
     await ctx.db.patch(args.itemId, updates);
+    if (args.photoStorageId) {
+      await attachStorageFile(ctx, args.photoStorageId, "entryItem", String(args.itemId), String(userId));
+    }
     await ctx.db.patch(item.entryId, { updatedAt: Date.now() });
 
     const product = args.productId ? await ctx.db.get(args.productId) : await ctx.db.get(item.productId);
@@ -824,6 +844,9 @@ export const editDraft = mutation({
     }
 
     await ctx.db.patch(args.entryId, updates);
+    if (args.documentStorageId) {
+      await attachStorageFile(ctx, args.documentStorageId, "entry", String(args.entryId), String(userId));
+    }
 
     await ctx.db.insert("auditLogs", {
       userId, action: "update", entity: "entries", entityId: args.entryId,

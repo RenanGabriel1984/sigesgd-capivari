@@ -2,6 +2,7 @@ import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { PRINT_AREA_ID } from "./printSupplies";
+import { attachStorageFile } from "./storage";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -252,6 +253,10 @@ export const createCollection = mutation({
       documentStorageId: args.documentStorageId,
       totalCartridges,
     });
+
+    if (args.documentStorageId) {
+      await attachStorageFile(ctx, args.documentStorageId, "gomaqCollection", String(collectionId), String(userId));
+    }
 
     // Update cartridges
     for (const cartridgeId of args.cartridgeIds) {

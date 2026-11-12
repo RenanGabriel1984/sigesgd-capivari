@@ -179,6 +179,7 @@ function isImplementationStockDate(receivedAt: number): boolean {
 /** Upload do documento original pelo MESMO mecanismo do XML (storage). */
 async function uploadFile(
   generateUploadUrl: () => Promise<string>,
+  registerUpload: (args: { storageId: string }) => Promise<unknown>,
   file: File,
   contentType?: string,
 ): Promise<string> {
@@ -192,6 +193,7 @@ async function uploadFile(
   });
   if (!response.ok) throw new Error("Falha no upload");
   const payload = (await response.json()) as { storageId: string };
+  await registerUpload({ storageId: payload.storageId });
   return payload.storageId;
 }
 
@@ -322,6 +324,7 @@ function EntriesPage() {
   const createCategory = useMutation(api.categories.create);
   const upsertNfeProductAlias = useMutation(api.nfeProductAliases.upsert);
   const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
+  const registerUpload = useMutation(api.storage.registerUpload);
   const createEntry = useMutation(api.entries.create);
   const confirmEntry = useMutation(api.entries.confirm);
 
@@ -847,6 +850,7 @@ function EntriesPage() {
           ? () =>
               uploadFile(
                 generateUploadUrl,
+                registerUpload,
                 danfeFile,
                 danfeFile.type || "application/pdf",
               )
@@ -855,6 +859,7 @@ function EntriesPage() {
           ? () =>
               uploadFile(
                 generateUploadUrl,
+                registerUpload,
                 nfeXmlFile,
                 nfeXmlFile.type || "application/xml",
               )

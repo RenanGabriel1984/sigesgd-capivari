@@ -1087,6 +1087,27 @@ const schema = defineSchema(
     }).index("by_share", ["shareId"])
       .index("by_paidAt", ["paidAt"]),
 
+    // ── Storage ownership (file-level authorization) ──
+    // "pending" files are visible only to their uploader until attached to a
+    // business entity. Existing legacy references are resolved read-only.
+    storageFiles: defineTable({
+      storageId: v.string(),
+      ownerType: v.union(
+        v.literal("pending"),
+        v.literal("entry"),
+        v.literal("entryItem"),
+        v.literal("product"),
+        v.literal("lot"),
+        v.literal("gomaqCollection"),
+      ),
+      ownerId: v.optional(v.string()),
+      uploaderUserId: v.id("users"),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_storageId", ["storageId"])
+      .index("by_owner", ["ownerType", "ownerId"])
+      .index("by_uploader", ["uploaderUserId"]),
+
     // ── Audit Log ──
     auditLogs: defineTable({
       userId: v.optional(v.id("users")),

@@ -4,6 +4,7 @@ import { tonerKitObservation, generateNextEntryNumber, generateNextLotNumber } f
 import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import { validateProductStockSemanticsChange } from "../lib/product-stock-semantics";
 import { requirePermission } from "./rbac";
+import { attachStorageFile } from "./storage";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
@@ -249,6 +250,9 @@ export const create = mutation({
       active: true,
     });
     const stockId = await ctx.db.insert("stock", { productId: id, physicalQuantity: 0, reservedQuantity: 0 });
+    if (productArgs.photo) {
+      await attachStorageFile(ctx, productArgs.photo, "product", String(id), String(userId));
+    }
 
     // ── Carga inicial: cria entrada, lote, saldo por local, saldo global e movimentação ──
     let initialLotInfo = "";
@@ -423,6 +427,9 @@ export const update = mutation({
     }
 
     await ctx.db.patch(id, updates);
+    if (updates.photo) {
+      await attachStorageFile(ctx, updates.photo, "product", String(id), String(userId));
+    }
     const action = updates.active === false ? "deactivate" : updates.active === true ? "activate" : "update";
     await ctx.db.insert("auditLogs", {
       userId, action, entity: "products", entityId: id,
