@@ -90,9 +90,14 @@ export const create = mutation({
     const product = await ctx.db.get(args.productId);
     if (!product || !product.active) throw new Error("Produto não encontrado ou inativo");
 
-    const globalStock = await ctx.db.query("stock")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).first();
-    if (!globalStock) throw new Error("Registro global de estoque não encontrado.");
+    const globalStockRows = await ctx.db.query("stock")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+    if (globalStockRows.length !== 1) {
+      throw new Error(globalStockRows.length === 0
+        ? "Registro global de estoque não encontrado."
+        : "Há registros globais de estoque duplicados. Regularize antes de transferir.");
+    }
+    const globalStock = globalStockRows[0];
     const allReservations = await ctx.db.query("requestItemReservations")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
     if (!Number.isFinite(globalStock.physicalQuantity) ||
@@ -155,6 +160,9 @@ export const create = mutation({
       lot.areaId === toAreaId && lot.locationId === args.toLocationId
     );
     for (const lot of productLots) {
+      if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0) {
+        throw new Error(`O lote ${lot.lotNumber} possui saldo inválido. Regularize antes da transferência.`);
+      }
       if (lot.active === false && Number(lot.quantityAvailable) > 0) {
         throw new Error(`O lote ${lot.lotNumber} está inativo com saldo positivo. Regularize antes da transferência.`);
       }
@@ -184,6 +192,12 @@ export const create = mutation({
         throw new Error(`A reserva do lote ${lot.lotNumber} não corresponde à área/local ou excede o saldo.`);
       }
       reservedByLot.set(String(lot._id), (reservedByLot.get(String(lot._id)) ?? 0) + remaining);
+    }
+    for (const lot of productLots) {
+      const reserved = reservedByLot.get(String(lot._id)) ?? 0;
+      if (reserved > Number(lot.quantityAvailable) + 1e-9) {
+        throw new Error(`A soma das reservas do lote ${lot.lotNumber} excede o saldo físico.`);
+      }
     }
 
     const candidates: Array<{ lot: any; free: number }> = [];
