@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { isValidStockQuantity } from "../lib/stock-quantity-rules";
 import { groupAssetPartConsumptionByLocation, planAssetPartFifoConsumption } from "../lib/asset-part-consumption";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
@@ -49,20 +50,30 @@ export const installPart = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    if (!Number.isFinite(args.quantity) || args.quantity <= 0) {
-      throw new Error("Quantidade deve ser um número positivo");
-    }
-
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
 
     const product = await ctx.db.get(args.productId);
     if (!product) throw new Error("Produto não encontrado");
+    if (!isValidStockQuantity(args.quantity, product.unitOfMeasure, product.hasSerial === true)) {
+      throw new Error(
+        product.hasSerial || ["un", "pc", "cx", "rl", "pct", "po", "kt"].includes((product.unitOfMeasure ?? "").trim().toLowerCase())
+          ? "A quantidade da peça deve ser um número inteiro positivo para a unidade de estoque deste produto."
+          : "Quantidade deve ser um número positivo.",
+      );
+    }
 
     const lots = await ctx.db
       .query("lots")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
+
+    const invalidActiveLot = lots.find(
+      (lot) => lot.active !== false && (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0),
+    );
+    if (invalidActiveLot) {
+      throw new Error("O lote " + invalidActiveLot.lotNumber + " possui saldo inválido. Regularize o lote antes de instalar a peça.");
+    }
 
     // Monta o plano FIFO antes de gravar qualquer alteração. Cada lote deve
     // informar local físico; a origem nunca é presumida pela tela ou pelo usuário.
@@ -112,11 +123,27 @@ export const installPart = mutation({
     }
 
     // Conferência final do saldo global disponível (físico - reservado).
-    const freshStock = await ctx.db
+    const globalRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!freshStock) throw new Error("Registro de estoque não encontrado");
+      .collect();
+    if (globalRows.length !== 1) {
+      throw new Error(
+        globalRows.length === 0
+          ? "Registro global de estoque não encontrado."
+          : "Existem registros globais duplicados para este produto. Regularize o estoque antes de instalar a peça.",
+      );
+    }
+    const freshStock = globalRows[0];
+    if (
+      !Number.isFinite(freshStock.physicalQuantity) ||
+      !Number.isFinite(freshStock.reservedQuantity) ||
+      freshStock.physicalQuantity < 0 ||
+      freshStock.reservedQuantity < 0 ||
+      freshStock.reservedQuantity > freshStock.physicalQuantity
+    ) {
+      throw new Error("O saldo global do produto está inconsistente. Regularize antes de instalar a peça.");
+    }
     const available = freshStock.physicalQuantity - freshStock.reservedQuantity;
     if (available < args.quantity) {
       throw new Error(
