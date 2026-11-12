@@ -217,7 +217,7 @@ export const getSupplyDashboard = query({
     ]);
 
     const supplyProducts = products.filter((p) => p.categoryId === SUPPLY_CATEGORY_ID);
-    const supplyIds = new Set(supplyProducts.map((p) => p._id));
+    const supplyIds = new Set<string>(supplyProducts.map((p) => String(p._id)));
 
     // Lotes da área Impressoras por produto (recorte operacional).
     const areaLots = new Map<string, number>();
@@ -422,7 +422,7 @@ async function readSupplyAreaLedger(ctx: any, productId: string): Promise<Supply
     throw new Error(`Integridade de ${productId}: saldo global (${physical}) diverge dos locais físicos (${locationsPhysical}). Retirada bloqueada.`);
   }
 
-  const lotById = new Map(lots.map((lot: any) => [String(lot._id), lot]));
+  const lotById = new Map<string, any>(lots.map((lot: any) => [String(lot._id), lot]));
   const reservedByLot = new Map<string, number>();
   let reservationTotal = 0;
   for (const reservation of reservations as any[]) {
@@ -901,11 +901,7 @@ export const withdrawFamily = mutation({
     if (openPacks > 0) {
       openedUnits = openPacks * conversion.factor;
       if (!looseBefore.stock) {
-        await ctx.db.insert("stock", {
-          productId: looseMember._id as any,
-          physicalQuantity: 0,
-          reservedQuantity: 0,
-        });
+        throw new Error("Registro de saldo do produto avulso ausente. Regularize o cadastro antes de abrir embalagens.");
       }
 
       for (let index = 0; index < closedConsumed.length; index++) {
@@ -950,12 +946,8 @@ export const withdrawFamily = mutation({
         });
       }
 
-      const looseStockAfterOpen = Number(looseBefore.stock?.physicalQuantity ?? 0) + openedUnits;
-      const looseStockRow = looseBefore.stock
-        ? looseBefore.stock._id
-        : await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", looseMember._id)).first().then((row: any) => row?._id);
-      if (!looseStockRow) throw new Error("Não foi possível criar o saldo do produto avulso.");
-      await ctx.db.patch(looseStockRow, { physicalQuantity: looseStockAfterOpen });
+      const looseStockAfterOpen = looseBefore.physical + openedUnits;
+      await ctx.db.patch(looseBefore.stock._id, { physicalQuantity: looseStockAfterOpen });
       looseAfterOpening = await readSupplyAreaLedger(ctx, String(looseMember._id));
     }
 
