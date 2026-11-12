@@ -203,13 +203,17 @@ export const create = mutation({
     if (movementLots.length > 0) {
       const linkError = validateExitLotLinks(
         Number(exit.quantity),
-        movementLots.map((link: any) => ({ lotId: String(link.lotId), quantity: Number(link.quantity) })),
+        movementLots.map((link: any) => ({
+          lotId: link.lotId ? String(link.lotId) : "",
+          quantity: Number(link.quantity),
+        })),
       );
       if (linkError) throw new Error(linkError);
       for (const link of movementLots) {
         const lot: any = await ctx.db.get(link.lotId);
-        if (!lot || lot.productId !== exit.productId) {
-          throw new Error("A trilha de lotes da saída está incompleta. Devolução bloqueada para preservar a rastreabilidade.");
+        if (!lot || lot.productId !== exit.productId ||
+            !Number.isFinite(lot.quantityReceived) || link.quantity > lot.quantityReceived) {
+          throw new Error("A trilha de lotes da saída está incompleta ou excede o lote recebido. Devolução bloqueada para preservar a rastreabilidade.");
         }
         if (exit.areaId) {
           if (lot.areaId !== exit.areaId || lot.locationId !== exit.locationId) {
@@ -327,10 +331,10 @@ export const create = mutation({
       throw new Error("Usuário recebedor não encontrado");
     }
 
-    const [stock, productLots, locationRows] = await Promise.all([
+    const [stockRows, productLots, locationRows] = await Promise.all([
       ctx.db.query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
-        .first(),
+        .collect(),
       ctx.db.query("lots")
         .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
         .collect(),
@@ -338,10 +342,22 @@ export const create = mutation({
         .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
         .collect(),
     ]);
-    if (!stock) throw new Error("Registro de estoque não encontrado");
+    if (stockRows.length !== 1) {
+      throw new Error(stockRows.length === 0
+        ? "Registro de estoque não encontrado."
+        : "Há registros globais de estoque duplicados. Regularize antes de devolver.");
+    }
+    const stock = stockRows[0];
     if (!Number.isFinite(stock.physicalQuantity) || !Number.isFinite(stock.reservedQuantity) ||
-        stock.physicalQuantity < stock.reservedQuantity || stock.reservedQuantity < 0) {
+        stock.physicalQuantity < 0 || stock.reservedQuantity < 0 ||
+        stock.physicalQuantity < stock.reservedQuantity) {
       throw new Error("O saldo global está inconsistente. Regularize o estoque antes de registrar a devolução.");
+    }
+    if (productLots.some((lot: any) =>
+      !Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0 ||
+      (lot.active === false && lot.quantityAvailable > 0)
+    )) {
+      throw new Error("Há lote com saldo inválido ou inativo com quantidade positiva. Regularize antes de devolver.");
     }
 
     let locationStock: any = null;
