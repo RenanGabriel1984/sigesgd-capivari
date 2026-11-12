@@ -7,6 +7,7 @@ import type { Id } from "./_generated/dataModel";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { planFifoAreaLotAllocation } from "../lib/area-stock";
+import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -162,8 +163,9 @@ export const create = mutation({
         throw new Error("Quantidade inválida");
       }
       if (item.quantityRequested <= 0) throw new Error("A quantidade deve ser maior que zero");
-      if (product.unitOfMeasure === "un" && !Number.isInteger(item.quantityRequested)) {
-        throw new Error("A quantidade deve ser um número inteiro para esta unidade");
+      if (isDiscreteStockUnit(product.unitOfMeasure, product.hasSerial) &&
+        !Number.isSafeInteger(item.quantityRequested)) {
+        throw new Error(`A quantidade deve ser um número inteiro para a unidade ${product.unitOfMeasure}.`);
       }
       // Validate toner compatibility: if this product has compatibility entries, targetPrinterId is required
       const compatEntries = await ctx.db
@@ -267,7 +269,12 @@ export const approve = mutation({
       if (input.quantityApproved === 0) continue;
 
       const product = await ctx.db.get(requestItem.productId);
-      const productName = product?.name ?? "item";
+      if (!product || !product.active) throw new Error("Produto não encontrado ou inativo; atualize a solicitação antes de aprovar.");
+      if (isDiscreteStockUnit(product.unitOfMeasure, product.hasSerial) &&
+        !Number.isSafeInteger(input.quantityApproved)) {
+        throw new Error(`A quantidade aprovada para "${product.name}" deve ser inteira.`);
+      }
+      const productName = product.name;
       const productKey = requestItem.productId as string;
       const isAreaScoped = !!requestItem.areaId;
       const current = stockNeeded.get(productKey) ?? {
@@ -455,8 +462,15 @@ export const deliver = mutation({
     reverseLogisticsConfirmed: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { userId, user } = await requireUser(ctx);
-    await requirePermission(ctx, "requests.deliver", { entity: "requests", entityId: args.requestId });
+    // A entrega também deve respeitar a regra de autoatendimento: quem
+    // solicitou não pode retirar/confirmar a própria requisição.
+    await requireUser(ctx);
+    const request = await ctx.db.get(args.requestId);
+    if (!request) throw new Error("Solicitação não encontrada");
+    const { userId, user } = await requireRequestAction(
+      ctx, "requests.deliver", request.requesterId,
+      { entity: "requests", entityId: args.requestId },
+    );
 
     const passwordRecord = await ctx.db.query("passwords")
       .withIndex("by_user", (q: any) => q.eq("userId", userId)).first();
@@ -466,13 +480,14 @@ export const deliver = mutation({
     );
     if (!passwordValid) throw new Error("Senha de confirmação incorreta");
 
-    const request = await ctx.db.get(args.requestId);
-    if (!request) throw new Error("Solicitação não encontrada");
     if (request.status !== "approved") throw new Error("Solicitação deve estar aprovada");
     const inputItems = args.items ?? [];
     if (inputItems.length === 0) throw new Error("Informe ao menos um item para entrega");
-    if (args.receivedByUserId && !(await ctx.db.get(args.receivedByUserId))) {
-      throw new Error("Usuário recebedor não encontrado");
+    if (args.receivedByUserId) {
+      const recipient = await ctx.db.get(args.receivedByUserId);
+      if (!recipient || recipient.active === false) {
+        throw new Error("Usuário recebedor não encontrado ou inativo");
+      }
     }
 
     const requestItems = await ctx.db.query("requestItems")
@@ -494,7 +509,12 @@ export const deliver = mutation({
         throw new Error(`Quantidade entregue excede a aprovada para "${(await ctx.db.get(item.productId as Id<"products">))?.name ?? "item"}".`);
       }
       const product = await ctx.db.get(item.productId as Id<"products">);
-      if (product?.hasSerial) {
+      if (!product || !product.active) throw new Error("Produto não encontrado ou inativo; entrega bloqueada.");
+      if (isDiscreteStockUnit(product.unitOfMeasure, product.hasSerial) &&
+        !Number.isSafeInteger(input.quantityDelivered)) {
+        throw new Error(`A quantidade entregue para "${product.name}" deve ser inteira.`);
+      }
+      if (product.hasSerial) {
         const serials = input.serialNumbers ?? [];
         if (serials.length !== input.quantityDelivered || serials.some((value: string) => !value.trim())) {
           throw new Error(`Informe exatamente ${input.quantityDelivered} número(s) de patrimônio/série para "${product.name}".`);
