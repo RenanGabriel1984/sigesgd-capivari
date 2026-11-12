@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { groupAssetPartConsumptionByLocation, planAssetPartFifoConsumption } from "../lib/asset-part-consumption";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -48,7 +49,9 @@ export const installPart = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    if (args.quantity <= 0) throw new Error("Quantidade deve ser maior que zero");
+    if (!Number.isFinite(args.quantity) || args.quantity <= 0) {
+      throw new Error("Quantidade deve ser um número positivo");
+    }
 
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
@@ -56,58 +59,98 @@ export const installPart = mutation({
     const product = await ctx.db.get(args.productId);
     if (!product) throw new Error("Produto não encontrado");
 
-    // Validate stock (check available = physical - reserved)
-    const stock = await ctx.db
-      .query("stock")
-      .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
-    if (stock.physicalQuantity - stock.reservedQuantity < args.quantity) {
-      throw new Error(`Estoque insuficiente. Disponível: ${stock.physicalQuantity - stock.reservedQuantity}. Necessário: ${args.quantity}`);
-    }
-
-    const now = Date.now();
-
-    // FIFO Lot Consumption (before stock reduction)
-    let remainingToConsume = args.quantity;
-    let consumedLotId: string | undefined;
     const lots = await ctx.db
       .query("lots")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
+      .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
-    const sortedLots = lots
-      .filter((l: any) => l.quantityAvailable > 0)
-      .sort((a: any, b: any) => a.receivedAt - b.receivedAt || a.lotNumber.localeCompare(b.lotNumber));
 
-    for (const lot of sortedLots) {
-      if (remainingToConsume <= 0) break;
-      const consumeFromLot = Math.min(lot.quantityAvailable, remainingToConsume);
-      if (consumeFromLot <= 0) continue;
-      await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consumeFromLot });
-      if (!consumedLotId) consumedLotId = lot._id;
-      remainingToConsume -= consumeFromLot;
+    // Monta o plano FIFO antes de gravar qualquer alteração. Cada lote deve
+    // informar local físico; a origem nunca é presumida pela tela ou pelo usuário.
+    const allocations = planAssetPartFifoConsumption(
+      lots.map((lot) => ({
+        id: String(lot._id),
+        lotNumber: lot.lotNumber,
+        receivedAt: lot.receivedAt,
+        quantityAvailable: lot.quantityAvailable,
+        active: lot.active,
+        locationId: lot.locationId ? String(lot.locationId) : undefined,
+        areaId: lot.areaId ? String(lot.areaId) : undefined,
+      })),
+      args.quantity,
+    );
+    const locationConsumption = groupAssetPartConsumptionByLocation(allocations);
+
+    // Cada parcela FIFO precisa corresponder exatamente a um saldo por
+    // produto/local/área. Duplicidades ou ausência de saldo bloqueiam a operação
+    // para evitar divergência entre o saldo global e os subestoques.
+    const locationBalances = await ctx.db
+      .query("stockByLocation")
+      .withIndex("by_product", (q) => q.eq("productId", args.productId))
+      .collect();
+
+    const locationUpdates: Array<{ id: any; newQuantity: number }> = [];
+    for (const group of locationConsumption) {
+      const matches = locationBalances.filter(
+        (row) =>
+          String(row.locationId) === group.locationId &&
+          (row.areaId ? String(row.areaId) : undefined) === group.areaId,
+      );
+      if (matches.length !== 1) {
+        throw new Error(
+          matches.length === 0
+            ? `Não existe saldo por local para o produto no local/área de origem do lote. Regularize antes de instalar.`
+            : `Existe saldo duplicado para o produto no mesmo local/área. Regularize o subestoque antes de instalar.`,
+        );
+      }
+      const row = matches[0];
+      if (!Number.isFinite(row.quantity) || row.quantity < group.quantity) {
+        throw new Error(
+          `Saldo insuficiente no local de origem do lote. Disponível: ${row.quantity}; necessário: ${group.quantity}.`,
+        );
+      }
+      locationUpdates.push({ id: row._id, newQuantity: row.quantity - group.quantity });
     }
 
-    if (remainingToConsume > 0) {
-      throw new Error(`Lotes insuficientes. Faltam ${remainingToConsume} unidades sem lote disponível.`);
-    }
-
-    // Re-read stock for concurrency safety (double-check pattern)
+    // Conferência final do saldo global disponível (físico - reservado).
     const freshStock = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .first();
-    if (!freshStock) throw new Error("Registro de estoque desapareceu durante a instalação");
-    if (freshStock.physicalQuantity - freshStock.reservedQuantity < args.quantity) {
-      throw new Error(`Estoque insuficiente (concorrência). Disponível: ${freshStock.physicalQuantity - freshStock.reservedQuantity}. Necessário: ${args.quantity}.`);
+    if (!freshStock) throw new Error("Registro de estoque não encontrado");
+    const available = freshStock.physicalQuantity - freshStock.reservedQuantity;
+    if (available < args.quantity) {
+      throw new Error(
+        `Estoque insuficiente. Disponível: ${available}. Necessário: ${args.quantity}.`,
+      );
     }
 
-    // Reduce global stock
+    const lotById = new Map(lots.map((lot) => [String(lot._id), lot]));
+    for (const allocation of allocations) {
+      const lot = lotById.get(allocation.lotId);
+      if (!lot || lot.quantityAvailable < allocation.quantity) {
+        throw new Error("O saldo do lote mudou durante a instalação. Atualize a tela e tente novamente.");
+      }
+    }
+
+    const now = Date.now();
+
+    // Debita todos os lotes consumidos e todos os subestoques correspondentes.
+    for (const allocation of allocations) {
+      const lot = lotById.get(allocation.lotId)!;
+      await ctx.db.patch(lot._id, {
+        quantityAvailable: lot.quantityAvailable - allocation.quantity,
+      });
+    }
+    for (const update of locationUpdates) {
+      await ctx.db.patch(update.id, { quantity: update.newQuantity });
+    }
+
     const newPhysical = freshStock.physicalQuantity - args.quantity;
     await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical });
 
-    // Create stock movement
-    await ctx.db.insert("stockMovements", {
+    const singleSource = locationConsumption.length === 1 ? locationConsumption[0] : null;
+    const firstLotId = allocations[0]?.lotId;
+    const movementId = await ctx.db.insert("stockMovements", {
       productId: args.productId,
       type: "exit",
       quantity: args.quantity,
@@ -116,37 +159,49 @@ export const installPart = mutation({
       previousReserved: freshStock.reservedQuantity,
       newReserved: freshStock.reservedQuantity,
       userId,
-      observation: `Instalação em equipamento: ${asset.patrimonyNumber ?? asset.serialNumber ?? args.assetId}`,
+      lotId: firstLotId,
+      areaId: singleSource?.areaId as any,
+      locationId: singleSource?.locationId as any,
+      observation: `Instalação em equipamento: ${asset.patrimonyNumber ?? asset.serialNumber ?? args.assetId}. A rastreabilidade de todos os lotes está vinculada à movimentação.`,
       timestamp: now,
     });
 
-    // Record part installation
+    // Uma linha por lote usado: não perde os lotes adicionais da mesma instalação.
+    for (const allocation of allocations) {
+      await ctx.db.insert("stockMovementLots", {
+        movementId,
+        lotId: allocation.lotId as any,
+        quantity: allocation.quantity,
+        areaId: allocation.areaId as any,
+        locationId: allocation.locationId as any,
+      });
+    }
+
     const partId = await ctx.db.insert("assetParts", {
       assetId: args.assetId,
       productId: args.productId,
-      lotId: consumedLotId,
+      lotId: firstLotId,
+      stockMovementId: movementId,
       quantity: args.quantity,
       installedAt: now,
       installedByUserId: userId,
       observation: args.observation || undefined,
     });
 
-    // Asset history
     await ctx.db.insert("assetHistory", {
       assetId: args.assetId,
       eventType: "part_installed",
       userId,
-      observation: `Peça instalada: ${product.name} (${args.quantity}x)`,
+      observation: `Peça instalada: ${product.name} (${args.quantity}x). Movimentação: ${movementId}`,
       timestamp: now,
     });
 
-    // Audit
     await ctx.db.insert("auditLogs", {
       userId,
       action: "asset_part_install",
       entity: "assetParts",
       entityId: partId,
-      details: `Peça ${product.name} instalada em ${asset.patrimonyNumber ?? "equipamento"} — ${args.quantity} un`,
+      details: `Peça ${product.name} instalada em ${asset.patrimonyNumber ?? "equipamento"} — ${args.quantity} un; ${allocations.length} lote(s) consumido(s)`,
       timestamp: now,
     });
 
