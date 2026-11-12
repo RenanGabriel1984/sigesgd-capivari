@@ -925,14 +925,18 @@ const schema = defineSchema(
     assetParts: defineTable({
       assetId: v.id("assets"),
       productId: v.id("products"),
+      // lotId preserva compatibilidade com registros antigos (primeiro lote).
+      // stockMovementId liga a instalação à relação completa stockMovementLots.
       lotId: v.optional(v.string()),
+      stockMovementId: v.optional(v.id("stockMovements")),
       quantity: v.number(),
       installedAt: v.number(),
       removedAt: v.optional(v.number()),
       installedByUserId: v.id("users"),
       observation: v.optional(v.string()),
     }).index("by_asset", ["assetId"])
-      .index("by_product", ["productId"]),
+      .index("by_product", ["productId"])
+      .index("by_stockMovement", ["stockMovementId"]),
 
     // ── Asset Maintenances (Manutenções) ──
     assetMaintenances: defineTable({
