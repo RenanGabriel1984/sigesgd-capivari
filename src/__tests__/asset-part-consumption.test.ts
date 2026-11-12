@@ -46,10 +46,15 @@ describe("rastreabilidade FIFO de peças instaladas", () => {
   it("ignora lotes inativos e rejeita quantidade inválida", () => {
     expect(
       planAssetPartFifoConsumption(
-        [{ id: "inactive", lotNumber: "X", receivedAt: 1, quantityAvailable: 10, active: false, locationId: "cabinet-1" }],
+        [
+          { id: "inactive", lotNumber: "X", receivedAt: 1, quantityAvailable: 10, active: false, locationId: "cabinet-1" },
+          { id: "active", lotNumber: "Y", receivedAt: 2, quantityAvailable: 2, active: true, locationId: "cabinet-2" },
+        ],
         1,
       ),
-    ).toEqual([]);
+    ).toEqual([
+      { lotId: "active", lotNumber: "Y", quantity: 1, locationId: "cabinet-2", areaId: undefined },
+    ]);
     expect(() => planAssetPartFifoConsumption(lots, 0)).toThrow(/número positivo/);
     expect(() => planAssetPartFifoConsumption(lots, Number.NaN)).toThrow(/número positivo/);
   });
