@@ -5,7 +5,7 @@ import { findEquipmentCategory, buildRelatedStockProducts } from "../lib/equipme
 import type { RelatedStockProduct } from "../lib/equipment-categories";
 import { maskLicenseKey } from "../lib/license-keys";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 const ASSET_TYPES = [
   "desktop", "notebook", "monitor", "server", "printer", "switch",
