@@ -2,7 +2,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { requirePermission } from "./rbac";
 import { mutation, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
-import { hashPassword, verifyPassword } from "./auth/passwords";
+import { hashPassword, verifyPassword, generateSecureNumericCode, nextResetAttempt } from "./auth/passwords";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
@@ -610,7 +610,7 @@ export const requestPasswordReset = mutation({
     }
 
     // Generate 6-digit code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = generateSecureNumericCode();
 
     const resetId: Id<"passwordResets"> = await ctx.db.insert("passwordResets", {
       userId: user._id,
@@ -687,20 +687,23 @@ export const confirmPasswordReset = mutation({
     );
 
     if (!validToken) {
-      // Incrementa a contagem do token QUANDO o código confere, para não
-      // penalizar quem digita códigos aleatórios de outro e-mail.
-      const matching = tokens.find(
-        (t) => t.token === args.code && !t.usedAt && t.expiresAt > Date.now(),
-      );
-      if (matching) {
-        const attempts = (matching.attempts ?? 0) + 1;
-        await ctx.db.patch(matching._id, {
-          attempts,
-          // Ao exceder o limite o token é INVALIDADO (usedAt) — o atacante
-          // precisa pedir uma nova recuperação e um novo e-mail é enviado.
-          usedAt: attempts >= RESET_MAX_ATTEMPTS ? Date.now() : undefined,
-        });
+      // Toda confirmação inválida consome uma tentativa do código ativo do
+      // usuário. Antes, somente uma tentativa que coincidisse com um token
+      // era contabilizada, deixando palpites aleatórios ilimitados.
+      const now = Date.now();
+      const activeToken = tokens
+        .filter((token) => !token.usedAt && token.expiresAt > now)
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+
+      if (activeToken) {
+        const attemptUpdate = nextResetAttempt(
+          activeToken.attempts ?? 0,
+          RESET_MAX_ATTEMPTS,
+          now,
+        );
+        await ctx.db.patch(activeToken._id, attemptUpdate);
       }
+
       throw new Error("Código inválido ou expirado");
     }
 
