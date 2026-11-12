@@ -6,6 +6,7 @@ import {
 } from "../lib/stock-consumption";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import {
   applyImplementationStockStamp,
   generateExitNumber,
@@ -63,7 +64,17 @@ async function generateLotNumber(ctx: any, _productId: string): Promise<string> 
 async function performInitialLoad(
   ctx: any,
   userId: string,
-  items: Array<{ productId: string; locationId: string; areaId?: string; quantity: number; unitOfMeasure?: string }>,
+  items: Array<{
+    productId: string;
+    locationId: string;
+    areaId?: string;
+    quantity: number;
+    unitOfMeasure?: string;
+    brand?: string;
+    model?: string;
+    specification?: string;
+    observation?: string;
+  }>,
   observation: string
 ) {
   if (!items || items.length === 0) {
@@ -76,21 +87,56 @@ async function performInitialLoad(
   // para number JS para que nenhuma aritmética misture bigint com number.
   items = items.map((i) => ({ ...i, quantity: Number(i.quantity) }));
 
-  // Carga inicial também precisa nascer em um subestoque identificado.
-  // Validamos todas as origens antes de criar entrada/lotes/saldos.
-  for (const item of items) {
-    if (item.quantity <= 0) continue;
-    const location = await ctx.db.get(item.locationId);
+  const positiveItems = items.filter((item) => item.quantity > 0);
+  if (items.some((item) => !Number.isFinite(item.quantity) || item.quantity < 0)) {
+    throw new Error("A carga inicial contém quantidade negativa ou inválida.");
+  }
+  if (positiveItems.length === 0) {
+    throw new Error("Informe ao menos um item com quantidade maior que zero para a carga inicial.");
+  }
+
+  // Validar TODO o lote de entrada antes de criar a entrada ou qualquer saldo.
+  for (const item of positiveItems) {
+    const [location, area, product, productLots, stockRows, locationRows] = await Promise.all([
+      ctx.db.get(item.locationId),
+      item.areaId ? ctx.db.get(item.areaId as any) : Promise.resolve(null),
+      ctx.db.get(item.productId as any),
+      ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect(),
+      ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect(),
+      ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect(),
+    ]);
     if (!location || !location.active) {
       throw new Error("A carga inicial precisa apontar para um local físico ativo.");
     }
-    const selectedAreaId = item.areaId;
-    if (!selectedAreaId) {
-      throw new Error(`Informe a área/subestoque do material armazenado em "${location.name}". O local físico não define a área.`);
+    if (!item.areaId || !area?.active) {
+      throw new Error(`Informe uma área/subestoque ativo para o material armazenado em "${location.name}". O local físico não define a área.`);
     }
-    const area = await ctx.db.get(selectedAreaId as any);
-    if (!area || !area.active) {
-      throw new Error(`A área selecionada para "${location.name}" não existe ou está inativa.`);
+    if (!product || !product.active) {
+      throw new Error(`O produto "${product?.name ?? item.productId}" não existe ou está inativo.`);
+    }
+    if (product.hasSerial || productLots.some((lot: any) => lot.materialType === "permanent")) {
+      throw new Error(`"${product.name}" é material permanente ou individualizado. Cadastre o equipamento individualmente; não faça carga por quantidade agregada.`);
+    }
+    const unit = item.unitOfMeasure ?? product.unitOfMeasure;
+    if (isDiscreteStockUnit(unit, product.hasSerial) && !Number.isSafeInteger(item.quantity)) {
+      throw new Error(`A quantidade inicial de "${product.name}" deve ser inteira para a unidade ${unit}.`);
+    }
+    if (stockRows.length > 1) {
+      throw new Error(`"${product.name}" possui registros globais de estoque duplicados. Regularize antes da carga inicial.`);
+    }
+    if (stockRows[0] && (
+      !Number.isFinite(stockRows[0].physicalQuantity) ||
+      !Number.isFinite(stockRows[0].reservedQuantity) ||
+      stockRows[0].physicalQuantity < stockRows[0].reservedQuantity ||
+      stockRows[0].reservedQuantity < 0
+    )) {
+      throw new Error(`O saldo global de "${product.name}" está inconsistente.`);
+    }
+    const locationMatches = locationRows.filter((row: any) =>
+      row.locationId === item.locationId && row.areaId === item.areaId
+    );
+    if (locationMatches.length > 1) {
+      throw new Error(`"${product.name}" possui saldos físicos duplicados nessa combinação de área/local.`);
     }
   }
 
@@ -122,8 +168,15 @@ async function performInitialLoad(
   }
 
   // ── Create entry header for the initial load ──
-  const entrySeq = (await ctx.db.query("entries").collect()).length + 1;
-  const entryNumber = `ENT-${year}-${String(entrySeq).padStart(6, "0")}`;
+  const existingEntries = await ctx.db.query("entries").collect();
+  const entryPrefix = `ENT-${year}-`;
+  const entrySequence = existingEntries.reduce((max: number, entry: any) => {
+    const match = String(entry.entryNumber ?? "").match(/^ENT-\\d{4}-(\\d+)$/);
+    if (!match || !String(entry.entryNumber).startsWith(entryPrefix)) return max;
+    const sequence = Number(match[1]);
+    return Number.isSafeInteger(sequence) && sequence > max ? sequence : max;
+  }, 0) + 1;
+  const entryNumber = `${entryPrefix}${String(entrySequence).padStart(6, "0")}`;
   const entryId = await ctx.db.insert("entries", {
     entryNumber,
     receivedAt: now,
@@ -142,11 +195,6 @@ async function performInitialLoad(
   let totalQuantityLoaded = 0;
 
   for (const item of items) {
-    if (item.quantity < 0) {
-      throw new Error(
-        `Quantidade negativa não permitida para produto ${item.productId}`
-      );
-    }
     if (item.quantity === 0) continue;
 
       const location = await ctx.db.get(item.locationId);
@@ -172,7 +220,10 @@ async function performInitialLoad(
         active: true,
         areaId,
         locationId: item.locationId,
-        observation: `Carga inicial — ${item.quantity} unidades`,
+        brand: item.brand?.trim() || undefined,
+        model: item.model?.trim() || undefined,
+        specification: item.specification?.trim() || undefined,
+        observation: item.observation?.trim() || `Carga inicial — ${item.quantity} unidades`,
       });
 
       // ── 2. Create entry item ──
@@ -186,6 +237,10 @@ async function performInitialLoad(
         lotId,
         locationId: item.locationId,
         areaId,
+        brand: item.brand?.trim() || undefined,
+        model: item.model?.trim() || undefined,
+        specification: item.specification?.trim() || undefined,
+        observation: item.observation?.trim() || undefined,
       });
 
       // ── 3. stockByLocation ──
@@ -218,14 +273,16 @@ async function performInitialLoad(
         .first();
 
       const previousGlobal = existingStock?.physicalQuantity ?? 0;
-      const totalForProduct = await ctx.db
-        .query("stockByLocation")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
-        .collect();
-      const newGlobal = totalForProduct.reduce(
-        (sum: number, s: any) => sum + s.quantity,
-        0
-      );
+      // Em produtos existentes, somar a carga ao saldo global preserva estoque
+      // legado que ainda não possua linha em stockByLocation. Recalcular pela
+      // soma dos locais aqui apagaria silenciosamente esse saldo.
+      const newGlobal = existingStock
+        ? previousGlobal + item.quantity
+        : (await ctx.db
+            .query("stockByLocation")
+            .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+            .collect())
+            .reduce((sum: number, row: any) => sum + row.quantity, 0);
 
       if (existingStock) {
         await ctx.db.patch(existingStock._id, {
@@ -366,6 +423,8 @@ export const importInitialSheet = mutation({
       quantity: number;
       unitOfMeasure?: string;
       areaId?: string;
+      brand?: string;
+      observation?: string;
     }> = [];
     let matched = 0;
     let created = 0;
@@ -432,6 +491,8 @@ export const importInitialSheet = mutation({
         // UOM original da planilha: a quantidade fica semanticamente na
         // unidade registrada (cx permanece cx, pct permanece pct).
         unitOfMeasure: row.unitOfMeasure || (existing?.unitOfMeasure ?? "un"),
+        brand: row.brand?.trim() || undefined,
+        observation: row.observation?.trim() || undefined,
       });
     }
 
