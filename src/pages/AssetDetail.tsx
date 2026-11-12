@@ -100,7 +100,12 @@ export default function AssetDetailPage() {
             </p>
           </div>
           <div className="ml-auto flex gap-2">
-            <Button variant="outline" onClick={() => setShowAssign(true)} className="gap-2"><ArrowRightLeft className="h-4 w-4" /> Atribuir</Button>
+            <Button variant="outline" onClick={() => {
+              setAssignUserId(asset.responsibleUserId ?? "");
+              setAssignOrgId(asset.organizationId ?? "");
+              setAssignObs("");
+              setShowAssign(true);
+            }} className="gap-2"><ArrowRightLeft className="h-4 w-4" /> Atribuir</Button>
             <Button variant="outline" onClick={() => setShowStatus(true)} className="gap-2"><Settings className="h-4 w-4" /> Status</Button>
           </div>
         </div>
