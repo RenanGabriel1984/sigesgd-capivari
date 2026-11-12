@@ -12,7 +12,7 @@ import {
 import { requirePermission } from "./rbac";
 import type { Id } from "./_generated/dataModel";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: entradas exigem sessão com visão de estoque.
