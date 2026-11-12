@@ -400,7 +400,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     type={faShowPassword ? "text" : "password"}
                     value={faNewPassword}
                     onChange={(e) => setFaNewPassword(e.target.value)}
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder="Mínimo 8 caracteres"
                     className="pl-9 pr-9"
                     disabled={faLoading}
                   />
@@ -436,7 +436,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             <Button
               className="w-full bg-[var(--capivari-green)] hover:bg-[var(--capivari-green-dark)]"
               onClick={handleFirstAccess}
-              disabled={faLoading || !faNewPassword || !faConfirmPassword || faNewPassword !== faConfirmPassword || faNewPassword.length < 6}
+              disabled={faLoading || !faNewPassword || !faConfirmPassword || faNewPassword !== faConfirmPassword || faNewPassword.length < 8}
             >
               {faLoading ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Salvando...</>
