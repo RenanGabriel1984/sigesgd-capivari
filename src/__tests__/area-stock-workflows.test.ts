@@ -118,7 +118,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(stockSetup).toContain("const areaId = item.areaId");
     expect(stockSetup).toContain("if (!item.areaId || !area?.active)");
     expect(stockSetup).toMatch(/local físico não define a área/i);
-    expect(stockSetup).toContain("areaId,\n      });");
+    expect(stockSetup).toMatch(/areaId,\s*\}\);/);
   });
 
   it("devolve cada parcela ao lote e ao subestoque da saída original", () => {
