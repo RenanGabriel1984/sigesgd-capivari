@@ -135,7 +135,7 @@ export const get = query({
       .withIndex("by_asset", (q) => q.eq("assetId", args.assetId))
       .collect();
     const licensesWithDetails = await Promise.all(assignments.map(async (a: any) => {
-      const license = await ctx.db.get(a.licenseId);
+      const license = await ctx.db.get(a.licenseId) as any;
       if (!license) return { ...a, license: null };
       return {
         ...a,
