@@ -579,8 +579,17 @@ export const quickExit = mutation({
     if (!Number.isFinite(args.quantity) || args.quantity <= 0) {
       throw new Error("Quantidade deve ser um número válido maior que zero");
     }
+    if (args.destination.trim().length === 0 || args.receiverName.trim().length === 0) {
+      throw new Error("Informe o destino e o nome de quem está recebendo o material.");
+    }
     const product = await ctx.db.get(args.productId);
     if (!product || !product.active) throw new Error("Produto não encontrado ou inativo");
+    if (product.hasSerial) {
+      throw new Error("Este produto exige controle individual por número de série/patrimônio. Use a movimentação do equipamento, não a saída rápida por quantidade.");
+    }
+    if (isDiscreteStockUnit(product.unitOfMeasure, product.hasSerial) && !Number.isSafeInteger(args.quantity)) {
+      throw new Error(`A quantidade de "${product.name}" deve ser inteira para a unidade ${product.unitOfMeasure}.`);
+    }
     const area = await ctx.db.get(args.areaId);
     const location = await ctx.db.get(args.locationId);
     if (!area || !area.active || !location || !location.active) {
@@ -589,6 +598,11 @@ export const quickExit = mutation({
     const stock = await ctx.db.query("stock")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).first();
     if (!stock) throw new Error("Produto não possui registro de estoque");
+    if (!Number.isFinite(stock.physicalQuantity) || !Number.isFinite(stock.reservedQuantity) ||
+        stock.physicalQuantity < 0 || stock.reservedQuantity < 0 ||
+        stock.reservedQuantity > stock.physicalQuantity) {
+      throw new Error("O saldo global está inconsistente. Regularize antes da saída rápida.");
+    }
     const globalAvailable = stock.physicalQuantity - stock.reservedQuantity;
     if (args.quantity > globalAvailable) {
       throw new Error(`Estoque global insuficiente. Disponível: ${globalAvailable} ${product.unitOfMeasure}`);
@@ -599,6 +613,17 @@ export const quickExit = mutation({
     const areaReservedGlobal = existingReservations.reduce(
       (sum: number, reservation: any) => sum + reservation.quantityRemaining, 0
     );
+    if (existingReservations.some((reservation: any) =>
+      !Number.isFinite(reservation.quantityRemaining) || reservation.quantityRemaining < 0
+    )) {
+      throw new Error("Há reserva de solicitação com quantidade inválida. Regularize antes da saída rápida.");
+    }
+    if (Math.abs(areaReservedGlobal - stock.reservedQuantity) > 1e-9) {
+      const legacyReserved = stock.reservedQuantity - areaReservedGlobal;
+      throw new Error(legacyReserved > 0
+        ? `Há ${legacyReserved} unidade(s) reservada(s) por solicitação antiga sem área. Conclua ou cancele essa solicitação antes da saída rápida.`
+        : "As reservas por lote excedem o saldo reservado global. Regularize a divergência antes da saída rápida.");
+    }
     const legacyReserved = Math.max(0, stock.reservedQuantity - areaReservedGlobal);
     if (legacyReserved > 0) {
       throw new Error(
@@ -608,23 +633,58 @@ export const quickExit = mutation({
 
     const locationRows = await ctx.db.query("stockByLocation")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
-    const locationStock = locationRows.find((row: any) =>
+    const matchingLocationRows = locationRows.filter((row: any) =>
       row.locationId === args.locationId && row.areaId === args.areaId
     );
-    if (!locationStock || locationStock.quantity < args.quantity) {
+    if (matchingLocationRows.length > 1) {
+      throw new Error("Há saldos físicos duplicados nessa área/local. Regularize antes da saída rápida.");
+    }
+    const locationStock = matchingLocationRows[0] ?? null;
+    if (!locationStock || !Number.isFinite(locationStock.quantity) || locationStock.quantity < args.quantity) {
       throw new Error(`Estoque insuficiente em "${area.name}" / "${location.name}". Disponível: ${locationStock?.quantity ?? 0}.`);
     }
 
     const productLots = await ctx.db.query("lots")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+    if (productLots.some((lot: any) => lot.materialType === "permanent")) {
+      throw new Error("Material permanente deve ser movimentado pelo cadastro individual do patrimônio, não por saída agregada.");
+    }
+    const sourceLots = productLots.filter((lot: any) =>
+      lot.areaId === args.areaId && lot.locationId === args.locationId
+    );
+    const sourceLotTotal = sourceLots.reduce((sum: number, lot: any) => {
+      if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0) {
+        throw new Error(`O lote ${lot.lotNumber} possui saldo inválido. Regularize antes da saída rápida.`);
+      }
+      if (lot.active === false && lot.quantityAvailable > 0) {
+        throw new Error(`O lote ${lot.lotNumber} está inativo com saldo positivo. Regularize antes da saída rápida.`);
+      }
+      return sum + lot.quantityAvailable;
+    }, 0);
+    if (Math.abs(sourceLotTotal - locationStock.quantity) > 1e-9) {
+      throw new Error("O saldo do local diverge dos lotes registrados. Regularize antes da saída rápida.");
+    }
+
+    const reservedByLot = new Map<string, number>();
+    for (const reservation of existingReservations as any[]) {
+      const lot = productLots.find((candidate: any) => candidate._id === reservation.lotId);
+      if (!lot || reservation.productId !== args.productId ||
+          reservation.areaId !== lot.areaId || reservation.locationId !== lot.locationId) {
+        throw new Error("Há reserva sem correspondência válida de produto, lote, área ou local.");
+      }
+      const remaining = Number(reservation.quantityRemaining);
+      reservedByLot.set(String(lot._id), (reservedByLot.get(String(lot._id)) ?? 0) + remaining);
+    }
+
     const candidates = [];
-    for (const lot of productLots) {
-      if (!lot.active || lot.areaId !== args.areaId || lot.locationId !== args.locationId) continue;
-      const reservations = await ctx.db.query("requestItemReservations")
-        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
-      const reserved = reservations.reduce((sum: number, reservation: any) =>
-        sum + reservation.quantityRemaining, 0);
-      candidates.push({ lot, free: Math.max(0, lot.quantityAvailable - reserved) });
+    for (const lot of sourceLots) {
+      if (!lot.active) continue;
+      const reserved = reservedByLot.get(String(lot._id)) ?? 0;
+      const free = Number(lot.quantityAvailable) - reserved;
+      if (free < -1e-9) {
+        throw new Error(`O lote ${lot.lotNumber} possui reserva superior ao saldo físico.`);
+      }
+      candidates.push({ lot, free: Math.max(0, free) });
     }
     candidates.sort((a: any,b: any) =>
       a.lot.receivedAt - b.lot.receivedAt || a.lot.lotNumber.localeCompare(b.lot.lotNumber)
@@ -642,7 +702,8 @@ export const quickExit = mutation({
       const free = Math.max(0, lot.quantityAvailable - reserved);
       const consume = Math.min(free, remaining);
       if (consume <= 0) continue;
-      await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consume });
+      const nextQuantity = lot.quantityAvailable - consume;
+      await ctx.db.patch(lot._id, { quantityAvailable: nextQuantity, active: nextQuantity > 0 });
       consumedLots.push({ lotId: lot._id as string, quantity: consume });
       remaining -= consume;
     }
