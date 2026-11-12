@@ -20,7 +20,9 @@ import { toast } from "sonner";
 import { useNavigate, useParams } from "react-router";
 import type { Id } from "@/convex/_generated/dataModel";
 
-const ASSET_STATUS_LABELS: Record<string, string> = {
+type AssetStatus = "active" | "maintenance" | "inactive" | "disposal_pending" | "disposed" | "lost";
+
+const ASSET_STATUS_LABELS: Record<AssetStatus, string> = {
   active: "Ativo", maintenance: "Manutenção", inactive: "Inativo",
   disposal_pending: "Descarte Pendente", disposed: "Descartado", lost: "Perdido",
 };
@@ -50,7 +52,7 @@ export default function AssetDetailPage() {
 
   const [tab, setTab] = useState("data");
   const [showStatus, setShowStatus] = useState(false);
-  const [newStatus, setNewStatus] = useState("");
+  const [newStatus, setNewStatus] = useState<AssetStatus | "">("");
   const [statusObs, setStatusObs] = useState("");
   const [showAssign, setShowAssign] = useState(false);
   const [assignUserId, setAssignUserId] = useState("");
@@ -235,7 +237,7 @@ export default function AssetDetailPage() {
             <div className="space-y-4">
               <div>
                 <Label>Novo Status</Label>
-                <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={newStatus} onChange={(e) => setNewStatus(e.target.value)}>
+                <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={newStatus} onChange={(e) => setNewStatus(e.target.value as AssetStatus | "")}>
                   <option value="">Selecione...</option>
                   {Object.entries(ASSET_STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
