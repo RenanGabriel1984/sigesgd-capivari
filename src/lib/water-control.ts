@@ -35,3 +35,35 @@ export function parseWaterMoneyToCents(value: string): number | null {
   if (!Number.isFinite(amount) || amount < 0) return null;
   return Math.round(amount * 100);
 }
+
+
+/** Períodos precisam ter timestamps inteiros, finitos e em ordem cronológica. */
+export function validateWaterPeriodRange(startAt: number, endAt: number): string | null {
+  if (!Number.isSafeInteger(startAt) || !Number.isSafeInteger(endAt)) {
+    return "As datas do período são inválidas.";
+  }
+  if (endAt < startAt) {
+    return "A data final não pode ser anterior à inicial.";
+  }
+  return null;
+}
+
+/** Um recebimento só pode compor o rateio do período ao qual pertence. */
+export function validateWaterReceiptDate(
+  receivedAt: number,
+  startAt: number,
+  endAt: number,
+): string | null {
+  if (!Number.isSafeInteger(receivedAt)) {
+    return "A data do recebimento é inválida.";
+  }
+  if (receivedAt < startAt || receivedAt > endAt) {
+    return "A data do recebimento precisa estar dentro do período de rateio selecionado.";
+  }
+  return null;
+}
+
+/** Datas de movimentos e pagamentos também devem ser timestamps válidos. */
+export function isValidWaterTimestamp(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
