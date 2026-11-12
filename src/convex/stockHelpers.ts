@@ -233,6 +233,30 @@ export function applyImplementationStockStamp(
   return prior ? `${prior} | ${IMPLEMENTATION_STOCK_STAMP}` : IMPLEMENTATION_STOCK_STAMP;
 }
 
+/** Próximo número de entrada calculado pelo maior sequencial existente. */
+export function nextEntryNumber(existingNumbers: string[], year: number): string {
+  const prefix = \`ENT-\${year}-\`;
+  const max = existingNumbers.reduce((value, number) => {
+    const match = String(number ?? "").match(/^ENT-\d{4}-(\d+)$/);
+    if (!match || !number.startsWith(prefix)) return value;
+    const sequence = Number(match[1]);
+    return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
+  }, 0);
+  return \`\${prefix}\${String(max + 1).padStart(6, "0")}\`;
+}
+
+/** Próximo número de lote calculado globalmente, não por produto. */
+export function nextLotNumber(existingNumbers: string[], year: number): string {
+  const prefix = \`LOT-\${year}-\`;
+  const max = existingNumbers.reduce((value, number) => {
+    const match = String(number ?? "").match(/^LOT-\d{4}-(\d+)$/);
+    if (!match || !number.startsWith(prefix)) return value;
+    const sequence = Number(match[1]);
+    return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
+  }, 0);
+  return \`\${prefix}\${String(max + 1).padStart(6, "0")}\`;
+}
+
 /**
  * Sequências globais compartilhadas: números ENT/LOT nunca dependem da
  * quantidade de documentos de um produto e nunca reutilizam lacunas antigas.
@@ -244,13 +268,7 @@ export async function generateNextEntryNumber(ctx: any): Promise<string> {
     .query("entries")
     .withIndex("by_number", (q: any) => q.gte("entryNumber", prefix))
     .collect();
-  const max = existing.reduce((value: number, entry: any) => {
-    const match = String(entry.entryNumber ?? "").match(/^ENT-\d{4}-(\d+)$/);
-    if (!match || !String(entry.entryNumber).startsWith(prefix)) return value;
-    const sequence = Number(match[1]);
-    return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
-  }, 0);
-  return `${prefix}${String(max + 1).padStart(6, "0")}`;
+  return nextEntryNumber(existing.map((entry: any) => String(entry.entryNumber ?? "")), year);
 }
 
 export async function generateNextLotNumber(ctx: any): Promise<string> {
@@ -260,13 +278,7 @@ export async function generateNextLotNumber(ctx: any): Promise<string> {
     .query("lots")
     .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix))
     .collect();
-  const max = existing.reduce((value: number, lot: any) => {
-    const match = String(lot.lotNumber ?? "").match(/^LOT-\d{4}-(\d+)$/);
-    if (!match || !String(lot.lotNumber).startsWith(prefix)) return value;
-    const sequence = Number(match[1]);
-    return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
-  }, 0);
-  return `${prefix}${String(max + 1).padStart(6, "0")}`;
+  return nextLotNumber(existing.map((lot: any) => String(lot.lotNumber ?? "")), year);
 }
 
 /**
