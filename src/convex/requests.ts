@@ -8,6 +8,7 @@ import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { planFifoAreaLotAllocation } from "../lib/area-stock";
 import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
+import { validateRequestItemReservationLedger } from "../lib/request-reservation-ledger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -541,12 +542,16 @@ export const deliver = mutation({
         }
         const reservations = await ctx.db.query("requestItemReservations")
           .withIndex("by_requestItem", (q: any) => q.eq("requestItemId", input.itemId)).collect();
-        const remaining = reservations.reduce((sum: number, reservation: any) => {
-          if (!Number.isFinite(reservation.quantityRemaining) || reservation.quantityRemaining < 0) {
-            throw new Error("A reserva por lote contém quantidade inválida.");
-          }
-          return sum + reservation.quantityRemaining;
-        }, 0);
+        const reservationLedger = validateRequestItemReservationLedger({
+          requestItemId: String(item._id),
+          productId: String(item.productId),
+          areaId: String(item.areaId),
+          locationId: String(item.sourceLocationId),
+          quantityApproved: Number(item.quantityApproved),
+          reservations,
+        });
+        if (reservationLedger.error) throw new Error(reservationLedger.error);
+        const remaining = reservationLedger.remaining;
         if (remaining < input.quantityDelivered) {
           throw new Error("A reserva por lote está incompleta. Entrega bloqueada para proteger a área/local.");
         }
@@ -776,9 +781,28 @@ export const cancel = mutation({
         if (item.quantityApproved <= 0) continue;
         let release = 0;
         if (item.areaId) {
+          if (!item.sourceLocationId) {
+            throw new Error("A solicitação aprovada não possui local físico de origem. Regularize antes de cancelar.");
+          }
           const reservations = await ctx.db.query("requestItemReservations")
             .withIndex("by_requestItem", (q: any) => q.eq("requestItemId", item._id)).collect();
+          const reservationLedger = validateRequestItemReservationLedger({
+            requestItemId: String(item._id),
+            productId: String(item.productId),
+            areaId: String(item.areaId),
+            locationId: String(item.sourceLocationId),
+            quantityApproved: Number(item.quantityApproved),
+            reservations,
+          });
+          if (reservationLedger.error) throw new Error(reservationLedger.error);
           for (const reservation of reservations) {
+            const lot = await ctx.db.get(reservation.lotId);
+            if (!lot || lot.productId !== item.productId ||
+                lot.areaId !== item.areaId || lot.locationId !== item.sourceLocationId ||
+                (reservation.quantityRemaining > 0 &&
+                  (!lot.active || lot.quantityAvailable < reservation.quantityRemaining))) {
+              throw new Error("A reserva não corresponde mais ao lote/área/local original. Cancelamento bloqueado para preservar o estoque.");
+            }
             if (reservation.quantityRemaining <= 0) continue;
             release += reservation.quantityRemaining;
             await ctx.db.patch(reservation._id, {
