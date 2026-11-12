@@ -6,7 +6,7 @@ import { validateProductStockSemanticsChange } from "../lib/product-stock-semant
 import { requirePermission } from "./rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: catálogo visível a quem pode consultar estoque/produtos.
