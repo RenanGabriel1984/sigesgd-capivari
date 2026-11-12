@@ -349,7 +349,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder="Mínimo 8 caracteres"
                   className="mt-1"
                   disabled={forgotLoading}
                 />
