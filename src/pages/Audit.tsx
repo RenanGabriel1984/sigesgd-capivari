@@ -36,6 +36,7 @@ const ALL_ACTIONS = [
   "cancel",
   "move_stock",
   "login",
+  "logout",
   "deliver",
   "password_change",
   "password_reset",
@@ -220,7 +221,12 @@ export default function Audit() {
                       <TableCell className="text-xs whitespace-nowrap">
                         {new Date(log.timestamp).toLocaleString("pt-BR")}
                       </TableCell>
-                      <TableCell className="text-sm">{log.user?.name ?? "Sistema"}</TableCell>
+                      <TableCell className="text-sm">
+                        <div>{log.user?.name ?? (log.action === "login" ? "Tentativa de login" : "Sistema")}</div>
+                        {log.user?.email && (
+                          <div className="text-xs text-muted-foreground">{log.user.email}</div>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Badge
                           variant="secondary"
