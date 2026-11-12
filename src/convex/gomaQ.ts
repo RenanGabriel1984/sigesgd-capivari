@@ -156,7 +156,7 @@ export const monthlyOrder = query({
           const remaining = Number(reservation.quantityRemaining);
           return Number.isFinite(remaining) && remaining > 0 ? sum + remaining : sum;
         }, 0);
-      const availableInArea = Math.max(0, areaPhysical - areaReserved);
+      const availableInArea = areaPhysical - areaReserved;
 
       const idealStock = product.idealStock ?? 0;
       const standardQty = product.standardOrderQuantity;
