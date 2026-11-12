@@ -623,10 +623,12 @@ describe("SEC — storage de documentos (§16)", () => {
   it("SEC-STORAGE-02: toda função de storage exige permissão de servidor", () => {
     const storageSrc = stripComments(read("src/convex/storage.ts"));
     const required = storageSrc.match(/requirePermission\(ctx,\s*"[a-z_.]+"/g) ?? [];
-    // generateUploadUrl, getUrl, getUrls = 3 chamadas; canUpload valida sessão.
-    expect(required.length).toBeGreaterThanOrEqual(3);
+    // generateUploadUrl e registerUpload exigem a permissão de estoque diretamente;
+    // getUrl/getUrls usam getStorageViewer + effectiveRole para autorizar pelo dono.
+    expect(required.length).toBeGreaterThanOrEqual(2);
     expect(storageSrc).toMatch(/isAnonymous === true/);
-    expect(storageSrc).toMatch(/if \(!user\.role\)/);
+    expect(storageSrc).toMatch(/effectiveRole\(user\)/);
+    expect(storageSrc).toMatch(/getStorageViewer/);
   });
 });
 
