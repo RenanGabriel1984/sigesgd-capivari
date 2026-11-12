@@ -1224,7 +1224,7 @@ export const assignPatrimony = mutation({
         entryItemId: unit.entryItemId,
         entryItemUnitId: args.entryItemUnitId,
         patrimonyNumber,
-        serialNumber: existingAsset.serialNumber ?? unit.serialNumber?.trim() || undefined,
+        serialNumber: existingAsset.serialNumber ?? (unit.serialNumber?.trim() || undefined),
         updatedAt: now,
       });
       await ctx.db.insert("assetHistory", {
