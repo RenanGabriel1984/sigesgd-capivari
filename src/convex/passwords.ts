@@ -814,7 +814,7 @@ export const recordFailedLogin = internalMutation({
 
     await ctx.db.insert("auditLogs", {
       userId: account?._id,
-      action: "login",
+      action: "login_failed",
       entity: "auth",
       entityId: account?._id ? String(account._id) : email,
       details: `Falha de autenticação para o login ${email}`,
