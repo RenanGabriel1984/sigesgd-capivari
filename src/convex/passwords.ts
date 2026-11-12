@@ -792,10 +792,6 @@ export const recordFailedLogin = internalMutation({
         attempts: newAttempts,
         lastAttemptAt: now,
       };
-      // Bloqueia após LOGIN_MAX_ATTEMPTS falhas por LOGIN_LOCK_MINUTES.
-      // O bloqueio é REAVALIADO quando a janela anterior expirou — sem isso a
-      // condição `!existing.lockedUntil` nunca voltava a ser verdadeira e a
-      // proteção de força brute deixava de valer depois do 1º bloqueio (§10).
       if (newAttempts >= LOGIN_MAX_ATTEMPTS && (!existing.lockedUntil || lockExpired)) {
         updates.lockedUntil = now + LOGIN_LOCK_MINUTES * 60 * 1000;
       }
@@ -807,12 +803,25 @@ export const recordFailedLogin = internalMutation({
         lastAttemptAt: now,
       });
     }
+
+    // A auditoria registra também tentativas inválidas. Quando o e-mail
+    // pertence a um usuário cadastrado, associa o evento à conta; caso
+    // contrário preserva o login tentado no detalhe, sem inventar identidade.
+    const account = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .first();
+
+    await ctx.db.insert("auditLogs", {
+      userId: account?._id,
+      action: "login",
+      entity: "auth",
+      entityId: account?._id ? String(account._id) : email,
+      details: `Falha de autenticação para o login ${email}`,
+      timestamp: now,
+    });
   },
 });
-
-/**
- * Check if an email is currently locked out due to brute force.
- */
 /**
  * Zera o contador de tentativas após um login BEN-SUCEDIDO (§10).
  *
@@ -827,6 +836,23 @@ export const recordSuccessfulLogin = internalMutation({
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
     if (!email) return { cleared: false };
+
+    const now = Date.now();
+    const account = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .first();
+
+    if (account) {
+      await ctx.db.insert("auditLogs", {
+        userId: account._id,
+        action: "login",
+        entity: "auth",
+        entityId: String(account._id),
+        details: `Login realizado com sucesso: ${email}`,
+        timestamp: now,
+      });
+    }
 
     const existing = await ctx.db
       .query("failedLoginAttempts")
@@ -843,6 +869,21 @@ export const recordSuccessfulLogin = internalMutation({
   },
 });
 
+export const recordLogout = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const { userId, user } = await requireUser(ctx);
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "logout",
+      entity: "auth",
+      entityId: String(userId),
+      details: `Sessão encerrada por ${user.email ?? user.name ?? String(userId)}`,
+      timestamp: Date.now(),
+    });
+    return true;
+  },
+});
 /**
  * Check if an email is currently locked out due to brute force.
  */
