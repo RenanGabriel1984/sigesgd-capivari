@@ -81,6 +81,23 @@ describe("PRINT-02 — totais dos cards correspondem ao estoque real", () => {
   });
 });
 
+describe("PRINT-02b — painel calcula saldo, status e reposição dentro da área", () => {
+  it("não confunde estoque global com o saldo da área Impressoras", () => {
+    const supply = row({
+      currentStock: 100,
+      inArea: 20,
+      availableInArea: 15,
+      minimumStock: 18,
+      idealStock: 30,
+    });
+    expect(supply.currentStock).toBe(100);
+    expect(supply.inArea).toBe(20);
+    expect(supply.status).toBe("Baixo");
+    expect(supply.suggestedReorder).toBe(15);
+    expect(computeCardTotals([supply]).toners).toBe(20);
+  });
+});
+
 /* ═══ PRINT-03/04/05 — classificação por tipo ═══════════════════════════════ */
 
 describe("PRINT-03 — Toner agrupado corretamente", () => {
