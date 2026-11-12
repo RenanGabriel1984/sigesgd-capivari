@@ -432,10 +432,15 @@ describe("PRINT-UOM-12 — estoque global continua 3338 com divergência 0", () 
     expect(backend).toContain("invariantDivergences");
   });
 
-  it("qualquer mutation aborta em divergência inesperada", () => {
-    expect(backend).toContain("INTEGRIDADE: estoque global divergente antes da operação");
-    expect(backend).toContain("VIOLAÇÃO DE SALDO na retirada");
-    expect(backend).toContain("physicalDelta !== -args.quantity");
+  it("retiradas validam o saldo global, os lotes e os locais antes/depois", () => {
+    expect(backend).toContain("async function readSupplyAreaLedger");
+    expect(backend).toContain("diverge dos lotes");
+    expect(backend).toContain("diverge dos locais físicos");
+    expect(backend).toContain("Reservas por lote");
+    expect(backend).toContain("async function consumeSupplyLotsInArea");
+    expect(backend).toContain("async function changeSupplyLocationQuantity");
+    expect(backend).toContain("Falha na conferência posterior da retirada");
+    expect(backend).toContain("Falha na conferência posterior da retirada por família");
   });
 
   it("a conversa de estoque usa a MESMA unidade-base (4 livros-razão conferidos)", () => {
@@ -477,11 +482,13 @@ describe("PRINT-UOM-14 — nenhuma duplicação de estoque é criada", () => {
     expect(schema).not.toMatch(/defineTable\(\{[^}]*familyStock/);
   });
 
-  it("a abertura de caixa é REPARTIÇÃO, não geração: transferência de unidades entre registros", () => {
-    expect(backend).toContain("transferir as unidades");
-    // A abertura credita as unidades no produto avulso e consome as caixas.
-    expect(backend).toContain("const openedUnits = openPacks * conv.factor");
-    expect(backend).toContain("newLoosePhys = loosePhys + openedUnits");
+  it("a abertura de caixa é reclassificação rastreável, não criação de estoque duplicado", () => {
+    expect(backend).toContain("const openedUnits = openPacks * conversion.factor");
+    expect(backend).toContain("reclassifiedFromLotId: source.lotId");
+    expect(backend).toContain("await changeSupplyLocationQuantity");
+    expect(backend).toContain('type: "adjustment"');
+    expect(backend).toContain("quantityAvailable: reclassifiedQuantity");
+    expect(backend).toContain("Falha na conferência posterior da retirada por família");
   });
 
   it("a família deriva de stock/lotes reais (sem cache persistido de família)", () => {
