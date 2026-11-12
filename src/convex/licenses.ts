@@ -171,6 +171,14 @@ export const update = mutation({
     if (args.active !== undefined) updates.active = args.active;
 
     await ctx.db.patch(args.licenseId, updates);
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "license_update",
+      entity: "licenses",
+      entityId: args.licenseId,
+      details: `Licença "${license.productName}" atualizada. Campos: ${Object.keys(updates).filter((field) => field !== "updatedAt").join(", ")}.`,
+      timestamp: now,
+    });
 
     return args.licenseId;
   },
@@ -244,6 +252,15 @@ export const removeFromAsset = mutation({
 
     const now = Date.now();
     await ctx.db.patch(args.assignmentId, { removedAt: now });
+    const asset = await ctx.db.get(assignment.assetId);
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "license_unassign",
+      entity: "licenseAssignments",
+      entityId: args.assignmentId,
+      details: `Vínculo da licença ${assignment.licenseId} removido do equipamento ${asset?.patrimonyNumber ?? assignment.assetId}.`,
+      timestamp: now,
+    });
 
     return args.assignmentId;
   },
