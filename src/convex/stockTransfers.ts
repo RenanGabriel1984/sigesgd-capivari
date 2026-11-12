@@ -95,7 +95,21 @@ export const create = mutation({
     if (!globalStock) throw new Error("Registro global de estoque não encontrado.");
     const allReservations = await ctx.db.query("requestItemReservations")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+    if (!Number.isFinite(globalStock.physicalQuantity) ||
+        !Number.isFinite(globalStock.reservedQuantity) ||
+        globalStock.physicalQuantity < 0 || globalStock.reservedQuantity < 0 ||
+        globalStock.reservedQuantity > globalStock.physicalQuantity) {
+      throw new Error("O saldo global está inconsistente. Regularize antes de transferir.");
+    }
+    if (allReservations.some((item: any) =>
+      !Number.isFinite(item.quantityRemaining) || item.quantityRemaining < 0
+    )) {
+      throw new Error("Há reserva por lote com quantidade inválida. Regularize antes de transferir.");
+    }
     const areaReserved = allReservations.reduce((sum: number, item: any) => sum + item.quantityRemaining, 0);
+    if (areaReserved - globalStock.reservedQuantity > 1e-9) {
+      throw new Error("As reservas por lote excedem o saldo reservado global. Regularize antes de transferir.");
+    }
     const legacyReserved = Math.max(0, globalStock.reservedQuantity - areaReserved);
     if (legacyReserved > 0) {
       throw new Error("Há solicitações antigas aprovadas sem reserva por lote para este produto. Conclua ou cancele essas solicitações antes de transferir.");
@@ -162,6 +176,7 @@ export const create = mutation({
         throw new Error("Há reserva inválida ou sem lote correspondente. Transferência bloqueada.");
       }
       if (remaining > 0 && (
+        reservation.productId !== args.productId ||
         reservation.areaId !== lot.areaId ||
         reservation.locationId !== lot.locationId ||
         remaining > Number(lot.quantityAvailable)
