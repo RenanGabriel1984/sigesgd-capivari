@@ -133,6 +133,12 @@ describe("integração do tombamento com a entrada e o cadastro de ativos", () =
     expect(entriesBackend).toContain("asset.patrimonyNumber?.trim().toLocaleUpperCase");
   });
 
+  it("bloqueia tombamento quando a série já pertence a outro equipamento", () => {
+    expect(entriesBackend).toContain("const normalizedSerial = unit.serialNumber");
+    expect(entriesBackend).toContain("const serialOwner = assets.find");
+    expect(entriesBackend).toContain("O número de série desta unidade já consta em outro equipamento");
+  });
+
   it("disponibiliza o perfil específico no provisionamento de usuários", () => {
     expect(usersBackend).toContain('v.literal("patrimony_manager")');
     expect(usersBackend).toContain("export const createUser = mutation");
