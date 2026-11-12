@@ -1080,6 +1080,7 @@ const schema = defineSchema(
       timestamp: v.number(),
     }).index("by_user", ["userId"])
       .index("by_entity", ["entity"])
+      .index("by_entity_entityId", ["entity", "entityId"])
       .index("by_action", ["action"])
       .index("by_timestamp", ["timestamp"]),
   },
