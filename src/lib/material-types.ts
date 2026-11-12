@@ -87,28 +87,26 @@ export function validateEntryUnits(input: {
     if (units.length > 0) {
       return (
         `Material de consumo não possui unidades patrimoniais${label}. ` +
-        `Classifique a entrada como "Material permanente" para registrar patrimônios.`
+        `Classifique a entrada como "Material permanente" para registrar as unidades.`
       );
     }
     return null;
   }
 
+  if (!Number.isSafeInteger(input.quantity) || input.quantity <= 0) {
+    return `Material permanente${label}: a quantidade recebida deve ser um número inteiro positivo.`;
+  }
+
   if (units.length !== input.quantity) {
     return (
-      `Material permanente${label}: informe uma unidade patrimonial por unidade recebida. ` +
+      `Material permanente${label}: informe uma identificação provisória por unidade recebida. ` +
       `Recebido: ${input.quantity}, unidades registradas: ${units.length}.`
     );
   }
 
-  for (let i = 0; i < units.length; i++) {
-    const u = units[i];
-    const hasPatrimony = !!(u.patrimonyNumber && u.patrimonyNumber.trim());
-    if (!hasPatrimony) {
-      return (
-        `Material permanente${label}: a unidade ${i + 1} precisa do número de patrimônio.`
-      );
-    }
-  }
+  // O número oficial de patrimônio é atribuído pelo setor de Patrimônio após
+  // o recebimento. Serial e demais características também permanecem opcionais
+  // quando não estão disponíveis no ato da conferência.
   return null;
 }
 
