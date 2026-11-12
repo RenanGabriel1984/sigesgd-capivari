@@ -235,26 +235,26 @@ export function applyImplementationStockStamp(
 
 /** Próximo número de entrada calculado pelo maior sequencial existente. */
 export function nextEntryNumber(existingNumbers: string[], year: number): string {
-  const prefix = \`ENT-\${year}-\`;
+  const prefix = "ENT-" + year + "-";
   const max = existingNumbers.reduce((value, number) => {
     const match = String(number ?? "").match(/^ENT-\d{4}-(\d+)$/);
     if (!match || !number.startsWith(prefix)) return value;
     const sequence = Number(match[1]);
     return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
   }, 0);
-  return \`\${prefix}\${String(max + 1).padStart(6, "0")}\`;
+  return prefix + String(max + 1).padStart(6, "0");
 }
 
 /** Próximo número de lote calculado globalmente, não por produto. */
 export function nextLotNumber(existingNumbers: string[], year: number): string {
-  const prefix = \`LOT-\${year}-\`;
+  const prefix = "LOT-" + year + "-";
   const max = existingNumbers.reduce((value, number) => {
     const match = String(number ?? "").match(/^LOT-\d{4}-(\d+)$/);
     if (!match || !number.startsWith(prefix)) return value;
     const sequence = Number(match[1]);
     return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
   }, 0);
-  return \`\${prefix}\${String(max + 1).padStart(6, "0")}\`;
+  return prefix + String(max + 1).padStart(6, "0");
 }
 
 /**
