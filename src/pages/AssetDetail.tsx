@@ -77,8 +77,8 @@ export default function AssetDetailPage() {
     try {
       await assign({
         assetId: asset._id as Id<"assets">,
-        responsibleUserId: (assignUserId as Id<"users">) || undefined,
-        organizationId: (assignOrgId as Id<"organizations">) || undefined,
+        responsibleUserId: assignUserId ? assignUserId as Id<"users"> : null,
+        organizationId: assignOrgId ? assignOrgId as Id<"organizations"> : null,
         observation: assignObs || undefined,
       });
       toast.success("Atribuição atualizada");
