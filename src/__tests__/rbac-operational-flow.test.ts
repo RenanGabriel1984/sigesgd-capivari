@@ -66,7 +66,7 @@ describe("etapa 2 — diretor/gestor aprovado reserva estoque", () => {
 describe("etapa 3 — entrega baixa físico e libera reserva", () => {
   it("entrega exige requests.deliver + senha eletrônica", () => {
     const deliver = reqSrc.slice(reqSrc.indexOf("export const deliver"));
-    expect(deliver).toContain('requirePermission(ctx, "requests.deliver"');
+    expect(deliver).toContain('requireRequestAction(\n      ctx, "requests.deliver"');
     expect(deliver).toContain("verifyPassword");
   });
 
