@@ -116,7 +116,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   const handleConfirmReset = async () => {
     if (!resetCode.trim()) { toast.error("Informe o código"); return; }
-    if (!newPassword.trim() || newPassword.length < 6) { toast.error("A nova senha deve ter pelo menos 6 caracteres"); return; }
+    if (!newPassword.trim() || newPassword.length < 8) { toast.error("A nova senha deve ter pelo menos 8 caracteres"); return; }
     setForgotLoading(true);
     try {
       await confirmPasswordReset({
@@ -137,8 +137,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   };
 
   const handleFirstAccess = async () => {
-    if (!faNewPassword.trim() || faNewPassword.length < 6) {
-      toast.error("A nova senha deve ter pelo menos 6 caracteres");
+    if (!faNewPassword.trim() || faNewPassword.length < 8) {
+      toast.error("A nova senha deve ter pelo menos 8 caracteres");
       return;
     }
     if (faNewPassword !== faConfirmPassword) {
