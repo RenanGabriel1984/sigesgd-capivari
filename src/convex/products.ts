@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { tonerKitObservation } from "./stockHelpers";
+import { tonerKitObservation, generateNextEntryNumber, generateNextLotNumber } from "./stockHelpers";
+import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import { requirePermission } from "./rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
@@ -148,14 +149,6 @@ export const belowMinimum = query({
   },
 });
 
-/** Generate lot number: LOT-YYYY-NNNNNN (same pattern as entries/initial load) */
-async function generateLotNumber(ctx: any, productId: string): Promise<string> {
-  const year = new Date().getFullYear();
-  const existingLots = await ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect();
-  const seq = existingLots.length + 1;
-  return `LOT-${year}-${String(seq).padStart(6, "0")}`;
-}
-
 export const create = mutation({
   args: {
     name: v.string(), description: v.optional(v.string()), categoryId: v.id("categories"),
@@ -215,6 +208,12 @@ export const create = mutation({
       throw new Error("Estoque atual não pode ser negativo");
     }
     if (initialStock !== undefined && initialStock > 0) {
+      if (args.hasSerial) {
+        throw new Error("Produtos com número de série exigem cadastro individual dos equipamentos; não informe estoque inicial agregado.");
+      }
+      if (isDiscreteStockUnit(args.unitOfMeasure, args.hasSerial) && !Number.isSafeInteger(initialStock)) {
+        throw new Error(`A quantidade inicial deve ser inteira para a unidade ${args.unitOfMeasure}.`);
+      }
       if (!locationId) {
         throw new Error("Informe o local de armazenamento para registrar o estoque atual");
       }
@@ -254,10 +253,7 @@ export const create = mutation({
     let initialLotInfo = "";
     if (initialStock !== undefined && initialStock > 0 && locationId) {
       const now = Date.now();
-      const year = new Date().getFullYear();
-
-      const entrySeq = (await ctx.db.query("entries").collect()).length + 1;
-      const entryNumber = `ENT-${year}-${String(entrySeq).padStart(6, "0")}`;
+      const entryNumber = await generateNextEntryNumber(ctx);
       const entryId = await ctx.db.insert("entries", {
         entryNumber,
         receivedAt: now,
@@ -270,11 +266,14 @@ export const create = mutation({
         updatedAt: now,
       });
 
-      const lotNumber = await generateLotNumber(ctx, id);
+      const lotNumber = await generateNextLotNumber(ctx);
       const lotId = await ctx.db.insert("lots", {
         lotNumber,
         productId: id,
         entryId,
+        brand: args.brand,
+        model: args.model,
+        specification: args.specification,
         quantityReceived: initialStock,
         quantityAvailable: initialStock,
         receivedAt: now,
@@ -289,9 +288,13 @@ export const create = mutation({
         productId: id,
         quantity: initialStock,
         unitOfMeasure: args.unitOfMeasure,
+        brand: args.brand,
+        model: args.model,
+        specification: args.specification,
         lotId: lotId as string,
         locationId,
         areaId: initialAreaId,
+        observation: args.observation,
       });
 
       await ctx.db.insert("stockByLocation", {
