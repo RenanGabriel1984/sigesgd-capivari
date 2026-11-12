@@ -18,6 +18,8 @@ import {
 import { Plus, Monitor, Laptop, Server, Printer, Wifi, HardDrive, HelpCircle, Search, Phone, Warehouse } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/use-auth";
+import { getPermissions, type UserRole } from "@/types/constants";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   EQUIPMENT_CATEGORIES,
@@ -181,6 +183,9 @@ function AssetsSkeleton() {
 }
 
 export default function AssetsPage() {
+  const { user } = useAuth();
+  const permissions = getPermissions(user?.role as UserRole | undefined);
+  const canAssignOfficialPatrimony = permissions.canViewPatrimony;
   const [searchParams, setSearchParams] = useSearchParams();
   // A categoria vive NA URL: cada uma tem o próprio recorte e permanece na tela
   // mesmo quando não existe nenhum asset cadastrado.
@@ -253,7 +258,7 @@ export default function AssetsPage() {
     try {
       await createAsset({
         assetType: form.assetType,
-        patrimonyNumber: form.patrimonyNumber || undefined,
+        patrimonyNumber: canAssignOfficialPatrimony ? form.patrimonyNumber || undefined : undefined,
         serialNumber: form.serialNumber || undefined,
         manufacturer: form.manufacturer || undefined,
         model: form.model || undefined,
@@ -482,16 +487,23 @@ export default function AssetsPage() {
                   ))}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Nº Patrimônio</Label>
-                  <Input value={form.patrimonyNumber} onChange={(e) => setForm({ ...form, patrimonyNumber: e.target.value })} />
-                </div>
+              <div className={canAssignOfficialPatrimony ? "grid grid-cols-2 gap-3" : "grid grid-cols-1 gap-3"}>
+                {canAssignOfficialPatrimony && (
+                  <div>
+                    <Label>Nº Patrimônio oficial</Label>
+                    <Input value={form.patrimonyNumber} onChange={(e) => setForm({ ...form, patrimonyNumber: e.target.value })} />
+                  </div>
+                )}
                 <div>
                   <Label>Nº Série</Label>
                   <Input value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} />
                 </div>
               </div>
+              {!canAssignOfficialPatrimony && (
+                <p className="text-xs text-muted-foreground">
+                  O número oficial de patrimônio é atribuído pelo setor de Patrimônio após o recebimento.
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Fabricante</Label>
