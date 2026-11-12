@@ -1119,10 +1119,10 @@ export const listPendingPatrimony = query({
   args: {},
   handler: async (ctx) => {
     await requirePermission(ctx, "patrimony.view", { entity: "entryItemUnits" });
-    const units = await ctx.db.query("entryItemUnits").collect();
-    const pending = units.filter((unit: any) =>
-      !unit.patrimonyNumber?.trim() && unit.patrimonyRegistrationStatus !== "registered"
-    );
+    const pending = await ctx.db
+      .query("entryItemUnits")
+      .withIndex("by_registration_status", (q) => q.eq("patrimonyRegistrationStatus", "pending"))
+      .collect();
     const rows = await Promise.all(pending.map(async (unit: any) => {
       const entry: any = await ctx.db.get(unit.entryId);
       if (!entry || entry.status !== "confirmed") return null;
