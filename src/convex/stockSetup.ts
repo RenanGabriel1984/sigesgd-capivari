@@ -595,9 +595,14 @@ export const quickExit = mutation({
     if (!area || !area.active || !location || !location.active) {
       throw new Error("A área/subestoque e o local físico precisam estar ativos.");
     }
-    const stock = await ctx.db.query("stock")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).first();
-    if (!stock) throw new Error("Produto não possui registro de estoque");
+    const stockRows = await ctx.db.query("stock")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+    if (stockRows.length !== 1) {
+      throw new Error(stockRows.length === 0
+        ? "Produto não possui registro de estoque"
+        : "Há registros globais de estoque duplicados. Regularize antes da saída rápida.");
+    }
+    const stock = stockRows[0];
     if (!Number.isFinite(stock.physicalQuantity) || !Number.isFinite(stock.reservedQuantity) ||
         stock.physicalQuantity < 0 || stock.reservedQuantity < 0 ||
         stock.reservedQuantity > stock.physicalQuantity) {
