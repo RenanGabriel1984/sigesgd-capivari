@@ -32,6 +32,8 @@ import {
   resolveReturnLotGuard,
   buildUnresolvableLotMessage,
   shouldRestockReturnedMaterial,
+  validateExitLotLinks,
+  applyReturnToLot,
 } from "@/lib/returns-rules";
 
 import {
@@ -386,5 +388,34 @@ describe("Devoluções: somente material não utilizado recompõe o saldo utiliz
 
   it("não trata condição histórica ausente como prova de material novo", () => {
     expect(shouldRestockReturnedMaterial(undefined)).toBe(false);
+  });
+});
+
+
+describe("Devolução: restauração integral do lote", () => {
+  it("reativa um lote que estava zerado/inativo quando o material não utilizado retorna", () => {
+    expect(applyReturnToLot(0, 1)).toEqual({ quantityAvailable: 1, active: true });
+    expect(applyReturnToLot(14, 1)).toEqual({ quantityAvailable: 15, active: true });
+  });
+
+  it("rejeita trilha de saída com soma diferente da quantidade baixada", () => {
+    expect(validateExitLotLinks(5, [
+      { lotId: "lote-a", quantity: 2 },
+      { lotId: "lote-b", quantity: 2 },
+    ])).toMatch(/não corresponde/i);
+  });
+
+  it("rejeita vínculo duplicado de lote na mesma saída", () => {
+    expect(validateExitLotLinks(2, [
+      { lotId: "lote-a", quantity: 1 },
+      { lotId: "lote-a", quantity: 1 },
+    ])).toMatch(/duplicado/i);
+  });
+
+  it("aceita a trilha quando os lotes somam exatamente a saída", () => {
+    expect(validateExitLotLinks(5, [
+      { lotId: "lote-a", quantity: 2 },
+      { lotId: "lote-b", quantity: 3 },
+    ])).toBeNull();
   });
 });
