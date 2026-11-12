@@ -2,6 +2,7 @@ import { requirePermission } from "./rbac";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { maskLicenseKey } from "../lib/license-keys";
+import { licenseQuantityError, canAssignLicenseToAsset } from "../lib/license-quantity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -93,7 +94,8 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireAdmin(ctx);
-    if (args.quantity <= 0) throw new Error("Quantidade deve ser maior que zero");
+    const quantityError = licenseQuantityError(args.quantity);
+    if (quantityError) throw new Error(quantityError);
 
     const now = Date.now();
 
@@ -152,7 +154,8 @@ export const update = mutation({
     if (args.licenseType !== undefined) updates.licenseType = args.licenseType;
     if (args.key !== undefined) updates.key = args.key || undefined;
     if (args.quantity !== undefined) {
-      if (args.quantity <= 0) throw new Error("Quantidade deve ser maior que zero");
+      const quantityError = licenseQuantityError(args.quantity);
+      if (quantityError) throw new Error(quantityError);
       // Check that we don't reduce below active assignments
       const activeCount = await ctx.db
         .query("licenseAssignments")
@@ -198,6 +201,9 @@ export const assignToAsset = mutation({
 
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    if (!canAssignLicenseToAsset(asset.status)) {
+      throw new Error("Não é possível vincular licença a equipamento baixado ou extraviado.");
+    }
 
     // Check quantity limit
     const existingAssignments = await ctx.db

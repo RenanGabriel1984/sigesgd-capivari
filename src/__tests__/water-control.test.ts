@@ -5,6 +5,7 @@ import {
   validateWaterPeriodRange,
   validateWaterReceiptDate,
   isValidWaterTimestamp,
+  calculateWaterContainerBalance,
 } from "../lib/water-control";
 
 describe("controle de água mineral", () => {
@@ -60,5 +61,34 @@ describe("datas e intervalos do controle de água", () => {
     expect(isValidWaterTimestamp(start)).toBe(true);
     expect(isValidWaterTimestamp(-1)).toBe(false);
     expect(isValidWaterTimestamp(start + 0.5)).toBe(false);
+  });
+});
+
+
+describe("saldo físico dos galões cheios e vazios", () => {
+  it("concilia recebimentos, consumo e devolução de vazios ao fornecedor", () => {
+    const balance = calculateWaterContainerBalance(
+      [
+        { gallonsReceived: 12, emptyGallonsReturned: 0 },
+        { gallonsReceived: 6, emptyGallonsReturned: 2 },
+      ],
+      [
+        { fullDelta: -5, emptyDelta: 5 },
+        { fullDelta: 0, emptyDelta: -3 },
+      ],
+    );
+    expect(balance).toEqual({ fullGallons: 13, emptyGallons: 0 });
+  });
+
+  it("concilia ajustes positivos e negativos sem distorcer a fórmula", () => {
+    const balance = calculateWaterContainerBalance(
+      [{ gallonsReceived: 4, emptyGallonsReturned: 1 }],
+      [
+        { fullDelta: 2, emptyDelta: 1 },
+        { fullDelta: -1, emptyDelta: 1 },
+        { fullDelta: 0, emptyDelta: -1 },
+      ],
+    );
+    expect(balance).toEqual({ fullGallons: 5, emptyGallons: 0 });
   });
 });

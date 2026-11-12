@@ -6,6 +6,7 @@ import {
   validateWaterPeriodRange,
   validateWaterReceiptDate,
   isValidWaterTimestamp,
+  calculateWaterContainerBalance,
 } from "../lib/water-control";
 
 async function currentContainerBalance(ctx: any) {
@@ -13,14 +14,7 @@ async function currentContainerBalance(ctx: any) {
     ctx.db.query("waterReceipts").collect(),
     ctx.db.query("waterContainerMovements").collect(),
   ]);
-  return {
-    fullGallons:
-      receipts.reduce((sum: number, item: any) => sum + item.gallonsReceived, 0) +
-      movements.reduce((sum: number, item: any) => sum + item.fullDelta, 0),
-    emptyGallons:
-      movements.reduce((sum: number, item: any) => sum + item.emptyDelta, 0) -
-      receipts.reduce((sum: number, item: any) => sum + item.emptyGallonsReturned, 0),
-  };
+  return calculateWaterContainerBalance(receipts, movements);
 }
 
 async function writeAudit(ctx: any, userId: any, action: "create" | "update", entity: string, entityId: string, details: string) {

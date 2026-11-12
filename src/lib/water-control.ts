@@ -67,3 +67,29 @@ export function validateWaterReceiptDate(
 export function isValidWaterTimestamp(value: number): boolean {
   return Number.isSafeInteger(value) && value >= 0;
 }
+
+
+export interface WaterReceiptBalanceInput {
+  gallonsReceived: number;
+  emptyGallonsReturned: number;
+}
+
+export interface WaterMovementBalanceInput {
+  fullDelta: number;
+  emptyDelta: number;
+}
+
+/** Calcula o saldo de galões a partir dos recebimentos e movimentos físicos. */
+export function calculateWaterContainerBalance(
+  receipts: WaterReceiptBalanceInput[],
+  movements: WaterMovementBalanceInput[],
+): { fullGallons: number; emptyGallons: number } {
+  return {
+    fullGallons:
+      receipts.reduce((sum, receipt) => sum + receipt.gallonsReceived, 0) +
+      movements.reduce((sum, movement) => sum + movement.fullDelta, 0),
+    emptyGallons:
+      movements.reduce((sum, movement) => sum + movement.emptyDelta, 0) -
+      receipts.reduce((sum, receipt) => sum + receipt.emptyGallonsReturned, 0),
+  };
+}

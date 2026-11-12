@@ -39,6 +39,7 @@ import {
 import { UNIT_LABELS } from "@/types/constants";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { serializeSemicolonCsv } from "@/lib/csv-export";
 
 function LoadingSkeleton() {
   return (
@@ -65,103 +66,60 @@ function downloadCSV(filename: string, csvContent: string) {
 }
 
 function exportStockPositionCSV(data: any[]) {
-  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade";
-  const rows = data.map((r) =>
-    [
-      r.internalCode,
-      r.name,
-      r.categoryName,
-      r.brand ?? "",
-      r.model ?? "",
-      r.currentStock,
-      r.minimumStock,
-      r.idealStock,
-      r.maximumStock,
-      r.status,
-      UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure,
-    ].join(";")
-  );
-  downloadCSV("posicao_estoque.csv", [header, ...rows].join("\n"));
+  const header = ["Código", "Nome", "Categoria", "Marca", "Modelo", "Saldo Atual", "Mínimo", "Ideal", "Máximo", "Status", "Unidade"];
+  const rows = data.map((r) => [
+    r.internalCode, r.name, r.categoryName, r.brand ?? "", r.model ?? "",
+    r.currentStock, r.minimumStock, r.idealStock, r.maximumStock, r.status,
+    UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure,
+  ]);
+  downloadCSV("posicao_estoque.csv", serializeSemicolonCsv(header, rows));
 }
 
 function exportMovementCSV(data: any[]) {
-  const header = "Data;Tipo;Produto;Quantidade;Usuário;Fornecedor;Documento;Observação;Cancelada";
-  const rows = data.map((r) =>
-    [
-      new Date(r.timestamp).toLocaleString("pt-BR"),
-      r.type === "entry" ? "Entrada" : r.type === "exit" ? "Saída" : r.type,
-      r.productName,
-      r.quantity,
-      r.userName,
-      r.supplierTrade || r.supplierName,
-      r.documentNumber,
-      r.observation,
-      r.canceled ? "Sim" : "Não",
-    ].join(";")
-  );
-  downloadCSV("movimentacoes.csv", [header, ...rows].join("\n"));
+  const header = ["Data", "Tipo", "Produto", "Quantidade", "Usuário", "Fornecedor", "Documento", "Observação", "Cancelada"];
+  const rows = data.map((r) => [
+    new Date(r.timestamp).toLocaleString("pt-BR"),
+    r.type === "entry" ? "Entrada" : r.type === "exit" ? "Saída" : r.type,
+    r.productName, r.quantity, r.userName, r.supplierTrade || r.supplierName,
+    r.documentNumber, r.observation, r.canceled ? "Sim" : "Não",
+  ]);
+  downloadCSV("movimentacoes.csv", serializeSemicolonCsv(header, rows));
 }
 
 function exportConsumptionCSV(data: any[]) {
-  const header = "Data;Solicitante;Motivo;Itens;Qtd Total";
-  const rows = data.map((r) =>
-    [
-      new Date(r.deliveredAt).toLocaleString("pt-BR"),
-      r.requesterName,
-      r.reason,
-      r.items.map((i: any) => `${i.name} (${i.quantityDelivered})`).join(", "),
-      r.totalItems,
-    ].join(";")
-  );
-  downloadCSV("consumo_por_secretaria.csv", [header, ...rows].join("\n"));
+  const header = ["Data", "Solicitante", "Motivo", "Itens", "Qtd Total"];
+  const rows = data.map((r) => [
+    new Date(r.deliveredAt).toLocaleString("pt-BR"), r.requesterName, r.reason,
+    r.items.map((i: any) => `${i.name} (${i.quantityDelivered})`).join(", "), r.totalItems,
+  ]);
+  downloadCSV("consumo_por_secretaria.csv", serializeSemicolonCsv(header, rows));
 }
 
 function exportRequestsCSV(data: any[]) {
-  const header = "Nº;Data;Solicitante;Secretaria;Status;Itens;Qtd Total";
-  const rows = data.map((r) =>
-    [
-      r._id.slice(-6),
-      new Date(r.createdAt).toLocaleString("pt-BR"),
-      r.requesterName,
-      r.secretariaName,
-      r.status,
-      r.itemCount,
-      r.totalItems,
-    ].join(";")
-  );
-  downloadCSV("solicitacoes.csv", [header, ...rows].join("\n"));
+  const header = ["Nº", "Data", "Solicitante", "Secretaria", "Status", "Itens", "Qtd Total"];
+  const rows = data.map((r) => [
+    r._id.slice(-6), new Date(r.createdAt).toLocaleString("pt-BR"),
+    r.requesterName, r.secretariaName, r.status, r.itemCount, r.totalItems,
+  ]);
+  downloadCSV("solicitacoes.csv", serializeSemicolonCsv(header, rows));
 }
 
 function exportAssetsCSV(data: any[]) {
-  const header = "Patrimônio;Série;Tipo;Fabricante;Modelo;Usuário;Secretaria;Status";
-  const rows = data.map((a) =>
-    [
-      a.patrimonyNumber ?? "",
-      a.serialNumber ?? "",
-      a.assetType,
-      a.manufacturer ?? "",
-      a.model ?? "",
-      a.responsible?.name ?? "",
-      a.organization?.name ?? "",
-      a.status,
-    ].join(";")
-  );
-  downloadCSV("equipamentos.csv", [header, ...rows].join("\n"));
+  const header = ["Patrimônio", "Série", "Tipo", "Fabricante", "Modelo", "Usuário", "Secretaria", "Status"];
+  const rows = data.map((a) => [
+    a.patrimonyNumber ?? "", a.serialNumber ?? "", a.assetType, a.manufacturer ?? "",
+    a.model ?? "", a.responsible?.name ?? "", a.organization?.name ?? "", a.status,
+  ]);
+  downloadCSV("equipamentos.csv", serializeSemicolonCsv(header, rows));
 }
 
 function exportGomaqCSV(exchanges: any[]) {
-  const header = "Data;Nº;Produto;Qtd Entregue;Carcaças;Impressora";
-  const rows = exchanges.map((e) =>
-    [
-      new Date(e.exchangedAt).toLocaleDateString("pt-BR"),
-      e.exchangeNumber,
-      e.product?.name ?? "",
-      e.quantityDelivered,
-      e.quantityEmptyReceived,
-      e.printer?.name ?? "",
-    ].join(";")
-  );
-  downloadCSV("trocas_gomaq.csv", [header, ...rows].join("\n"));
+  const header = ["Data", "Nº", "Produto", "Qtd Entregue", "Carcaças", "Impressora"];
+  const rows = exchanges.map((e) => [
+    new Date(e.exchangedAt).toLocaleDateString("pt-BR"), e.exchangeNumber,
+    e.product?.name ?? "", e.quantityDelivered, e.quantityEmptyReceived, e.printer?.name ?? "",
+  ]);
+  downloadCSV("trocas_gomaq.csv", serializeSemicolonCsv(header, rows));
 }
 
 export default function Reports() {

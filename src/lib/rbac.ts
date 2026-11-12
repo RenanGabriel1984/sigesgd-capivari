@@ -194,6 +194,11 @@ const DIRECTOR_ACCESS: readonly AppPermission[] = [
   "stock.view",
   "products.view",
   "equipment.view",
+  // Relatórios exigem leitura da estrutura, impressoras e GomaQ.
+  // Diretor recebe somente consulta, sem permissões de gerenciamento.
+  "organizations.view",
+  "printers.view",
+  "gomaq.view",
   // Diretor CONSULTA a parametrização e a solicitação mensal, mas NÃO altera
   // parâmetros nem cria/gera documentos (decisão é de quem opera o estoque).
   "stock_parameters.view",
