@@ -245,7 +245,7 @@ export async function generateNextEntryNumber(ctx: any): Promise<string> {
     .withIndex("by_number", (q: any) => q.gte("entryNumber", prefix))
     .collect();
   const max = existing.reduce((value: number, entry: any) => {
-    const match = String(entry.entryNumber ?? "").match(/^ENT-\\d{4}-(\\d+)$/);
+    const match = String(entry.entryNumber ?? "").match(/^ENT-\d{4}-(\d+)$/);
     if (!match || !String(entry.entryNumber).startsWith(prefix)) return value;
     const sequence = Number(match[1]);
     return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
@@ -261,7 +261,7 @@ export async function generateNextLotNumber(ctx: any): Promise<string> {
     .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix))
     .collect();
   const max = existing.reduce((value: number, lot: any) => {
-    const match = String(lot.lotNumber ?? "").match(/^LOT-\\d{4}-(\\d+)$/);
+    const match = String(lot.lotNumber ?? "").match(/^LOT-\d{4}-(\d+)$/);
     if (!match || !String(lot.lotNumber).startsWith(prefix)) return value;
     const sequence = Number(match[1]);
     return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
