@@ -40,7 +40,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { getPermissions, ROLE_LABELS } from "@/types/constants";
 import { isNavItemActive } from "@/lib/nav-active";
@@ -195,6 +195,7 @@ const SidebarLink = memo(function SidebarLink({
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
+  const recordLogout = useMutation(api.passwords.recordLogout);
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -302,6 +303,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   })).filter((section) => section.items.length > 0);
 
   const handleSignOut = async () => {
+    try {
+      await recordLogout({});
+    } catch {
+      // Falha de auditoria não pode impedir o encerramento da sessão.
+      console.error("[SIGESGD] Não foi possível registrar o encerramento da sessão.");
+    }
     await signOut();
     navigate("/");
   };
