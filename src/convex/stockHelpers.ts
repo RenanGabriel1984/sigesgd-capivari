@@ -234,6 +234,42 @@ export function applyImplementationStockStamp(
 }
 
 /**
+ * Sequências globais compartilhadas: números ENT/LOT nunca dependem da
+ * quantidade de documentos de um produto e nunca reutilizam lacunas antigas.
+ */
+export async function generateNextEntryNumber(ctx: any): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `ENT-${year}-`;
+  const existing = await ctx.db
+    .query("entries")
+    .withIndex("by_number", (q: any) => q.gte("entryNumber", prefix))
+    .collect();
+  const max = existing.reduce((value: number, entry: any) => {
+    const match = String(entry.entryNumber ?? "").match(/^ENT-\\d{4}-(\\d+)$/);
+    if (!match || !String(entry.entryNumber).startsWith(prefix)) return value;
+    const sequence = Number(match[1]);
+    return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
+  }, 0);
+  return `${prefix}${String(max + 1).padStart(6, "0")}`;
+}
+
+export async function generateNextLotNumber(ctx: any): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `LOT-${year}-`;
+  const existing = await ctx.db
+    .query("lots")
+    .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix))
+    .collect();
+  const max = existing.reduce((value: number, lot: any) => {
+    const match = String(lot.lotNumber ?? "").match(/^LOT-\\d{4}-(\\d+)$/);
+    if (!match || !String(lot.lotNumber).startsWith(prefix)) return value;
+    const sequence = Number(match[1]);
+    return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
+  }, 0);
+  return `${prefix}${String(max + 1).padStart(6, "0")}`;
+}
+
+/**
  * Gestão de Estoque SGGD — Numerador sequencial de SAÍDAS: SAI-ANO-SEQUENCIAL.
  * Puro em relação ao formato (número derivado da lista existente).
  * Nunca altera dados — apenas calcula.
