@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseWaterMoneyToCents, splitWaterCostCents } from "../lib/water-control";
+import {
+  parseWaterMoneyToCents,
+  splitWaterCostCents,
+  validateWaterPeriodRange,
+  validateWaterReceiptDate,
+  isValidWaterTimestamp,
+} from "../lib/water-control";
 
 describe("controle de água mineral", () => {
   it("divide o total em centavos sem perder ou criar valores", () => {
@@ -26,5 +32,33 @@ describe("controle de água mineral", () => {
     expect(parseWaterMoneyToCents("12.50")).toBe(1250);
     expect(parseWaterMoneyToCents("-1,00")).toBeNull();
     expect(parseWaterMoneyToCents("abc")).toBeNull();
+  });
+});
+
+
+describe("datas e intervalos do controle de água", () => {
+  const start = new Date(2026, 10, 1, 12).getTime();
+  const end = new Date(2026, 10, 30, 12).getTime();
+
+  it("aceita período cronológico com timestamps válidos", () => {
+    expect(validateWaterPeriodRange(start, end)).toBeNull();
+  });
+
+  it("rejeita datas inválidas e fim anterior ao início", () => {
+    expect(validateWaterPeriodRange(Number.NaN, end)).toMatch(/datas/i);
+    expect(validateWaterPeriodRange(end, start)).toMatch(/final/i);
+  });
+
+  it("só aceita recebimento dentro do período informado", () => {
+    expect(validateWaterReceiptDate(start, start, end)).toBeNull();
+    expect(validateWaterReceiptDate(end, start, end)).toBeNull();
+    expect(validateWaterReceiptDate(start - 1, start, end)).toMatch(/dentro do período/i);
+    expect(validateWaterReceiptDate(end + 1, start, end)).toMatch(/dentro do período/i);
+  });
+
+  it("rejeita timestamps negativos ou fracionados em movimentações/pagamentos", () => {
+    expect(isValidWaterTimestamp(start)).toBe(true);
+    expect(isValidWaterTimestamp(-1)).toBe(false);
+    expect(isValidWaterTimestamp(start + 0.5)).toBe(false);
   });
 });
