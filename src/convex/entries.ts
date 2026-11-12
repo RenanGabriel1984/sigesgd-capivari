@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { validateEntryUnits } from "../lib/material-types";
+import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import {
   duplicateInvoiceMessage,
   entryInvoiceFingerprint,
@@ -426,6 +427,43 @@ export const confirm = mutation({
       }
     }
     for (const item of items) {
+      if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+        throw new Error(`Quantidade inválida para o item ${item.productId}.`);
+      }
+      const product: any = await ctx.db.get(item.productId);
+      if (!product || !product.active) {
+        throw new Error(`Produto ${product?.name ?? item.productId} não encontrado ou inativo.`);
+      }
+      if (product.hasSerial && entry.materialType !== "permanent") {
+        throw new Error(`"${product.name}" exige controle individual por série/patrimônio. Classifique a entrada como material permanente e informe as unidades.`);
+      }
+      if (entry.materialType !== "permanent" &&
+          isDiscreteStockUnit(item.unitOfMeasure, product.hasSerial) &&
+          !Number.isSafeInteger(item.quantity)) {
+        throw new Error(`A quantidade de "${product.name}" deve ser inteira para a unidade ${item.unitOfMeasure}.`);
+      }
+
+      const [globalRows, locationRows] = await Promise.all([
+        ctx.db.query("stock")
+          .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+          .collect(),
+        ctx.db.query("stockByLocation")
+          .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+          .collect(),
+      ]);
+      if (globalRows.length > 1) {
+        throw new Error(`"${product.name}" possui registros globais de estoque duplicados. Regularize antes de confirmar a entrada.`);
+      }
+      const global = globalRows[0];
+      if (global && (
+        !Number.isFinite(global.physicalQuantity) ||
+        !Number.isFinite(global.reservedQuantity) ||
+        global.physicalQuantity < 0 || global.reservedQuantity < 0 ||
+        global.reservedQuantity > global.physicalQuantity
+      )) {
+        throw new Error(`O saldo global de "${product.name}" está inconsistente. Entrada bloqueada.`);
+      }
+
       const effectiveAreaId = item.areaId ?? entry.areaId;
       itemAreas.set(item._id as string, effectiveAreaId as string | undefined);
       if (effectiveAreaId) {
@@ -442,6 +480,19 @@ export const confirm = mutation({
       const location = await ctx.db.get(item.locationId);
       if (!location || !location.active) {
         throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
+      }
+      const locationRows = await ctx.db.query("stockByLocation")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+        .collect();
+      const sameScope = locationRows.filter((row: any) =>
+        row.locationId === item.locationId &&
+        (row.areaId ?? undefined) === (effectiveAreaId ?? undefined)
+      );
+      if (sameScope.length > 1) {
+        throw new Error("Há saldos físicos duplicados para o produto na mesma área/local. Regularize antes de confirmar a entrada.");
+      }
+      if (sameScope[0] && (!Number.isFinite(sameScope[0].quantity) || sameScope[0].quantity < 0)) {
+        throw new Error("O saldo físico da área/local está inválido. Regularize antes de confirmar a entrada.");
       }
     }
     const now = Date.now();
