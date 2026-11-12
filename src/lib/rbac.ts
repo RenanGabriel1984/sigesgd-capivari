@@ -218,7 +218,6 @@ const DIRECTOR_ACCESS: readonly AppPermission[] = [
 ];
 
 const PATRIMONY_MANAGER_ACCESS: readonly AppPermission[] = [
-  "dashboard.view",
   "patrimony.view",
   "patrimony.assign",
   "settings.view",
