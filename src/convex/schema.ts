@@ -325,7 +325,8 @@ const schema = defineSchema(
       .index("by_active", ["active"])
       .index("by_code", ["internalCode"])
       .index("by_ean", ["ean"])
-      .index("by_name", ["name"]),
+      .index("by_name", ["name"])
+      .index("by_photo", ["photo"]),
 
     // ── Stock (per product) ──
     stock: defineTable({
@@ -576,7 +577,9 @@ const schema = defineSchema(
       .index("by_number", ["entryNumber"])
       .index("by_date", ["receivedAt"])
       .index("by_access_key", ["accessKey"])
-      .index("by_invoice_fingerprint", ["invoiceFingerprint"]),
+      .index("by_invoice_fingerprint", ["invoiceFingerprint"])
+      .index("by_documentStorageId", ["documentStorageId"])
+      .index("by_xmlStorageId", ["xmlStorageId"]),
 
     // ── Entry Items (Itens da Entrada) ──
     entryItems: defineTable({
@@ -606,7 +609,8 @@ const schema = defineSchema(
       matchScore: v.optional(v.number()),
       associationType: v.optional(v.string()),
     }).index("by_entry", ["entryId"])
-      .index("by_product", ["productId"]),
+      .index("by_product", ["productId"])
+      .index("by_photoStorageId", ["photoStorageId"]),
 
     // ── Lots (Lotes de Entrada) ──
     lots: defineTable({
@@ -637,7 +641,8 @@ const schema = defineSchema(
       .index("by_entry", ["entryId"])
       .index("by_location", ["locationId"])
       .index("by_number", ["lotNumber"])
-      .index("by_active", ["active"]),
+      .index("by_active", ["active"])
+      .index("by_photoStorageId", ["photoStorageId"]),
 
     // ── Storage Locations (Locais de Armazenamento) ──
     storageLocations: defineTable({
@@ -873,7 +878,8 @@ const schema = defineSchema(
       observation: v.optional(v.string()),
       documentStorageId: v.optional(v.string()),
       totalCartridges: v.number(),
-    }).index("by_date", ["collectedAt"]),
+    }).index("by_date", ["collectedAt"])
+      .index("by_documentStorageId", ["documentStorageId"]),
 
     // ── Assets (Equipamentos Patrimoniais) ──
     assets: defineTable({

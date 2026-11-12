@@ -86,17 +86,41 @@ async function resolveStorageOwners(
 
   if (idsNeedingLegacyLookup.length === 0) return ownersById;
 
-  const wanted = new Set(idsNeedingLegacyLookup);
-  const [entries, entryItems, products, lots, collections] = await Promise.all([
-    ctx.db.query("entries").collect(),
-    ctx.db.query("entryItems").collect(),
-    ctx.db.query("products").collect(),
-    ctx.db.query("lots").collect(),
-    ctx.db.query("gomaQCollections").collect(),
-  ]);
+  const [entryDocuments, entryXml, itemPhotos, productPhotos, lotPhotos, collectionDocuments] =
+    await Promise.all([
+      Promise.all(idsNeedingLegacyLookup.map((storageId) =>
+        ctx.db.query("entries")
+          .withIndex("by_documentStorageId", (q: any) => q.eq("documentStorageId", storageId))
+          .collect(),
+      )),
+      Promise.all(idsNeedingLegacyLookup.map((storageId) =>
+        ctx.db.query("entries")
+          .withIndex("by_xmlStorageId", (q: any) => q.eq("xmlStorageId", storageId))
+          .collect(),
+      )),
+      Promise.all(idsNeedingLegacyLookup.map((storageId) =>
+        ctx.db.query("entryItems")
+          .withIndex("by_photoStorageId", (q: any) => q.eq("photoStorageId", storageId))
+          .collect(),
+      )),
+      Promise.all(idsNeedingLegacyLookup.map((storageId) =>
+        ctx.db.query("products")
+          .withIndex("by_photo", (q: any) => q.eq("photo", storageId))
+          .collect(),
+      )),
+      Promise.all(idsNeedingLegacyLookup.map((storageId) =>
+        ctx.db.query("lots")
+          .withIndex("by_photoStorageId", (q: any) => q.eq("photoStorageId", storageId))
+          .collect(),
+      )),
+      Promise.all(idsNeedingLegacyLookup.map((storageId) =>
+        ctx.db.query("gomaQCollections")
+          .withIndex("by_documentStorageId", (q: any) => q.eq("documentStorageId", storageId))
+          .collect(),
+      )),
+    ]);
 
-  const addLegacy = (storageId: unknown, ownerType: StorageOwnerType, ownerId: string) => {
-    if (typeof storageId !== "string" || !wanted.has(storageId)) return;
+  const addLegacy = (storageId: string, ownerType: StorageOwnerType, ownerId: string) => {
     const rows = ownersById.get(storageId) ?? [];
     if (!rows.some((row) => row.ownerType === ownerType && row.ownerId === ownerId)) {
       rows.push({ ownerType, ownerId });
@@ -104,21 +128,26 @@ async function resolveStorageOwners(
     }
   };
 
-  for (const entry of entries as any[]) {
-    addLegacy(entry.documentStorageId, "entry", String(entry._id));
-    addLegacy(entry.xmlStorageId, "entry", String(entry._id));
-  }
-  for (const item of entryItems as any[]) {
-    addLegacy(item.photoStorageId, "entryItem", String(item._id));
-  }
-  for (const product of products as any[]) {
-    addLegacy(product.photo, "product", String(product._id));
-  }
-  for (const lot of lots as any[]) {
-    addLegacy(lot.photoStorageId, "lot", String(lot._id));
-  }
-  for (const collection of collections as any[]) {
-    addLegacy(collection.documentStorageId, "gomaqCollection", String(collection._id));
+  for (let index = 0; index < idsNeedingLegacyLookup.length; index++) {
+    const storageId = idsNeedingLegacyLookup[index];
+    for (const entry of entryDocuments[index] as any[]) {
+      addLegacy(storageId, "entry", String(entry._id));
+    }
+    for (const entry of entryXml[index] as any[]) {
+      addLegacy(storageId, "entry", String(entry._id));
+    }
+    for (const item of itemPhotos[index] as any[]) {
+      addLegacy(storageId, "entryItem", String(item._id));
+    }
+    for (const product of productPhotos[index] as any[]) {
+      addLegacy(storageId, "product", String(product._id));
+    }
+    for (const lot of lotPhotos[index] as any[]) {
+      addLegacy(storageId, "lot", String(lot._id));
+    }
+    for (const collection of collectionDocuments[index] as any[]) {
+      addLegacy(storageId, "gomaqCollection", String(collection._id));
+    }
   }
 
   return ownersById;
