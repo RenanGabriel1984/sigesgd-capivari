@@ -28,12 +28,14 @@ import { RotateCcw, PackageCheck, ArrowRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
+import { roleHasPermission } from "@/lib/rbac";
 import {
   RETURN_CONDITION_VALUES,
   RETURN_CONDITION_LABELS,
   validateReturnQuantity,
   returnableQuantity,
   formatExitLabel,
+  shouldRestockReturnedMaterial,
   type ReturnCondition,
 } from "@/lib/returns-rules";
 
@@ -134,7 +136,9 @@ export default function ReturnsPage() {
         observation: observation || undefined,
       });
       toast.success(
-        `Devolução de ${quantity} unidade(s) registrada — estoque recomposto`
+        shouldRestockReturnedMaterial(condition)
+          ? `Devolução de ${quantity} unidade(s) registrada e reintegrada ao estoque`
+          : `Devolução de ${quantity} unidade(s) recebida para avaliação; saldo disponível preservado`
       );
       setSelectedExitId("");
       setSearchParams({}, { replace: true });
@@ -163,7 +167,7 @@ export default function ReturnsPage() {
     setObservation("");
   };
 
-  const canProcess = user?.role === "admin" || user?.role === "stock_manager";
+  const canProcess = roleHasPermission(user?.role, "returns.create");
 
   if (exits === undefined || returns === undefined) return <LoadingSkeleton />;
 
@@ -274,6 +278,7 @@ export default function ReturnsPage() {
                       <TableHead>Produto</TableHead>
                       <TableHead className="text-center">Qtd</TableHead>
                       <TableHead>Condição</TableHead>
+                      <TableHead>Destino</TableHead>
                       <TableHead>Motivo</TableHead>
                       <TableHead>Devolvido por</TableHead>
                       <TableHead>Recebido por</TableHead>
@@ -298,6 +303,11 @@ export default function ReturnsPage() {
                           {r.condition
                             ? RETURN_CONDITION_LABELS[r.condition as ReturnCondition]
                             : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={(r.restocked ?? true) ? "default" : "secondary"}>
+                            {(r.restocked ?? true) ? "No estoque" : "Em avaliação"}
+                          </Badge>
                         </TableCell>
                         <TableCell className="text-sm max-w-[200px] truncate">
                           {r.reason}
@@ -396,6 +406,12 @@ export default function ReturnsPage() {
                       </option>
                     ))}
                   </select>
+                  {!shouldRestockReturnedMaterial(condition) && (
+                    <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      Este material será registrado para avaliação e não retornará ao saldo disponível,
+                      aos lotes utilizáveis ou às solicitações até uma regularização própria.
+                    </p>
+                  )}
                 </div>
 
                 <div>
