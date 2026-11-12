@@ -78,6 +78,7 @@ export function validateEntryUnits(input: {
   quantity: number;
   units: PatrimonyUnitDraft[];
   productName?: string;
+  requireSerial?: boolean;
 }): string | null {
   const label = input.productName ? ` (${input.productName})` : "";
   const units = input.units ?? [];
@@ -103,9 +104,16 @@ export function validateEntryUnits(input: {
     );
   }
 
+  if (input.requireSerial) {
+    for (let index = 0; index < units.length; index++) {
+      if (!units[index].serialNumber?.trim()) {
+        return `Material permanente${label}: a unidade ${index + 1} exige número de série no recebimento.`;
+      }
+    }
+  }
+
   // O número oficial de patrimônio é atribuído pelo setor de Patrimônio após
-  // o recebimento. Serial e demais características também permanecem opcionais
-  // quando não estão disponíveis no ato da conferência.
+  // o recebimento. Quando o produto exige série, ela é registrada no ato.
   return null;
 }
 
