@@ -67,6 +67,34 @@ export const get = query({
 
 // ─── Mutations ───────────────────────────────────────────────────────────────
 
+async function generateInventoryAdjustmentEntryNumber(ctx: any): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `ENT-${year}-`;
+  const existing = await ctx.db.query("entries")
+    .withIndex("by_number", (q: any) => q.gte("entryNumber", prefix)).collect();
+  const max = existing.reduce((value: number, entry: any) => {
+    const match = /^ENT-\\d{4}-(\\d+)$/.exec(entry.entryNumber);
+    if (!match || !entry.entryNumber.startsWith(prefix)) return value;
+    const n = Number(match[1]);
+    return Number.isSafeInteger(n) && n > value ? n : value;
+  }, 0);
+  return `${prefix}${String(max + 1).padStart(6, "0")}`;
+}
+
+async function generateInventoryAdjustmentLotNumber(ctx: any): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `LOT-${year}-`;
+  const existing = await ctx.db.query("lots")
+    .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix)).collect();
+  const max = existing.reduce((value: number, lot: any) => {
+    const match = /^LOT-\\d{4}-(\\d+)$/.exec(lot.lotNumber);
+    if (!match || !lot.lotNumber.startsWith(prefix)) return value;
+    const n = Number(match[1]);
+    return Number.isSafeInteger(n) && n > value ? n : value;
+  }, 0);
+  return `${prefix}${String(max + 1).padStart(6, "0")}`;
+}
+
 /** Create a new inventory in DRAFT status. Populates counts with all active products. */
 export const create = mutation({
   args: {
@@ -241,8 +269,6 @@ export const startReview = mutation({
 export const close = mutation({
   args: {
     inventoryId: v.id("inventories"),
-    // Justificativa obrigatória: qualquer ajuste de saldo precisa de motivo
-    // auditável — nunca alterar saldo silenciosamente.
     justification: v.string(),
   },
   handler: async (ctx, args) => {
@@ -253,9 +279,7 @@ export const close = mutation({
     }
 
     const justification = (args.justification ?? "").trim();
-    if (!justification) {
-      throw new Error("A justificativa do fechamento é obrigatória (ajuste de saldo auditável)");
-    }
+    if (!justification) throw new Error("A justificativa do fechamento é obrigatória (ajuste de saldo auditável)");
 
     const inv = await ctx.db.get(args.inventoryId);
     if (!inv) throw new Error("Inventário não encontrado");
@@ -264,41 +288,228 @@ export const close = mutation({
       throw new Error("Este inventário foi criado antes do escopo por área. Cancele-o e abra outro selecionando área e local físico.");
     }
 
-    const counts = await ctx.db.query("inventoryCounts").withIndex("by_inventory", (q: any) => q.eq("inventoryId", args.inventoryId)).collect();
-    const countsWithDiff = counts.filter((c) => c.difference !== null && c.difference !== undefined && c.difference !== 0);
+    const counts = await ctx.db.query("inventoryCounts")
+      .withIndex("by_inventory", (q: any) => q.eq("inventoryId", args.inventoryId)).collect();
+    const changedCounts = counts.filter((count: any) =>
+      count.countedQuantity !== undefined &&
+      count.countedQuantity !== null &&
+      Number(count.countedQuantity) !== Number(count.systemQuantity),
+    );
     const now = Date.now();
     const locationScope = inv.locationId ? await ctx.db.get(inv.locationId) : null;
+    if (inv.locationId && (!locationScope || !locationScope.active)) {
+      throw new Error("O local físico deste inventário não existe ou está inativo.");
+    }
     const scopeSuffix = locationScope ? ` no local "${locationScope.name}"` : "";
-
     const adjustmentDetails: string[] = [];
 
-    for (const count of countsWithDiff) {
-      const countProduct = await ctx.db.get(count.productId);
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).first();
-      const counted = count.countedQuantity ?? 0;
-      const prevPhysical = stock?.physicalQuantity ?? 0;
-      const reserved = stock?.reservedQuantity ?? 0;
+    for (const count of changedCounts as any[]) {
+      const product: any = await ctx.db.get(count.productId);
+      if (!product) throw new Error("Produto do inventário não encontrado.");
+      const counted = Number(count.countedQuantity);
+      const snapshot = Number(count.systemQuantity);
+      if (!Number.isFinite(counted) || counted < 0 || !Number.isFinite(snapshot) || snapshot < 0) {
+        throw new Error(`Contagem inválida para "${product.name}".`);
+      }
+      const delta = counted - snapshot;
+      if (Math.abs(Number(count.difference ?? 0) - delta) > 1e-9) {
+        throw new Error(`A contagem de "${product.name}" mudou após o cálculo da diferença. Salve a contagem novamente antes de fechar.`);
+      }
 
-      let newPhysical: number;
+      const [stock, lots, locationRows, reservations] = await Promise.all([
+        ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).first(),
+        ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect(),
+        ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect(),
+        ctx.db.query("requestItemReservations").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect(),
+      ]);
+
+      const previousPhysical = Number(stock?.physicalQuantity ?? 0);
+      const previousReserved = Number(stock?.reservedQuantity ?? 0);
+      const lotTotal = lots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+      if (Math.abs(lotTotal - previousPhysical) > 1e-9) {
+        throw new Error(`Integridade de "${product.name}": saldo global (${previousPhysical}) diverge dos lotes (${lotTotal}). Regularize antes de fechar o inventário.`);
+      }
+
+      const reservationTotal = reservations.reduce((sum: number, reservation: any) => {
+        const remaining = Number(reservation.quantityRemaining);
+        if (!Number.isFinite(remaining) || remaining < 0) {
+          throw new Error(`Há reserva inválida para "${product.name}".`);
+        }
+        return sum + remaining;
+      }, 0);
+      if (Math.abs(reservationTotal - previousReserved) > 1e-9) {
+        throw new Error(`As reservas por lote de "${product.name}" divergem do saldo reservado global. Regularize as solicitações antes do inventário.`);
+      }
+
+      // Confere a representação por área/local antes de permitir qualquer ajuste.
+      const rowGroups = new Map<string, any[]>();
+      for (const row of locationRows as any[]) {
+        const key = `${String(row.areaId ?? "")}|${String(row.locationId)}`;
+        const group = rowGroups.get(key) ?? [];
+        group.push(row);
+        rowGroups.set(key, group);
+      }
+      for (const [key, rows] of rowGroups) {
+        if (rows.length !== 1) {
+          throw new Error(`Há saldos duplicados de "${product.name}" para uma combinação de área/local (${key}). Regularize antes do inventário.`);
+        }
+      }
+      const lotsByScope = new Map<string, number>();
+      for (const lot of lots as any[]) {
+        if (!lot.locationId) continue;
+        const key = `${String(lot.areaId ?? "")}|${String(lot.locationId)}`;
+        lotsByScope.set(key, (lotsByScope.get(key) ?? 0) + Number(lot.quantityAvailable));
+      }
+      for (const [key, rows] of rowGroups) {
+        const expected = lotsByScope.get(key) ?? 0;
+        if (Math.abs(Number(rows[0].quantity) - expected) > 1e-9) {
+          throw new Error(`Integridade de "${product.name}" no local (${key}): saldo físico (${rows[0].quantity}) diverge dos lotes (${expected}). Regularize antes do inventário.`);
+        }
+      }
+      for (const [key, quantity] of lotsByScope) {
+        if (quantity > 1e-9 && !rowGroups.has(key)) {
+          throw new Error(`Há lotes de "${product.name}" sem saldo por local físico (${key}). Regularize antes do inventário.`);
+        }
+      }
+
+      const reservedByLot = new Map<string, number>();
+      for (const reservation of reservations as any[]) {
+        const key = String(reservation.lotId);
+        reservedByLot.set(key, (reservedByLot.get(key) ?? 0) + Number(reservation.quantityRemaining));
+      }
+
+      let targetLocationStock: any = null;
+      let eligibleLots = lots as any[];
+      let reservedInScope = previousReserved;
+      if (inv.locationId) {
+        const targetRows = locationRows.filter((row: any) =>
+          row.locationId === inv.locationId && row.areaId === inv.areaId
+        );
+        if (targetRows.length > 1) throw new Error("Há linhas duplicadas de saldo para o produto/área/local.");
+        targetLocationStock = targetRows[0] ?? null;
+        const currentScope = Number(targetLocationStock?.quantity ?? 0);
+        if (Math.abs(currentScope - snapshot) > 1e-9) {
+          throw new Error(`O saldo de "${product.name}" no local mudou depois da abertura do inventário. Atualize o inventário antes de fechar.`);
+        }
+        eligibleLots = (lots as any[]).filter((lot: any) =>
+          lot.areaId === inv.areaId && lot.locationId === inv.locationId
+        );
+        const scopeTotal = eligibleLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+        if (Math.abs(scopeTotal - currentScope) > 1e-9) {
+          throw new Error(`Lotes de "${product.name}" não conferem com o saldo da área/local selecionado.`);
+        }
+        reservedInScope = (reservations as any[])
+          .filter((reservation: any) => reservation.areaId === inv.areaId && reservation.locationId === inv.locationId)
+          .reduce((sum: number, reservation: any) => sum + Number(reservation.quantityRemaining), 0);
+        if (counted < reservedInScope) {
+          throw new Error(`A contagem de "${product.name}" (${counted}) ficaria abaixo das ${reservedInScope} unidade(s) reservada(s) nesta área/local.`);
+        }
+      } else {
+        if (Math.abs(previousPhysical - snapshot) > 1e-9) {
+          throw new Error(`O saldo global de "${product.name}" mudou depois da abertura do inventário. Atualize o inventário antes de fechar.`);
+        }
+        if (counted < previousReserved) {
+          throw new Error(`A contagem de "${product.name}" ficaria abaixo das ${previousReserved} unidade(s) reservada(s).`);
+        }
+        // Inventário geral não consegue atribuir reservas legadas sem trilha por lote.
+        if (Math.abs(reservationTotal - previousReserved) > 1e-9) {
+          throw new Error(`Há reservas sem rastreabilidade por lote para "${product.name}".`);
+        }
+      }
+
+      const plannedReductions: Array<{ lot: any; quantity: number }> = [];
+      if (delta < 0) {
+        let remaining = -delta;
+        const candidates = eligibleLots
+          .filter((lot: any) => lot.active !== false && Number(lot.quantityAvailable) > 0)
+          .sort((a: any, b: any) => a.receivedAt - b.receivedAt || a.lotNumber.localeCompare(b.lotNumber));
+        for (const lot of candidates) {
+          if (remaining <= 1e-9) break;
+          const reserved = reservedByLot.get(String(lot._id)) ?? 0;
+          const free = Number(lot.quantityAvailable) - reserved;
+          if (free <= 1e-9) continue;
+          const reduction = Math.min(free, remaining);
+          plannedReductions.push({ lot, quantity: reduction });
+          remaining -= reduction;
+        }
+        if (remaining > 1e-9) {
+          throw new Error(`A diferença negativa de "${product.name}" excede os lotes livres, desconsiderando as reservas.`);
+        }
+      }
+
+      const newPhysical = previousPhysical + delta;
+      if (newPhysical < previousReserved) {
+        throw new Error(`Ajuste de "${product.name}" deixaria o estoque abaixo das unidades reservadas.`);
+      }
+
+      // A diferença positiva gera um lote próprio de ajuste. A diferença negativa
+      // é distribuída entre lotes livres FIFO, mantendo a origem de cada redução.
+      let adjustmentEntryId: any = undefined;
+      let adjustmentLotId: any = undefined;
+      if (delta > 0) {
+        const entryNumber = await generateInventoryAdjustmentEntryNumber(ctx);
+        adjustmentEntryId = await ctx.db.insert("entries", {
+          entryNumber,
+          receivedAt: now,
+          originType: "other",
+          responsibleUserId: userId,
+          observation: `Ajuste positivo de inventário ${inv.inventoryNumber}. ${justification}`,
+          areaId: inv.locationId ? inv.areaId : undefined,
+          status: "confirmed",
+          createdAt: now,
+          updatedAt: now,
+        });
+        const lotNumber = await generateInventoryAdjustmentLotNumber(ctx);
+        adjustmentLotId = await ctx.db.insert("lots", {
+          lotNumber,
+          productId: count.productId,
+          entryId: adjustmentEntryId,
+          brand: product.brand ?? undefined,
+          model: product.model ?? undefined,
+          specification: product.specification ?? undefined,
+          quantityReceived: delta,
+          quantityAvailable: delta,
+          receivedAt: now,
+          active: true,
+          materialType: lots.find((lot: any) => lot.materialType)?.materialType,
+          areaId: inv.locationId ? inv.areaId : undefined,
+          locationId: inv.locationId ?? undefined,
+          observation: `Ajuste positivo do inventário ${inv.inventoryNumber}. ${justification}`,
+        });
+        const itemId = await ctx.db.insert("entryItems", {
+          entryId: adjustmentEntryId,
+          productId: count.productId,
+          quantity: delta,
+          unitOfMeasure: product.unitOfMeasure,
+          brand: product.brand ?? undefined,
+          model: product.model ?? undefined,
+          specification: product.specification ?? undefined,
+          lotId: adjustmentLotId as string,
+          areaId: inv.locationId ? inv.areaId : undefined,
+          locationId: inv.locationId ?? undefined,
+          observation: `Ajuste positivo do inventário ${inv.inventoryNumber}. ${justification}`,
+        });
+        await ctx.db.insert("auditLogs", {
+          userId, action: "confirm_entry", entity: "entries", entityId: adjustmentEntryId,
+          details: `Entrada de ajuste ${entryNumber} criada pelo inventário ${inv.inventoryNumber} para "${product.name}" (+${delta}).`,
+          timestamp: now,
+        });
+        void itemId;
+      }
+
+      if (delta < 0) {
+        for (const reduction of plannedReductions) {
+          const nextQuantity = Number(reduction.lot.quantityAvailable) - reduction.quantity;
+          await ctx.db.patch(reduction.lot._id, {
+            quantityAvailable: nextQuantity,
+            active: nextQuantity > 0,
+          });
+        }
+      }
 
       if (inv.locationId) {
-        // O bucket é identificado por produto + área + local físico.
-        const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
-        const matchingRows = sbls.filter((s: any) => s.locationId === inv.locationId && s.areaId === inv.areaId);
-        const reservations = await ctx.db.query("requestItemReservations")
-          .withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
-        const reservedInScope = reservations
-          .filter((reservation: any) => reservation.locationId === inv.locationId && reservation.areaId === inv.areaId)
-          .reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0);
-        if (counted < reservedInScope) {
-          throw new Error(`A contagem de "${countProduct?.name ?? "item"}" (${counted}) ficaria abaixo das ${reservedInScope} unidade(s) reservada(s) nesta área/local.`);
-        }
-        if (matchingRows.length > 1) {
-          throw new Error("Há linhas duplicadas de saldo para o mesmo produto/área/local. Regularize-as antes de fechar o inventário.");
-        }
-        const sbl = matchingRows[0];
-        if (sbl) {
-          await ctx.db.patch(sbl._id, { quantity: counted });
+        if (targetLocationStock) {
+          await ctx.db.patch(targetLocationStock._id, { quantity: counted });
         } else if (counted > 0) {
           await ctx.db.insert("stockByLocation", {
             productId: count.productId,
@@ -307,22 +518,26 @@ export const close = mutation({
             quantity: counted,
           });
         }
-        const allSbl = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
-        newPhysical = allSbl.reduce((sum, s) => sum + s.quantity, 0);
-      } else {
-        // ── Inventário geral: saldo global é a contagem ──
-        newPhysical = counted;
-      }
-
-      // Nunca deixar o estoque abaixo das reservas
-      if (newPhysical < reserved) {
-        throw new Error(
-          `Ajuste de "${countProduct?.name ?? "item"}" deixaria o estoque (${newPhysical}) abaixo das unidades reservadas (${reserved}).`
-        );
+      } else if (delta < 0) {
+        // Inventário geral pode reduzir lotes de vários locais; mantém cada bucket
+        // físico sincronizado com a redução aplicada ao respectivo lote.
+        const reductionsByScope = new Map<string, number>();
+        for (const reduction of plannedReductions) {
+          const lot = reduction.lot;
+          if (!lot.locationId) continue;
+          const key = `${String(lot.areaId ?? "")}|${String(lot.locationId)}`;
+          reductionsByScope.set(key, (reductionsByScope.get(key) ?? 0) + reduction.quantity);
+        }
+        for (const [key, reduction] of reductionsByScope) {
+          const row = rowGroups.get(key)?.[0];
+          if (!row || Number(row.quantity) < reduction) {
+            throw new Error(`Saldo por local insuficiente para o ajuste de "${product.name}" no escopo ${key}.`);
+          }
+          await ctx.db.patch(row._id, { quantity: Number(row.quantity) - reduction });
+        }
       }
 
       if (!stock) {
-        // Create stock entry with counted quantity
         await ctx.db.insert("stock", {
           productId: count.productId,
           physicalQuantity: newPhysical,
@@ -332,41 +547,63 @@ export const close = mutation({
         await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
       }
 
-      // Create adjustment movement (com a justificativa obrigatória)
-      await ctx.db.insert("stockMovements", {
+      const movementId = await ctx.db.insert("stockMovements", {
         productId: count.productId,
         type: "adjustment",
-        quantity: Math.abs(count.difference!),
-        previousPhysical: prevPhysical,
+        quantity: Math.abs(delta),
+        previousPhysical,
         newPhysical,
-        previousReserved: reserved,
-        newReserved: reserved,
+        previousReserved,
+        newReserved: previousReserved,
         userId,
-        areaId: inv.areaId,
-        locationId: inv.locationId,
-        observation: `Ajuste via inventário ${inv.inventoryNumber}${scopeSuffix}. Área: ${inv.areaId ?? "geral"}. Diferença: ${count.difference! >= 0 ? "+" : ""}${count.difference}. Justificativa: ${justification}`,
+        entryId: adjustmentEntryId,
+        lotId: adjustmentLotId ? String(adjustmentLotId) : plannedReductions[0]?.lot._id as string | undefined,
+        areaId: inv.locationId ? inv.areaId : undefined,
+        locationId: inv.locationId ?? undefined,
+        observation:
+          `Ajuste via inventário ${inv.inventoryNumber}${scopeSuffix}. Área: ${inv.areaId ?? "geral"}. ` +
+          `Diferença: ${delta >= 0 ? "+" : ""}${delta}. Justificativa: ${justification}`,
         timestamp: now,
       });
+      if (adjustmentLotId) {
+        await ctx.db.insert("stockMovementLots", {
+          movementId, lotId: adjustmentLotId, quantity: delta,
+          areaId: inv.locationId ? inv.areaId : undefined,
+          locationId: inv.locationId ?? undefined,
+        });
+      } else {
+        for (const reduction of plannedReductions) {
+          await ctx.db.insert("stockMovementLots", {
+            movementId,
+            lotId: reduction.lot._id,
+            quantity: reduction.quantity,
+            areaId: reduction.lot.areaId,
+            locationId: reduction.lot.locationId,
+          });
+        }
+      }
 
-      adjustmentDetails.push(`${countProduct?.name ?? "item"}: ${count.systemQuantity} → ${count.countedQuantity} (${count.difference! >= 0 ? "+" : ""}${count.difference})${scopeSuffix}`);
+      adjustmentDetails.push(
+        `${product.name}: ${snapshot} → ${counted} (${delta >= 0 ? "+" : ""}${delta})${scopeSuffix}`,
+      );
     }
 
-    // Close inventory
     await ctx.db.patch(args.inventoryId, {
       status: "closed",
       closedAt: now,
       closedByUserId: userId,
       updatedAt: now,
     });
-
-    // Audit (com a justificativa obrigatória)
     await ctx.db.insert("auditLogs", {
-      userId, action: "close_inventory", entity: "inventories", entityId: args.inventoryId,
-      details: `Inventário ${inv.inventoryNumber} fechado${scopeSuffix}. ${countsWithDiff.length} ajuste(s): ${adjustmentDetails.join("; ") || "nenhum"}. Justificativa: ${justification}`,
+      userId,
+      action: "close_inventory",
+      entity: "inventories",
+      entityId: args.inventoryId,
+      details: `Inventário ${inv.inventoryNumber} fechado${scopeSuffix}. ${changedCounts.length} ajuste(s): ${adjustmentDetails.join("; ") || "nenhum"}. Justificativa: ${justification}`,
       timestamp: now,
     });
 
-    return { adjustments: countsWithDiff.length, details: adjustmentDetails };
+    return { adjustments: changedCounts.length, details: adjustmentDetails };
   },
 });
 
