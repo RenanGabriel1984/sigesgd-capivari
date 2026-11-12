@@ -198,13 +198,23 @@ associação manual).
 - **Ambiente Convex de homologação existe?** Sim: projeto separado
   `sigesgd-capivari-homologacao`, com Production `tame-alligator-797` e
   Development `first-dinosaur-625`.
-- **Frontend Preview atual existe?** Sim: o projeto Vercel separado tem Preview
-  READY para o commit `897e25f`; ele deve usar `tame-alligator-797`.
-- **Backend de homologação atualizado com o código atual?** Ainda não
-  comprovado. A atualização das funções/schema de storage continua pendente.
-- **Produção/projeto principal modificados nesta etapa?** Não: nenhum deploy de
-  funções, nenhuma mutação de banco, nenhuma confirmação de nota ou alteração
-  de estoque foi executada neste procedimento.
+- **Frontend Preview atual existe?** Sim: deployment
+  `dpl_AR2fkKVbBQYFJEM6EWbGEtTYAqXt`, commit `5ec6089`, estado READY:
+  https://sigesgd-capivari-homologacao-36tw0my1r.vercel.app.
+- **Backend de homologação atualizado?** Sim: workflow #1, tentativa 3,
+  concluído com sucesso em 12/11/2026. O CLI confirmou
+  `Schema validation complete` e
+  `Deployed Convex functions to https://tame-alligator-797.convex.cloud`.
+- **Escopo do deploy:** somente funções/schema do projeto e deployment
+  `sigesgd-capivari-homologacao/tame-alligator-797`; não executou seeds,
+  importações de DANFE ou mutations de negócio.
+- **Testes de autorização de anexos em runtime?** Pendentes de sessão
+  autenticada no Preview. A bateria automatizada local/CI cobre políticas de
+  proprietário, leitura e reassociação; isso não substitui o teste real
+  integrado após a publicação.
+- **Produção/projeto principal modificados?** Não: nenhum deploy de funções,
+  mutação, limpeza, migração ou confirmação de nota foi executado em
+  `savory-sockeye-292` ou no backend operacional `first-herring-264`.
 
 
 ---
@@ -267,3 +277,14 @@ homologação persistente atual.
 - Não copiar a chave de produção para Preview e não alterar variáveis do ambiente Production.
 - A homologação permanece **não aprovada para operação** até a configuração segura da chave exclusivamente no deployment de Preview e a repetição dos testes de login.
 - Nenhuma chave foi gerada, exibida ou alterada durante a auditoria desta branch.
+
+
+## Publicação das funções em homologação — 12/11/2026
+
+- Workflow: `Convex — publicar funções em HOMOLOGAÇÃO`, execução #1, tentativa 3, GitHub Actions run `43288626841`.
+- Resultado: `success`.
+- As guardas validaram a deploy key como `prod:tame-alligator-797` sem imprimir o segredo.
+- O log confirmou o alvo `tame-alligator-797`, upload das funções, `Schema validation complete` e a mensagem final de publicação no host correto.
+- O projeto principal e o backend operacional não foram alvo.
+- A validação de permissões/contexto de anexos via sessão autenticada do aplicativo continua pendente; não declarar a homologação funcional integral até concluir esses testes.
+- Preview utilizado: `https://sigesgd-capivari-homologacao-36tw0my1r.vercel.app` (deployment `dpl_AR2fkKVbBQYFJEM6EWbGEtTYAqXt`, commit `5ec6089`).
