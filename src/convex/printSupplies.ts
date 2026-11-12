@@ -855,7 +855,7 @@ export const withdrawFamily = mutation({
     if (!closedBefore.stock) throw new Error("Estoque do produto de embalagem não encontrado.");
     const closedAvailable = closedBefore.areaAvailable;
     const looseAvailable = looseBefore.areaAvailable;
-    const familyAvailable = closedAvailable * conversion.conversionFactor + looseAvailable;
+    const familyAvailable = closedAvailable * conversion.factor + looseAvailable;
     if (quantity > familyAvailable) {
       throw new Error(`Estoque livre insuficiente na área Impressoras. Disponível: ${familyAvailable} ${conversion.baseUnit}.`);
     }
@@ -863,11 +863,11 @@ export const withdrawFamily = mutation({
     const plan = planPackOperation(quantity, {
       closedPacks: closedAvailable,
       looseUnits: looseAvailable,
-      factor: conversion.conversionFactor,
+      factor: conversion.factor,
     });
     if (!plan) {
       throw new Error(
-        `Composição insuficiente na área Impressoras: ${looseAvailable} un. avulsas + ${closedAvailable} ${conversion.packagingUnit}(s) de ${conversion.conversionFactor} un.`,
+        `Composição insuficiente na área Impressoras: ${looseAvailable} un. avulsas + ${closedAvailable} ${conversion.packagingUnit}(s) de ${conversion.factor} un.`,
       );
     }
 
@@ -883,7 +883,7 @@ export const withdrawFamily = mutation({
     const openPacks = plan.operation === "open_pack" ? plan.packs : 0;
     const looseUnitsToConsume = plan.operation === "open_pack"
       ? quantity
-      : quantity - closedPacksToConsume * conversion.conversionFactor;
+      : quantity - closedPacksToConsume * conversion.factor;
 
     let closedConsumed: SupplyConsumedLot[] = [];
     let looseConsumed: SupplyConsumedLot[] = [];
@@ -899,7 +899,7 @@ export const withdrawFamily = mutation({
 
     let looseAfterOpening = looseBefore;
     if (openPacks > 0) {
-      openedUnits = openPacks * conversion.conversionFactor;
+      openedUnits = openPacks * conversion.factor;
       if (!looseBefore.stock) {
         await ctx.db.insert("stock", {
           productId: looseMember._id as any,
@@ -910,7 +910,7 @@ export const withdrawFamily = mutation({
 
       for (let index = 0; index < closedConsumed.length; index++) {
         const source = closedConsumed[index];
-        const reclassifiedQuantity = source.qty * conversion.conversionFactor;
+        const reclassifiedQuantity = source.qty * conversion.factor;
         const lotNumber = await generateReclassificationLotNumber(ctx);
         const reclassifiedLotId = await ctx.db.insert("lots", {
           lotNumber,
@@ -921,7 +921,7 @@ export const withdrawFamily = mutation({
           specification: source.specification,
           quantityReceived: reclassifiedQuantity,
           quantityAvailable: reclassifiedQuantity,
-          unitCost: source.unitCost != null ? source.unitCost / conversion.conversionFactor : undefined,
+          unitCost: source.unitCost != null ? source.unitCost / conversion.factor : undefined,
           receivedAt: now,
           supplierId: source.supplierId as any,
           invoiceNumber: source.invoiceNumber,
@@ -1039,10 +1039,10 @@ export const withdrawFamily = mutation({
 
     const closedAfter = await readSupplyAreaLedger(ctx, String(closedMember._id));
     const looseAfter = await readSupplyAreaLedger(ctx, String(looseMember._id));
-    const baseBefore = closedBefore.areaPhysical * conversion.conversionFactor + looseBefore.areaPhysical;
-    const baseAfter = closedAfter.areaPhysical * conversion.conversionFactor + looseAfter.areaPhysical;
-    const availableBefore = closedBefore.areaAvailable * conversion.conversionFactor + looseBefore.areaAvailable;
-    const availableAfter = closedAfter.areaAvailable * conversion.conversionFactor + looseAfter.areaAvailable;
+    const baseBefore = closedBefore.areaPhysical * conversion.factor + looseBefore.areaPhysical;
+    const baseAfter = closedAfter.areaPhysical * conversion.factor + looseAfter.areaPhysical;
+    const availableBefore = closedBefore.areaAvailable * conversion.factor + looseBefore.areaAvailable;
+    const availableAfter = closedAfter.areaAvailable * conversion.factor + looseAfter.areaAvailable;
     if (
       Math.abs(baseAfter - (baseBefore - quantity)) > 1e-9 ||
       Math.abs(availableAfter - (availableBefore - quantity)) > 1e-9 ||
