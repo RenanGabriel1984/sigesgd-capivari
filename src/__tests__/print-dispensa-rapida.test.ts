@@ -330,10 +330,11 @@ describe("PRINT-DISP — Backend é a autoridade final", () => {
     for (const body of [withdrawBlock, withdrawFamilyBlock]) {
       // Valida a forma…
       expect(body).toContain("validateWithdrawal");
-      // …e o saldo real, calculado a partir de `stock` (físico − reservado).
-      expect(body).toContain("physicalQuantity");
-      expect(body).toContain("reservedQuantity");
-      expect(body).toContain("Estoque insuficiente");
+      // …e o saldo real, aferido pelos livros-razão globais e pela área.
+      expect(backend).toContain("physicalQuantity");
+      expect(backend).toContain("reservedQuantity");
+      expect(body).toContain("readSupplyAreaLedger");
+      expect(body).toContain("Estoque livre insuficiente na área Impressoras");
       // Um produto de outra categoria nunca sai por este atalho.
       expect(body).toContain("categoryId !== SUPPLY_CATEGORY_ID");
     }
