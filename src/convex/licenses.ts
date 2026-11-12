@@ -173,7 +173,7 @@ export const update = mutation({
     await ctx.db.patch(args.licenseId, updates);
     await ctx.db.insert("auditLogs", {
       userId,
-      action: "license_update",
+      action: "update",
       entity: "licenses",
       entityId: args.licenseId,
       details: `Licença "${license.productName}" atualizada. Campos: ${Object.keys(updates).filter((field) => field !== "updatedAt").join(", ")}.`,
@@ -255,7 +255,7 @@ export const removeFromAsset = mutation({
     const asset = await ctx.db.get(assignment.assetId);
     await ctx.db.insert("auditLogs", {
       userId,
-      action: "license_unassign",
+      action: "update",
       entity: "licenseAssignments",
       entityId: args.assignmentId,
       details: `Vínculo da licença ${assignment.licenseId} removido do equipamento ${asset?.patrimonyNumber ?? assignment.assetId}.`,

@@ -11,14 +11,14 @@ const remove = source.slice(removeStart);
 
 describe("auditoria de alterações de licenças", () => {
   it("registra atualização sem incluir o conteúdo da chave no log", () => {
-    expect(update).toContain('action: "license_update"');
+    expect(update).toContain('action: "update"');
     expect(update).toContain('entity: "licenses"');
     expect(update).toContain("Object.keys(updates)");
     expect(update).not.toContain("details: JSON.stringify(updates)");
   });
 
   it("registra a remoção de vínculo com equipamento", () => {
-    expect(remove).toContain('action: "license_unassign"');
+    expect(remove).toContain('action: "update"');
     expect(remove).toContain('entity: "licenseAssignments"');
     expect(remove).toContain("assignment.licenseId");
   });
