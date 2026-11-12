@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -224,7 +225,14 @@ export const saveCount = mutation({
       throw new Error("Inventário deve estar em contagem ou revisão para registrar contagem");
     }
 
-    if (args.countedQuantity < 0) throw new Error("A quantidade contada não pode ser negativa");
+    if (!Number.isFinite(args.countedQuantity) || args.countedQuantity < 0) {
+      throw new Error("A quantidade contada deve ser um número válido não negativo.");
+    }
+    const product = await ctx.db.get(count.productId);
+    if (product && isDiscreteStockUnit(product.unitOfMeasure, product.hasSerial) &&
+      !Number.isSafeInteger(args.countedQuantity)) {
+      throw new Error(`A contagem de "${product.name}" deve ser um número inteiro para a unidade ${product.unitOfMeasure}.`);
+    }
 
     const difference = args.countedQuantity - count.systemQuantity;
 
@@ -312,6 +320,18 @@ export const close = mutation({
         throw new Error(`Contagem inválida para "${product.name}".`);
       }
       const delta = counted - snapshot;
+      if (isDiscreteStockUnit(product.unitOfMeasure, product.hasSerial) && !Number.isSafeInteger(counted)) {
+        throw new Error(`A contagem de "${product.name}" deve ser inteira para a unidade ${product.unitOfMeasure}.`);
+      }
+      // Um inventário geral não identifica em qual área/local o excedente foi
+      // encontrado. Não criar lotes sem origem física definida: reabra o
+      // inventário informando a área e o local responsáveis pelo saldo extra.
+      if (delta > 0 && !inv.locationId) {
+        throw new Error(
+          `Ajuste positivo de "${product.name}" exige inventário por área e local físico. ` +
+          "Cancele este inventário geral e abra outro selecionando a área e o local onde o material foi encontrado."
+        );
+      }
       if (Math.abs(Number(count.difference ?? 0) - delta) > 1e-9) {
         throw new Error(`A contagem de "${product.name}" mudou após o cálculo da diferença. Salve a contagem novamente antes de fechar.`);
       }
