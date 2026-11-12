@@ -153,7 +153,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
 
   it("inventários e classificação permitem escolher área e armário separadamente", () => {
     expect(inventory).toContain("inv.locationId && !inv.areaId");
-    expect(inventory).toContain("s.locationId === inv.locationId && s.areaId === inv.areaId");
+    expect(inventory).toContain("row.locationId === inv.locationId && row.areaId === inv.areaId");
     expect(stockAreasPage).toContain("location.active");
     expect(stockAreasPage).not.toContain("location.areaId === classificationAreaId");
   });
