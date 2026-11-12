@@ -39,6 +39,7 @@ import {
 import type { RelatedStockProduct } from "@/lib/equipment-categories";
 
 const ASSET_TYPE_LABELS: Record<string, string> = EQUIPMENT_TYPE_LABELS;
+type AssetType = "desktop" | "notebook" | "monitor" | "server" | "printer" | "switch" | "router" | "access_point" | "ups" | "storage" | "phone" | "other";
 
 const ASSET_STATUS_LABELS: Record<string, string> = {
   active: "Ativo", maintenance: "Manutenção", inactive: "Inativo",
@@ -186,9 +187,9 @@ export default function AssetsPage() {
   const category = resolveEquipmentCategory(searchParams);
   const [tab, setTab] = useState("list");
   const [showNew, setShowNew] = useState(false);
-  const [filters, setFilters] = useState({ status: "", assetType: "", search: "" });
+  const [filters, setFilters] = useState<{ status: string; assetType: AssetType | ""; search: string }>({ status: "", assetType: "", search: "" });
   const [form, setForm] = useState({
-    patrimonyNumber: "", serialNumber: "", assetType: "desktop",
+    patrimonyNumber: "", serialNumber: "", assetType: "desktop" as AssetType,
     manufacturer: "", model: "", hostname: "", macAddress: "",
     organizationId: "", responsibleUserId: "", observation: "",
   });
@@ -251,7 +252,7 @@ export default function AssetsPage() {
     if (!form.assetType) { toast.error("Selecione o tipo de equipamento"); return; }
     try {
       await createAsset({
-        assetType: form.assetType as any,
+        assetType: form.assetType,
         patrimonyNumber: form.patrimonyNumber || undefined,
         serialNumber: form.serialNumber || undefined,
         manufacturer: form.manufacturer || undefined,
@@ -264,7 +265,7 @@ export default function AssetsPage() {
       });
       toast.success("Equipamento cadastrado com sucesso");
       setShowNew(false);
-      setForm({ patrimonyNumber: "", serialNumber: "", assetType: "desktop", manufacturer: "", model: "", hostname: "", macAddress: "", organizationId: "", responsibleUserId: "", observation: "" });
+      setForm({ patrimonyNumber: "", serialNumber: "", assetType: "desktop" as AssetType, manufacturer: "", model: "", hostname: "", macAddress: "", organizationId: "", responsibleUserId: "", observation: "" });
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao cadastrar equipamento");
     }
@@ -341,7 +342,7 @@ export default function AssetsPage() {
           <select
             className="border rounded-md p-2 text-sm bg-background"
             value={filters.assetType}
-            onChange={(e) => setFilters({ ...filters, assetType: e.target.value })}
+            onChange={(e) => setFilters({ ...filters, assetType: e.target.value as AssetType | "" })}
           >
             <option value="">Todos os tipos</option>
             {Object.entries(ASSET_TYPE_LABELS).map(([k, v]) => (
