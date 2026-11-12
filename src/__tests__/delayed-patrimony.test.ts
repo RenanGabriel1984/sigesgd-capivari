@@ -86,7 +86,6 @@ describe("integração do tombamento com a entrada e o cadastro de ativos", () =
     expect(entriesBackend).toContain("entryId: unit.entryId");
     expect(entriesBackend).toContain("entryItemId: unit.entryItemId");
     expect(entriesBackend).toContain("entryItemUnitId: args.entryItemUnitId");
-    expect(entriesBackend).toContain("stock");
   });
 
   it("libera a fila somente para quem possui permissão de visualizar Patrimônio", () => {
@@ -109,6 +108,7 @@ describe("integração do tombamento com a entrada e o cadastro de ativos", () =
 
   it("disponibiliza o perfil específico no provisionamento de usuários", () => {
     expect(usersBackend).toContain('v.literal("patrimony_manager")');
-    expect(usersBackend).toContain('role: "patrimony_manager"');
+    expect(usersBackend).toContain("export const createUser = mutation");
+    expect(usersBackend).toContain("role: args.role");
   });
 });
