@@ -29,7 +29,8 @@ describe("integridade do fechamento de inventário", () => {
     expect(close).toContain("reservedByLot");
     expect(close).toContain("const free = Number(lot.quantityAvailable) - reserved");
     expect(close).toContain("plannedReductions");
-    expect(close).toContain("reduce(movement");
+    expect(close).toContain("lot.quantityAvailable");
+    expect(close).toContain("reservedByLot.get(String(lot._id))");
     expect(close).toContain("await ctx.db.patch(reduction.lot._id");
   });
 
