@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { maskLicenseKey } from "../lib/license-keys";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -12,11 +13,6 @@ async function requireUser(ctx: any) {
 async function requireAdmin(ctx: any) {
   // RBAC central: gerenciamento de licenças.
   return requirePermission(ctx, "licenses.manage", { entity: "licenses" });
-}
-
-function maskKey(key: string): string {
-  if (!key || key.length <= 8) return "****";
-  return "*".repeat(key.length - 4) + key.slice(-4);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -41,7 +37,7 @@ export const list = query({
     // Mask keys for non-admins
     return licenses.map((l: any) => ({
       ...l,
-      key: l.key ? (isAdmin ? l.key : maskKey(l.key)) : undefined,
+      key: l.key ? (isAdmin ? l.key : maskLicenseKey(l.key)) : undefined,
     }));
   },
 });
@@ -72,7 +68,7 @@ export const get = query({
 
     return {
       ...license,
-      key: license.key ? (isAdmin ? license.key : maskKey(license.key)) : undefined,
+      key: license.key ? (isAdmin ? license.key : maskLicenseKey(license.key)) : undefined,
       assignedCount: activeAssignments.length,
       assignments: assignmentsWithDetails,
     };
