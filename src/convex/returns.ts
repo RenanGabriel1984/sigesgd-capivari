@@ -10,6 +10,7 @@ import {
   buildReturnAuditDetail,
   resolveReturnLotGuard,
   buildUnresolvableLotMessage,
+  shouldRestockReturnedMaterial,
   type ReturnCondition,
 } from "../lib/returns-rules";
 
@@ -325,10 +326,18 @@ export const create = mutation({
 
     const now = Date.now();
     const condition: ReturnCondition = args.condition;
-    const newPhysical = applyReturnToStock(stock.physicalQuantity, args.quantity);
-    await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+    const restocked = shouldRestockReturnedMaterial(condition);
+    // Só material explicitamente não utilizado volta ao saldo requisitável.
+    // Itens usados parcialmente, defeituosos ou não classificados ficam
+    // registrados para avaliação, sem alterar stock, lote ou bucket físico.
+    const newPhysical = restocked
+      ? applyReturnToStock(stock.physicalQuantity, args.quantity)
+      : stock.physicalQuantity;
+    if (restocked) {
+      await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+    }
 
-    if (targetLocationId) {
+    if (restocked && targetLocationId) {
       if (locationStock) {
         await ctx.db.patch(locationStock._id, {
           quantity: applyReturnToLocation(locationStock.quantity, args.quantity),
@@ -346,7 +355,7 @@ export const create = mutation({
     const returnIds: string[] = [];
     let runningPhysical = stock.physicalQuantity;
     for (const part of parts) {
-      if (part.lot) {
+      if (restocked && part.lot) {
         await ctx.db.patch(part.lot._id, {
           quantityAvailable: part.lot.quantityAvailable + part.quantity,
         });
@@ -359,6 +368,7 @@ export const create = mutation({
         quantity: part.quantity,
         reason,
         condition,
+        restocked,
         areaId: exit.areaId,
         locationId: targetLocationId,
         returnedByUserId: userId,
@@ -368,7 +378,7 @@ export const create = mutation({
       });
       returnIds.push(returnId as string);
 
-      const nextPhysical = runningPhysical + part.quantity;
+      const nextPhysical = runningPhysical + (restocked ? part.quantity : 0);
       await ctx.db.insert("stockMovements", {
         productId: exit.productId,
         type: "return",
@@ -384,6 +394,7 @@ export const create = mutation({
         areaId: exit.areaId,
         locationId: targetLocationId,
         observation: `Devolução da saída ${exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR")} — ${reason}` +
+          (restocked ? " | material não utilizado reintegrado ao estoque" : " | recebido para avaliação; fora do saldo utilizável") +
           (args.observation ? ` | ${args.observation}` : ""),
         timestamp: now,
       });
@@ -402,7 +413,9 @@ export const create = mutation({
         exitLabel,
         condition,
         reason,
-      }) + (parts.length > 1 ? ` | distribuída entre ${parts.length} lotes` : ""),
+      }) +
+        (restocked ? " | reintegrada ao estoque utilizável" : " | em avaliação, sem recompor o estoque disponível") +
+        (parts.length > 1 ? ` | distribuída entre ${parts.length} lotes` : ""),
       timestamp: now,
     });
 
