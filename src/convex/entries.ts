@@ -443,14 +443,9 @@ export const confirm = mutation({
         throw new Error(`A quantidade de "${product.name}" deve ser inteira para a unidade ${item.unitOfMeasure}.`);
       }
 
-      const [globalRows, locationRows] = await Promise.all([
-        ctx.db.query("stock")
-          .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
-          .collect(),
-        ctx.db.query("stockByLocation")
-          .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
-          .collect(),
-      ]);
+      const globalRows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+        .collect();
       if (globalRows.length > 1) {
         throw new Error(`"${product.name}" possui registros globais de estoque duplicados. Regularize antes de confirmar a entrada.`);
       }
