@@ -1,4 +1,5 @@
 import { query } from "./_generated/server";
+import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 
@@ -89,68 +90,65 @@ export const byEntity = query({
 /** List audit logs with filters. All supplied filters are applied together. */
 export const listFiltered = query({
   args: {
+    paginationOpts: paginationOptsValidator,
     userId: v.optional(v.id("users")),
     action: v.optional(v.string()),
     entity: v.optional(v.string()),
     startDate: v.optional(v.number()),
     endDate: v.optional(v.number()),
-    limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    const limit = validateLimit(args.limit, 300);
     validateDateRange(args.startDate, args.endDate);
 
-    const scanLimit = Math.min(limit * 10, MAX_AUDIT_SCAN);
-    let logs;
+    const base = ctx.db.query("auditLogs");
+    let orderedQuery;
 
-    // When a date range is present, constrain the timestamp index before
-    // applying other filters. This prevents old date queries from being
-    // accidentally limited to only the newest global audit records.
-    if (args.startDate !== undefined || args.endDate !== undefined) {
-      logs = await ctx.db
-        .query("auditLogs")
+    // Choose the most selective available index as the pagination source.
+    // The remaining filters are applied to each page, so the cursor can
+    // continue through the complete history instead of silently truncating
+    // after a fixed over-fetch window.
+    if (args.userId) {
+      orderedQuery = base
+        .withIndex("by_user", (q: any) => q.eq("userId", args.userId))
+        .order("desc");
+    } else if (args.action) {
+      orderedQuery = base
+        .withIndex("by_action", (q: any) => q.eq("action", args.action))
+        .order("desc");
+    } else if (args.entity) {
+      orderedQuery = base
+        .withIndex("by_entity", (q: any) => q.eq("entity", args.entity))
+        .order("desc");
+    } else {
+      orderedQuery = base
         .withIndex("by_timestamp", (index: any) => {
           let range = index;
           if (args.startDate !== undefined) range = range.gte("timestamp", args.startDate);
           if (args.endDate !== undefined) range = range.lte("timestamp", args.endDate);
           return range;
         })
-        .order("desc")
-        .take(scanLimit);
-    } else if (args.action) {
-      logs = await ctx.db
-        .query("auditLogs")
-        .withIndex("by_action", (q: any) => q.eq("action", args.action))
-        .order("desc")
-        .take(scanLimit);
-    } else if (args.entity) {
-      logs = await ctx.db
-        .query("auditLogs")
-        .withIndex("by_entity", (q: any) => q.eq("entity", args.entity))
-        .order("desc")
-        .take(scanLimit);
-    } else {
-      logs = await ctx.db
-        .query("auditLogs")
-        .withIndex("by_timestamp")
-        .order("desc")
-        .take(scanLimit);
+        .order("desc");
     }
 
-    // Do not condition these filters on whether a previous filter ran:
-    // combining action + entity + user previously skipped some conditions.
-    let filtered = logs;
-    if (args.userId) filtered = filtered.filter((log) => log.userId === args.userId);
-    if (args.action) filtered = filtered.filter((log) => log.action === args.action);
-    if (args.entity) filtered = filtered.filter((log) => log.entity === args.entity);
+    const result = await orderedQuery.paginate(args.paginationOpts);
+    let filtered = result.page;
+
+    // Apply every supplied filter independently. In particular, action +
+    // entity + user + date combinations must all be honored simultaneously.
+    if (args.userId) filtered = filtered.filter((log: any) => log.userId === args.userId);
+    if (args.action) filtered = filtered.filter((log: any) => log.action === args.action);
+    if (args.entity) filtered = filtered.filter((log: any) => log.entity === args.entity);
     if (args.startDate !== undefined) {
-      filtered = filtered.filter((log) => log.timestamp >= args.startDate!);
+      filtered = filtered.filter((log: any) => log.timestamp >= args.startDate!);
     }
     if (args.endDate !== undefined) {
-      filtered = filtered.filter((log) => log.timestamp <= args.endDate!);
+      filtered = filtered.filter((log: any) => log.timestamp <= args.endDate!);
     }
 
-    return attachMinimalUser(ctx, filtered.slice(0, limit));
+    return {
+      ...result,
+      page: await attachMinimalUser(ctx, filtered),
+    };
   },
 });
