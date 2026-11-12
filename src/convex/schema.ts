@@ -9,6 +9,7 @@ export const ROLES = {
   DIRECTOR: "director",
   SECRETARY: "secretary",
   TECHNICIAN: "technician",
+  PATRIMONY_MANAGER: "patrimony_manager",
 } as const;
 
 export const roleValidator = v.union(
