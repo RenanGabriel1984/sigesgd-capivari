@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "convex/react";
+import { usePaginatedQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
@@ -95,13 +95,20 @@ export default function Audit() {
   const [endDate, setEndDate] = useState("");
   const [showFilters, setShowFilters] = useState(false);
 
-  const logs = useQuery(api.auditLogs.listFiltered, {
-    action: actionFilter !== "all" ? actionFilter : undefined,
-    entity: entityFilter !== "all" ? entityFilter : undefined,
-    startDate: startDate ? new Date(startDate).getTime() : undefined,
-    endDate: endDate ? new Date(endDate + "T23:59:59").getTime() : undefined,
-    limit: 300,
-  });
+  const {
+    results: logs,
+    status: auditStatus,
+    loadMore: loadMoreAuditLogs,
+  } = usePaginatedQuery(
+    api.auditLogs.listFiltered,
+    {
+      action: actionFilter !== "all" ? actionFilter : undefined,
+      entity: entityFilter !== "all" ? entityFilter : undefined,
+      startDate: startDate ? new Date(startDate).getTime() : undefined,
+      endDate: endDate ? new Date(endDate + "T23:59:59.999").getTime() : undefined,
+    },
+    { initialNumItems: 50 },
+  );
 
   const hasFilters = !!(actionFilter !== "all" || entityFilter !== "all" || startDate || endDate);
 
@@ -119,7 +126,7 @@ export default function Audit() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Auditoria</h1>
             <p className="text-sm text-muted-foreground">
-              Trilha de auditoria completa do sistema — {logs?.length ?? 0} registro(s)
+              Trilha de auditoria completa do sistema — {logs.length} registro(s) carregado(s)
             </p>
           </div>
           <Button
@@ -217,7 +224,7 @@ export default function Audit() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {logs?.map((log) => (
+                  {logs.map((log) => (
                     <TableRow key={log._id}>
                       <TableCell className="text-xs whitespace-nowrap">
                         {new Date(log.timestamp).toLocaleString("pt-BR")}
@@ -260,7 +267,7 @@ export default function Audit() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {logs?.length === 0 && (
+                  {logs.length === 0 && auditStatus === "Exhausted" && (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center py-12">
                         <Shield className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
@@ -273,6 +280,30 @@ export default function Audit() {
                 </TableBody>
               </Table>
             </div>
+            {auditStatus === "LoadingFirstPage" && (
+              <div className="space-y-2 p-4" aria-live="polite">
+                <Skeleton className="h-5 w-full" />
+                <Skeleton className="h-5 w-4/5" />
+                <Skeleton className="h-5 w-3/5" />
+              </div>
+            )}
+            {(auditStatus === "CanLoadMore" || auditStatus === "LoadingMore") && (
+              <div className="flex justify-center border-t border-border/50 p-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={auditStatus === "LoadingMore"}
+                  onClick={() => loadMoreAuditLogs(50)}
+                >
+                  {auditStatus === "LoadingMore" ? "Carregando..." : "Carregar mais registros"}
+                </Button>
+              </div>
+            )}
+            {auditStatus === "Exhausted" && logs.length > 0 && (
+              <p className="border-t border-border/50 p-3 text-center text-xs text-muted-foreground">
+                Todos os {logs.length} registros que correspondem à consulta foram carregados.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>
