@@ -17,6 +17,7 @@ export const roleValidator = v.union(
   v.literal(ROLES.DIRECTOR),
   v.literal(ROLES.SECRETARY),
   v.literal(ROLES.TECHNICIAN),
+  v.literal(ROLES.PATRIMONY_MANAGER),
 );
 
 // ─── Organization Types ──────────────────────────────────────────────────────
@@ -762,6 +763,10 @@ const schema = defineSchema(
       entryItemId: v.id("entryItems"),
       productId: v.id("products"),
       patrimonyNumber: v.optional(v.string()),
+      patrimonyRegistrationStatus: v.optional(v.union(v.literal("pending"), v.literal("registered"))),
+      patrimonyAssignedAt: v.optional(v.number()),
+      patrimonyAssignedByUserId: v.optional(v.id("users")),
+      assetId: v.optional(v.id("assets")),
       serialNumber: v.optional(v.string()),
       manufacturer: v.optional(v.string()),
       model: v.optional(v.string()),
@@ -782,7 +787,8 @@ const schema = defineSchema(
       createdAt: v.number(),
     }).index("by_entry", ["entryId"])
       .index("by_entryItem", ["entryItemId"])
-      .index("by_product", ["productId"]),
+      .index("by_product", ["productId"])
+      .index("by_asset", ["assetId"]),
 
     // ── Stock by Location (Estoque por Local de Armazenamento) ──
     stockByLocation: defineTable({
@@ -871,6 +877,10 @@ const schema = defineSchema(
     assets: defineTable({
       patrimonyNumber: v.optional(v.string()),
       serialNumber: v.optional(v.string()),
+      // Origem patrimonial rastreável até a unidade e documento de recebimento.
+      entryId: v.optional(v.id("entries")),
+      entryItemId: v.optional(v.id("entryItems")),
+      entryItemUnitId: v.optional(v.id("entryItemUnits")),
       // Inclui "phone" (categoria Telefonia). Ampliação ADITIVA: registros
       // existentes continuam válidos; nenhuma migração de dados é necessária.
       assetType: v.union(
@@ -899,7 +909,8 @@ const schema = defineSchema(
       .index("by_type", ["assetType"])
       .index("by_organization", ["organizationId"])
       .index("by_responsible", ["responsibleUserId"])
-      .index("by_patrimony", ["patrimonyNumber"]),
+      .index("by_patrimony", ["patrimonyNumber"])
+      .index("by_entryItemUnit", ["entryItemUnitId"]),
 
     // ── Asset History (Histórico de Equipamentos) ──
     assetHistory: defineTable({
