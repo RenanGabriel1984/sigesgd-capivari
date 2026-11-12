@@ -69,10 +69,9 @@ export interface PatrimonyUnitDraft {
  * Regras:
  *  - Material de consumo: NÃO exige patrimônio e NÃO aceita unidades
  *    patrimoniais registradas.
- *  - Material permanente: exige EXATAMENTE uma unidade por quantidade
- *    recebida, e cada unidade precisa de número de patrimônio
- *    (ou, no mínimo, número de série quando o patrimônio for atribuído
- *    posteriormente — aqui exigimos patrimônio).
+ *  - Material permanente: exige EXATAMENTE uma unidade de identificação por
+ *    quantidade recebida. O número oficial do patrimônio é atribuído
+ *    posteriormente pelo setor de Patrimônio e não bloqueia o recebimento.
  */
 export function validateEntryUnits(input: {
   materialType?: MaterialType | null;
