@@ -86,6 +86,22 @@ describe("stock read integrity", () => {
     expect(result.lotQuantity).toBe(7);
   });
 
+  it("reconciles a legacy physical cabinet bucket against lots split across multiple areas", () => {
+    const result = inspectProductStockIntegrity(
+      [{ physicalQuantity: 7, reservedQuantity: 1 }],
+      [{ locationId: "cabinet-1", quantity: 7 }],
+      [
+        { lotNumber: "LOT-TI", areaId: "ti", locationId: "cabinet-1", quantityAvailable: 4, active: true },
+        { lotNumber: "LOT-PRINT", areaId: "printers", locationId: "cabinet-1", quantityAvailable: 3, active: true },
+      ],
+      "Mouse",
+    );
+    expect(result.consistent).toBe(true);
+    expect(result.locationQuantity).toBe(7);
+    expect(result.lotQuantity).toBe(7);
+    expect(result.issues).toEqual([]);
+  });
+
   it("reports global, location and lot discrepancies instead of hiding them", () => {
     const result = inspectProductStockIntegrity(
       [{ physicalQuantity: 10, reservedQuantity: 0 }],
