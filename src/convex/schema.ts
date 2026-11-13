@@ -742,6 +742,17 @@ const schema = defineSchema(
     }).index("by_product", ["productId"])
       .index("by_location", ["locationId"]),
 
+    // ── Lot balances by physical location (additive diagnostic foundation) ──
+    lotLocationBalances: defineTable({
+      lotId: v.id("lots"),
+      productId: v.id("products"),
+      locationId: v.id("storageLocations"),
+      quantityAvailable: v.number(),
+      updatedAt: v.number(),
+    }).index("by_lot", ["lotId"])
+      .index("by_product_location", ["productId", "locationId"])
+      .index("by_product", ["productId"]),
+
     // ── Stock Transfers (Transferências entre Locais) ──
     stockTransfers: defineTable({
       productId: v.id("products"),
