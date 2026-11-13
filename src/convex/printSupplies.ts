@@ -41,11 +41,9 @@ export const TI_GERAL_AREA_ID = "q971w9jkmz8rsqr3vsr2as0dps8eyqns";
 export const SUPPLY_CATEGORY_ID = "k57fk85xwpj3b3xj9dc31jwqpd8dgk3a";
 
 /**
- * Invariantes GLOBAIS inegociáveis do estoque (snapshot oficial da
- * reconciliação): physical 3338 · reserved 0 · available 3338 ·
- * stockByLocation 3338 · soma dos lotes 3338. Toda mutation que mexe em
- * saldos compara ANTES × DEPOIS nestas 5 representações e aborta em
- * QUALQUER divergência além da saída autorizada.
+ * Snapshot histórico da reconciliação inicial (não é limite operacional).
+ * As mutations validam relações entre os livros-razão atuais; o total físico
+ * pode mudar legitimamente após entradas e saídas.
  */export const GLOBAL_INVARIANTS = {
   physical: 3338,
   reserved: 0,
@@ -60,30 +58,47 @@ interface GlobalTotals {
   reserved: number;
   stockByLocation: number;
   lotsAvailable: number;
+  lotLocationBalances: number;
 }
 
-/** Snapshot SOMENTE-LEITURA dos 4 livros-razão globais. */
+const STOCK_EPSILON = 1e-9;
+
+/** Snapshot SOMENTE-LEITURA dos 5 livros-razão globais. */
 async function readGlobalTotals(ctx: any): Promise<GlobalTotals> {
-  const [stock, sbl, lots] = await Promise.all([
+  const [stock, sbl, lots, lotLocationBalances] = await Promise.all([
     ctx.db.query("stock").collect(),
     ctx.db.query("stockByLocation").collect(),
     ctx.db.query("lots").collect(),
+    ctx.db.query("lotLocationBalances").collect(),
   ]);
   return {
     physical: stock.reduce((s: number, x: any) => s + x.physicalQuantity, 0),
     reserved: stock.reduce((s: number, x: any) => s + x.reservedQuantity, 0),
     stockByLocation: sbl.reduce((s: number, x: any) => s + x.quantity, 0),
     lotsAvailable: lots.reduce((s: number, l: any) => s + l.quantityAvailable, 0),
+    lotLocationBalances: lotLocationBalances.reduce((s: number, b: any) => s + b.quantityAvailable, 0),
   };
 }
 
-/** Divergências entre o snapshot e os invariantes esperados (vazio = ok). */
+/** Valida relações atuais, sem comparar o saldo vivo com o snapshot histórico 3.338. */
 function invariantDivergences(t: GlobalTotals): string[] {
   const div: string[] = [];
-  if (t.physical !== GLOBAL_INVARIANTS.physical) div.push(`physical=${t.physical} (esperado ${GLOBAL_INVARIANTS.physical})`);
-  if (t.reserved !== GLOBAL_INVARIANTS.reserved) div.push(`reserved=${t.reserved} (esperado ${GLOBAL_INVARIANTS.reserved})`);
-  if (t.stockByLocation !== GLOBAL_INVARIANTS.stockByLocation) div.push(`stockByLocation=${t.stockByLocation} (esperado ${GLOBAL_INVARIANTS.stockByLocation})`);
-  if (t.lotsAvailable !== GLOBAL_INVARIANTS.lotsAvailable) div.push(`lotsAvailable=${t.lotsAvailable} (esperado ${GLOBAL_INVARIANTS.lotsAvailable})`);
+  const values = [t.physical, t.reserved, t.stockByLocation, t.lotsAvailable, t.lotLocationBalances];
+  if (values.some((value) => !Number.isFinite(value) || value < 0)) {
+    div.push("há quantidade negativa ou não finita em um dos livros-razão");
+  }
+  if (Math.abs(t.physical - t.stockByLocation) > STOCK_EPSILON) {
+    div.push(`physical=${t.physical} difere de stockByLocation=${t.stockByLocation}`);
+  }
+  if (Math.abs(t.physical - t.lotsAvailable) > STOCK_EPSILON) {
+    div.push(`physical=${t.physical} difere de lotsAvailable=${t.lotsAvailable}`);
+  }
+  if (Math.abs(t.physical - t.lotLocationBalances) > STOCK_EPSILON) {
+    div.push(`physical=${t.physical} difere de lotLocationBalances=${t.lotLocationBalances}`);
+  }
+  if (t.reserved > t.physical + STOCK_EPSILON) {
+    div.push(`reserved=${t.reserved} excede physical=${t.physical}`);
+  }
   return div;
 }
 
@@ -810,14 +825,20 @@ export const withdrawFamily = mutation({
     // Guarda de invariante: a soma global NÃO MUDA além da saída autorizada.
     const after = await readGlobalTotals(ctx);
     const physicalDelta = after.physical - before.physical;
-    if (physicalDelta !== -args.quantity) {
+    if (Math.abs(physicalDelta + args.quantity) > STOCK_EPSILON) {
       throw new Error(
         `VIOLAÇÃO DE SALDO na retirada: Δphysical=${physicalDelta} (esperado ${-args.quantity}). ` +
         "Operação abortada após patches — verifique lotes e saldos manualmente.",
       );
     }
-    if (after.reserved !== before.reserved) {
+    if (Math.abs(after.reserved - before.reserved) > STOCK_EPSILON) {
       throw new Error("VIOLAÇÃO DE SALDO: reservado global alterado indevidamente. Operação abortada.");
+    }
+    const afterDivergences = invariantDivergences(after);
+    if (afterDivergences.length > 0) {
+      throw new Error(
+        `VIOLAÇÃO DE SALDO após retirada (${afterDivergences.join("; ")}). Operação abortada.`,
+      );
     }
 
     const movementId = await ctx.db.insert("stockMovements", {
