@@ -399,6 +399,21 @@ export const movementReport = query({
         const product = await ctx.db.get(m.productId);
         const user = await ctx.db.get(m.userId);
         const supplier = m.supplierId ? await ctx.db.get(m.supplierId) : null;
+        const allocations = await ctx.db.query("stockMovementLotAllocations")
+          .withIndex("by_movement", (q: any) => q.eq("movementId", m._id))
+          .collect();
+        const lotAllocations = await Promise.all(allocations.map(async (allocation: any) => {
+          const [lot, location] = await Promise.all([
+            ctx.db.get(allocation.lotId),
+            ctx.db.get(allocation.locationId),
+          ]);
+          return {
+            lotNumber: lot?.lotNumber ?? "Lote não encontrado",
+            locationName: location?.name ?? "Armário não encontrado",
+            quantity: allocation.quantity,
+            allocationType: allocation.allocationType,
+          };
+        }));
         return {
           _id: m._id,
           type: m.type,
@@ -414,6 +429,7 @@ export const movementReport = query({
           userName: user?.name ?? "",
           supplierName: supplier?.legalName ?? "",
           supplierTrade: supplier?.tradeName ?? "",
+          lotAllocations,
         };
       })
     );
