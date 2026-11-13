@@ -479,7 +479,7 @@ export const lotLocationReadiness = query({
   args: { productId: v.optional(v.id("products")) },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    const [allProducts, allLots, allBalances, allLocations, allGlobalStock, allLocalStock, allEntryItems, allMovements, allTransfers, allReturns] = await Promise.all([
+    const [allProducts, allLots, allBalances, allLocations, allGlobalStock, allLocalStock, allEntryItems, allEntries, allMovements, allTransfers, allReturns] = await Promise.all([
       ctx.db.query("products").collect(),
       ctx.db.query("lots").collect(),
       ctx.db.query("lotLocationBalances").collect(),
@@ -487,6 +487,7 @@ export const lotLocationReadiness = query({
       ctx.db.query("stock").collect(),
       ctx.db.query("stockByLocation").collect(),
       ctx.db.query("entryItems").collect(),
+      ctx.db.query("entries").collect(),
       ctx.db.query("stockMovements").collect(),
       ctx.db.query("stockTransfers").collect(),
       ctx.db.query("returns").collect(),
@@ -496,15 +497,31 @@ export const lotLocationReadiness = query({
       ? allProducts.filter((product) => product._id === args.productId)
       : allProducts;
     const locationNames = new Map(allLocations.map((location) => [String(location._id), location.name]));
-    const productsResult = [];
+    const entryNumbers = new Map(allEntries.map((entry) => [String(entry._id), entry.entryNumber]));
+    const productsResult: Array<Record<string, any>> = [];
 
     for (const product of products) {
       const lots = allLots.filter((lot) => lot.productId === product._id);
       const balances = allBalances.filter((balance) => balance.productId === product._id);
       const localRows = allLocalStock.filter((row) => row.productId === product._id);
       const globalRows = allGlobalStock.filter((row) => row.productId === product._id);
-      validateUniqueScopedStockRows(localRows, product.name);
-      const global = getOptionalSingleValidGlobalStock(globalRows, product.name);
+
+      let global: (typeof globalRows)[number] | null = null;
+      let globalError: string | null = null;
+      if (globalRows.length > 1) {
+        globalError = `Existem ${globalRows.length} registros globais de estoque para o produto.`;
+      } else if (globalRows.length === 1) {
+        global = globalRows[0];
+        if (
+          !Number.isFinite(global.physicalQuantity) ||
+          !Number.isFinite(global.reservedQuantity) ||
+          global.physicalQuantity < 0 ||
+          global.reservedQuantity < 0 ||
+          global.reservedQuantity > global.physicalQuantity
+        ) {
+          globalError = "O registro global possui quantidades inválidas.";
+        }
+      }
 
       const balancesByLot = new Map<string, typeof balances>();
       for (const balance of balances) {
@@ -530,18 +547,26 @@ export const lotLocationReadiness = query({
         const laterReturns = allReturns.filter((returned) =>
           returned.productId === product._id && returned.createdAt > lot.receivedAt,
         );
+        const duplicateLocationRows = lotBalances.length !== new Set(lotBalances.map((balance) => String(balance.locationId))).size;
+        const invalidBalance = lotBalances.some((balance) =>
+          !Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0,
+        );
 
         let status: "mapped" | "divergent" | "candidate" | "ambiguous" | "unmapped";
         let reason: string;
         let candidateLocationId: string | null = null;
 
         if (lotBalances.length > 0) {
-          if (Math.abs(mappedQuantity - lot.quantityAvailable) <= 1e-9) {
+          if (duplicateLocationRows || invalidBalance || Math.abs(mappedQuantity - lot.quantityAvailable) > 1e-9) {
+            status = "divergent";
+            reason = duplicateLocationRows
+              ? "Há mais de um saldo do mesmo lote no mesmo armário."
+              : invalidBalance
+                ? "Há quantidade negativa ou não finita em um saldo lote × armário."
+                : `Soma por armário (${mappedQuantity}) difere do saldo atual do lote (${lot.quantityAvailable}).`;
+          } else {
             status = "mapped";
             reason = "Saldo por armário confere com o saldo atual do lote.";
-          } else {
-            status = "divergent";
-            reason = `Soma por armário (${mappedQuantity}) difere do saldo atual do lote (${lot.quantityAvailable}).`;
           }
         } else if (
           candidateLocationIds.length === 1 &&
@@ -565,7 +590,11 @@ export const lotLocationReadiness = query({
           lotNumber: lot.lotNumber,
           quantityAvailable: lot.quantityAvailable,
           receivedAt: lot.receivedAt,
-          entryNumber: entryItems.length > 0 ? String(entryItems[0].entryId) : null,
+          entryNumber: entryNumbers.get(String(lot.entryId)) ?? null,
+          sourceEntryLocations: candidateLocationIds.map((locationId) => ({
+            locationId,
+            locationName: locationNames.get(locationId) ?? "Local inexistente",
+          })),
           mappedQuantity,
           mappedLocations: lotBalances.map((balance) => ({
             locationId: String(balance.locationId),
@@ -582,19 +611,36 @@ export const lotLocationReadiness = query({
         };
       });
 
-      const physicalByLocation = new Map(localRows.map((row) => [String(row.locationId), row.quantity]));
+      const physicalByLocation = new Map<string, number>();
+      const localDuplicateCounts = new Map<string, number>();
+      for (const row of localRows) {
+        const key = String(row.locationId);
+        physicalByLocation.set(key, (physicalByLocation.get(key) ?? 0) + row.quantity);
+        localDuplicateCounts.set(key, (localDuplicateCounts.get(key) ?? 0) + 1);
+      }
       const mappedByLocation = new Map<string, number>();
       for (const balance of balances) {
         const key = String(balance.locationId);
         mappedByLocation.set(key, (mappedByLocation.get(key) ?? 0) + balance.quantityAvailable);
       }
-      const locationIds = [...new Set([...physicalByLocation.keys(), ...mappedByLocation.keys()])];
+      const candidateByLocation = new Map<string, number>();
+      for (const lot of lotDetails) {
+        if (lot.status === "candidate" && lot.candidateLocationId) {
+          candidateByLocation.set(
+            lot.candidateLocationId,
+            (candidateByLocation.get(lot.candidateLocationId) ?? 0) + lot.quantityAvailable,
+          );
+        }
+      }
+      const locationIds = [...new Set([...physicalByLocation.keys(), ...mappedByLocation.keys(), ...candidateByLocation.keys()])];
       const localComparison = locationIds.map((locationId) => ({
         locationId,
         locationName: locationNames.get(locationId) ?? "Local inexistente",
         physicalQuantity: physicalByLocation.get(locationId) ?? 0,
         mappedLotQuantity: mappedByLocation.get(locationId) ?? 0,
+        candidateLotQuantity: candidateByLocation.get(locationId) ?? 0,
         difference: (physicalByLocation.get(locationId) ?? 0) - (mappedByLocation.get(locationId) ?? 0),
+        duplicatePhysicalRows: Math.max(0, (localDuplicateCounts.get(locationId) ?? 0) - 1),
       }));
 
       const statusCounts = {
@@ -604,26 +650,38 @@ export const lotLocationReadiness = query({
         ambiguous: lotDetails.filter((lot) => lot.status === "ambiguous").length,
         unmapped: lotDetails.filter((lot) => lot.status === "unmapped").length,
       };
+      const globalPhysical = global?.physicalQuantity ?? 0;
+      const localPhysicalTotal = localRows.reduce((sum, row) => sum + row.quantity, 0);
+      const lotsAvailableTotal = lots.reduce((sum, lot) => sum + lot.quantityAvailable, 0);
+      const mappedLotTotal = balances.reduce((sum, balance) => sum + balance.quantityAvailable, 0);
+      const candidateLotTotal = lotDetails.filter((lot) => lot.status === "candidate").reduce((sum, lot) => sum + lot.quantityAvailable, 0);
 
       productsResult.push({
         productId: String(product._id),
         productName: product.name,
-        globalPhysical: global?.physicalQuantity ?? 0,
+        globalPhysical,
         globalReserved: global?.reservedQuantity ?? 0,
-        localPhysicalTotal: localRows.reduce((sum, row) => sum + row.quantity, 0),
-        lotsAvailableTotal: lots.reduce((sum, lot) => sum + lot.quantityAvailable, 0),
-        mappedLotTotal: balances.reduce((sum, balance) => sum + balance.quantityAvailable, 0),
+        globalError,
+        localPhysicalTotal,
+        lotsAvailableTotal,
+        mappedLotTotal,
+        candidateLotTotal,
         localComparison,
         statusCounts,
         lots: lotDetails,
+        candidateTotalsAlign:
+          localComparison.every((row) => Math.abs(row.physicalQuantity - (row.mappedLotQuantity + row.candidateLotQuantity)) <= 1e-9) &&
+          Math.abs(globalPhysical - (mappedLotTotal + candidateLotTotal)) <= 1e-9,
         readyForTrackedWithdrawal:
+          !globalError &&
           statusCounts.divergent === 0 &&
           statusCounts.candidate === 0 &&
           statusCounts.ambiguous === 0 &&
           statusCounts.unmapped === 0 &&
-          Math.abs((global?.physicalQuantity ?? 0) - localRows.reduce((sum, row) => sum + row.quantity, 0)) <= 1e-9 &&
-          Math.abs((global?.physicalQuantity ?? 0) - lots.reduce((sum, lot) => sum + lot.quantityAvailable, 0)) <= 1e-9 &&
-          localComparison.every((row) => Math.abs(row.difference) <= 1e-9),
+          localRows.every((row) => Number.isFinite(row.quantity) && row.quantity >= 0) &&
+          localComparison.every((row) => row.duplicatePhysicalRows === 0 && Math.abs(row.difference) <= 1e-9) &&
+          Math.abs(globalPhysical - localPhysicalTotal) <= 1e-9 &&
+          Math.abs(globalPhysical - lotsAvailableTotal) <= 1e-9,
       });
     }
 
@@ -633,7 +691,7 @@ export const lotLocationReadiness = query({
       migrationApplied: false,
       totalProducts: productsResult.length,
       productsRequiringReview: productsResult.filter((product) => !product.readyForTrackedWithdrawal).length,
-      products: productsResult,
+      products,
     };
   },
 });
