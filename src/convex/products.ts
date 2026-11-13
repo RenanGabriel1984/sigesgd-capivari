@@ -59,7 +59,8 @@ export const listActive = query({
     const compatProductIds = new Set(allCompat.map((c: any) => c.productId));
     return Promise.all(products.map(async (p: any) => {
       const category = await ctx.db.get(p.categoryId);
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
       return { ...p, category, stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 }, hasCompat: compatProductIds.has(p._id) };
     }));
   },
