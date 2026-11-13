@@ -40,6 +40,7 @@ export const stats = query({
     const stockRowsByProduct = new Map<string, typeof stockRows>();
     const locationRowsByProduct = new Map<string, typeof locationRows>();
     const lotsByProduct = new Map<string, typeof lots>();
+    const lotLocationsByLot = new Map<string, typeof lotLocationRows>();
     for (const row of stockRows) {
       const key = String(row.productId);
       const rows = stockRowsByProduct.get(key) ?? [];
@@ -226,11 +227,12 @@ export const stockPosition = query({
   args: {},
   handler: async (ctx) => {
     await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "stockPosition" });
-    const [products, stockRows, locationRows, lots, categories, areas, storageLocations] = await Promise.all([
+    const [products, stockRows, locationRows, lots, lotLocationRows, categories, areas, storageLocations] = await Promise.all([
       ctx.db.query("products").collect(),
       ctx.db.query("stock").collect(),
       ctx.db.query("stockByLocation").collect(),
       ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
       ctx.db.query("categories").collect(),
       ctx.db.query("stockAreas").collect(),
       ctx.db.query("storageLocations").collect(),
@@ -256,6 +258,12 @@ export const stockPosition = query({
       const group = lotsByProduct.get(key) ?? [];
       group.push(lot);
       lotsByProduct.set(key, group);
+    }
+    for (const row of lotLocationRows) {
+      const key = String(row.lotId);
+      const group = lotLocationsByLot.get(key) ?? [];
+      group.push(row);
+      lotLocationsByLot.set(key, group);
     }
 
     const categoryById = new Map(categories.map((category) => [String(category._id), category.name]));
@@ -302,10 +310,17 @@ export const stockPosition = query({
           lots: [],
         };
         existing.quantity += lot.quantityAvailable;
+        const lotLocations = (lotLocationsByLot.get(String(lot._id)) ?? [])
+          .map((balance) => ({
+            locationName: locationById.get(String(balance.locationId)) ?? "Local não encontrado",
+            quantityAvailable: balance.quantityAvailable,
+          }))
+          .sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR"));
         existing.lots.push({
           lotNumber: lot.lotNumber,
           quantityAvailable: lot.quantityAvailable,
           active: lot.active,
+          locations: lotLocations,
         });
         areaTotals.set(areaKey, existing);
       }
@@ -330,6 +345,17 @@ export const stockPosition = query({
         active: product.active,
         locationBreakdown,
         areaBreakdown,
+        lotLocationBreakdown: productLots.map((lot) => ({
+          lotNumber: lot.lotNumber,
+          areaName: lot.areaId ? areaById.get(String(lot.areaId)) ?? "Área não encontrada" : "Sem área",
+          quantityAvailable: lot.quantityAvailable,
+          locations: (lotLocationsByLot.get(String(lot._id)) ?? [])
+            .map((balance) => ({
+              locationName: locationById.get(String(balance.locationId)) ?? "Local não encontrado",
+              quantityAvailable: balance.quantityAvailable,
+            }))
+            .sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR")),
+        })).sort((a, b) => a.lotNumber.localeCompare(b.lotNumber, "pt-BR")),
         integrityIssues: integrity.issues,
         integrityLimitations: integrity.limitations,
       };
