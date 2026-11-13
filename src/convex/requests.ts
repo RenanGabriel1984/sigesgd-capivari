@@ -7,7 +7,7 @@ import type { Id } from "./_generated/dataModel";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { planFifoAreaLotAllocation } from "../lib/area-stock";
-import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
+import { isDiscreteStockUnit, requireSingleValidGlobalStock } from "../lib/stock-quantity-rules";
 import { validateRequestItemReservationLedger } from "../lib/request-reservation-ledger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
@@ -354,10 +354,10 @@ export const approve = mutation({
           `A solicitação mistura estoque classificado e legado para "${needed.productName}". Separe em solicitações distintas.`
         );
       }
-      const stock = await ctx.db.query("stock")
+      const stockRows = await ctx.db.query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", productId as any))
-        .first();
-      if (!stock) throw new Error(`Registro de estoque não encontrado para "${needed.productName}".`);
+        .collect();
+      const stock = requireSingleValidGlobalStock(stockRows, needed.productName);
 
       if (needed.hasArea) {
         const existingReservations = await ctx.db.query("requestItemReservations")
@@ -395,10 +395,10 @@ export const approve = mutation({
       if (!requestItem) continue;
       await ctx.db.patch(input.itemId, { quantityApproved: input.quantityApproved });
       if (input.quantityApproved <= 0) continue;
-      const stock = await ctx.db.query("stock")
+      const stockRows = await ctx.db.query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
-        .first();
-      if (!stock) throw new Error("Registro de estoque desapareceu durante a aprovação.");
+        .collect();
+      const stock = requireSingleValidGlobalStock(stockRows, String(requestItem.productId));
       await ctx.db.patch(stock._id, {
         reservedQuantity: stock.reservedQuantity + input.quantityApproved,
       });
@@ -530,9 +530,10 @@ export const deliver = mutation({
         }
       }
 
-      const stock = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
-      if (!stock || stock.physicalQuantity < input.quantityDelivered || stock.reservedQuantity < input.quantityDelivered) {
+      const stockRows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+      const stock = requireSingleValidGlobalStock(stockRows, product.name);
+      if (stock.physicalQuantity < input.quantityDelivered || stock.reservedQuantity < input.quantityDelivered) {
         throw new Error("Estoque físico ou reservado insuficiente para concluir a entrega.");
       }
 
@@ -613,9 +614,9 @@ export const deliver = mutation({
     const now = Date.now();
     for (const input of inputItems) {
       const item: any = byId.get(input.itemId);
-      const stock = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
-      if (!stock) throw new Error("Registro de estoque desapareceu durante a entrega.");
+      const stockRows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+      const stock = requireSingleValidGlobalStock(stockRows, String(item.productId));
       const newPhysical = stock.physicalQuantity - input.quantityDelivered;
       const newReserved = stock.reservedQuantity - input.quantityDelivered;
       if (newPhysical < 0 || newReserved < 0) throw new Error("Saldo global inconsistente; entrega abortada.");
@@ -729,9 +730,10 @@ export const deliver = mutation({
       }
     }
     for (const [productId, release] of releaseByProduct) {
-      const stock = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", productId as any)).first();
-      if (!stock || stock.reservedQuantity < release) {
+      const stockRows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", productId as any)).collect();
+      const stock = requireSingleValidGlobalStock(stockRows, String(productId));
+      if (stock.reservedQuantity < release) {
         throw new Error("Inconsistência de reserva global ao liberar quantidade não entregue.");
       }
       await ctx.db.patch(stock._id, { reservedQuantity: stock.reservedQuantity - release });
@@ -821,9 +823,10 @@ export const cancel = mutation({
         }
       }
       for (const [productId, release] of releaseByProduct) {
-        const stock = await ctx.db.query("stock")
-          .withIndex("by_product", (q: any) => q.eq("productId", productId as any)).first();
-        if (!stock || stock.reservedQuantity < release) {
+        const stockRows = await ctx.db.query("stock")
+          .withIndex("by_product", (q: any) => q.eq("productId", productId as any)).collect();
+        const stock = requireSingleValidGlobalStock(stockRows, String(productId));
+        if (stock.reservedQuantity < release) {
           throw new Error("Inconsistência de estoque: reserva insuficiente para cancelamento. Nenhuma alteração foi confirmada.");
         }
         await ctx.db.patch(stock._id, { reservedQuantity: stock.reservedQuantity - release });
