@@ -326,6 +326,7 @@ function EntriesPage() {
   const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
   const registerUpload = useMutation(api.storage.registerUpload);
   const createEntry = useMutation(api.entries.create);
+  const updateDraftArea = useMutation(api.entries.updateDraftArea);
   const confirmEntry = useMutation(api.entries.confirm);
 
   // ── Cadastro rápido de produto (R31 §1) ──
@@ -629,6 +630,10 @@ function EntriesPage() {
     materialType: MaterialType,
     areaId: string,
   ) => {
+    if (!areaId.trim()) {
+      toast.error(NFE_DESTINATION_REQUIRED_MESSAGE);
+      return;
+    }
     const invalidIndex = nfeItems.findIndex((row) => {
       if (!row.productId || !row.locationId) return true;
       const location = locationList.find((item) => item._id === row.locationId);
@@ -807,6 +812,12 @@ function EntriesPage() {
             areaId: nfeDestination.areaId ?? "",
           }
         : null);
+    const selectedAreaId = destinationOverride?.areaId ?? nfeDestination.areaId ?? "";
+    if (!selectedAreaId.trim()) {
+      setDestinationOpen(true);
+      toast.error(NFE_DESTINATION_REQUIRED_MESSAGE);
+      return;
+    }
     // D1: material permanente é decidido pelo destino RESOLVIDO (override ou
     // estado persistido), nunca por um default.
     const effectiveMaterialType =
@@ -841,6 +852,12 @@ function EntriesPage() {
 
     setNfeConfirming(true);
     try {
+      if (nfeDraft) {
+        await updateDraftArea({
+          entryId: nfeDraft.entryId as any,
+          areaId: selectedAreaId as any,
+        });
+      }
       const result = await runEntryImport({
         destination: destinationOverride,
         destinationState: nfeDestination,
@@ -972,6 +989,10 @@ function EntriesPage() {
       );
       return;
     }
+    if (!areaId.trim()) {
+      toast.error("Selecione a área/subestoque de destino antes de registrar a entrada.");
+      return;
+    }
     for (const item of withProduct) {
       const location = locationList.find((entry) => entry._id === item.locationId);
       if (!location || !location.active) {
@@ -982,6 +1003,12 @@ function EntriesPage() {
 
     setManualSaving(true);
     try {
+      if (manualDraft) {
+        await updateDraftArea({
+          entryId: manualDraft.entryId as any,
+          areaId: areaId as any,
+        });
+      }
       const result = await runEntryImport({
         destination: { materialType: manualMaterialType, areaId },
         existingDraft: manualDraft,
@@ -1319,18 +1346,15 @@ function EntriesPage() {
                 </SelectContent>
               </Select>
             </FieldRow>
-            <FieldRow label="Área de destino">
-              <Select value={areaId || "none"} onValueChange={(value) => {
-                const nextAreaId = value === "none" ? "" : value;
-                setAreaId(nextAreaId);
-                // Alterar a área não altera a localização física selecionada.
-                // Um mesmo armário pode armazenar produtos de áreas diferentes.
-              }}>
+            <FieldRow
+              label="Área de destino *"
+              tooltip="Obrigatória. A área classifica a finalidade do material; o armário é uma escolha física independente."
+            >
+              <Select value={areaId} onValueChange={setAreaId}>
                 <SelectTrigger className="mt-1 h-10 w-full min-w-0 max-w-full">
-                  <SelectValue placeholder="Selecionar área" />
+                  <SelectValue placeholder="Selecionar área/subestoque" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Sem área definida</SelectItem>
                   {(areas ?? []).map((area) => (
                     <SelectItem key={area._id} value={area._id}>
                       {area.name}
