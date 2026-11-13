@@ -1,4 +1,5 @@
 import { query, mutation } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
@@ -97,7 +98,7 @@ export const createExit = mutation({
       locationId: sourceLocationId,
       quantity: args.quantity,
     });
-    const sourceLocation = await ctx.db.get(sourceLocationId);
+    const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
     const prevPhysical = stock.physicalQuantity;
     const prevReserved = stock.reservedQuantity;
     const newPhysical = prevPhysical - args.quantity;
