@@ -23,6 +23,7 @@ export interface ProductStockIntegrity {
   locationQuantity: number;
   lotQuantity: number;
   issues: string[];
+  limitations: string[];
   consistent: boolean;
 }
 
@@ -106,6 +107,7 @@ export function inspectProductStockIntegrity(
   productLabel: string,
 ): ProductStockIntegrity {
   const issues: string[] = [];
+  const limitations: string[] = [];
   let globalStock: GlobalStockBalance | null = null;
   try {
     globalStock = getOptionalSingleValidGlobalStock(globalRows, productLabel);
@@ -139,6 +141,7 @@ export function inspectProductStockIntegrity(
 
   const lotsByScope = new Map<string, number>();
   let lotQuantity = 0;
+  let hasUnlocatedPositiveLots = false;
   for (const lot of lots) {
     const quantity = lot.quantityAvailable;
     if (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity < 0) {
@@ -150,14 +153,24 @@ export function inspectProductStockIntegrity(
     }
     lotQuantity += quantity;
     if (quantity <= TOLERANCE) continue;
-    if (!lot.areaId || !lot.locationId) {
-      issues.push(`O lote ${lot.lotNumber ?? "(sem número)"} ainda não possui área e/ou local físico classificados.`);
+    if (!lot.areaId) {
+      issues.push(`O lote ${lot.lotNumber ?? "(sem número)"} ainda não possui área classificada.`);
     }
-    if (!lot.locationId) continue;
+    // O schema atual não possui localização atual por lote. Quando não há
+    // vínculo explícito, não inferir que o armário original da entrada ainda
+    // seja o armário atual (transferências parciais podem dividir o lote).
+    if (!lot.locationId) {
+      hasUnlocatedPositiveLots = true;
+      continue;
+    }
     const key = lot.areaId
       ? `${lot.areaId}|${lot.locationId}`
       : `*|${lot.locationId}`;
     lotsByScope.set(key, (lotsByScope.get(key) ?? 0) + quantity);
+  }
+
+  if (hasUnlocatedPositiveLots) {
+    limitations.push("O modelo atual não registra a localização atual por lote; não é possível conciliar lote × armário com segurança.");
   }
 
   const lotTotalsByLocation = new Map<string, number>();
@@ -167,6 +180,7 @@ export function inspectProductStockIntegrity(
   }
 
   for (const [key, localQuantity] of locationByScope) {
+    if (hasUnlocatedPositiveLots) continue;
     const [areaId, locationId] = key.split("|");
     // Um registro físico legado sem areaId representa todas as áreas do
     // armário. Só comparamos o total do armário; a abertura por área vem dos lotes.
@@ -179,6 +193,7 @@ export function inspectProductStockIntegrity(
   }
 
   for (const key of lotsByScope.keys()) {
+    if (hasUnlocatedPositiveLots) continue;
     const locationId = key.slice(key.lastIndexOf("|") + 1);
     const wildcardKey = `*|${locationId}`;
     if (!locationByScope.has(key) && !locationByScope.has(wildcardKey)) {
@@ -202,6 +217,7 @@ export function inspectProductStockIntegrity(
     locationQuantity,
     lotQuantity,
     issues: [...new Set(issues)],
+    limitations: [...new Set(limitations)],
     consistent: issues.length === 0,
   };
 }
