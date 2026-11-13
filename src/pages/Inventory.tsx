@@ -40,6 +40,8 @@ const STATUS_COLORS: Record<string, string> = {
 // Formato retornado por api.inventory.list (inventário + contagens + joins)
 type InventoryCountView = Doc<"inventoryCounts"> & {
   product: Doc<"products"> | null;
+  lot: Doc<"lots"> | null;
+  countLocation: Doc<"storageLocations"> | null;
 };
 
 type InventoryView = Doc<"inventories"> & {
@@ -475,7 +477,7 @@ export default function Inventory() {
                             <Table>
                               <TableHeader>
                                 <TableRow>
-                                  <TableHead className="text-xs">Produto</TableHead>
+                                  <TableHead className="text-xs">Produto / lote / armário</TableHead>
                                   <TableHead className="text-xs text-center">Est. Sistema</TableHead>
                                   <TableHead className="text-xs text-center">Contado</TableHead>
                                   <TableHead className="text-xs text-center">Diferença</TableHead>
@@ -493,7 +495,11 @@ export default function Inventory() {
                                     <TableRow key={c._id}>
                                       <TableCell>
                                         <p className="font-medium text-sm">{c.product?.name ?? "—"}</p>
-                                        <p className="text-[10px] text-muted-foreground">{c.product?.internalCode ?? ""}</p>
+                                        <p className="text-[10px] text-muted-foreground">
+                                          {c.lot?.lotNumber ? `Lote ${c.lot.lotNumber} · ` : ""}
+                                          {c.countLocation?.name ?? (c.locationId ? "Armário" : "Local não definido")}
+                                          {c.product?.internalCode ? ` · ${c.product.internalCode}` : ""}
+                                        </p>
                                       </TableCell>
                                       <TableCell className="text-center font-mono text-sm">{c.systemQuantity}</TableCell>
                                       <TableCell className="text-center">
