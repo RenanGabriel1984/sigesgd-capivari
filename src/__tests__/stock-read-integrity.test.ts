@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getOptionalSingleValidGlobalStock,
   inspectProductStockIntegrity,
+  requireSingleValidGlobalStock,
   validateUniqueScopedStockRows,
 } from "@/lib/stock-read-integrity";
 
@@ -25,6 +26,19 @@ describe("stock read integrity", () => {
         "Mouse",
       ),
     ).toThrow(/duplicados/i);
+  });
+
+  it("requires a global stock row when the operation depends on one", () => {
+    expect(() => requireSingleValidGlobalStock([], "Mouse")).toThrow(/não encontrado/i);
+    const row = { physicalQuantity: 5, reservedQuantity: 1 };
+    expect(requireSingleValidGlobalStock([row], "Mouse")).toBe(row);
+    expect(() => requireSingleValidGlobalStock(
+      [
+        { physicalQuantity: 5, reservedQuantity: 0 },
+        { physicalQuantity: 6, reservedQuantity: 0 },
+      ],
+      "Mouse",
+    )).toThrow(/duplicados/i);
   });
 
   it.each([
