@@ -17,6 +17,7 @@ import { query, mutation, internalMutation, internalQuery } from "./_generated/s
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
 import {
   buildSupplyRow,
   computeCardTotals,
@@ -384,10 +385,11 @@ export const withdraw = mutation({
     }
 
     // ── Mesmas regras da saída rápida existente (stockSetup.quickExit) ──
-    const stock = await ctx.db
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
+      .collect();
+    const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
     const available = (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
     if (args.quantity > available) {
       throw new Error(`Estoque insuficiente. Disponível: ${available} ${product.unitOfMeasure}`);
@@ -641,11 +643,11 @@ export const withdrawFamily = mutation({
       throw new Error(`INTEGRIDADE: estoque global divergente antes da operação (${preDivergences.join("; ")}). Operação abortada.`);
     }
 
-    const stock = await ctx.db
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!stock) throw new Error("Estoque do produto não encontrado");
+      .collect();
+    const stock = requireSingleValidGlobalStock(stockRows, product.name);
 
     // Família: todos os produtos da categoria com a mesma chave canônica.
     const conv = readPackagingConversion(product);
@@ -666,10 +668,14 @@ export const withdrawFamily = mutation({
       throw new Error("Família inválida para retirada em unidades: configure a conversão no produto de embalagem (caixa fechada).");
     }
 
-    const stockOf = async (productId: string) =>
-      ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId)).first();
-    const closedStock = (await stockOf(closedMember._id)) as { _id: string; physicalQuantity: number; reservedQuantity: number } | null;
-    const looseStock = (await stockOf(looseMember._id)) as { _id: string; physicalQuantity: number; reservedQuantity: number } | null;
+    const stockOf = async (productId: string, productName: string) => {
+      const rows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", productId))
+        .collect();
+      return getOptionalSingleValidGlobalStock(rows, productName);
+    };
+    const closedStock = await stockOf(closedMember._id, closedMember.name);
+    const looseStock = await stockOf(looseMember._id, looseMember.name);
     const closedPhys = closedStock?.physicalQuantity ?? 0;
     const closedRes = closedStock?.reservedQuantity ?? 0;
     const loosePhys = looseStock?.physicalQuantity ?? 0;
@@ -885,10 +891,14 @@ async function previewFamilyWithdrawalImpl(ctx: any, args: { productId: string; 
     const closedMember = members.find((p) => !!readPackagingConversion(p));
     const looseMember = members.find((p) => !readPackagingConversion(p));
 
-    const stockOf = async (productId: string) =>
-      ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId)).first();
-    const closedStock = closedMember ? await stockOf(closedMember._id) : null;
-    const looseStock = looseMember ? await stockOf(looseMember._id) : null;
+    const stockOf = async (productId: string, productName: string) => {
+      const rows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", productId))
+        .collect();
+      return getOptionalSingleValidGlobalStock(rows, productName);
+    };
+    const closedStock = closedMember ? await stockOf(closedMember._id, closedMember.name) : null;
+    const looseStock = looseMember ? await stockOf(looseMember._id, looseMember.name) : null;
     const closedAvailable = (closedStock?.physicalQuantity ?? 0) - (closedStock?.reservedQuantity ?? 0);
     const looseAvailable = (looseStock?.physicalQuantity ?? 0) - (looseStock?.reservedQuantity ?? 0);
     const familyAvailable = closedAvailable * conv.factor + looseAvailable;
