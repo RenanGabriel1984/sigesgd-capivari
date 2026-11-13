@@ -125,22 +125,24 @@ describe("NF-e: destino viaja por argumento (regressão do stale closure)", () =
     expect(resolved).toEqual({ materialType: "permanent", areaId: AREA_IMPRESSORAS });
   });
 
-  it("permite escolha consciente de 'Sem área' (estoque geral)", () => {
-    const payload = toEntryDestinationPayload({
+  it("bloqueia a escolha sem área para novas entradas", () => {
+    expect(() => resolveNfeDestination({
+      override: { materialType: "consumption", areaId: "" },
+    })).toThrow(NfeDestinationError);
+    expect(() => toEntryDestinationPayload({
       materialType: "consumption",
       areaId: "",
-    });
-    // String vazia = escolha explícita de estoque geral → undefined é correto.
-    expect(payload.areaId).toBeUndefined();
-    expect(payload.materialType).toBe("consumption");
+    })).toThrow(NfeDestinationError);
   });
 
-  it("ignora areaId só com espaços em branco", () => {
-    const payload = toEntryDestinationPayload({
+  it("bloqueia areaId composto apenas por espaços", () => {
+    expect(() => resolveNfeDestination({
+      override: { materialType: "consumption", areaId: "   " },
+    })).toThrow(NfeDestinationError);
+    expect(() => toEntryDestinationPayload({
       materialType: "consumption",
       areaId: "   ",
-    });
-    expect(payload.areaId).toBeUndefined();
+    })).toThrow(NfeDestinationError);
   });
 
   it("FALHA explicitamente quando não há override nem escolha no estado", () => {
