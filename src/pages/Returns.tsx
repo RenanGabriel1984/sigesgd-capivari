@@ -298,6 +298,7 @@ export default function ReturnsPage() {
                       <TableHead>Saída</TableHead>
                       <TableHead>Produto</TableHead>
                       <TableHead className="text-center">Qtd</TableHead>
+                      <TableHead>Lotes × armários</TableHead>
                       <TableHead>Condição</TableHead>
                       <TableHead>Motivo</TableHead>
                       <TableHead>Devolvido por</TableHead>
@@ -318,6 +319,15 @@ export default function ReturnsPage() {
                         </TableCell>
                         <TableCell className="text-center">
                           <Badge variant="outline">{r.quantity}</Badge>
+                        </TableCell>
+                        <TableCell className="text-xs min-w-52">
+                          {(r.lotAllocations ?? []).length > 0
+                            ? r.lotAllocations.map((allocation: any, index: number) => (
+                                <div key={index}>
+                                  {allocation.lotNumber} · {allocation.sourceLocationName} → {allocation.destinationLocationName}: <span className="font-mono">{allocation.quantity}</span>
+                                </div>
+                              ))
+                            : r.lot?.lotNumber ?? "—"}
                         </TableCell>
                         <TableCell className="text-xs">
                           {r.condition
