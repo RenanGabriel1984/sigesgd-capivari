@@ -76,7 +76,7 @@ export function validateUniqueScopedStockRows(
     ) {
       throw new Error(`Há saldo inválido por área/local para "${productLabel}".`);
     }
-    const key = `${row.areaId ?? "__NO_AREA__"}|${row.locationId}`;
+    const key = `${row.productId ?? "__SAME_PRODUCT__"}|${row.areaId ?? "__NO_AREA__"}|${row.locationId}`;
     if (seen.has(key)) {
       throw new Error(`Há saldos duplicados para "${productLabel}" na combinação área/local.`);
     }
