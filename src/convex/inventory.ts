@@ -165,18 +165,13 @@ export const create = mutation({
       }
 
       if (trackedLots.length > 0) {
-        const lotTotal = trackedLots.reduce((sum: number, lot: any) => {
+        // Divergência entre lote e saldo global não impede a contagem:
+        // o inventário é justamente o instrumento para medir e reconciliar.
+        // Quantidades inválidas/duplicadas continuam bloqueando a abertura.
+        for (const lot of trackedLots) {
           if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0) {
             throw new Error(`O lote ${lot.lotNumber} possui quantidade inválida.`);
           }
-          return sum + lot.quantityAvailable;
-        }, 0);
-        const globalPhysical = stock?.physicalQuantity ?? 0;
-        if (Math.abs(lotTotal - globalPhysical) > 1e-9) {
-          throw new Error(
-            `O produto "${product.name}" possui saldo global ${globalPhysical}, mas os lotes somam ${lotTotal}. ` +
-            "Regularize essa divergência antes de abrir inventário por lote.",
-          );
         }
 
         const seenBalances = new Set<string>();
