@@ -3,7 +3,7 @@ import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
-import { consumeLotLocationStock, resolveWithdrawalLocation } from "./lotLocationLedger";
+import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -95,7 +95,7 @@ export const installPart = mutation({
     await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical });
 
     // Create stock movement
-    await ctx.db.insert("stockMovements", {
+    const movementId = await ctx.db.insert("stockMovements", {
       productId: args.productId,
       type: "exit",
       quantity: args.quantity,
@@ -108,6 +108,11 @@ export const installPart = mutation({
       locationId: sourceLocationId,
       observation: `Instalação em equipamento: ${asset.patrimonyNumber ?? asset.serialNumber ?? args.assetId} — armário ${sourceLocation?.name ?? sourceLocationId}; lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
       timestamp: now,
+    });
+
+    await recordLotMovementAllocations(ctx, {
+      movementId, productId: args.productId, locationId: sourceLocationId,
+      allocations: lotConsumption.allocations,
     });
 
     // Record part installation
