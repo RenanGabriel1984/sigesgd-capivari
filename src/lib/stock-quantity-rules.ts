@@ -49,7 +49,7 @@ export function getOptionalSingleValidGlobalStock<T>(
   ) {
     throw new Error(`O saldo global de "${productLabel}" está inconsistente. Regularize antes de continuar.`);
   }
-  return stock;
+  return rows[0] as T;
 }
 
 /** Exige o registro global quando a operação necessariamente consome estoque. */
