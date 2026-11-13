@@ -158,6 +158,10 @@ async function performInitialLoad(
         .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
         .collect();
       validateUniqueScopedStockRows(existingSbl, String(item.productId));
+      const previousLocationTotal = existingSbl.reduce((sum: number, row: any) => sum + row.quantity, 0);
+      if (!Number.isFinite(previousLocationTotal)) {
+        throw new Error("Há saldo inválido por armário. Regularize antes de realizar nova carga inicial.");
+      }
       const sblForLocation = existingSbl.find(
         (s: any) => s.locationId === item.locationId
       );
@@ -182,17 +186,7 @@ async function performInitialLoad(
       const existingStock = getOptionalSingleValidGlobalStock(existingStockRows, String(item.productId));
 
       const previousGlobal = existingStock?.physicalQuantity ?? 0;
-      const totalForProduct = await ctx.db
-        .query("stockByLocation")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
-        .collect();
-      validateUniqueScopedStockRows(totalForProduct, String(item.productId));
-      const previousLocationTotal = totalForProduct.reduce(
-        (sum: number, row: any) => sum + row.quantity,
-        0
-      );
-      if (!Number.isFinite(previousLocationTotal) ||
-          Math.abs(previousGlobal - previousLocationTotal) > 1e-9) {
+      if (Math.abs(previousGlobal - previousLocationTotal) > 1e-9) {
         throw new Error("O saldo global e os saldos por armário já estão divergentes. Regularize antes de realizar nova carga inicial.");
       }
       const newGlobal = previousLocationTotal + item.quantity;
