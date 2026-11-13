@@ -64,19 +64,24 @@ interface GlobalTotals {
 const STOCK_EPSILON = 1e-9;
 
 /** Snapshot SOMENTE-LEITURA dos 5 livros-razão globais. */
-async function readGlobalTotals(ctx: any): Promise<GlobalTotals> {
+async function readGlobalTotals(ctx: any, productIds?: string[]): Promise<GlobalTotals> {
   const [stock, sbl, lots, lotLocationBalances] = await Promise.all([
     ctx.db.query("stock").collect(),
     ctx.db.query("stockByLocation").collect(),
     ctx.db.query("lots").collect(),
     ctx.db.query("lotLocationBalances").collect(),
   ]);
+  const allowed = productIds ? new Set(productIds.map(String)) : null;
+  const scopedStock = allowed ? stock.filter((row: any) => allowed.has(String(row.productId))) : stock;
+  const scopedLocations = allowed ? sbl.filter((row: any) => allowed.has(String(row.productId))) : sbl;
+  const scopedLots = allowed ? lots.filter((row: any) => allowed.has(String(row.productId))) : lots;
+  const scopedBalances = allowed ? lotLocationBalances.filter((row: any) => allowed.has(String(row.productId))) : lotLocationBalances;
   return {
-    physical: stock.reduce((s: number, x: any) => s + x.physicalQuantity, 0),
-    reserved: stock.reduce((s: number, x: any) => s + x.reservedQuantity, 0),
-    stockByLocation: sbl.reduce((s: number, x: any) => s + x.quantity, 0),
-    lotsAvailable: lots.reduce((s: number, l: any) => s + l.quantityAvailable, 0),
-    lotLocationBalances: lotLocationBalances.reduce((s: number, b: any) => s + b.quantityAvailable, 0),
+    physical: scopedStock.reduce((s: number, x: any) => s + x.physicalQuantity, 0),
+    reserved: scopedStock.reduce((s: number, x: any) => s + x.reservedQuantity, 0),
+    stockByLocation: scopedLocations.reduce((s: number, x: any) => s + x.quantity, 0),
+    lotsAvailable: scopedLots.reduce((s: number, l: any) => s + l.quantityAvailable, 0),
+    lotLocationBalances: scopedBalances.reduce((s: number, b: any) => s + b.quantityAvailable, 0),
   };
 }
 
@@ -650,13 +655,6 @@ export const withdrawFamily = mutation({
       throw new Error('Produto não pertence à categoria "Suprimentos de Impressão".');
     }
 
-    // Snapshot ANTES (invariantes globais).
-    const before = await readGlobalTotals(ctx);
-    const preDivergences = invariantDivergences(before);
-    if (preDivergences.length > 0) {
-      throw new Error(`INTEGRIDADE: estoque global divergente antes da operação (${preDivergences.join("; ")}). Operação abortada.`);
-    }
-
     const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
@@ -680,6 +678,16 @@ export const withdrawFamily = mutation({
     const looseMember = members.find((p) => !readPackagingConversion(p));
     if (!closedMember || !looseMember || closedMember._id !== product._id) {
       throw new Error("Família inválida para retirada em unidades: configure a conversão no produto de embalagem (caixa fechada).");
+    }
+
+    // Concilia somente os dois produtos desta família. Um lote legado de outra
+    // área não deve bloquear uma retirada independente, mas qualquer divergência
+    // entre os livros-razão destes dois produtos bloqueia a operação.
+    const familyProductIds = [closedMember._id, looseMember._id];
+    const before = await readGlobalTotals(ctx, familyProductIds);
+    const preDivergences = invariantDivergences(before);
+    if (preDivergences.length > 0) {
+      throw new Error(`INTEGRIDADE: estoque da família divergente antes da operação (${preDivergences.join("; ")}). Operação abortada.`);
     }
 
     const stockOf = async (productId: string, productName: string) => {
@@ -835,7 +843,7 @@ export const withdrawFamily = mutation({
     }
 
     // Guarda de invariante: a soma global NÃO MUDA além da saída autorizada.
-    const after = await readGlobalTotals(ctx);
+    const after = await readGlobalTotals(ctx, familyProductIds);
     const physicalDelta = after.physical - before.physical;
     const closedDelta = newClosedPhys - closedPhys;
     const looseDelta = newLoosePhys - loosePhys;
