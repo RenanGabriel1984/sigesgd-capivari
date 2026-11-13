@@ -47,6 +47,9 @@ export default function AssetDetailPage() {
   const asset = useQuery(api.assets.get, id ? { assetId: id as Id<"assets"> } : "skip");
   const changeStatus = useMutation(api.assets.changeStatus);
   const assign = useMutation(api.assets.assign);
+  const installPart = useMutation(api.assetParts.installPart);
+  const installableProducts = useQuery(api.products.listActive);
+  const storageLocations = useQuery(api.storageLocations.listActive);
 
   const [tab, setTab] = useState("data");
   const [showStatus, setShowStatus] = useState(false);
@@ -56,6 +59,12 @@ export default function AssetDetailPage() {
   const [assignUserId, setAssignUserId] = useState("");
   const [assignOrgId, setAssignOrgId] = useState("");
   const [assignObs, setAssignObs] = useState("");
+  const [showInstallPart, setShowInstallPart] = useState(false);
+  const [partProductId, setPartProductId] = useState("");
+  const [partLocationId, setPartLocationId] = useState("");
+  const [partQuantity, setPartQuantity] = useState("1");
+  const [partObservation, setPartObservation] = useState("");
+  const [installingPart, setInstallingPart] = useState(false);
 
   const users = useQuery(api.users.listUserOptions);
   const orgs = useQuery(api.organizations.listActive);
@@ -82,6 +91,42 @@ export default function AssetDetailPage() {
       toast.success("Atribuição atualizada");
       setShowAssign(false); setAssignUserId(""); setAssignOrgId(""); setAssignObs("");
     } catch (e: any) { toast.error(e.message); }
+  };
+
+  const handleInstallPart = async () => {
+    if (!partProductId) {
+      toast.error("Selecione a peça/produto");
+      return;
+    }
+    if (!partLocationId) {
+      toast.error("Selecione o armário de origem");
+      return;
+    }
+    const quantity = Number(partQuantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      toast.error("Informe uma quantidade válida");
+      return;
+    }
+    setInstallingPart(true);
+    try {
+      await installPart({
+        assetId: asset._id as Id<"assets">,
+        productId: partProductId as Id<"products">,
+        locationId: partLocationId as Id<"storageLocations">,
+        quantity,
+        observation: partObservation.trim() || undefined,
+      });
+      toast.success("Peça instalada e baixa de estoque registrada");
+      setShowInstallPart(false);
+      setPartProductId("");
+      setPartLocationId("");
+      setPartQuantity("1");
+      setPartObservation("");
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao instalar peça");
+    } finally {
+      setInstallingPart(false);
+    }
   };
 
   return (
@@ -182,7 +227,10 @@ export default function AssetDetailPage() {
 
           <TabsContent value="parts">
             <Card>
-              <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Package className="h-4 w-4" /> Peças Instaladas</CardTitle></CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between gap-3">
+                <CardTitle className="text-lg flex items-center gap-2"><Package className="h-4 w-4" /> Peças Instaladas</CardTitle>
+                <Button size="sm" onClick={() => setShowInstallPart(true)}>Instalar peça</Button>
+              </CardHeader>
               <CardContent>
                 {!asset.parts?.length ? <p className="text-muted-foreground">Nenhuma peça instalada</p> : (
                   <Table>
@@ -245,6 +293,59 @@ export default function AssetDetailPage() {
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowStatus(false)}>Cancelar</Button>
               <Button onClick={handleStatusChange}>Confirmar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Install Part Dialog */}
+        <Dialog open={showInstallPart} onOpenChange={setShowInstallPart}>
+          <DialogContent>
+            <DialogHeader><DialogTitle>Instalar peça no equipamento</DialogTitle></DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label>Peça / produto *</Label>
+                <select
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={partProductId}
+                  onChange={(e) => setPartProductId(e.target.value)}
+                >
+                  <option value="">Selecione...</option>
+                  {(installableProducts ?? [])
+                    .filter((p: any) => (p.stock?.physicalQuantity ?? 0) - (p.stock?.reservedQuantity ?? 0) > 0)
+                    .map((p: any) => (
+                      <option key={p._id} value={p._id}>
+                        {p.name} · disponível {(p.stock?.physicalQuantity ?? 0) - (p.stock?.reservedQuantity ?? 0)}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <Label>Armário de origem *</Label>
+                <select
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  value={partLocationId}
+                  onChange={(e) => setPartLocationId(e.target.value)}
+                >
+                  <option value="">Selecione o armário...</option>
+                  {(storageLocations ?? []).map((location: any) => (
+                    <option key={location._id} value={location._id}>{location.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label>Quantidade *</Label>
+                <Input type="number" min="0.001" step="any" value={partQuantity} onChange={(e) => setPartQuantity(e.target.value)} />
+              </div>
+              <div>
+                <Label>Observação</Label>
+                <Textarea value={partObservation} onChange={(e) => setPartObservation(e.target.value)} placeholder="Ex.: substituição de memória, fonte ou SSD" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowInstallPart(false)} disabled={installingPart}>Cancelar</Button>
+              <Button onClick={handleInstallPart} disabled={installingPart}>
+                {installingPart ? "Registrando..." : "Confirmar instalação"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
