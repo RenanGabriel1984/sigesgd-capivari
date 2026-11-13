@@ -4,6 +4,7 @@
  * Valida rastreabilidade por lote na carga inicial e consumo FIFO na saída.
  */
 import { describe, it, expect } from "vitest";
+import { isClosedUnusedReturnAtSource } from "../convex/stockHelpers";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // INITIAL STOCK LOAD + LOT TRACEABILITY TESTS
@@ -339,5 +340,104 @@ describe("Product creation with initial stock", () => {
     expect(globalPhysical).toBe(6);
     expect(locationQty).toBe(globalPhysical);
     expect(globalPhysical - reserved).toBe(6);
+  });
+});
+
+
+describe("Reconciliação de lote com devolução sem uso ao armário de origem", () => {
+  const base = {
+    lotId: "lot_1",
+    sourceLocationId: "loc_1",
+    movements: [
+      {
+        id: "exit_1",
+        type: "exit",
+        lotId: "lot_1",
+        quantity: 1,
+        canceled: false,
+      },
+      {
+        id: "return_movement_1",
+        type: "return",
+        lotId: "lot_1",
+        quantity: 1,
+        exitMovementId: "exit_1",
+        canceled: false,
+      },
+    ],
+    returns: [
+      {
+        exitMovementId: "exit_1",
+        quantity: 1,
+        locationId: "loc_1",
+        condition: "unused",
+      },
+    ],
+  };
+
+  it("reconhece a devolução integral, sem uso e ao mesmo armário", () => {
+    expect(isClosedUnusedReturnAtSource(base)).toBe(true);
+  });
+
+  it("não aceita devolução para outro armário", () => {
+    expect(isClosedUnusedReturnAtSource({
+      ...base,
+      returns: [{ ...base.returns[0], locationId: "loc_2" }],
+    })).toBe(false);
+  });
+
+  it("não aceita item usado ou sem condição confirmada", () => {
+    expect(isClosedUnusedReturnAtSource({
+      ...base,
+      returns: [{ ...base.returns[0], condition: "used" }],
+    })).toBe(false);
+    expect(isClosedUnusedReturnAtSource({
+      ...base,
+      returns: [{ ...base.returns[0], condition: null }],
+    })).toBe(false);
+  });
+
+  it("exige vínculo da devolução com a saída e com o lote original", () => {
+    expect(isClosedUnusedReturnAtSource({
+      ...base,
+      movements: base.movements.map((movement, index) =>
+        index === 1 ? { ...movement, exitMovementId: "other_exit" } : movement,
+      ),
+    })).toBe(false);
+    expect(isClosedUnusedReturnAtSource({
+      ...base,
+      movements: base.movements.map((movement, index) =>
+        index === 1 ? { ...movement, lotId: "other_lot" } : movement,
+      ),
+    })).toBe(false);
+  });
+
+  it("não aceita saída parcial, movimento adicional ou duplicidade de devolução", () => {
+    expect(isClosedUnusedReturnAtSource({
+      ...base,
+      returns: [{ ...base.returns[0], quantity: 0.5 }],
+    })).toBe(false);
+    expect(isClosedUnusedReturnAtSource({
+      ...base,
+      movements: [...base.movements, {
+        id: "adjustment_1",
+        type: "adjustment",
+        lotId: "lot_1",
+        quantity: 1,
+      }],
+    })).toBe(false);
+    expect(isClosedUnusedReturnAtSource({
+      ...base,
+      returns: [...base.returns, base.returns[0]],
+    })).toBe(false);
+  });
+
+  it("não aceita movimentos cancelados", () => {
+    expect(isClosedUnusedReturnAtSource({
+      ...base,
+      movements: base.movements.map((movement, index) =>
+        index === 0 ? { ...movement, canceled: true } : movement,
+      ),
+    })).toBe(false);
   });
 });
