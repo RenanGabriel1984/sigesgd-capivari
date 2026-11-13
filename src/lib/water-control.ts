@@ -93,3 +93,27 @@ export function calculateWaterContainerBalance(
       receipts.reduce((sum, receipt) => sum + receipt.emptyGallonsReturned, 0),
   };
 }
+
+
+/**
+ * Devolução ao fornecedor pode incluir galões cheios, vazios ou ambos.
+ * O movimento é sempre uma redução dos saldos físicos correspondentes.
+ */
+export function buildWaterSupplierReturnDeltas(
+  fullGallonsReturned: number,
+  emptyGallonsReturned: number,
+): { fullDelta: number; emptyDelta: number } {
+  if (!Number.isSafeInteger(fullGallonsReturned) || fullGallonsReturned < 0) {
+    throw new Error("A quantidade de galões cheios devolvidos deve ser um inteiro não negativo.");
+  }
+  if (!Number.isSafeInteger(emptyGallonsReturned) || emptyGallonsReturned < 0) {
+    throw new Error("A quantidade de galões vazios devolvidos deve ser um inteiro não negativo.");
+  }
+  if (fullGallonsReturned === 0 && emptyGallonsReturned === 0) {
+    throw new Error("Informe ao menos um galão cheio ou vazio para devolver.");
+  }
+  return {
+    fullDelta: -fullGallonsReturned,
+    emptyDelta: -emptyGallonsReturned,
+  };
+}
