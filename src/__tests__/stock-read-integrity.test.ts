@@ -156,7 +156,7 @@ describe("stock read integrity", () => {
       "Mouse",
     );
     expect(result.consistent).toBe(false);
-    expect(result.issues.some((issue) => /não possui área e\/ou local físico/.test(issue))).toBe(true);
+    expect(result.issues.some((issue) => /não possui área classificada/.test(issue))).toBe(true);
     expect(result.issues.some((issue) => /inativo com saldo positivo/.test(issue))).toBe(true);
     expect(result.limitations.some((issue) => /localização atual por lote/.test(issue))).toBe(true);
   });
