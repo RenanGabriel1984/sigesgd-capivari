@@ -130,7 +130,7 @@ describe("planejamento da migração lote × armário", () => {
         localComparison: base.products[0].localComparison.map((row) => ({
           ...row,
           mappedLotQuantity: row.locationId === "loc-1" ? 3277 : 0,
-          candidateLotQuantity: row.locationId === "loc-1" ? 22 : row.candidateLotQuantity,
+          candidateLotQuantity: row.locationId === "loc-1" ? 40 : 21,
         })),
       }],
     } as LotLocationMigrationReport;
