@@ -6,6 +6,7 @@ import {
   validateWaterReceiptDate,
   isValidWaterTimestamp,
   calculateWaterContainerBalance,
+  buildWaterSupplierReturnDeltas,
 } from "../lib/water-control";
 
 describe("controle de água mineral", () => {
@@ -90,5 +91,26 @@ describe("saldo físico dos galões cheios e vazios", () => {
       ],
     );
     expect(balance).toEqual({ fullGallons: 5, emptyGallons: 0 });
+  });
+});
+
+
+describe("devolução de galões ao fornecedor", () => {
+  it("permite devolver somente vazios", () => {
+    expect(buildWaterSupplierReturnDeltas(0, 3)).toEqual({ fullDelta: 0, emptyDelta: -3 });
+  });
+
+  it("permite devolver somente cheios", () => {
+    expect(buildWaterSupplierReturnDeltas(2, 0)).toEqual({ fullDelta: -2, emptyDelta: 0 });
+  });
+
+  it("permite devolver cheios e vazios na mesma movimentação", () => {
+    expect(buildWaterSupplierReturnDeltas(2, 4)).toEqual({ fullDelta: -2, emptyDelta: -4 });
+  });
+
+  it("rejeita devolução zerada, fracionada ou negativa", () => {
+    expect(() => buildWaterSupplierReturnDeltas(0, 0)).toThrow(/ao menos um galão/i);
+    expect(() => buildWaterSupplierReturnDeltas(1.5, 0)).toThrow(/inteiro/i);
+    expect(() => buildWaterSupplierReturnDeltas(0, -1)).toThrow(/inteiro/i);
   });
 });
