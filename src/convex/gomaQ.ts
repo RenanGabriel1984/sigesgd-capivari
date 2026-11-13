@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
+import { consumeLotLocationStock, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -189,6 +190,7 @@ export const createExchange = mutation({
   args: {
     productId: v.id("products"),
     printerId: v.id("printers"),
+    locationId: v.optional(v.id("storageLocations")),
     quantityDelivered: v.number(),
     quantityEmptyReceived: v.number(),
     receivedByUserId: v.optional(v.id("users")),
@@ -233,29 +235,16 @@ export const createExchange = mutation({
     const now = Date.now();
     const exchangeNumber = generateExchangeNumber();
 
-    // FIFO Lot Consumption (before stock reduction — mirrors requests.deliver pattern)
-    let remainingToConsume = args.quantityDelivered;
-    let consumedLotId: string | undefined;
-    const lots = await ctx.db
-      .query("lots")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
-      .collect();
-    const sortedLots = lots
-      .filter((l: any) => l.quantityAvailable > 0)
-      .sort((a: any, b: any) => a.receivedAt - b.receivedAt || a.lotNumber.localeCompare(b.lotNumber));
-
-    for (const lot of sortedLots) {
-      if (remainingToConsume <= 0) break;
-      const consumeFromLot = Math.min(lot.quantityAvailable, remainingToConsume);
-      if (consumeFromLot <= 0) continue;
-      await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consumeFromLot });
-      if (!consumedLotId) consumedLotId = lot._id;
-      remainingToConsume -= consumeFromLot;
-    }
-
-    if (remainingToConsume > 0) {
-      throw new Error(`Lotes insuficientes. Faltam ${remainingToConsume} unidades sem lote disponível.`);
-    }
+    // A troca baixa somente no armário de origem selecionado e preserva
+    // a relação de cada lote consumido. O fallback só aceita um armário único.
+    const sourceLocationId = await resolveWithdrawalLocation(ctx, args.productId, args.locationId);
+    const lotConsumption = await consumeLotLocationStock(ctx, {
+      productId: args.productId,
+      locationId: sourceLocationId,
+      quantity: args.quantityDelivered,
+    });
+    const consumedLotId = lotConsumption.allocations[0]?.lotId;
+    const sourceLocation = await ctx.db.get(sourceLocationId);
 
     // Re-read stock for concurrency safety (double-check pattern)
     const freshStockRows = await ctx.db
@@ -285,7 +274,9 @@ export const createExchange = mutation({
       previousReserved: freshStock.reservedQuantity,
       newReserved,
       userId,
-      observation: `Troca Gomaq — ${printer.name} (${printer.model})`,
+      lotId: consumedLotId as any,
+      locationId: sourceLocationId,
+      observation: `Troca Gomaq — ${printer.name} (${printer.model}) — armário ${sourceLocation?.name ?? sourceLocationId}; lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
       timestamp: now,
     });
 
@@ -294,6 +285,7 @@ export const createExchange = mutation({
       exchangeNumber,
       productId: args.productId,
       lotId: consumedLotId as any,
+      locationId: sourceLocationId,
       printerId: args.printerId,
       quantityDelivered: args.quantityDelivered,
       quantityEmptyReceived: args.quantityEmptyReceived,
