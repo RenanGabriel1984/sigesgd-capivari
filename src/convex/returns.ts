@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 import {
   validateReturnQuantity,
   returnedQuantityForExit,
@@ -227,11 +228,11 @@ export const create = mutation({
     });
 
     // 2) Repor estoque físico global
-    const stock = await ctx.db
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", exit.productId))
-      .first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
+      .collect();
+    const stock = requireSingleValidGlobalStock(stockRows, String(exit.productId));
 
     const newPhysical = applyReturnToStock(stock.physicalQuantity, args.quantity);
     await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
@@ -242,6 +243,7 @@ export const create = mutation({
         .query("stockByLocation")
         .withIndex("by_product", (q) => q.eq("productId", exit.productId))
         .collect();
+      validateUniqueScopedStockRows(sblList, String(exit.productId));
       const sbl = sblList.find((s: any) => s.locationId === args.locationId);
       if (sbl) {
         await ctx.db.patch(sbl._id, {
