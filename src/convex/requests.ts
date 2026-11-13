@@ -624,7 +624,43 @@ export const deliver = mutation({
             : "Há saldos duplicados no local de origem. Regularize antes de concluir a entrega.");
         }
         const source = matchingSourceRows[0];
-        if (!Number.isFinite(source.quantity) || source.quantity < input.quantityDelivered) {
+        const sourceLots = await ctx.db.query("lots")
+          .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+          .collect();
+        const scopedLots = sourceLots.filter((lot: any) =>
+          lot.areaId === item.areaId && lot.locationId === item.sourceLocationId
+        );
+        const scopedLotBalances = [];
+        for (const lot of scopedLots) {
+          const lotReservations = await ctx.db.query("requestItemReservations")
+            .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id))
+            .collect();
+          if (lotReservations.some((row: any) =>
+            !Number.isFinite(row.quantityRemaining) || row.quantityRemaining < 0
+          )) {
+            throw new Error(`O lote ${lot.lotNumber} possui reserva inválida. Entrega bloqueada.`);
+          }
+          const quantityReserved = lotReservations.reduce(
+            (sum: number, row: any) => sum + row.quantityRemaining,
+            0,
+          );
+          scopedLotBalances.push({
+            lotNumber: lot.lotNumber,
+            quantityAvailable: lot.quantityAvailable,
+            quantityReserved,
+            active: lot.active,
+          });
+        }
+        const sourceBalance = validateAreaLocationLotBalance(
+          matchingSourceRows,
+          scopedLotBalances,
+        );
+        if (!sourceBalance.valid) {
+          throw new Error(
+            `Não é seguro entregar "${product.name}" em ${item.areaId}/${item.sourceLocationId}: ${sourceBalance.error}`
+          );
+        }
+        if (sourceBalance.stockQuantity < input.quantityDelivered) {
           throw new Error("Saldo físico insuficiente no local de origem para concluir a entrega.");
         }
       } else {
