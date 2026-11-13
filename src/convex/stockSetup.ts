@@ -4,7 +4,7 @@ import {
   formatConsumedLots,
   type LotConsumption,
 } from "../lib/stock-consumption";
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import {
   applyImplementationStockStamp,
@@ -926,10 +926,9 @@ export const getInitialLoadStatus = query({
  * localização atual confirmada. Movimentos posteriores de saída, ajuste,
  * transferência ou devolução tornam a associação ambígua para revisão humana.
  */
-export const lotLocationReadiness = query({
+export const lotLocationReadiness = internalQuery({
   args: { productId: v.optional(v.id("products")) },
   handler: async (ctx, args) => {
-    await requireUser(ctx);
     const [allProducts, allLots, allBalances, allLocations, allGlobalStock, allLocalStock, allEntryItems, allEntries, allMovements, allTransfers, allReturns] = await Promise.all([
       ctx.db.query("products").collect(),
       ctx.db.query("lots").collect(),
