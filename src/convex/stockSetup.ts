@@ -183,7 +183,7 @@ async function performInitialLoad(
         .query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
         .collect();
-      const existingStock = getOptionalSingleValidGlobalStock(existingStockRows, String(item.productId));
+      const existingStock = getOptionalSingleValidGlobalStock(existingStockRows, String(item.productId)); as (typeof existingStockRows)[number] | null;
 
       const previousGlobal = existingStock?.physicalQuantity ?? 0;
       if (Math.abs(previousGlobal - previousLocationTotal) > 1e-9) {
