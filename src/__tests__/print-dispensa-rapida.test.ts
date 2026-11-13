@@ -35,6 +35,7 @@ const read = (p: string) => readFileSync(resolve(ROOT, p), "utf-8");
 const panel = read("src/pages/GomaQ.tsx");
 const backend = read("src/convex/printSupplies.ts");
 const ledger = read("src/convex/lotLocationLedger.ts");
+const lotRules = read("src/lib/lot-location-rules.ts");
 
 /** Bloco do diálogo de retirada dentro de GomaQ.tsx. */
 const dialog = panel.slice(
@@ -303,7 +304,7 @@ describe("PRINT-DISP — A retirada é uma SAÍDA real, não transferência", ()
     expect(ledger).toContain("lotLocationBalances");
 
     // A validação bloqueia ausência de saldo rastreável no armário.
-    expect(ledger).toContain("Saldo rastreável insuficiente no armário selecionado");
+    expect(lotRules).toContain("Saldo rastreável insuficiente no armário selecionado");
     expect(ledger).toContain("A baixa foi bloqueada");
   });
 
