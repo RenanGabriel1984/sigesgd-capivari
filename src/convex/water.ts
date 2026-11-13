@@ -7,15 +7,8 @@ import {
   validateWaterReceiptDate,
   isValidWaterTimestamp,
   calculateWaterContainerBalance,
+  summarizeWaterFinances,
 } from "../lib/water-control";
-
-async function currentContainerBalance(ctx: any) {
-  const [receipts, movements] = await Promise.all([
-    ctx.db.query("waterReceipts").collect(),
-    ctx.db.query("waterContainerMovements").collect(),
-  ]);
-  return calculateWaterContainerBalance(receipts, movements);
-}
 
 async function writeAudit(ctx: any, userId: any, action: "create" | "update", entity: string, entityId: string, details: string) {
   await ctx.db.insert("auditLogs", {
@@ -27,20 +20,37 @@ export const dashboard = query({
   args: {},
   handler: async (ctx) => {
     await requirePermission(ctx, "water.view", { entity: "water" });
-    const [participants, periods, receipts, movements, balance] = await Promise.all([
+    const [participants, periods, allReceipts, allMovements, shares, payments] = await Promise.all([
       ctx.db.query("waterParticipants").collect(),
       ctx.db.query("waterPeriods").withIndex("by_startAt").order("desc").take(24),
-      ctx.db.query("waterReceipts").withIndex("by_receivedAt").order("desc").take(30),
-      ctx.db.query("waterContainerMovements").withIndex("by_date").order("desc").take(30),
-      currentContainerBalance(ctx),
+      ctx.db.query("waterReceipts").collect(),
+      ctx.db.query("waterContainerMovements").collect(),
+      ctx.db.query("waterShares").collect(),
+      ctx.db.query("waterPayments").collect(),
     ]);
+    const sortedParticipants = participants.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    const participantNames = new Map(sortedParticipants.map((person: any) => [String(person._id), person.name]));
+    const financialSummary = summarizeWaterFinances(
+      allReceipts,
+      shares.map((share: any) => ({
+        shareId: String(share._id),
+        participantId: String(share.participantId),
+        participantName: participantNames.get(String(share.participantId)) ?? share.participantName,
+        amountDueCents: share.amountDueCents,
+      })),
+      payments.map((payment: any) => ({
+        shareId: String(payment.shareId),
+        amountCents: payment.amountCents,
+      })),
+    );
     return {
-      participants: participants.sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+      participants: sortedParticipants,
       periods,
       openPeriod: periods.find((period) => period.status === "open") ?? null,
-      receipts,
-      movements,
-      balance,
+      receipts: allReceipts.sort((a, b) => b.receivedAt - a.receivedAt).slice(0, 30),
+      movements: allMovements.sort((a, b) => b.date - a.date).slice(0, 30),
+      balance: calculateWaterContainerBalance(allReceipts, allMovements),
+      financialSummary,
     };
   },
 });
