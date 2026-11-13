@@ -1,7 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
-import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
+import { isDiscreteStockUnit, requireValidScopedStockQuantity } from "../lib/stock-quantity-rules";
 import {
   validateReturnQuantity,
   returnedQuantityForExit,
@@ -361,6 +361,7 @@ export const create = mutation({
     }
 
     let locationStock: any = null;
+    let locationStockQuantity = 0;
     if (targetLocationId) {
       const matchingRows = locationRows.filter((row: any) =>
         row.locationId === targetLocationId &&
@@ -370,11 +371,15 @@ export const create = mutation({
         throw new Error("Há saldos físicos duplicados para a área/local de origem. Regularize antes de devolver.");
       }
       locationStock = matchingRows[0] ?? null;
+      locationStockQuantity = locationStock
+        ? requireValidScopedStockQuantity(locationStock.quantity, "área/local de origem")
+        : 0;
       const lotsAtLocation = productLots
         .filter((lot: any) => lot.locationId === targetLocationId &&
           (lot.areaId ?? undefined) === (exit.areaId ?? undefined))
         .reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
-      if (Math.abs(lotsAtLocation - Number(locationStock?.quantity ?? 0)) > 1e-9) {
+      if (!Number.isFinite(lotsAtLocation) ||
+          Math.abs(lotsAtLocation - locationStockQuantity) > 1e-9) {
         throw new Error("O saldo físico da área/local diverge dos lotes. Regularize antes de devolver.");
       }
     }
@@ -395,7 +400,7 @@ export const create = mutation({
     if (restocked && targetLocationId) {
       if (locationStock) {
         await ctx.db.patch(locationStock._id, {
-          quantity: applyReturnToLocation(locationStock.quantity, args.quantity),
+          quantity: applyReturnToLocation(locationStockQuantity, args.quantity),
         });
       } else {
         await ctx.db.insert("stockByLocation", {
