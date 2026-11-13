@@ -241,6 +241,7 @@ export const stockPosition = query({
     const stockByProduct = new Map<string, typeof stockRows>();
     const locationsByProduct = new Map<string, typeof locationRows>();
     const lotsByProduct = new Map<string, typeof lots>();
+    const lotLocationsByLot = new Map<string, typeof lotLocationRows>();
     for (const row of stockRows) {
       const key = String(row.productId);
       const group = stockByProduct.get(key) ?? [];
@@ -297,7 +298,16 @@ export const stockPosition = query({
           : null,
       })).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR"));
 
-      const areaTotals = new Map<string, { areaName: string; quantity: number; lots: Array<{ lotNumber: string; quantityAvailable: number; active: boolean }> }>();
+      const areaTotals = new Map<string, {
+        areaName: string;
+        quantity: number;
+        lots: Array<{
+          lotNumber: string;
+          quantityAvailable: number;
+          active: boolean;
+          locations: Array<{ locationName: string; quantityAvailable: number }>;
+        }>;
+      }>();
       for (const lot of productLots.filter((candidate) =>
         typeof candidate.quantityAvailable === "number" &&
         Number.isFinite(candidate.quantityAvailable) &&
