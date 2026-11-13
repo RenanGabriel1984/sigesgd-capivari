@@ -1,4 +1,5 @@
 import { query, mutation } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { verifyPassword } from "./auth/passwords";
 import { generateExitNumber } from "./stockHelpers";
@@ -449,7 +450,7 @@ export const deliver = mutation({
         locationId: sourceLocationId,
         quantity: input.quantityDelivered,
       });
-      const sourceLocation = await ctx.db.get(sourceLocationId);
+      const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
       const newPhysical = freshStock.physicalQuantity - input.quantityDelivered;
       const newReserved = freshStock.reservedQuantity - input.quantityDelivered;
       await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical, reservedQuantity: newReserved });
