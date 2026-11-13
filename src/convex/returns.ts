@@ -48,7 +48,25 @@ export const list = query({
       const request = r.requestId ? await ctx.db.get(r.requestId) : null;
       const exit = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
       const location = r.locationId ? await ctx.db.get(r.locationId) : null;
-      return { ...r, product, lot, returnedBy, receivedBy, request, exit, location };
+      const allocations = await ctx.db.query("returnLotAllocations")
+        .withIndex("by_return", (q: any) => q.eq("returnId", r._id))
+        .collect();
+      const lotAllocations = await Promise.all(allocations.map(async (allocation: any) => {
+        const [allocationLot, sourceLocation, destinationLocation] = await Promise.all([
+          ctx.db.get(allocation.lotId as any) as Promise<any>,
+          allocation.sourceLocationId
+            ? ctx.db.get(allocation.sourceLocationId as any) as Promise<any>
+            : Promise.resolve(null),
+          ctx.db.get(allocation.destinationLocationId as any) as Promise<any>,
+        ]);
+        return {
+          lotNumber: allocationLot?.lotNumber ?? "Lote não encontrado",
+          sourceLocationName: sourceLocation?.name ?? "Origem não identificada",
+          destinationLocationName: destinationLocation?.name ?? "Destino não encontrado",
+          quantity: allocation.quantity,
+        };
+      }));
+      return { ...r, product, lot, returnedBy, receivedBy, request, exit, location, lotAllocations };
     }));
   },
 });
