@@ -256,7 +256,7 @@ export const registerGomaqNfe372043 = internalMutation({
       lotSeq += 1;
       const lotNumber = "LOT-" + year + "-" + String(lotSeq).padStart(6, "0");
       const prevStockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", r.productId)).collect();
-      const prevStock = getOptionalSingleValidGlobalStock(prevStockRows, String(r.productId)); as (typeof prevStockRows)[number] | null;
+      const prevStock = getOptionalSingleValidGlobalStock(prevStockRows, String(r.productId)) as (typeof prevStockRows)[number] | null;
       const prevPhysical = prevStock?.physicalQuantity ?? 0;
       const prevReserved = prevStock?.reservedQuantity ?? 0;
 
