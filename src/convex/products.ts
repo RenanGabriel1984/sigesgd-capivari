@@ -122,7 +122,8 @@ export const belowMinimum = query({
     const products = await ctx.db.query("products").withIndex("by_active", (q) => q.eq("active", true)).collect();
     const result = [];
     for (const p of products) {
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", p._id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", p._id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
       const qty = stock?.physicalQuantity ?? 0;
       if (qty < (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
