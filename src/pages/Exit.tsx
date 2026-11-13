@@ -111,9 +111,10 @@ export default function Exit() {
   const pickProduct = (id: string) => {
     setProductId(id);
     const locs = locationsByProduct.get(id) ?? [];
-    if (locs.length > 0 && !locs.some((l) => l.locationId === locationId)) {
-      setLocationId(locs[0].locationId);
-    }
+    // Só preseleciona quando existe um único armário possível. Com vários,
+    // exige escolha explícita para não mandar a retirada ao primeiro da lista.
+    if (locs.length === 1) setLocationId(locs[0].locationId);
+    else setLocationId("");
     setStep(1);
   };
 
@@ -331,7 +332,7 @@ export default function Exit() {
                     <div>
                       <Label className="text-sm font-medium">De qual local?</Label>
                       <Select value={locationId} onValueChange={setLocationId}>
-                        <SelectTrigger className="mt-1"><SelectValue placeholder="Qualquer local" /></SelectTrigger>
+                        <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione o armário de origem" /></SelectTrigger>
                         <SelectContent>
                           {(locationsByProduct.get(selectedProduct._id as string) ?? []).map((l) => (
                             <SelectItem key={l.locationId} value={l.locationId}>
@@ -387,6 +388,7 @@ export default function Exit() {
                     {[
                       ["Material", selectedProduct.name],
                       ["Quantidade", `${qty} ${UNIT_LABELS[selectedProduct.unitOfMeasure] ?? selectedProduct.unitOfMeasure}`],
+                      ["Armário de origem", (locationsByProduct.get(selectedProduct._id as string) ?? []).find((l) => l.locationId === locationId)?.locationName ?? "Não selecionado"],
                       ["Destino", destination || "Não informado"],
                       ["Responsável", receiverName.trim() || (activeUsers.find((u: any) => u._id === receiverId)?.name ?? "—")],
                       ["Motivo", reason],
@@ -418,7 +420,7 @@ export default function Exit() {
                     </Button>
                   )}
                   {step === 4 && (
-                    <Button onClick={confirm} disabled={submitting || qty <= 0 || qty > available} className="gap-2 bg-[var(--capivari-green)] hover:bg-[var(--capivari-green-dark)]">
+                    <Button onClick={confirm} disabled={submitting || qty <= 0 || qty > available || !locationId} className="gap-2 bg-[var(--capivari-green)] hover:bg-[var(--capivari-green-dark)]">
                       <PackageCheck className="h-4 w-4" />
                       {submitting ? "Confirmando..." : "Confirmar saída"}
                     </Button>
