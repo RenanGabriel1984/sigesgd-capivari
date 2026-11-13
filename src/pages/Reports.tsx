@@ -92,13 +92,16 @@ function exportStockPositionCSV(data: any[]) {
 }
 
 function exportMovementCSV(data: any[]) {
-  const header = "Data;Tipo;Produto;Quantidade;Usuário;Fornecedor;Documento;Observação;Cancelada";
+  const header = "Data;Tipo;Produto;Quantidade;Lotes × armários;Usuário;Fornecedor;Documento;Observação;Cancelada";
   const rows = data.map((r) =>
     [
       new Date(r.timestamp).toLocaleString("pt-BR"),
       r.type === "entry" ? "Entrada" : r.type === "exit" ? "Saída" : r.type,
       r.productName,
       r.quantity,
+      (r.lotAllocations ?? []).map((allocation: any) =>
+        `${allocation.lotNumber} / ${allocation.locationName}=${allocation.quantity} [${allocation.allocationType}]`
+      ).join(" | "),
       r.userName,
       r.supplierTrade || r.supplierName,
       r.documentNumber,
@@ -481,6 +484,7 @@ export default function Reports() {
                         <TableHead className="text-xs">Tipo</TableHead>
                         <TableHead className="text-xs">Produto</TableHead>
                         <TableHead className="text-xs text-right">Qtd</TableHead>
+                        <TableHead className="text-xs">Lotes × armários</TableHead>
                         <TableHead className="text-xs">Usuário</TableHead>
                         <TableHead className="text-xs">Fornecedor</TableHead>
                         <TableHead className="text-xs">Documento</TableHead>
@@ -510,6 +514,16 @@ export default function Reports() {
                           </TableCell>
                           <TableCell className="text-sm">{m.productName}</TableCell>
                           <TableCell className="text-sm text-right font-mono">{m.quantity}</TableCell>
+                          <TableCell className="text-xs min-w-48">
+                            {(m.lotAllocations ?? []).length > 0
+                              ? m.lotAllocations.map((allocation: any, index: number) => (
+                                  <div key={index}>
+                                    {allocation.lotNumber} · {allocation.locationName}: <span className="font-mono">{allocation.quantity}</span>
+                                    {allocation.allocationType === "reclassification" ? " (reclassificação)" : ""}
+                                  </div>
+                                ))
+                              : "—"}
+                          </TableCell>
                           <TableCell className="text-xs">{m.userName}</TableCell>
                           <TableCell className="text-xs">{m.supplierTrade || m.supplierName || "—"}</TableCell>
                           <TableCell className="text-xs font-mono">{m.documentNumber || "—"}</TableCell>
@@ -521,14 +535,14 @@ export default function Reports() {
                       ))}
                       {!movements && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                             Carregando…
                           </TableCell>
                         </TableRow>
                       )}
                       {movements && movements.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                             Nenhuma movimentação encontrada
                           </TableCell>
                         </TableRow>
