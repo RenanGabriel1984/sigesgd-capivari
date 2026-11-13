@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -135,10 +136,11 @@ export const monthlyOrder = query({
       const product = rawProduct as any;
       if (!product.name || !product.categoryId) return null;
 
-      const stock = await ctx.db
+      const stockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", pid))
-        .first();
+        .collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
 
       const compatEntries = allCompat.filter((c: any) => c.productId === pid);
       const compatibleModels = compatEntries.map((c: any) => c.printerModel);
@@ -210,11 +212,11 @@ export const createExchange = mutation({
     if (!printer) throw new Error("Impressora não encontrada");
 
     // Validate stock (check available = physical - reserved)
-    const stock = await ctx.db
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
+      .collect();
+    const stock = requireSingleValidGlobalStock(stockRows, product.name);
     const availableStock = stock.physicalQuantity - stock.reservedQuantity;
     if (availableStock < args.quantityDelivered) {
       throw new Error(`Estoque insuficiente. Disponível: ${availableStock} (físico: ${stock.physicalQuantity}, reservado: ${stock.reservedQuantity}). Necessário: ${args.quantityDelivered}`);
@@ -256,11 +258,11 @@ export const createExchange = mutation({
     }
 
     // Re-read stock for concurrency safety (double-check pattern)
-    const freshStock = await ctx.db
+    const freshStockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!freshStock) throw new Error("Registro de estoque desapareceu durante a troca");
+      .collect();
+    const freshStock = requireSingleValidGlobalStock(freshStockRows, product.name);
     if (freshStock.physicalQuantity < args.quantityDelivered) {
       throw new Error(`Estoque insuficiente (concorrência). Físico: ${freshStock.physicalQuantity}. Necessário: ${args.quantityDelivered}.`);
     }
