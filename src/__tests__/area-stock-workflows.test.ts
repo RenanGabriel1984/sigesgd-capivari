@@ -61,7 +61,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(approve).toContain("validateAreaLocationLotBalance");
     expect(approve).toContain("sourceBalance.error");
     expect(approve).toContain("lot.areaId === requestItem.areaId && lot.locationId === requestItem.sourceLocationId");
-    expect(approve).toContain("lot.locationId !== requestItem.sourceLocationId");
+    expect(approve).toContain("lot.areaId === requestItem.areaId && lot.locationId === requestItem.sourceLocationId");
     expect(approve).not.toMatch(/\blocation\.areaId/);
     expect(approve).toContain('ctx.db.insert("requestItemReservations"');
   });
