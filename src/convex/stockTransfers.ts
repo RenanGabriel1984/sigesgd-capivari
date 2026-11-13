@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { planTransfer } from "../lib/transfer-rules";
+import { planLotLocationTransfer } from "../lib/lot-location-rules";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 
@@ -79,6 +80,7 @@ export const create = mutation({
     // não consome material.
     let sourceLotLocation: any = null;
     let destinationLotLocation: any = null;
+    let lotLocationPlan: ReturnType<typeof planLotLocationTransfer> | null = null;
     let lotDoc: any = null;
     if (args.lotId) {
       lotDoc = await ctx.db.get(args.lotId);
@@ -97,9 +99,11 @@ export const create = mutation({
       if (!sourceLotLocation) {
         throw new Error("Não há saldo rastreável deste lote no armário de origem. É necessária regularização do legado antes da transferência.");
       }
-      if (!Number.isFinite(sourceLotLocation.quantityAvailable) || sourceLotLocation.quantityAvailable < args.quantity) {
-        throw new Error(`Saldo do lote no armário de origem insuficiente. Disponível: ${sourceLotLocation.quantityAvailable}.`);
-      }
+      lotLocationPlan = planLotLocationTransfer({
+        sourceQuantity: sourceLotLocation.quantityAvailable,
+        destinationQuantity: destinationLotLocation?.quantityAvailable ?? 0,
+        quantity: args.quantity,
+      });
     } else {
       const activeLots = await ctx.db.query("lots")
         .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
@@ -165,12 +169,12 @@ export const create = mutation({
     // permanece inalterado, pois transferência não é saída/consumo.
     if (args.lotId && sourceLotLocation) {
       await ctx.db.patch(sourceLotLocation._id, {
-        quantityAvailable: sourceLotLocation.quantityAvailable - args.quantity,
+        quantityAvailable: lotLocationPlan!.sourceQuantityAfter,
         updatedAt: now,
       });
       if (destinationLotLocation) {
         await ctx.db.patch(destinationLotLocation._id, {
-          quantityAvailable: destinationLotLocation.quantityAvailable + args.quantity,
+          quantityAvailable: lotLocationPlan!.destinationQuantityAfter,
           updatedAt: now,
         });
       } else {
@@ -178,7 +182,7 @@ export const create = mutation({
           lotId: args.lotId,
           productId: args.productId,
           locationId: args.toLocationId,
-          quantityAvailable: args.quantity,
+          quantityAvailable: lotLocationPlan!.destinationQuantityAfter,
           updatedAt: now,
         });
       }
