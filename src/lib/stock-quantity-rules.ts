@@ -24,16 +24,11 @@ export function isValidStockQuantity(
 }
 
 
-export interface GlobalStockBalanceRow {
-  physicalQuantity: number;
-  reservedQuantity: number;
-}
-
 /**
  * Retorna o saldo único válido ou null quando o produto ainda não possui
  * registro global. Duplicidades e valores fisicamente impossíveis bloqueiam.
  */
-export function getOptionalSingleValidGlobalStock<T extends GlobalStockBalanceRow>(
+export function getOptionalSingleValidGlobalStock<T>(
   rows: readonly T[],
   productLabel: string,
 ): T | null {
@@ -42,7 +37,7 @@ export function getOptionalSingleValidGlobalStock<T extends GlobalStockBalanceRo
   }
   if (rows.length === 0) return null;
 
-  const stock = rows[0];
+  const stock = rows[0] as { physicalQuantity: number; reservedQuantity: number };
   const physical = Number(stock.physicalQuantity);
   const reserved = Number(stock.reservedQuantity);
   if (
@@ -58,7 +53,7 @@ export function getOptionalSingleValidGlobalStock<T extends GlobalStockBalanceRo
 }
 
 /** Exige o registro global quando a operação necessariamente consome estoque. */
-export function requireSingleValidGlobalStock<T extends GlobalStockBalanceRow>(
+export function requireSingleValidGlobalStock<T>(
   rows: readonly T[],
   productLabel: string,
 ): T {
