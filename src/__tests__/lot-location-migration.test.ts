@@ -38,8 +38,8 @@ function report(overrides: Partial<LotLocationMigrationReport> = {}): LotLocatio
       duplicateBalanceScopeCount: 0,
       orphanBalanceCount: 0,
       localComparison: [
-        { locationId: "loc-1", physicalQuantity: 3300, mappedLotQuantity: 0, candidateLotQuantity: 3300, duplicatePhysicalRows: 0 },
-        { locationId: "loc-2", physicalQuantity: 38, mappedLotQuantity: 0, candidateLotQuantity: 38, duplicatePhysicalRows: 0 },
+        { locationId: "loc-1", physicalQuantity: 3317, mappedLotQuantity: 0, candidateLotQuantity: 3317, duplicatePhysicalRows: 0 },
+        { locationId: "loc-2", physicalQuantity: 21, mappedLotQuantity: 0, candidateLotQuantity: 21, duplicatePhysicalRows: 0 },
       ],
       lots,
     }],
