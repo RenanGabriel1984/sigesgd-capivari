@@ -1,4 +1,5 @@
 import { query, mutation } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
@@ -244,7 +245,7 @@ export const createExchange = mutation({
       quantity: args.quantityDelivered,
     });
     const consumedLotId = lotConsumption.allocations[0]?.lotId;
-    const sourceLocation = await ctx.db.get(sourceLocationId);
+    const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
 
     // Re-read stock for concurrency safety (double-check pattern)
     const freshStockRows = await ctx.db
