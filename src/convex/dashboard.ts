@@ -403,8 +403,8 @@ export const movementReport = query({
           .collect();
         const lotAllocations = await Promise.all(allocations.map(async (allocation: any) => {
           const [lot, location] = await Promise.all([
-            ctx.db.get(allocation.lotId),
-            ctx.db.get(allocation.locationId),
+            ctx.db.get(allocation.lotId as any) as Promise<any>,
+            ctx.db.get(allocation.locationId as any) as Promise<any>,
           ]);
           return {
             lotNumber: lot?.lotNumber ?? "Lote não encontrado",
