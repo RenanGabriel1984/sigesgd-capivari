@@ -10,6 +10,14 @@ import {
   summarizeWaterFinances,
 } from "../lib/water-control";
 
+async function currentContainerBalance(ctx: any) {
+  const [receipts, movements] = await Promise.all([
+    ctx.db.query("waterReceipts").collect(),
+    ctx.db.query("waterContainerMovements").collect(),
+  ]);
+  return calculateWaterContainerBalance(receipts, movements);
+}
+
 async function writeAudit(ctx: any, userId: any, action: "create" | "update", entity: string, entityId: string, details: string) {
   await ctx.db.insert("auditLogs", {
     userId, action, entity, entityId, details, timestamp: Date.now(),
