@@ -928,7 +928,7 @@ export const withdrawFamily = mutation({
         `Lotes retirados: ${consumedLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}. ` +
         (reclassifiedFromLots.length ? `Lotes reclassificados: ${reclassifiedFromLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}. ` : "") +
         `Motivo: ${args.reason ?? "—"}; O.S.: ${args.osNumber ?? "—"}; Destino: ${args.secretariaId ?? "—"}. ` +
-        `Invariante global preservado (Δphysical=${-args.quantity}, Δreserved=0).`,
+        `Equivalência preservada em unidade-base (Δ=${baseUnitDelta}, esperado=${-args.quantity}); Δ bruto por registros=${physicalDelta}; Δ reservado=0.`,
       timestamp: now,
     });
 
