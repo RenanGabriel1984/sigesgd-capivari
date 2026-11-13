@@ -439,6 +439,7 @@ const schema = defineSchema(
       newReserved: v.number(),
       userId: v.id("users"),
       supplierId: v.optional(v.id("suppliers")),
+      locationId: v.optional(v.id("storageLocations")),
       requestId: v.optional(v.id("requests")),
       entryId: v.optional(v.id("entries")),
       lotId: v.optional(v.string()),
@@ -667,6 +668,7 @@ const schema = defineSchema(
     requestItemLots: defineTable({
       requestItemId: v.id("requestItems"),
       lotId: v.id("lots"),
+      locationId: v.optional(v.id("storageLocations")),
       quantity: v.number(),
     }).index("by_requestItem", ["requestItemId"])
       .index("by_lot", ["lotId"]),
@@ -774,6 +776,7 @@ const schema = defineSchema(
       exchangeNumber: v.string(),
       productId: v.id("products"),
       lotId: v.optional(v.id("lots")),
+      locationId: v.optional(v.id("storageLocations")),
       printerId: v.id("printers"),
       quantityDelivered: v.number(),
       quantityEmptyReceived: v.number(),
@@ -877,6 +880,7 @@ const schema = defineSchema(
       assetId: v.id("assets"),
       productId: v.id("products"),
       lotId: v.optional(v.string()),
+      locationId: v.optional(v.id("storageLocations")),
       quantity: v.number(),
       installedAt: v.number(),
       removedAt: v.optional(v.number()),
