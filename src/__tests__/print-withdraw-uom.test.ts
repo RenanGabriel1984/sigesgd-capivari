@@ -37,6 +37,8 @@ const read = (p: string) => readFileSync(resolve(ROOT, p), "utf-8");
 const backend = read("src/convex/printSupplies.ts");
 const panel = read("src/pages/GomaQ.tsx");
 const schema = read("src/convex/schema.ts");
+const ledger = read("src/convex/lotLocationLedger.ts");
+const lotRules = read("src/lib/lot-location-rules.ts");
 const orgsBackend = read("src/convex/organizations.ts");
 
 /* ─── Ativos reconciliados (read-only, 2026-09) ─────────────────────────── */
@@ -163,10 +165,15 @@ describe("PRINT-EXIT-03 — retirada respeita o backend (autoridade final)", () 
     expect(backend).toContain("ctx.db.insert(\"auditLogs\"");
   });
 
-  it("FIFO de lotes e lotId estruturado preservados na retirada por família", () => {
-    expect(backend).toContain("sort((a, b) => a.receivedAt - b.receivedAt)");
-    expect(backend).toContain("lotId: consumedLots[0]?.lotId as never");
-    expect(backend).toContain("Falha de consistência: lotes insuficientes");
+  it("FIFO e alocações multi-lote ficam vinculados à movimentação", () => {
+    expect(backend).toContain("consumeLotLocationStock");
+    expect(backend).toContain("consumedLots.find((allocation) => allocation.productId === args.productId)");
+    expect(backend).toContain("recordLotMovementAllocations");
+    expect(backend).toContain('allocationType: "withdrawal"');
+    expect(backend).toContain('allocationType: "reclassification"');
+    expect(schema).toContain("stockMovementLotAllocations: defineTable");
+    expect(ledger).toContain("planFifoLotLocationConsumption");
+    expect(lotRules).toContain("Saldo rastreável insuficiente no armário selecionado");
   });
 
   it("a retirada registra destino, secretaria, departamento, unidade, O.S. e motivo", () => {
@@ -300,10 +307,12 @@ describe("PRINT-UOM-05 — a retirada trabalha em unidade-base", () => {
     expect(closedAfter * 50 + looseAfter).toBe(648);
   });
 
-  it("o backend registra a abertura de embalagem como evento explícito e auditado", () => {
-    expect(backend).toContain("Abertura INTEGRAL");
+  it("a abertura de embalagem gera lote avulso derivado e mantém origem", () => {
+    expect(backend).toContain("Abrir embalagens é reclassificação física");
     expect(backend).toContain("open_pack");
-    expect(backend).toContain("Reclassificação de");
+    expect(backend).toContain("originLotId: sourceLot._id");
+    expect(backend).toContain("allocationType: \"reclassification\"");
+    expect(backend).toContain("allocationType: \"withdrawal\"");
   });
 });
 
@@ -431,10 +440,14 @@ describe("PRINT-UOM-12 — estoque global continua 3338 com divergência 0", () 
     expect(backend).toContain("invariantDivergences");
   });
 
-  it("qualquer mutation aborta em divergência inesperada", () => {
-    expect(backend).toContain("INTEGRIDADE: estoque global divergente antes da operação");
-    expect(backend).toContain("VIOLAÇÃO DE SALDO na retirada");
-    expect(backend).toContain("physicalDelta !== -args.quantity");
+  it("a retirada confere os livros-razão da família sem usar snapshot fixo como limite", () => {
+    expect(backend).toContain("INTEGRIDADE: estoque da família divergente antes da operação");
+    expect(backend).toContain("VIOLAÇÃO DE SALDO em unidade-base");
+    expect(backend).toContain("Math.abs(physicalDelta - expectedRawDelta) > STOCK_EPSILON");
+    expect(backend).toContain("Math.abs(baseUnitDelta + args.quantity) > STOCK_EPSILON");
+    expect(backend).toContain("lotLocationBalances");
+    expect(backend).toContain("afterDivergences");
+    expect(backend).toContain("readGlobalTotals(ctx, familyProductIds)");
   });
 
   it("a conversa de estoque usa a MESMA unidade-base (4 livros-razão conferidos)", () => {
@@ -471,16 +484,20 @@ describe("PRINT-UOM-13 — nenhuma conversão automática indevida de papel tér
 });
 
 describe("PRINT-UOM-14 — nenhuma duplicação de estoque é criada", () => {
-  it("não existe nova tabela de estoque no painel de suprimentos", () => {
-    expect(backend).not.toMatch(/insert\("(stock|printSuppliesStock|supplyStock|familyStock)"/);
-    expect(schema).not.toMatch(/defineTable\(\{[^}]*familyStock/);
+  it("não existe tabela paralela: os saldos continuam nas tabelas canônicas", () => {
+    expect(schema).toMatch(/stock:\s*defineTable\(/);
+    expect(schema).toContain("lotLocationBalances: defineTable");
+    expect(schema).not.toMatch(/printSuppliesStock|supplyStock|familyStock/);
+    expect(backend).toContain('ctx.db.insert("stock"');
   });
 
   it("a abertura de caixa é REPARTIÇÃO, não geração: transferência de unidades entre registros", () => {
-    expect(backend).toContain("transferir as unidades");
-    // A abertura credita as unidades no produto avulso e consome as caixas.
+    expect(backend).toContain("Abrir embalagens é reclassificação física");
+    // Cada lote fechado origina lote avulso derivado no mesmo armário.
     expect(backend).toContain("const openedUnits = openPacks * conv.factor");
     expect(backend).toContain("newLoosePhys = loosePhys + openedUnits");
+    expect(backend).toContain("lotLocationBalances");
+    expect(backend).toContain("stockByLocation");
   });
 
   it("a família deriva de stock/lotes reais (sem cache persistido de família)", () => {

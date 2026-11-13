@@ -17,6 +17,8 @@ import { query, mutation, internalMutation, internalQuery } from "./_generated/s
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 import {
   buildSupplyRow,
   computeCardTotals,
@@ -39,11 +41,9 @@ export const TI_GERAL_AREA_ID = "q971w9jkmz8rsqr3vsr2as0dps8eyqns";
 export const SUPPLY_CATEGORY_ID = "k57fk85xwpj3b3xj9dc31jwqpd8dgk3a";
 
 /**
- * Invariantes GLOBAIS inegociáveis do estoque (snapshot oficial da
- * reconciliação): physical 3338 · reserved 0 · available 3338 ·
- * stockByLocation 3338 · soma dos lotes 3338. Toda mutation que mexe em
- * saldos compara ANTES × DEPOIS nestas 5 representações e aborta em
- * QUALQUER divergência além da saída autorizada.
+ * Snapshot histórico da reconciliação inicial (não é limite operacional).
+ * As mutations validam relações entre os livros-razão atuais; o total físico
+ * pode mudar legitimamente após entradas e saídas.
  */export const GLOBAL_INVARIANTS = {
   physical: 3338,
   reserved: 0,
@@ -58,30 +58,52 @@ interface GlobalTotals {
   reserved: number;
   stockByLocation: number;
   lotsAvailable: number;
+  lotLocationBalances: number;
 }
 
-/** Snapshot SOMENTE-LEITURA dos 4 livros-razão globais. */
-async function readGlobalTotals(ctx: any): Promise<GlobalTotals> {
-  const [stock, sbl, lots] = await Promise.all([
+const STOCK_EPSILON = 1e-9;
+
+/** Snapshot SOMENTE-LEITURA dos 5 livros-razão globais. */
+async function readGlobalTotals(ctx: any, productIds?: string[]): Promise<GlobalTotals> {
+  const [stock, sbl, lots, lotLocationBalances] = await Promise.all([
     ctx.db.query("stock").collect(),
     ctx.db.query("stockByLocation").collect(),
     ctx.db.query("lots").collect(),
+    ctx.db.query("lotLocationBalances").collect(),
   ]);
+  const allowed = productIds ? new Set(productIds.map(String)) : null;
+  const scopedStock = allowed ? stock.filter((row: any) => allowed.has(String(row.productId))) : stock;
+  const scopedLocations = allowed ? sbl.filter((row: any) => allowed.has(String(row.productId))) : sbl;
+  const scopedLots = allowed ? lots.filter((row: any) => allowed.has(String(row.productId))) : lots;
+  const scopedBalances = allowed ? lotLocationBalances.filter((row: any) => allowed.has(String(row.productId))) : lotLocationBalances;
   return {
-    physical: stock.reduce((s: number, x: any) => s + x.physicalQuantity, 0),
-    reserved: stock.reduce((s: number, x: any) => s + x.reservedQuantity, 0),
-    stockByLocation: sbl.reduce((s: number, x: any) => s + x.quantity, 0),
-    lotsAvailable: lots.reduce((s: number, l: any) => s + l.quantityAvailable, 0),
+    physical: scopedStock.reduce((s: number, x: any) => s + x.physicalQuantity, 0),
+    reserved: scopedStock.reduce((s: number, x: any) => s + x.reservedQuantity, 0),
+    stockByLocation: scopedLocations.reduce((s: number, x: any) => s + x.quantity, 0),
+    lotsAvailable: scopedLots.reduce((s: number, l: any) => s + l.quantityAvailable, 0),
+    lotLocationBalances: scopedBalances.reduce((s: number, b: any) => s + b.quantityAvailable, 0),
   };
 }
 
-/** Divergências entre o snapshot e os invariantes esperados (vazio = ok). */
+/** Valida relações atuais, sem comparar o saldo vivo com o snapshot histórico 3.338. */
 function invariantDivergences(t: GlobalTotals): string[] {
   const div: string[] = [];
-  if (t.physical !== GLOBAL_INVARIANTS.physical) div.push(`physical=${t.physical} (esperado ${GLOBAL_INVARIANTS.physical})`);
-  if (t.reserved !== GLOBAL_INVARIANTS.reserved) div.push(`reserved=${t.reserved} (esperado ${GLOBAL_INVARIANTS.reserved})`);
-  if (t.stockByLocation !== GLOBAL_INVARIANTS.stockByLocation) div.push(`stockByLocation=${t.stockByLocation} (esperado ${GLOBAL_INVARIANTS.stockByLocation})`);
-  if (t.lotsAvailable !== GLOBAL_INVARIANTS.lotsAvailable) div.push(`lotsAvailable=${t.lotsAvailable} (esperado ${GLOBAL_INVARIANTS.lotsAvailable})`);
+  const values = [t.physical, t.reserved, t.stockByLocation, t.lotsAvailable, t.lotLocationBalances];
+  if (values.some((value) => !Number.isFinite(value) || value < 0)) {
+    div.push("há quantidade negativa ou não finita em um dos livros-razão");
+  }
+  if (Math.abs(t.physical - t.stockByLocation) > STOCK_EPSILON) {
+    div.push(`physical=${t.physical} difere de stockByLocation=${t.stockByLocation}`);
+  }
+  if (Math.abs(t.physical - t.lotsAvailable) > STOCK_EPSILON) {
+    div.push(`physical=${t.physical} difere de lotsAvailable=${t.lotsAvailable}`);
+  }
+  if (Math.abs(t.physical - t.lotLocationBalances) > STOCK_EPSILON) {
+    div.push(`physical=${t.physical} difere de lotLocationBalances=${t.lotLocationBalances}`);
+  }
+  if (t.reserved > t.physical + STOCK_EPSILON) {
+    div.push(`reserved=${t.reserved} excede physical=${t.physical}`);
+  }
   return div;
 }
 
@@ -362,6 +384,7 @@ export const withdraw = mutation({
   args: {
     productId: v.id("products"),
     quantity: v.number(),
+    locationId: v.optional(v.id("storageLocations")),
     secretariaId: v.optional(v.id("organizations")),
     departamentoId: v.optional(v.id("organizations")),
     unidadeId: v.optional(v.id("organizations")),
@@ -384,42 +407,32 @@ export const withdraw = mutation({
     }
 
     // ── Mesmas regras da saída rápida existente (stockSetup.quickExit) ──
-    const stock = await ctx.db
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
+      .collect();
+    const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
     const available = (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
     if (args.quantity > available) {
       throw new Error(`Estoque insuficiente. Disponível: ${available} ${product.unitOfMeasure}`);
     }
 
+    const sourceLocationId = await resolveWithdrawalLocation(ctx, args.productId, args.locationId);
+    const lotConsumption = await consumeLotLocationStock(ctx, {
+      productId: args.productId,
+      locationId: sourceLocationId,
+      quantity: args.quantity,
+    });
+    const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
+    const consumedLots = lotConsumption.allocations.map((allocation) => ({
+      lotId: String(allocation.lotId),
+      lotNumber: allocation.lotNumber,
+      qty: allocation.quantity,
+    }));
+
     const now = Date.now();
     const previousPhysical = stock!.physicalQuantity;
     const newPhysical = previousPhysical - args.quantity;
-
-    // Lotes disponíveis do produto, ordenados (FIFO por recebimento).
-    const lotList = (await ctx.db.query("lots").collect())
-      .filter((l) => l.productId === args.productId && l.quantityAvailable > 0 && l.active !== false)
-      .sort((a, b) => a.receivedAt - b.receivedAt);
-    const remaining = args.quantity;
-    let consumed = 0;
-    const consumedLots: Array<{ lotId: string; lotNumber: string; qty: number }> = [];
-
-    for (const lot of lotList) {
-      if (consumed >= remaining) break;
-      const take = Math.min(lot.quantityAvailable, remaining - consumed);
-      await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - take });
-      consumedLots.push({ lotId: lot._id as string, lotNumber: lot.lotNumber, qty: take });
-      consumed += take;
-      if (consumed >= remaining) break;
-    }
-
-    if (consumed < remaining) {
-      throw new Error(
-        `Falha de consistência: lotes insuficientes (${consumed}/${remaining}). Nenhuma saída registrada.`,
-      );
-    }
-
     await ctx.db.patch(stock!._id, { physicalQuantity: newPhysical });
 
     // Movimentação com lotId estruturado (1º lote consumido) + observation
@@ -433,15 +446,22 @@ export const withdraw = mutation({
       previousReserved: stock!.reservedQuantity,
       newReserved: stock!.reservedQuantity,
       lotId: consumedLots[0].lotId as never,
+      locationId: sourceLocationId,
       userId,
       exitNumber: `SAI-${new Date(now).getFullYear()}-SUP-${now}`,
       observation:
         `Retirada de suprimento — ${args.reason ?? "Sem motivo"} ` +
+        `| Armário: ${sourceLocation?.name ?? sourceLocationId} ` +
         `| O.S.: ${args.osNumber ?? "—"} | Destino: ${args.secretariaId ?? "—"} ` +
-        `| Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(", ")}` +
+        `| Lotes retirados: ${consumedLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}` +
         (args.observation ? ` | Obs: ${args.observation}` : ""),
       timestamp: now,
     } as never);
+
+    await recordLotMovementAllocations(ctx, {
+      movementId, productId: args.productId, locationId: sourceLocationId,
+      allocations: lotConsumption.allocations,
+    });
 
     await ctx.db.insert("auditLogs", {
       userId: userId as never,
@@ -450,7 +470,7 @@ export const withdraw = mutation({
       entityId: movementId,
       details:
         `Retirada rápida de suprimento de impressão: ${args.quantity} ${product.unitOfMeasure} de "${product.name}". ` +
-        `Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(", ")}. ` +
+        `Lotes retirados: ${consumedLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}. ` +
         `Motivo: ${args.reason ?? "—"}; O.S.: ${args.osNumber ?? "—"}; Destino: ${args.secretariaId ?? "—"}.` +
         (args.observation ? ` Obs: ${args.observation}` : ""),
       timestamp: now,
@@ -614,6 +634,7 @@ export const withdrawFamily = mutation({
   args: {
     productId: v.id("products"),
     quantity: v.number(), // em unidades-base
+    locationId: v.id("storageLocations"),
     secretariaId: v.optional(v.id("organizations")),
     departamentoId: v.optional(v.id("organizations")),
     unidadeId: v.optional(v.id("organizations")),
@@ -634,18 +655,11 @@ export const withdrawFamily = mutation({
       throw new Error('Produto não pertence à categoria "Suprimentos de Impressão".');
     }
 
-    // Snapshot ANTES (invariantes globais).
-    const before = await readGlobalTotals(ctx);
-    const preDivergences = invariantDivergences(before);
-    if (preDivergences.length > 0) {
-      throw new Error(`INTEGRIDADE: estoque global divergente antes da operação (${preDivergences.join("; ")}). Operação abortada.`);
-    }
-
-    const stock = await ctx.db
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!stock) throw new Error("Estoque do produto não encontrado");
+      .collect();
+    const stock = requireSingleValidGlobalStock(stockRows, product.name);
 
     // Família: todos os produtos da categoria com a mesma chave canônica.
     const conv = readPackagingConversion(product);
@@ -666,10 +680,24 @@ export const withdrawFamily = mutation({
       throw new Error("Família inválida para retirada em unidades: configure a conversão no produto de embalagem (caixa fechada).");
     }
 
-    const stockOf = async (productId: string) =>
-      ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId)).first();
-    const closedStock = (await stockOf(closedMember._id)) as { _id: string; physicalQuantity: number; reservedQuantity: number } | null;
-    const looseStock = (await stockOf(looseMember._id)) as { _id: string; physicalQuantity: number; reservedQuantity: number } | null;
+    // Concilia somente os dois produtos desta família. Um lote legado de outra
+    // área não deve bloquear uma retirada independente, mas qualquer divergência
+    // entre os livros-razão destes dois produtos bloqueia a operação.
+    const familyProductIds = [closedMember._id, looseMember._id];
+    const before = await readGlobalTotals(ctx, familyProductIds);
+    const preDivergences = invariantDivergences(before);
+    if (preDivergences.length > 0) {
+      throw new Error(`INTEGRIDADE: estoque da família divergente antes da operação (${preDivergences.join("; ")}). Operação abortada.`);
+    }
+
+    const stockOf = async (productId: string, productName: string) => {
+      const rows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", productId))
+        .collect();
+      return getOptionalSingleValidGlobalStock(rows, productName);
+    };
+    const closedStock = await stockOf(closedMember._id, closedMember.name);
+    const looseStock = await stockOf(looseMember._id, looseMember.name);
     const closedPhys = closedStock?.physicalQuantity ?? 0;
     const closedRes = closedStock?.reservedQuantity ?? 0;
     const loosePhys = looseStock?.physicalQuantity ?? 0;
@@ -693,109 +721,152 @@ export const withdrawFamily = mutation({
     }
 
     const now = Date.now();
-    const consumedLots: Array<{ lotId: string; lotNumber: string; qty: number }> = [];
-
-    // FIFO central de lotes de um produto (por recebimento) + patch do lote.
-    const consumeFifo = async (productId: string, quantity: number, physicalBefore: number) => {
-      const lotList = ((await ctx.db.query("lots").collect()) as Array<any>)
-        .filter((l) => l.productId === productId && l.quantityAvailable > 0 && l.active !== false)
-        .sort((a, b) => a.receivedAt - b.receivedAt);
-      let consumed = 0;
-      for (const lot of lotList) {
-        if (consumed >= quantity) break;
-        const take = Math.min(lot.quantityAvailable, quantity - consumed);
-        await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - take });
-        consumedLots.push({ lotId: lot._id as string, lotNumber: lot.lotNumber, qty: take });
-        consumed += take;
-      }
-      if (consumed < quantity) {
-        throw new Error(`Falha de consistência: lotes insuficientes (${consumed}/${quantity}). Nenhuma saída registrada.`);
-      }
-      return physicalBefore - quantity;
+    const consumedLots: Array<{ lotId: any; lotNumber: string; qty: number; productId: any }> = [];
+    const reclassifiedFromLots: Array<{ lotId: any; lotNumber: string; qty: number }> = [];
+    const consumeAtLocation = async (productId: string, quantity: number, locationId: any) => {
+      if (quantity <= 0) return { allocations: [] as any[] };
+      return consumeLotLocationStock(ctx, { productId, locationId, quantity });
+    };
+    const appendWithdrawalAllocations = (productId: any, allocations: Array<any>) => {
+      consumedLots.push(...allocations.map((allocation) => ({
+        lotId: allocation.lotId,
+        lotNumber: allocation.lotNumber,
+        qty: allocation.quantity,
+        productId,
+      })));
     };
 
-    let closedExitUnits = 0;
-    let looseExitUnits = 0;
+    let closedExitUnits = 0; // quantidade de EMBALAGENS fechadas retiradas
+    let looseExitUnits = 0; // quantidade de unidades-base efetivamente retirada
     let newClosedPhys = closedPhys;
     let newLoosePhys = loosePhys;
 
     if (plan.operation === "take_pack") {
-      // Retirada direta: avulsas primeiro, depois caixas fechadas INTEGRAIS.
-      const fromLoose = Math.min(looseAvailable, args.quantity);
-      const fromClosedPacks = Math.floor((args.quantity - fromLoose) / conv.factor);
-      closedExitUnits = fromClosedPacks * conv.factor;
-      looseExitUnits = args.quantity - closedExitUnits;
-      if (looseExitUnits > 0) newLoosePhys = await consumeFifo(looseMember._id, looseExitUnits, loosePhys);
-      if (closedExitUnits > 0) newClosedPhys = await consumeFifo(closedMember._id, closedExitUnits, closedPhys);
-    } else {
-      // open_pack: sai das avulsas e abre caixas fechadas INTEGRAIS para cobrir o resto.
-      const openPacks = plan.packs;
-      // Abertura INTEGRAL: consumir openPacks caixas fechadas (lotes FIFO) e
-      // transferir as unidades para o registro "unidade avulsa".
-      newClosedPhys = await consumeFifo(closedMember._id, openPacks * conv.factor, closedPhys);
-      const openedUnits = openPacks * conv.factor;
-      if (openedUnits > 0) {
-        // Rastreabilidade: o lote de reclassificação herda a ENTRADA do 1º lote
-        // de caixa fechada consumido (origem histórica preservada).
-        const firstClosedLot = consumedLots.length > 0 ? await ctx.db.get(consumedLots[0].lotId as Id<"lots">) : null;
-        const inheritEntryId = (firstClosedLot as { entryId?: string } | null)?.entryId ?? undefined;
-        const looseLotList = ((await ctx.db.query("lots").collect()) as Array<any>)
-          .filter((l) => l.productId === looseMember._id)
-          .sort((a, b) => a.receivedAt - b.receivedAt);
-        let remaining = openedUnits;
-        // Incrementa lotes EXISTENTES do produto avulso (FIFO); se faltar
-        // cobertura, cria lote de reclassificação vinculado à entrada de origem.
-        for (const lot of looseLotList) {
-          if (remaining <= 0) break;
-          const add = Math.min(remaining, conv.factor * 100);
-          await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable + add });
-          remaining -= add;
-        }
-        if (remaining > 0) {
-          if (!inheritEntryId) {
-            throw new Error("Falha de rastreabilidade: lote de origem da abertura não encontrado. Nenhuma reclassificação registrada.");
-          }
-          await ctx.db.insert("lots", {
-            lotNumber: `REC-${now}-${remaining}`,
-            productId: looseMember._id,
-            entryId: inheritEntryId,
-            brand: looseMember.brand ?? undefined,
-            quantityReceived: remaining,
-            quantityAvailable: remaining,
-            receivedAt: now,
-            active: true,
-            areaId: PRINT_AREA_ID as never,
-            observation: `Reclassificação de ${openPacks} ${conv.packagingUnit}(s) aberta(s) de "${closedMember.name}" (1 ${conv.packagingUnit} = ${conv.factor} ${conv.baseUnit}).`,
-          } as never);
-        }
-        newLoosePhys = loosePhys + openedUnits;
+      // Primeiro consome avulsas; o restante só pode sair como embalagens inteiras.
+      looseExitUnits = Math.min(looseAvailable, args.quantity);
+      closedExitUnits = Math.floor((args.quantity - looseExitUnits) / conv.factor);
+      if (looseExitUnits > 0) {
+        const loose = await consumeAtLocation(looseMember._id, looseExitUnits, args.locationId);
+        appendWithdrawalAllocations(looseMember._id, loose.allocations);
+        newLoosePhys = loosePhys - looseExitUnits;
       }
-      // Saída TOTAL em unidades do produto avulso (inclui as recém-abertas).
+      if (closedExitUnits > 0) {
+        const closed = await consumeAtLocation(closedMember._id, closedExitUnits, args.locationId);
+        appendWithdrawalAllocations(closedMember._id, closed.allocations);
+        newClosedPhys = closedPhys - closedExitUnits;
+      }
+    } else {
+      // Abrir embalagens é reclassificação física, não saída das unidades todas.
+      // Cada lote de embalagem consumido origina lote avulso próprio, preservando
+      // a cadeia de origem mesmo quando a abertura atravessa mais de um lote.
+      const openPacks = plan.packs;
+      const openedUnits = openPacks * conv.factor;
+      const opened = await consumeAtLocation(closedMember._id, openPacks, args.locationId);
+      newClosedPhys = closedPhys - openPacks;
+      reclassifiedFromLots.push(...opened.allocations.map((allocation: any) => ({
+        lotId: allocation.lotId,
+        lotNumber: allocation.lotNumber,
+        qty: allocation.quantity,
+      })));
+
+      for (const sourceAllocation of opened.allocations) {
+        const sourceLot = await ctx.db.get(sourceAllocation.lotId as Id<"lots">);
+        if (!sourceLot?.entryId) {
+          throw new Error("Falha de rastreabilidade: lote de origem da embalagem aberta não encontrado. Nenhuma reclassificação registrada.");
+        }
+        const childQuantity = sourceAllocation.quantity * conv.factor;
+        const reclassifiedLotId = await ctx.db.insert("lots", {
+          lotNumber: `REC-${now}-${sourceLot.lotNumber}`,
+          productId: looseMember._id as Id<"products">,
+          entryId: sourceLot.entryId,
+          brand: looseMember.brand ?? undefined,
+          quantityReceived: childQuantity,
+          quantityAvailable: childQuantity,
+          receivedAt: now,
+          supplierId: sourceLot.supplierId,
+          invoiceNumber: sourceLot.invoiceNumber,
+          active: true,
+          materialType: sourceLot.materialType,
+          areaId: (sourceLot.areaId ?? PRINT_AREA_ID) as never,
+          originLotId: sourceLot._id,
+          observation: `Reclassificação de ${sourceAllocation.quantity} embalagem(ns) de "${closedMember.name}" para "${looseMember.name}". Origem: ${sourceLot.lotNumber}.`,
+        } as never);
+        await ctx.db.insert("lotLocationBalances", {
+          lotId: reclassifiedLotId as Id<"lots">,
+          productId: looseMember._id as Id<"products">,
+          locationId: args.locationId,
+          quantityAvailable: childQuantity,
+          updatedAt: now,
+        });
+      }
+
+      const looseLocationRows = await ctx.db.query("stockByLocation")
+        .withIndex("by_product", (q: any) => q.eq("productId", looseMember._id))
+        .collect();
+      validateUniqueScopedStockRows(looseLocationRows, looseMember.name);
+      const looseLocationRow = looseLocationRows.find((row: any) => row.locationId === args.locationId);
+      if (looseLocationRow) {
+        await ctx.db.patch(looseLocationRow._id, { quantity: looseLocationRow.quantity + openedUnits });
+      } else {
+        await ctx.db.insert("stockByLocation", {
+          productId: looseMember._id as Id<"products">,
+          locationId: args.locationId,
+          quantity: openedUnits,
+        });
+      }
+      newLoosePhys = loosePhys + openedUnits;
+
+      // Agora a saída real consome as unidades avulsas (antigas primeiro,
+      // e só depois os lotes recém-abertos, conforme FIFO por data).
       looseExitUnits = args.quantity;
-      newLoosePhys = await consumeFifo(looseMember._id, looseExitUnits, newLoosePhys);
+      const loose = await consumeAtLocation(looseMember._id, looseExitUnits, args.locationId);
+      appendWithdrawalAllocations(looseMember._id, loose.allocations);
+      newLoosePhys -= looseExitUnits;
     }
 
-    // Patches de saldo por produto.
+    // Atualiza os dois saldos globais. Embalagens e unidades-base são produtos
+    // distintos; a equivalência física é conferida em unidade-base abaixo.
     if (closedExitUnits > 0 || plan.operation === "open_pack") {
-      await ctx.db.patch(closedStock!._id as Id<"stock">, { physicalQuantity: newClosedPhys });
+      if (!closedStock) throw new Error("Saldo global do produto em embalagem fechada não encontrado.");
+      await ctx.db.patch(closedStock._id as Id<"stock">, { physicalQuantity: newClosedPhys });
     }
-    if (plan.operation === "take_pack") {
-      if (looseExitUnits > 0) await ctx.db.patch(looseStock!._id as Id<"stock">, { physicalQuantity: newLoosePhys });
-    } else {
-      await ctx.db.patch(looseStock!._id as Id<"stock">, { physicalQuantity: newLoosePhys });
+    if (looseExitUnits > 0 || plan.operation === "open_pack") {
+      if (looseStock) {
+        await ctx.db.patch(looseStock._id as Id<"stock">, { physicalQuantity: newLoosePhys });
+      } else if (newLoosePhys > 0) {
+        await ctx.db.insert("stock", {
+          productId: looseMember._id as Id<"products">,
+          physicalQuantity: newLoosePhys,
+          reservedQuantity: 0,
+        });
+      }
     }
 
     // Guarda de invariante: a soma global NÃO MUDA além da saída autorizada.
-    const after = await readGlobalTotals(ctx);
+    const after = await readGlobalTotals(ctx, familyProductIds);
     const physicalDelta = after.physical - before.physical;
-    if (physicalDelta !== -args.quantity) {
+    const closedDelta = newClosedPhys - closedPhys;
+    const looseDelta = newLoosePhys - loosePhys;
+    const expectedRawDelta = closedDelta + looseDelta;
+    const baseUnitDelta = closedDelta * conv.factor + looseDelta;
+    if (Math.abs(physicalDelta - expectedRawDelta) > STOCK_EPSILON) {
       throw new Error(
-        `VIOLAÇÃO DE SALDO na retirada: Δphysical=${physicalDelta} (esperado ${-args.quantity}). ` +
-        "Operação abortada após patches — verifique lotes e saldos manualmente.",
+        `VIOLAÇÃO DE SALDO na reclassificação/retirada: Δglobal=${physicalDelta}, esperado=${expectedRawDelta}.`,
       );
     }
-    if (after.reserved !== before.reserved) {
+    if (Math.abs(baseUnitDelta + args.quantity) > STOCK_EPSILON) {
+      throw new Error(
+        `VIOLAÇÃO DE SALDO em unidade-base: Δ=${baseUnitDelta}, esperado=${-args.quantity}.`,
+      );
+    }
+    if (Math.abs(after.reserved - before.reserved) > STOCK_EPSILON) {
       throw new Error("VIOLAÇÃO DE SALDO: reservado global alterado indevidamente. Operação abortada.");
+    }
+    const afterDivergences = invariantDivergences(after);
+    if (afterDivergences.length > 0) {
+      throw new Error(
+        `VIOLAÇÃO DE SALDO após retirada (${afterDivergences.join("; ")}). Operação abortada.`,
+      );
     }
 
     const movementId = await ctx.db.insert("stockMovements", {
@@ -807,7 +878,8 @@ export const withdrawFamily = mutation({
       newPhysical: closedPhys * conv.factor + loosePhys - args.quantity,
       previousReserved: closedRes * conv.factor + looseRes,
       newReserved: closedRes * conv.factor + looseRes,
-      lotId: consumedLots[0]?.lotId as never,
+      lotId: consumedLots.find((allocation) => allocation.productId === args.productId)?.lotId as never,
+      locationId: args.locationId,
       userId,
       exitNumber: `SAI-${new Date(now).getFullYear()}-SUP-${now}`,
       observation:
@@ -815,10 +887,35 @@ export const withdrawFamily = mutation({
         `| Operação: ${plan.operation === "open_pack" ? `abertura integral de ${plan.packs} ${conv.packagingUnit}(s)` : `${plan.packs > 0 ? `${plan.packs} ${conv.packagingUnit}(s) fechada(s)` : ""}${plan.packs > 0 && looseExitUnits > 0 ? " + " : ""}${looseExitUnits} ${conv.baseUnit}. avulsa(s)`} ` +
         `| Composição antes: ${closedAvailable} ${conv.packagingUnit}(s) fechada(s) + ${looseAvailable} ${conv.baseUnit}. avulsa(s) ` +
         `| O.S.: ${args.osNumber ?? "—"} | Destino: ${args.secretariaId ?? "—"} ` +
-        `| Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(", ")}` +
+        `| Lotes retirados: ${consumedLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}` +
+        (reclassifiedFromLots.length ? ` | Embalagens abertas: ${reclassifiedFromLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}` : "") +
         (args.observation ? ` | Obs: ${args.observation}` : ""),
       timestamp: now,
     } as never);
+
+    const withdrawalGroups = new Map<string, { productId: any; allocations: Array<{ lotId: any; quantity: number }> }>();
+    for (const allocation of consumedLots) {
+      const key = String(allocation.productId);
+      const group = withdrawalGroups.get(key) ?? { productId: allocation.productId, allocations: [] };
+      group.allocations.push({ lotId: allocation.lotId, quantity: allocation.qty });
+      withdrawalGroups.set(key, group);
+    }
+    for (const group of withdrawalGroups.values()) {
+      await recordLotMovementAllocations(ctx, {
+        movementId, productId: group.productId, locationId: args.locationId,
+        allocations: group.allocations,
+        allocationType: "withdrawal",
+      });
+    }
+    if (reclassifiedFromLots.length > 0) {
+      await recordLotMovementAllocations(ctx, {
+        movementId, productId: closedMember._id, locationId: args.locationId,
+        allocations: reclassifiedFromLots.map((allocation) => ({
+          lotId: allocation.lotId, quantity: allocation.qty,
+        })),
+        allocationType: "reclassification",
+      });
+    }
 
     await ctx.db.insert("auditLogs", {
       userId,
@@ -828,13 +925,14 @@ export const withdrawFamily = mutation({
       details:
         `Retirada por família em unidades-base: ${args.quantity} ${conv.baseUnit} de "${product.name}". ` +
         `Operação ${plan.operation === "open_pack" ? `open_pack(${plan.packs} ${conv.packagingUnit})` : `take_pack(${plan.packs} ${conv.packagingUnit}, ${looseExitUnits} ${conv.baseUnit} avulsas)`}. ` +
-        `Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(", ")}. ` +
+        `Lotes retirados: ${consumedLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}. ` +
+        (reclassifiedFromLots.length ? `Lotes reclassificados: ${reclassifiedFromLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}. ` : "") +
         `Motivo: ${args.reason ?? "—"}; O.S.: ${args.osNumber ?? "—"}; Destino: ${args.secretariaId ?? "—"}. ` +
-        `Invariante global preservado (Δphysical=${-args.quantity}, Δreserved=0).`,
+        `Equivalência preservada em unidade-base (Δ=${baseUnitDelta}, esperado=${-args.quantity}); Δ bruto por registros=${physicalDelta}; Δ reservado=0.`,
       timestamp: now,
     });
 
-    return { movementId, plan, consumedLots, compositionAfter: { closedPacks: closedPhys - closedExitUnits - (plan.operation === "open_pack" ? plan.packs : 0), looseUnits: newLoosePhys - looseRes } };
+    return { movementId, plan, consumedLots, compositionAfter: { closedPacks: closedPhys - closedExitUnits, looseUnits: newLoosePhys - looseRes } };
   },
 });
 
@@ -885,10 +983,14 @@ async function previewFamilyWithdrawalImpl(ctx: any, args: { productId: string; 
     const closedMember = members.find((p) => !!readPackagingConversion(p));
     const looseMember = members.find((p) => !readPackagingConversion(p));
 
-    const stockOf = async (productId: string) =>
-      ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId)).first();
-    const closedStock = closedMember ? await stockOf(closedMember._id) : null;
-    const looseStock = looseMember ? await stockOf(looseMember._id) : null;
+    const stockOf = async (productId: string, productName: string) => {
+      const rows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", productId))
+        .collect();
+      return getOptionalSingleValidGlobalStock(rows, productName);
+    };
+    const closedStock = closedMember ? await stockOf(closedMember._id, closedMember.name) : null;
+    const looseStock = looseMember ? await stockOf(looseMember._id, looseMember.name) : null;
     const closedAvailable = (closedStock?.physicalQuantity ?? 0) - (closedStock?.reservedQuantity ?? 0);
     const looseAvailable = (looseStock?.physicalQuantity ?? 0) - (looseStock?.reservedQuantity ?? 0);
     const familyAvailable = closedAvailable * conv.factor + looseAvailable;

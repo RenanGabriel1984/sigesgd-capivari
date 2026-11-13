@@ -439,6 +439,7 @@ const schema = defineSchema(
       newReserved: v.number(),
       userId: v.id("users"),
       supplierId: v.optional(v.id("suppliers")),
+      locationId: v.optional(v.id("storageLocations")),
       requestId: v.optional(v.id("requests")),
       entryId: v.optional(v.id("entries")),
       lotId: v.optional(v.string()),
@@ -456,6 +457,36 @@ const schema = defineSchema(
       .index("by_user", ["userId"])
       .index("by_timestamp", ["timestamp"])
       .index("by_request", ["requestId"]),
+
+    // Alocação estruturada de cada movimentação aos lotes e armários reais.
+    // Uma movimentação pode consumir diversos lotes; lotId no movimento legado
+    // continua como referência compatível ao primeiro lote.
+    stockMovementLotAllocations: defineTable({
+      movementId: v.id("stockMovements"),
+      productId: v.id("products"),
+      lotId: v.id("lots"),
+      locationId: v.id("storageLocations"),
+      quantity: v.number(),
+      allocationType: v.union(v.literal("withdrawal"), v.literal("reclassification")),
+      createdAt: v.number(),
+    }).index("by_movement", ["movementId"])
+      .index("by_lot", ["lotId"])
+      .index("by_product_location", ["productId", "locationId"]),
+
+    // Devolução de uma saída multi-lote: registra qual parcela voltou de
+    // cada alocação original e em qual armário foi recebida.
+    returnLotAllocations: defineTable({
+      returnId: v.id("returns"),
+      exitMovementId: v.id("stockMovements"),
+      productId: v.id("products"),
+      lotId: v.id("lots"),
+      sourceLocationId: v.optional(v.id("storageLocations")),
+      destinationLocationId: v.id("storageLocations"),
+      quantity: v.number(),
+      createdAt: v.number(),
+    }).index("by_exitMovement", ["exitMovementId"])
+      .index("by_return", ["returnId"])
+      .index("by_lot", ["lotId"]),
 
     // ── Requests (Solicitações) ──
     requests: defineTable({
@@ -618,6 +649,8 @@ const schema = defineSchema(
       // ── Classificação preservada historicamente no lote ──
       materialType: v.optional(materialTypeValidator),
       areaId: v.optional(v.id("stockAreas")),
+      // Lote criado ao abrir embalagem: identifica a origem física/contábil.
+      originLotId: v.optional(v.id("lots")),
     }).index("by_product", ["productId"])
       .index("by_entry", ["entryId"])
       .index("by_number", ["lotNumber"])
@@ -655,7 +688,10 @@ const schema = defineSchema(
     inventoryCounts: defineTable({
       inventoryId: v.id("inventories"),
       productId: v.id("products"),
+      // Para inventários rastreados: combinação lote × armário.
+      // lotId permanece string por compatibilidade com registros legados.
       lotId: v.optional(v.string()),
+      locationId: v.optional(v.id("storageLocations")),
       systemQuantity: v.number(),
       countedQuantity: v.optional(v.number()),
       difference: v.optional(v.number()),
@@ -667,6 +703,7 @@ const schema = defineSchema(
     requestItemLots: defineTable({
       requestItemId: v.id("requestItems"),
       lotId: v.id("lots"),
+      locationId: v.optional(v.id("storageLocations")),
       quantity: v.number(),
     }).index("by_requestItem", ["requestItemId"])
       .index("by_lot", ["lotId"]),
@@ -742,6 +779,19 @@ const schema = defineSchema(
     }).index("by_product", ["productId"])
       .index("by_location", ["locationId"]),
 
+    // ── Stock by Lot and Location (saldo atual por lote × armário) ──
+    // Não inferir localização histórica a partir do recebimento: esta tabela
+    // passa a ser escrita pelos novos fluxos; legado exige diagnóstico/migração.
+    lotLocationBalances: defineTable({
+      lotId: v.id("lots"),
+      productId: v.id("products"),
+      locationId: v.id("storageLocations"),
+      quantityAvailable: v.number(),
+      updatedAt: v.number(),
+    }).index("by_lot", ["lotId"])
+      .index("by_product_location", ["productId", "locationId"])
+      .index("by_product", ["productId"]),
+
     // ── Stock Transfers (Transferências entre Locais) ──
     stockTransfers: defineTable({
       productId: v.id("products"),
@@ -761,6 +811,7 @@ const schema = defineSchema(
       exchangeNumber: v.string(),
       productId: v.id("products"),
       lotId: v.optional(v.id("lots")),
+      locationId: v.optional(v.id("storageLocations")),
       printerId: v.id("printers"),
       quantityDelivered: v.number(),
       quantityEmptyReceived: v.number(),
@@ -864,6 +915,7 @@ const schema = defineSchema(
       assetId: v.id("assets"),
       productId: v.id("products"),
       lotId: v.optional(v.string()),
+      locationId: v.optional(v.id("storageLocations")),
       quantity: v.number(),
       installedAt: v.number(),
       removedAt: v.optional(v.number()),

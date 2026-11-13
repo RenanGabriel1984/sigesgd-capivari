@@ -1,6 +1,9 @@
 import { requirePermission } from "./rbac";
+import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
+import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -44,6 +47,7 @@ export const installPart = mutation({
     assetId: v.id("assets"),
     productId: v.id("products"),
     quantity: v.number(),
+    locationId: v.optional(v.id("storageLocations")),
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -57,47 +61,31 @@ export const installPart = mutation({
     if (!product) throw new Error("Produto não encontrado");
 
     // Validate stock (check available = physical - reserved)
-    const stock = await ctx.db
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
+      .collect();
+    const stock = requireSingleValidGlobalStock(stockRows, product.name);
     if (stock.physicalQuantity - stock.reservedQuantity < args.quantity) {
       throw new Error(`Estoque insuficiente. Disponível: ${stock.physicalQuantity - stock.reservedQuantity}. Necessário: ${args.quantity}`);
     }
 
     const now = Date.now();
 
-    // FIFO Lot Consumption (before stock reduction)
-    let remainingToConsume = args.quantity;
-    let consumedLotId: string | undefined;
-    const lots = await ctx.db
-      .query("lots")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
-      .collect();
-    const sortedLots = lots
-      .filter((l: any) => l.quantityAvailable > 0)
-      .sort((a: any, b: any) => a.receivedAt - b.receivedAt || a.lotNumber.localeCompare(b.lotNumber));
-
-    for (const lot of sortedLots) {
-      if (remainingToConsume <= 0) break;
-      const consumeFromLot = Math.min(lot.quantityAvailable, remainingToConsume);
-      if (consumeFromLot <= 0) continue;
-      await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consumeFromLot });
-      if (!consumedLotId) consumedLotId = lot._id;
-      remainingToConsume -= consumeFromLot;
-    }
-
-    if (remainingToConsume > 0) {
-      throw new Error(`Lotes insuficientes. Faltam ${remainingToConsume} unidades sem lote disponível.`);
-    }
+    const sourceLocationId = await resolveWithdrawalLocation(ctx, args.productId, args.locationId);
+    const lotConsumption = await consumeLotLocationStock(ctx, {
+      productId: args.productId,
+      locationId: sourceLocationId,
+      quantity: args.quantity,
+    });
+    const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
 
     // Re-read stock for concurrency safety (double-check pattern)
-    const freshStock = await ctx.db
+    const freshStockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!freshStock) throw new Error("Registro de estoque desapareceu durante a instalação");
+      .collect();
+    const freshStock = requireSingleValidGlobalStock(freshStockRows, product.name);
     if (freshStock.physicalQuantity - freshStock.reservedQuantity < args.quantity) {
       throw new Error(`Estoque insuficiente (concorrência). Disponível: ${freshStock.physicalQuantity - freshStock.reservedQuantity}. Necessário: ${args.quantity}.`);
     }
@@ -107,7 +95,7 @@ export const installPart = mutation({
     await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical });
 
     // Create stock movement
-    await ctx.db.insert("stockMovements", {
+    const movementId = await ctx.db.insert("stockMovements", {
       productId: args.productId,
       type: "exit",
       quantity: args.quantity,
@@ -116,15 +104,23 @@ export const installPart = mutation({
       previousReserved: freshStock.reservedQuantity,
       newReserved: freshStock.reservedQuantity,
       userId,
-      observation: `Instalação em equipamento: ${asset.patrimonyNumber ?? asset.serialNumber ?? args.assetId}`,
+      lotId: lotConsumption.allocations[0]?.lotId as any,
+      locationId: sourceLocationId,
+      observation: `Instalação em equipamento: ${asset.patrimonyNumber ?? asset.serialNumber ?? args.assetId} — armário ${sourceLocation?.name ?? sourceLocationId}; lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
       timestamp: now,
+    });
+
+    await recordLotMovementAllocations(ctx, {
+      movementId, productId: args.productId, locationId: sourceLocationId,
+      allocations: lotConsumption.allocations,
     });
 
     // Record part installation
     const partId = await ctx.db.insert("assetParts", {
       assetId: args.assetId,
       productId: args.productId,
-      lotId: consumedLotId,
+      lotId: lotConsumption.allocations[0]?.lotId as any,
+      locationId: sourceLocationId,
       quantity: args.quantity,
       installedAt: now,
       installedByUserId: userId,

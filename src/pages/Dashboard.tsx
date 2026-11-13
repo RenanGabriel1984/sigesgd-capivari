@@ -568,6 +568,26 @@ export default function Dashboard() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
+                {!loading && s!.integrityAlerts.length > 0 && (
+                  <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3" role="alert">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-destructive">Saldos divergentes — exigem conferência</p>
+                      <Badge variant="destructive">{s!.divergentStock}</Badge>
+                    </div>
+                    <div className="mt-2 space-y-2 max-h-[180px] overflow-y-auto">
+                      {s!.integrityAlerts.slice(0, 8).map((item: any) => (
+                        <div key={item.productId} className="text-xs">
+                          <Link to={`/products/${item.productId}`} className="font-medium underline underline-offset-2">{item.productName}</Link>
+                          <p className="text-muted-foreground">{item.issues.join(" ")}</p>
+                        </div>
+                      ))}
+                      {s!.integrityAlerts.length > 8 && (
+                        <p className="text-xs text-muted-foreground">E mais {s!.integrityAlerts.length - 8} produto(s) com divergência.</p>
+                      )}
+                    </div>
+                    <p className="mt-2 text-[11px] text-muted-foreground">Esses produtos não entram no contador de estoque crítico até a conciliação dos saldos global, físico e por lote.</p>
+                  </div>
+                )}
                 {loading ? (
                   <p className="text-sm text-muted-foreground py-8 text-center">Carregando…</p>
                 ) : s!.urgentAlerts.length === 0 ? (

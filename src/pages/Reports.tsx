@@ -65,7 +65,7 @@ function downloadCSV(filename: string, csvContent: string) {
 }
 
 function exportStockPositionCSV(data: any[]) {
-  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade";
+  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade;Saldos físicos por armário;Saldos por área/lote;Saldos por lote × armário;Alertas de Integridade;Limitações de rastreio";
   const rows = data.map((r) =>
     [
       r.internalCode,
@@ -73,25 +73,35 @@ function exportStockPositionCSV(data: any[]) {
       r.categoryName,
       r.brand ?? "",
       r.model ?? "",
-      r.currentStock,
+      r.currentStock ?? "não confiável",
       r.minimumStock,
       r.idealStock,
       r.maximumStock,
       r.status,
       UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure,
+      (r.locationBreakdown ?? []).map((location: any) => `${location.locationName}: ${location.quantity ?? "inválido"}`).join(" | "),
+      (r.areaBreakdown ?? []).map((area: any) => `${area.areaName}: ${area.quantity} [${(area.lots ?? []).map((lot: any) => `${lot.lotNumber}=${lot.quantityAvailable}`).join(", ")}]`).join(" | "),
+      (r.lotLocationBreakdown ?? []).map((lot: any) =>
+        `${lot.areaName} / ${lot.lotNumber}=${lot.quantityAvailable} [${(lot.locations ?? []).map((location: any) => `${location.locationName}=${location.quantityAvailable}`).join(", ")}]`
+      ).join(" | "),
+      (r.integrityIssues ?? []).join(" | "),
+      (r.integrityLimitations ?? []).join(" | "),
     ].join(";")
   );
   downloadCSV("posicao_estoque.csv", [header, ...rows].join("\n"));
 }
 
 function exportMovementCSV(data: any[]) {
-  const header = "Data;Tipo;Produto;Quantidade;Usuário;Fornecedor;Documento;Observação;Cancelada";
+  const header = "Data;Tipo;Produto;Quantidade;Lotes × armários;Usuário;Fornecedor;Documento;Observação;Cancelada";
   const rows = data.map((r) =>
     [
       new Date(r.timestamp).toLocaleString("pt-BR"),
       r.type === "entry" ? "Entrada" : r.type === "exit" ? "Saída" : r.type,
       r.productName,
       r.quantity,
+      (r.lotAllocations ?? []).map((allocation: any) =>
+        `${allocation.lotNumber} / ${allocation.locationName}=${allocation.quantity} [${allocation.allocationType}]`
+      ).join(" | "),
       r.userName,
       r.supplierTrade || r.supplierName,
       r.documentNumber,
@@ -205,17 +215,18 @@ export default function Reports() {
   );
 
   const stockStatusCounts = useMemo(() => {
-    if (!stockPosition) return { normal: 0, baixo: 0, critico: 0, zerado: 0, total: 0 };
+    if (!stockPosition) return { normal: 0, baixo: 0, critico: 0, zerado: 0, divergente: 0, total: 0 };
     return stockPosition.reduce(
       (acc, item) => {
         acc.total++;
-        if (item.status === "Zerado") acc.zerado++;
+        if (item.status === "Divergente") acc.divergente++;
+        else if (item.status === "Zerado") acc.zerado++;
         else if (item.status === "Crítico") acc.critico++;
         else if (item.status === "Baixo") acc.baixo++;
         else acc.normal++;
         return acc;
       },
-      { normal: 0, baixo: 0, critico: 0, zerado: 0, total: 0 }
+      { normal: 0, baixo: 0, critico: 0, zerado: 0, divergente: 0, total: 0 }
     );
   }, [stockPosition]);
 
@@ -273,6 +284,9 @@ export default function Reports() {
                 <Badge variant="destructive" className="text-xs">
                   Zerado: {stockStatusCounts.zerado}
                 </Badge>
+                <Badge variant="destructive" className="text-xs">
+                  Divergente: {stockStatusCounts.divergente}
+                </Badge>
               </div>
               <div className="flex gap-2">
                 <Button
@@ -310,6 +324,7 @@ export default function Reports() {
                         <TableHead className="text-xs text-right">Mínimo</TableHead>
                         <TableHead className="text-xs text-right">Ideal</TableHead>
                         <TableHead className="text-xs text-right">Máximo</TableHead>
+                        <TableHead className="text-xs">Armários (físico) / Áreas e lotes</TableHead>
                         <TableHead className="text-xs">Status</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -320,14 +335,55 @@ export default function Reports() {
                           <TableCell className="text-sm font-medium">{item.name}</TableCell>
                           <TableCell className="text-xs">{item.categoryName}</TableCell>
                           <TableCell className="text-xs">{[item.brand, item.model].filter(Boolean).join(" — ") || "—"}</TableCell>
-                          <TableCell className="text-sm text-right font-mono">{item.currentStock}</TableCell>
+                          <TableCell className="text-sm text-right font-mono">{item.currentStock ?? "—"}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.minimumStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.idealStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.maximumStock}</TableCell>
+                          <TableCell className="text-xs min-w-56">
+                            <div className="space-y-1">
+                              <div className="space-y-1">
+                                <div className="font-medium">Por armário (saldo físico)</div>
+                                {item.locationBreakdown?.length ? item.locationBreakdown.map((location, index) => (
+                                  <div key={index} className="pl-2">{location.locationName}: <span className="font-mono">{location.quantity ?? "inválido"}</span></div>
+                                )) : <div className="pl-2 text-muted-foreground">Sem saldo por armário</div>}
+                                <div className="font-medium pt-1">Por área/lote (saldo disponível)</div>
+                                {item.areaBreakdown?.length ? item.areaBreakdown.map((area, index) => (
+                                  <div key={index} className="pl-2">
+                                    <div>{area.areaName}: <span className="font-mono">{area.quantity}</span></div>
+                                    <div className="pl-3 text-[11px] text-muted-foreground">
+                                      {area.lots.map((lot: any, lotIndex: number) => (
+                                        <div key={lotIndex} className="py-0.5">
+                                          <span>{lot.lotNumber}: <span className="font-mono">{lot.quantityAvailable}</span></span>
+                                          {lot.locations?.length ? (
+                                            <div className="pl-3">
+                                              {lot.locations.map((location: any, locationIndex: number) => (
+                                                <span key={locationIndex}>
+                                                  {location.locationName}: <span className="font-mono">{location.quantityAvailable}</span>
+                                                  {locationIndex < lot.locations.length - 1 ? " · " : ""}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <div className="pl-3 text-amber-700">Sem saldo por armário mapeado</div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )) : <div className="pl-2 text-muted-foreground">Sem lotes com saldo disponível</div>}
+                              </div>
+                              {item.integrityIssues?.length > 0 && (
+                                <div className="text-destructive text-[11px] whitespace-normal">{item.integrityIssues.join(" ")}</div>
+                              )}
+                              {item.integrityLimitations?.length > 0 && (
+                                <div className="text-amber-700 text-[11px] whitespace-normal">{item.integrityLimitations.join(" ")}</div>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell>
                             <Badge
                               variant={
-                                item.status === "Crítico" || item.status === "Zerado"
+                                item.status === "Divergente" || item.status === "Crítico" || item.status === "Zerado"
                                   ? "destructive"
                                   : item.status === "Baixo"
                                   ? "secondary"
@@ -342,7 +398,7 @@ export default function Reports() {
                       ))}
                       {!stockPosition && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                             Carregando…
                           </TableCell>
                         </TableRow>
@@ -428,6 +484,7 @@ export default function Reports() {
                         <TableHead className="text-xs">Tipo</TableHead>
                         <TableHead className="text-xs">Produto</TableHead>
                         <TableHead className="text-xs text-right">Qtd</TableHead>
+                        <TableHead className="text-xs">Lotes × armários</TableHead>
                         <TableHead className="text-xs">Usuário</TableHead>
                         <TableHead className="text-xs">Fornecedor</TableHead>
                         <TableHead className="text-xs">Documento</TableHead>
@@ -457,6 +514,16 @@ export default function Reports() {
                           </TableCell>
                           <TableCell className="text-sm">{m.productName}</TableCell>
                           <TableCell className="text-sm text-right font-mono">{m.quantity}</TableCell>
+                          <TableCell className="text-xs min-w-48">
+                            {(m.lotAllocations ?? []).length > 0
+                              ? m.lotAllocations.map((allocation: any, index: number) => (
+                                  <div key={index}>
+                                    {allocation.lotNumber} · {allocation.locationName}: <span className="font-mono">{allocation.quantity}</span>
+                                    {allocation.allocationType === "reclassification" ? " (reclassificação)" : ""}
+                                  </div>
+                                ))
+                              : "—"}
+                          </TableCell>
                           <TableCell className="text-xs">{m.userName}</TableCell>
                           <TableCell className="text-xs">{m.supplierTrade || m.supplierName || "—"}</TableCell>
                           <TableCell className="text-xs font-mono">{m.documentNumber || "—"}</TableCell>
@@ -468,14 +535,14 @@ export default function Reports() {
                       ))}
                       {!movements && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                             Carregando…
                           </TableCell>
                         </TableRow>
                       )}
                       {movements && movements.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                             Nenhuma movimentação encontrada
                           </TableCell>
                         </TableRow>

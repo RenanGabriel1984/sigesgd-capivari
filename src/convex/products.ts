@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { tonerKitObservation } from "./stockHelpers";
 import { requirePermission } from "./rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import { getOptionalSingleValidGlobalStock } from "../lib/stock-read-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -41,7 +42,8 @@ export const list = query({
     const compatProductIds = new Set(allCompat.map((c: any) => c.productId));
     return Promise.all(products.map(async (p: any) => {
       const category = await ctx.db.get(p.categoryId);
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
       return { ...p, category, stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 }, hasCompat: compatProductIds.has(p._id) };
     }));
   },
@@ -57,7 +59,8 @@ export const listActive = query({
     const compatProductIds = new Set(allCompat.map((c: any) => c.productId));
     return Promise.all(products.map(async (p: any) => {
       const category = await ctx.db.get(p.categoryId);
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
       return { ...p, category, stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 }, hasCompat: compatProductIds.has(p._id) };
     }));
   },
@@ -70,7 +73,8 @@ export const getById = query({
     const product = await ctx.db.get(args.id);
     if (!product) return null;
     const category = await ctx.db.get(product.categoryId);
-    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.id)).first();
+    const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.id)).collect();
+    const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
     const movements = await ctx.db.query("stockMovements").withIndex("by_product", (q) => q.eq("productId", args.id)).order("desc").take(10);
     const movementsWithUser = await Promise.all(movements.map(async (m: any) => {
       const user = await ctx.db.get(m.userId);
@@ -104,7 +108,9 @@ export const getStock = query({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
+    const product = await ctx.db.get(args.productId);
+    const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).collect();
+    const stock = getOptionalSingleValidGlobalStock(stockRows, product?.name ?? String(args.productId));
     return stock ?? { physicalQuantity: 0, reservedQuantity: 0 };
   },
 });
@@ -116,7 +122,8 @@ export const belowMinimum = query({
     const products = await ctx.db.query("products").withIndex("by_active", (q) => q.eq("active", true)).collect();
     const result = [];
     for (const p of products) {
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", p._id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", p._id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
       const qty = stock?.physicalQuantity ?? 0;
       if (qty < (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
@@ -323,7 +330,8 @@ export const update = mutation({
 
     // Prevent deactivation if product has active reservations
     if (updates.active === false) {
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
       if (stock && stock.reservedQuantity > 0) {
         throw new Error("Não é possível desativar: existem unidades reservadas em solicitações pendentes");
       }
