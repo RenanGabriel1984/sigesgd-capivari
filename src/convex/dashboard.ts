@@ -40,7 +40,6 @@ export const stats = query({
     const stockRowsByProduct = new Map<string, typeof stockRows>();
     const locationRowsByProduct = new Map<string, typeof locationRows>();
     const lotsByProduct = new Map<string, typeof lots>();
-    const lotLocationsByLot = new Map<string, typeof lotLocationRows>();
     for (const row of stockRows) {
       const key = String(row.productId);
       const rows = stockRowsByProduct.get(key) ?? [];
