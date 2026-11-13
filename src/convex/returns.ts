@@ -211,6 +211,23 @@ export const create = mutation({
     const now = Date.now();
     const condition: ReturnCondition = args.condition;
 
+    // Para lote rastreado, a devolução precisa de destino físico explícito.
+    // O saldo do lote é reposto no armário informado, sem presumir a origem.
+    let returnedLotLocation: any = null;
+    if (resolvedLot) {
+      if (!args.locationId) {
+        throw new Error("Informe o armário de destino para devolver material rastreado por lote.");
+      }
+      const lotLocationRows = await ctx.db.query("lotLocationBalances")
+        .withIndex("by_lot", (q: any) => q.eq("lotId", resolvedLot._id))
+        .collect();
+      const matchingRows = lotLocationRows.filter((row: any) => row.locationId === args.locationId);
+      if (matchingRows.length > 1) {
+        throw new Error("Há saldos duplicados deste lote no armário de devolução. Regularize antes de continuar.");
+      }
+      returnedLotLocation = matchingRows[0] ?? null;
+    }
+
     // 1) Registro da devolução (rastreável e reversor)
     const returnId = await ctx.db.insert("returns", {
       exitMovementId: exit._id,
@@ -266,6 +283,20 @@ export const create = mutation({
       await ctx.db.patch(resolvedLot._id, {
         quantityAvailable: resolvedLot.quantityAvailable + args.quantity,
       });
+      if (returnedLotLocation) {
+        await ctx.db.patch(returnedLotLocation._id, {
+          quantityAvailable: returnedLotLocation.quantityAvailable + args.quantity,
+          updatedAt: now,
+        });
+      } else {
+        await ctx.db.insert("lotLocationBalances", {
+          lotId: resolvedLot._id,
+          productId: exit.productId,
+          locationId: args.locationId!,
+          quantityAvailable: args.quantity,
+          updatedAt: now,
+        });
+      }
     }
 
     // 5) Movimentação de DEVOLUÇÃO vinculada à saída original
