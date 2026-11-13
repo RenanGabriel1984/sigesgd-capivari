@@ -14,6 +14,7 @@ import {
   isImplementationStockStamped,
   tonerKitObservation,
 } from "./stockHelpers";
+import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 
 async function requireUser(ctx: any) {
   // RBAC central: resumos de implantação/localização exigem visão de estoque.
@@ -156,6 +157,7 @@ async function performInitialLoad(
         .query("stockByLocation")
         .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
         .collect();
+      validateUniqueScopedStockRows(existingSbl, String(item.productId));
       const sblForLocation = existingSbl.find(
         (s: any) => s.locationId === item.locationId
       );
@@ -173,20 +175,27 @@ async function performInitialLoad(
       }
 
       // ── 4. stock (global) ──
-      const existingStock = await ctx.db
+      const existingStockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
-        .first();
+        .collect();
+      const existingStock = getOptionalSingleValidGlobalStock(existingStockRows, String(item.productId));
 
       const previousGlobal = existingStock?.physicalQuantity ?? 0;
       const totalForProduct = await ctx.db
         .query("stockByLocation")
         .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
         .collect();
-      const newGlobal = totalForProduct.reduce(
-        (sum: number, s: any) => sum + s.quantity,
+      validateUniqueScopedStockRows(totalForProduct, String(item.productId));
+      const previousLocationTotal = totalForProduct.reduce(
+        (sum: number, row: any) => sum + row.quantity,
         0
       );
+      if (!Number.isFinite(previousLocationTotal) ||
+          Math.abs(previousGlobal - previousLocationTotal) > 1e-9) {
+        throw new Error("O saldo global e os saldos por armário já estão divergentes. Regularize antes de realizar nova carga inicial.");
+      }
+      const newGlobal = previousLocationTotal + item.quantity;
 
       if (existingStock) {
         await ctx.db.patch(existingStock._id, {
@@ -419,6 +428,16 @@ export const productLocationSummary = query({
   handler: async (ctx) => {
     await requireUser(ctx);
     const sbl = await ctx.db.query("stockByLocation").collect();
+    const rowsByProduct = new Map<string, typeof sbl>();
+    for (const row of sbl) {
+      const key = String(row.productId);
+      const rows = rowsByProduct.get(key) ?? [];
+      rows.push(row);
+      rowsByProduct.set(key, rows);
+    }
+    for (const [productId, rows] of rowsByProduct) {
+      validateUniqueScopedStockRows(rows, productId);
+    }
     const locIds = [...new Set(sbl.map((s) => s.locationId))];
     const locs = await Promise.all(locIds.map((id) => ctx.db.get(id)));
     const locName = new Map(
@@ -468,8 +487,8 @@ export const quickExit = mutation({
     // Defesa numérica: normaliza Int64 → number (v.number() aceita Int64 via CLI)
     args = { ...args, quantity: Number(args.quantity) };
 
-    if (args.quantity <= 0) {
-      throw new Error("Quantidade deve ser maior que zero");
+    if (!Number.isFinite(args.quantity) || args.quantity <= 0) {
+      throw new Error("Quantidade deve ser um número finito maior que zero");
     }
 
     // ── Validate product ──
@@ -477,11 +496,12 @@ export const quickExit = mutation({
     if (!product) throw new Error("Produto não encontrado");
     if (!product.active) throw new Error("Produto está inativo");
 
-    // ── Check stock ──
-    const stock = await ctx.db
+    // ── Check stock: nunca selecionar arbitrariamente entre duplicidades ──
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
+      .collect();
+    const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
 
     const available =
       (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
@@ -539,6 +559,7 @@ export const quickExit = mutation({
         .query("stockByLocation")
         .withIndex("by_product", (q) => q.eq("productId", args.productId))
         .collect();
+      validateUniqueScopedStockRows(sbl, product.name);
       const sblForLocation = sbl.find(
         (s) => s.locationId === args.locationId
       );
