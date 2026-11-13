@@ -60,7 +60,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(approve).toContain("planFifoAreaLotAllocation");
     expect(approve).toContain("validateAreaLocationLotBalance");
     expect(approve).toContain("sourceBalance.error");
-    expect(approve).toContain("lot.areaId !== requestItem.areaId");
+    expect(approve).toContain("lot.areaId === requestItem.areaId && lot.locationId === requestItem.sourceLocationId");
     expect(approve).toContain("lot.locationId !== requestItem.sourceLocationId");
     expect(approve).not.toMatch(/\blocation\.areaId/);
     expect(approve).toContain('ctx.db.insert("requestItemReservations"');
@@ -70,7 +70,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     const deliver = mutationBlock(requests, "deliver");
     expect(deliver).toContain('ctx.db.query("requestItemReservations")');
     expect(deliver).toContain("validateAreaLocationLotBalance");
-    expect(deliver).toContain("O saldo físico da área/local diverge da soma dos lotes.");
+    expect(deliver).toContain("sourceBalance.error");
     expect(deliver).toContain("lot.areaId !== item.areaId");
     expect(deliver).toContain("lot.locationId !== item.sourceLocationId");
     expect(deliver).toContain('ctx.db.patch(source._id, { quantity: source.quantity - input.quantityDelivered })');
