@@ -114,7 +114,12 @@ export function inspectProductStockIntegrity(
       issues.push("Existe saldo local negativo ou não finito.");
       continue;
     }
-    const key = `${row.areaId ?? "__NO_AREA__"}|${row.locationId}`;
+    // Na estrutura atual do banco, stockByLocation registra produto × armário.
+    // A área é derivada dos lotes; por isso uma linha física sem areaId cobre
+    // conjuntamente todas as áreas guardadas naquele armário.
+    const key = row.areaId
+      ? `${row.areaId}|${row.locationId}`
+      : `*|${row.locationId}`;
     if (seenScopes.has(key)) issues.push("Há linhas duplicadas para a mesma combinação de área e local físico.");
     seenScopes.add(key);
     locationByScope.set(key, (locationByScope.get(key) ?? 0) + row.quantity);
@@ -136,15 +141,28 @@ export function inspectProductStockIntegrity(
     if (quantity <= TOLERANCE) continue;
     if (!lot.areaId || !lot.locationId) {
       issues.push(`O lote ${lot.lotNumber ?? "(sem número)"} ainda não possui área e/ou local físico classificados.`);
-      continue;
     }
-    const key = `${lot.areaId}|${lot.locationId}`;
+    if (!lot.locationId) continue;
+    const key = lot.areaId
+      ? `${lot.areaId}|${lot.locationId}`
+      : `*|${lot.locationId}`;
     lotsByScope.set(key, (lotsByScope.get(key) ?? 0) + quantity);
   }
 
+  const lotTotalsByLocation = new Map<string, number>();
+  for (const [key, quantity] of lotsByScope) {
+    const locationId = key.slice(key.lastIndexOf("|") + 1);
+    lotTotalsByLocation.set(locationId, (lotTotalsByLocation.get(locationId) ?? 0) + quantity);
+  }
+
   for (const key of new Set([...locationByScope.keys(), ...lotsByScope.keys()])) {
+    const [areaId, locationId] = key.split("|");
     const localQuantity = locationByScope.get(key) ?? 0;
-    const scopedLotQuantity = lotsByScope.get(key) ?? 0;
+    // Um registro físico legado sem areaId representa todas as áreas do
+    // armário. Só comparamos o total do armário; a abertura por área vem dos lotes.
+    const scopedLotQuantity = areaId === "*"
+      ? lotTotalsByLocation.get(locationId) ?? 0
+      : lotsByScope.get(key) ?? 0;
     if (Math.abs(localQuantity - scopedLotQuantity) > TOLERANCE) {
       issues.push(`O saldo físico da área/local (${key}) diverge da soma dos lotes.`);
     }
