@@ -38,6 +38,7 @@ const backend = read("src/convex/printSupplies.ts");
 const panel = read("src/pages/GomaQ.tsx");
 const schema = read("src/convex/schema.ts");
 const ledger = read("src/convex/lotLocationLedger.ts");
+const lotRules = read("src/lib/lot-location-rules.ts");
 const orgsBackend = read("src/convex/organizations.ts");
 
 /* ─── Ativos reconciliados (read-only, 2026-09) ─────────────────────────── */
@@ -169,7 +170,7 @@ describe("PRINT-EXIT-03 — retirada respeita o backend (autoridade final)", () 
     expect(backend).toContain("lotId: consumedLots[0]?.lotId as never");
     expect(backend).toContain("locationId: args.locationId");
     expect(ledger).toContain("planFifoLotLocationConsumption");
-    expect(ledger).toContain("Saldo rastreável insuficiente no armário selecionado");
+    expect(lotRules).toContain("Saldo rastreável insuficiente no armário selecionado");
   });
 
   it("a retirada registra destino, secretaria, departamento, unidade, O.S. e motivo", () => {
