@@ -18,6 +18,7 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
+import { consumeLotLocationStock, resolveWithdrawalLocation } from "./lotLocationLedger";
 import {
   buildSupplyRow,
   computeCardTotals,
@@ -363,6 +364,7 @@ export const withdraw = mutation({
   args: {
     productId: v.id("products"),
     quantity: v.number(),
+    locationId: v.optional(v.id("storageLocations")),
     secretariaId: v.optional(v.id("organizations")),
     departamentoId: v.optional(v.id("organizations")),
     unidadeId: v.optional(v.id("organizations")),
@@ -395,33 +397,22 @@ export const withdraw = mutation({
       throw new Error(`Estoque insuficiente. Disponível: ${available} ${product.unitOfMeasure}`);
     }
 
+    const sourceLocationId = await resolveWithdrawalLocation(ctx, args.productId, args.locationId);
+    const lotConsumption = await consumeLotLocationStock(ctx, {
+      productId: args.productId,
+      locationId: sourceLocationId,
+      quantity: args.quantity,
+    });
+    const sourceLocation = await ctx.db.get(sourceLocationId);
+    const consumedLots = lotConsumption.allocations.map((allocation) => ({
+      lotId: String(allocation.lotId),
+      lotNumber: allocation.lotNumber,
+      qty: allocation.quantity,
+    }));
+
     const now = Date.now();
     const previousPhysical = stock!.physicalQuantity;
     const newPhysical = previousPhysical - args.quantity;
-
-    // Lotes disponíveis do produto, ordenados (FIFO por recebimento).
-    const lotList = (await ctx.db.query("lots").collect())
-      .filter((l) => l.productId === args.productId && l.quantityAvailable > 0 && l.active !== false)
-      .sort((a, b) => a.receivedAt - b.receivedAt);
-    const remaining = args.quantity;
-    let consumed = 0;
-    const consumedLots: Array<{ lotId: string; lotNumber: string; qty: number }> = [];
-
-    for (const lot of lotList) {
-      if (consumed >= remaining) break;
-      const take = Math.min(lot.quantityAvailable, remaining - consumed);
-      await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - take });
-      consumedLots.push({ lotId: lot._id as string, lotNumber: lot.lotNumber, qty: take });
-      consumed += take;
-      if (consumed >= remaining) break;
-    }
-
-    if (consumed < remaining) {
-      throw new Error(
-        `Falha de consistência: lotes insuficientes (${consumed}/${remaining}). Nenhuma saída registrada.`,
-      );
-    }
-
     await ctx.db.patch(stock!._id, { physicalQuantity: newPhysical });
 
     // Movimentação com lotId estruturado (1º lote consumido) + observation
@@ -435,10 +426,12 @@ export const withdraw = mutation({
       previousReserved: stock!.reservedQuantity,
       newReserved: stock!.reservedQuantity,
       lotId: consumedLots[0].lotId as never,
+      locationId: sourceLocationId,
       userId,
       exitNumber: `SAI-${new Date(now).getFullYear()}-SUP-${now}`,
       observation:
         `Retirada de suprimento — ${args.reason ?? "Sem motivo"} ` +
+        `| Armário: ${sourceLocation?.name ?? sourceLocationId} ` +
         `| O.S.: ${args.osNumber ?? "—"} | Destino: ${args.secretariaId ?? "—"} ` +
         `| Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(", ")}` +
         (args.observation ? ` | Obs: ${args.observation}` : ""),
