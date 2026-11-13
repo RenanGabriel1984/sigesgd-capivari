@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isDiscreteStockUnit, isValidStockQuantity, requireSingleValidGlobalStock } from "../lib/stock-quantity-rules";
+import { isDiscreteStockUnit, isValidStockQuantity, requireSingleValidGlobalStock, requireValidScopedStockQuantity } from "../lib/stock-quantity-rules";
 
 describe("quantidades de estoque por unidade", () => {
   it.each(["un", "pc", "cx", "rl", "pct", "po", "kt"])(
@@ -51,4 +51,19 @@ describe("integridade do saldo global do estoque", () => {
   ])("bloqueia saldo físico/reservado inválido: $physicalQuantity/$reservedQuantity", (row) => {
     expect(() => requireSingleValidGlobalStock([row], "Material")).toThrow(/inconsistente/i);
   });
+});
+
+
+describe("integridade dos saldos por área/local", () => {
+  it.each([0, 0.5, 12])("aceita quantidade física válida %s", (quantity) => {
+    expect(requireValidScopedStockQuantity(quantity, "TI Geral / Armário TI 01")).toBe(quantity);
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -0.01, "4", null])(
+    "bloqueia quantidade física inválida (%s)",
+    (quantity) => {
+      expect(() => requireValidScopedStockQuantity(quantity, "Impressoras / Armário TI 02"))
+        .toThrow(/saldo físico.*inválido/i);
+    },
+  );
 });
