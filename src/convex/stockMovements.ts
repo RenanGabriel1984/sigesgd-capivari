@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
+import { consumeLotLocationStock, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -77,6 +78,7 @@ export const createEntry = mutation({
 export const createExit = mutation({
   args: {
     productId: v.id("products"), quantity: v.number(),
+    locationId: v.optional(v.id("storageLocations")),
     requestId: v.optional(v.id("requests")), observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -89,6 +91,13 @@ export const createExit = mutation({
     if (available < args.quantity) {
       throw new Error(`Estoque insuficiente. Disponível: ${available}. Solicitado: ${args.quantity}.`);
     }
+    const sourceLocationId = await resolveWithdrawalLocation(ctx, args.productId, args.locationId);
+    const lotConsumption = await consumeLotLocationStock(ctx, {
+      productId: args.productId,
+      locationId: sourceLocationId,
+      quantity: args.quantity,
+    });
+    const sourceLocation = await ctx.db.get(sourceLocationId);
     const prevPhysical = stock.physicalQuantity;
     const prevReserved = stock.reservedQuantity;
     const newPhysical = prevPhysical - args.quantity;
@@ -96,7 +105,11 @@ export const createExit = mutation({
     const movementId = await ctx.db.insert("stockMovements", {
       productId: args.productId, type: "exit", quantity: args.quantity,
       previousPhysical: prevPhysical, newPhysical, previousReserved: prevReserved, newReserved: prevReserved,
-      userId, requestId: args.requestId, observation: args.observation, timestamp: Date.now(),
+      userId, requestId: args.requestId,
+      lotId: lotConsumption.allocations[0]?.lotId as any,
+      locationId: sourceLocationId,
+      observation: `${args.observation ?? "Saída direta"} — armário ${sourceLocation?.name ?? sourceLocationId}; lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
+      timestamp: Date.now(),
     });
     await ctx.db.insert("auditLogs", {
       userId, action: "move_stock", entity: "stockMovements", entityId: movementId,
