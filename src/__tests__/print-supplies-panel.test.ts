@@ -30,6 +30,7 @@ const read = (p: string) => readFileSync(resolve(ROOT, p), "utf-8");
 
 const backend = read("src/convex/printSupplies.ts");
 const ledger = read("src/convex/lotLocationLedger.ts");
+const schema = read("src/convex/schema.ts");
 const panel = read("src/pages/GomaQ.tsx");
 
 const IMP = "q97b7737gv98ajm8qqpmjmzjs18ezb58"; // Impressoras
