@@ -150,14 +150,17 @@ describe("PRINT-08 — retirada rápida reduz estoque corretamente", () => {
   });
 });
 
-describe("PRINT-09 — retirada registra lotId", () => {
-  it("movement carrega lotId estruturado (1º lote consumido)", () => {
+describe("PRINT-09 — retirada registra alocação estruturada de todos os lotes", () => {
+  it("movement mantém o lote principal legado e a tabela registra todos", () => {
     expect(backend).toContain("lotId: consumedLots[0].lotId");
+    expect(backend).toContain("recordLotMovementAllocations");
+    expect(schema).toContain("stockMovementLotAllocations: defineTable");
+    expect(ledger).toContain('ctx.db.insert("stockMovementLotAllocations"');
   });
-  it("consome lotes FIFO por recebimento e registra todos na observation", () => {
+  it("consome lotes FIFO por recebimento e registra todos no ledger", () => {
     expect(backend).toContain("consumeLotLocationStock");
     expect(backend).toContain("resolveWithdrawalLocation");
-    expect(backend).toContain("Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(\", \")}");
+    expect(backend).toContain("Lotes retirados: ${consumedLots.map((item) => `${item.lotNumber}(${item.qty})`).join(\", \")}");
     expect(ledger).toContain("planFifoLotLocationConsumption");
     expect(ledger).toContain("lotLocationBalances");
   });
