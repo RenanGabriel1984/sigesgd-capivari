@@ -438,7 +438,9 @@ describe("PRINT-UOM-12 — estoque global continua 3338 com divergência 0", () 
   it("qualquer mutation aborta em divergência inesperada", () => {
     expect(backend).toContain("INTEGRIDADE: estoque global divergente antes da operação");
     expect(backend).toContain("VIOLAÇÃO DE SALDO na retirada");
-    expect(backend).toContain("physicalDelta !== -args.quantity");
+    expect(backend).toContain("Math.abs(physicalDelta + args.quantity) > STOCK_EPSILON");
+    expect(backend).toContain("lotLocationBalances");
+    expect(backend).toContain("afterDivergences");
   });
 
   it("a conversa de estoque usa a MESMA unidade-base (4 livros-razão conferidos)", () => {
