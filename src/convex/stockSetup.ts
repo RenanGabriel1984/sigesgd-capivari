@@ -7,6 +7,7 @@ import {
 import { internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import {
+  isClosedUnusedReturnAtSource,
   applyImplementationStockStamp,
   generateExitNumber,
   hasInitialInventoryLot,
@@ -1044,13 +1045,34 @@ export const lotLocationReadiness = internalQuery({
           }
         } else if (
           candidateLocationIds.length === 1 &&
-          laterExitsOrAdjustments.length === 0 &&
           laterTransfers.length === 0 &&
-          laterReturns.length === 0
+          (
+            (laterExitsOrAdjustments.length === 0 && laterReturns.length === 0) ||
+            isClosedUnusedReturnAtSource({
+              lotId: String(lot._id),
+              sourceLocationId: candidateLocationIds[0],
+              movements: laterExitsOrAdjustments.map((movement) => ({
+                id: String(movement._id),
+                type: movement.type,
+                lotId: movement.lotId ? String(movement.lotId) : null,
+                quantity: movement.quantity,
+                exitMovementId: movement.exitMovementId ? String(movement.exitMovementId) : null,
+                canceled: movement.canceled === true,
+              })),
+              returns: laterReturns.map((returned) => ({
+                exitMovementId: returned.exitMovementId ? String(returned.exitMovementId) : null,
+                quantity: returned.quantity,
+                locationId: returned.locationId ? String(returned.locationId) : null,
+                condition: returned.condition ?? null,
+              })),
+            })
+          )
         ) {
           status = "candidate";
           candidateLocationId = candidateLocationIds[0];
-          reason = "A entrada aponta um único armário e não há saída, ajuste, transferência ou devolução posterior identificada; exige conferência humana antes de qualquer migração.";
+          reason = laterExitsOrAdjustments.length > 0
+            ? "A saída foi integralmente devolvida sem uso ao mesmo armário, vinculada ao lote e à saída original; a localização de origem permanece sustentada pelo histórico."
+            : "A entrada aponta um único armário e não há saída, ajuste, transferência ou devolução posterior identificada; exige conferência humana antes de qualquer migração.";
         } else if (candidateLocationIds.length > 0 || laterExitsOrAdjustments.length > 0 || laterTransfers.length > 0 || laterReturns.length > 0) {
           status = "ambiguous";
           reason = "Há histórico posterior ou mais de um local de entrada; não é seguro inferir a localização atual.";
