@@ -55,7 +55,8 @@ describe("etapa 2 — diretor/gestor aprovado reserva estoque", () => {
 
   it("aprovação RESERVA (reservedQuantity += aprovado) com revalidação fresh", () => {
     expect(reqSrc).toContain("reservedQuantity: stock.reservedQuantity + input.quantityApproved,");
-    expect(reqSrc).toMatch(/const stock = await ctx\.db\.query\("stock"\)/);
+    expect(reqSrc).toMatch(/const stockRows = await ctx\.db\.query\("stock"\)/);
+    expect(reqSrc).toContain("requireSingleValidGlobalStock(stockRows, needed.productName)");
   });
 
   it("auditoria 'approve' registrada com usuário e itens", () => {
