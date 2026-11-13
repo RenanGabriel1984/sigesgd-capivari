@@ -609,6 +609,7 @@ export const withdrawFamily = mutation({
   args: {
     productId: v.id("products"),
     quantity: v.number(), // em unidades-base
+    locationId: v.id("storageLocations"),
     secretariaId: v.optional(v.id("organizations")),
     departamentoId: v.optional(v.id("organizations")),
     unidadeId: v.optional(v.id("organizations")),
@@ -693,24 +694,15 @@ export const withdrawFamily = mutation({
 
     const now = Date.now();
     const consumedLots: Array<{ lotId: string; lotNumber: string; qty: number }> = [];
-
-    // FIFO central de lotes de um produto (por recebimento) + patch do lote.
-    const consumeFifo = async (productId: string, quantity: number, physicalBefore: number) => {
-      const lotList = ((await ctx.db.query("lots").collect()) as Array<any>)
-        .filter((l) => l.productId === productId && l.quantityAvailable > 0 && l.active !== false)
-        .sort((a, b) => a.receivedAt - b.receivedAt);
-      let consumed = 0;
-      for (const lot of lotList) {
-        if (consumed >= quantity) break;
-        const take = Math.min(lot.quantityAvailable, quantity - consumed);
-        await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - take });
-        consumedLots.push({ lotId: lot._id as string, lotNumber: lot.lotNumber, qty: take });
-        consumed += take;
-      }
-      if (consumed < quantity) {
-        throw new Error(`Falha de consistência: lotes insuficientes (${consumed}/${quantity}). Nenhuma saída registrada.`);
-      }
-      return physicalBefore - quantity;
+    const consumeAtLocation = async (productId: string, quantity: number, locationId: any) => {
+      if (quantity <= 0) return { allocations: [] as any[] };
+      const result = await consumeLotLocationStock(ctx, { productId, locationId, quantity });
+      consumedLots.push(...result.allocations.map((allocation) => ({
+        lotId: String(allocation.lotId),
+        lotNumber: allocation.lotNumber,
+        qty: allocation.quantity,
+      })));
+      return result;
     };
 
     let closedExitUnits = 0;
@@ -724,64 +716,94 @@ export const withdrawFamily = mutation({
       const fromClosedPacks = Math.floor((args.quantity - fromLoose) / conv.factor);
       closedExitUnits = fromClosedPacks * conv.factor;
       looseExitUnits = args.quantity - closedExitUnits;
-      if (looseExitUnits > 0) newLoosePhys = await consumeFifo(looseMember._id, looseExitUnits, loosePhys);
-      if (closedExitUnits > 0) newClosedPhys = await consumeFifo(closedMember._id, closedExitUnits, closedPhys);
+      if (looseExitUnits > 0) {
+        await consumeAtLocation(looseMember._id, looseExitUnits, args.locationId);
+        newLoosePhys = loosePhys - looseExitUnits;
+      }
+      if (closedExitUnits > 0) {
+        await consumeAtLocation(closedMember._id, closedExitUnits, args.locationId);
+        newClosedPhys = closedPhys - closedExitUnits;
+      }
     } else {
-      // open_pack: sai das avulsas e abre caixas fechadas INTEGRAIS para cobrir o resto.
+      // Abrir embalagem é reclassificação: baixa o lote fechado no armário,
+      // cria novo lote avulso com origem rastreável e só então faz a saída.
       const openPacks = plan.packs;
-      // Abertura INTEGRAL: consumir openPacks caixas fechadas (lotes FIFO) e
-      // transferir as unidades para o registro "unidade avulsa".
-      newClosedPhys = await consumeFifo(closedMember._id, openPacks * conv.factor, closedPhys);
       const openedUnits = openPacks * conv.factor;
+      const opened = await consumeAtLocation(closedMember._id, openedUnits, args.locationId);
+      newClosedPhys = closedPhys - openedUnits;
+
       if (openedUnits > 0) {
-        // Rastreabilidade: o lote de reclassificação herda a ENTRADA do 1º lote
-        // de caixa fechada consumido (origem histórica preservada).
-        const firstClosedLot = consumedLots.length > 0 ? await ctx.db.get(consumedLots[0].lotId as Id<"lots">) : null;
-        const inheritEntryId = (firstClosedLot as { entryId?: string } | null)?.entryId ?? undefined;
-        const looseLotList = ((await ctx.db.query("lots").collect()) as Array<any>)
-          .filter((l) => l.productId === looseMember._id)
-          .sort((a, b) => a.receivedAt - b.receivedAt);
-        let remaining = openedUnits;
-        // Incrementa lotes EXISTENTES do produto avulso (FIFO); se faltar
-        // cobertura, cria lote de reclassificação vinculado à entrada de origem.
-        for (const lot of looseLotList) {
-          if (remaining <= 0) break;
-          const add = Math.min(remaining, conv.factor * 100);
-          await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable + add });
-          remaining -= add;
+        const firstClosedLot = opened.allocations.length > 0
+          ? await ctx.db.get(opened.allocations[0].lotId as Id<"lots">)
+          : null;
+        if (!firstClosedLot?.entryId) {
+          throw new Error("Falha de rastreabilidade: lote de origem da abertura não encontrado. Nenhuma reclassificação registrada.");
         }
-        if (remaining > 0) {
-          if (!inheritEntryId) {
-            throw new Error("Falha de rastreabilidade: lote de origem da abertura não encontrado. Nenhuma reclassificação registrada.");
-          }
-          await ctx.db.insert("lots", {
-            lotNumber: `REC-${now}-${remaining}`,
-            productId: looseMember._id,
-            entryId: inheritEntryId,
-            brand: looseMember.brand ?? undefined,
-            quantityReceived: remaining,
-            quantityAvailable: remaining,
-            receivedAt: now,
-            active: true,
-            areaId: PRINT_AREA_ID as never,
-            observation: `Reclassificação de ${openPacks} ${conv.packagingUnit}(s) aberta(s) de "${closedMember.name}" (1 ${conv.packagingUnit} = ${conv.factor} ${conv.baseUnit}).`,
-          } as never);
+
+        const reclassifiedLotId = await ctx.db.insert("lots", {
+          lotNumber: `REC-${now}-${firstClosedLot.lotNumber}`,
+          productId: looseMember._id as Id<"products">,
+          entryId: firstClosedLot.entryId,
+          brand: looseMember.brand ?? undefined,
+          quantityReceived: openedUnits,
+          quantityAvailable: openedUnits,
+          receivedAt: now,
+          supplierId: firstClosedLot.supplierId,
+          invoiceNumber: firstClosedLot.invoiceNumber,
+          active: true,
+          materialType: firstClosedLot.materialType,
+          areaId: firstClosedLot.areaId ?? PRINT_AREA_ID as never,
+          originLotId: firstClosedLot._id,
+          observation: `Reclassificação de ${openPacks} ${conv.packagingUnit}(s) aberta(s) de "${closedMember.name}". Origem: ${firstClosedLot.lotNumber}.`,
+        } as never);
+
+        await ctx.db.insert("lotLocationBalances", {
+          lotId: reclassifiedLotId as Id<"lots">,
+          productId: looseMember._id as Id<"products">,
+          locationId: args.locationId,
+          quantityAvailable: openedUnits,
+          updatedAt: now,
+        });
+
+        const looseLocationRows = await ctx.db.query("stockByLocation")
+          .withIndex("by_product", (q: any) => q.eq("productId", looseMember._id))
+          .collect();
+        validateUniqueScopedStockRows(looseLocationRows, looseMember.name);
+        const looseLocationRow = looseLocationRows.find((row: any) => row.locationId === args.locationId);
+        if (looseLocationRow) {
+          await ctx.db.patch(looseLocationRow._id, { quantity: looseLocationRow.quantity + openedUnits });
+        } else {
+          await ctx.db.insert("stockByLocation", {
+            productId: looseMember._id as Id<"products">,
+            locationId: args.locationId,
+            quantity: openedUnits,
+          });
         }
         newLoosePhys = loosePhys + openedUnits;
       }
-      // Saída TOTAL em unidades do produto avulso (inclui as recém-abertas).
+
+      // Saída total em unidades avulsas, incluindo as que acabaram de ser abertas.
       looseExitUnits = args.quantity;
-      newLoosePhys = await consumeFifo(looseMember._id, looseExitUnits, newLoosePhys);
+      await consumeAtLocation(looseMember._id, looseExitUnits, args.locationId);
+      newLoosePhys -= looseExitUnits;
     }
 
-    // Patches de saldo por produto.
+    // Patches dos saldos globais dos dois produtos. As baixas locais e por lote
+    // já foram aplicadas pelo serviço comum; a reclassificação não muda o total.
     if (closedExitUnits > 0 || plan.operation === "open_pack") {
-      await ctx.db.patch(closedStock!._id as Id<"stock">, { physicalQuantity: newClosedPhys });
+      if (!closedStock) throw new Error("Saldo global do produto em embalagem fechada não encontrado.");
+      await ctx.db.patch(closedStock._id as Id<"stock">, { physicalQuantity: newClosedPhys });
     }
-    if (plan.operation === "take_pack") {
-      if (looseExitUnits > 0) await ctx.db.patch(looseStock!._id as Id<"stock">, { physicalQuantity: newLoosePhys });
-    } else {
-      await ctx.db.patch(looseStock!._id as Id<"stock">, { physicalQuantity: newLoosePhys });
+    if (looseExitUnits > 0 || plan.operation === "open_pack") {
+      if (looseStock) {
+        await ctx.db.patch(looseStock._id as Id<"stock">, { physicalQuantity: newLoosePhys });
+      } else if (newLoosePhys > 0) {
+        await ctx.db.insert("stock", {
+          productId: looseMember._id as Id<"products">,
+          physicalQuantity: newLoosePhys,
+          reservedQuantity: 0,
+        });
+      }
     }
 
     // Guarda de invariante: a soma global NÃO MUDA além da saída autorizada.
@@ -807,6 +829,7 @@ export const withdrawFamily = mutation({
       previousReserved: closedRes * conv.factor + looseRes,
       newReserved: closedRes * conv.factor + looseRes,
       lotId: consumedLots[0]?.lotId as never,
+      locationId: args.locationId,
       userId,
       exitNumber: `SAI-${new Date(now).getFullYear()}-SUP-${now}`,
       observation:
