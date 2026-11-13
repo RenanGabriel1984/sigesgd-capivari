@@ -2,7 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import type { Id } from "./_generated/dataModel";
-import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
+import { isDiscreteStockUnit, requireValidScopedStockQuantity } from "../lib/stock-quantity-rules";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -149,8 +149,18 @@ export const create = mutation({
     }
     const sourceStock = sourceRows[0];
     const destinationStock = destinationRows[0] ?? null;
-    if (sourceStock.quantity < args.quantity) {
-      throw new Error(`Estoque insuficiente em "${fromArea.name}" / "${fromLocation.name}". Disponível: ${sourceStock.quantity}.`);
+    const sourceStockQuantity = requireValidScopedStockQuantity(
+      sourceStock.quantity,
+      `origem ${fromArea.name} / ${fromLocation.name}`,
+    );
+    const destinationStockQuantity = destinationStock
+      ? requireValidScopedStockQuantity(
+          destinationStock.quantity,
+          `destino ${toArea.name} / ${toLocation.name}`,
+        )
+      : 0;
+    if (sourceStockQuantity < args.quantity) {
+      throw new Error(`Estoque insuficiente em "${fromArea.name}" / "${fromLocation.name}". Disponível: ${sourceStockQuantity}.`);
     }
 
     const sourceLots = productLots.filter((lot: any) =>
@@ -169,10 +179,10 @@ export const create = mutation({
     }
     const sourceLotTotal = sourceLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
     const destinationLotTotal = destinationLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
-    if (Math.abs(sourceLotTotal - Number(sourceStock.quantity)) > 1e-9) {
+    if (!Number.isFinite(sourceLotTotal) || Math.abs(sourceLotTotal - sourceStockQuantity) > 1e-9) {
       throw new Error("O saldo da origem diverge dos lotes registrados. Transferência bloqueada para preservar a rastreabilidade.");
     }
-    if (Math.abs(destinationLotTotal - Number(destinationStock?.quantity ?? 0)) > 1e-9) {
+    if (!Number.isFinite(destinationLotTotal) || Math.abs(destinationLotTotal - destinationStockQuantity) > 1e-9) {
       throw new Error("O saldo do destino diverge dos lotes registrados. Regularize antes de transferir.");
     }
 
@@ -258,7 +268,7 @@ export const create = mutation({
       await ctx.db.insert("stockTransferLots", { transferId, sourceLotId: sourceLot._id, destinationLotId, quantity: part.quantity });
     }
 
-    await ctx.db.patch(sourceStock._id, { quantity: sourceStock.quantity - args.quantity });
+    await ctx.db.patch(sourceStock._id, { quantity: sourceStockQuantity - args.quantity });
     if (destinationStock) {
       await ctx.db.patch(destinationStock._id, { quantity: destinationStock.quantity + args.quantity });
     } else {
