@@ -1,7 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { validateEntryUnits } from "../lib/material-types";
-import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import {
   duplicateInvoiceMessage,
   entryInvoiceFingerprint,
@@ -458,18 +458,7 @@ export const confirm = mutation({
       const globalRows = await ctx.db.query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
         .collect();
-      if (globalRows.length > 1) {
-        throw new Error(`"${product.name}" possui registros globais de estoque duplicados. Regularize antes de confirmar a entrada.`);
-      }
-      const global = globalRows[0];
-      if (global && (
-        !Number.isFinite(global.physicalQuantity) ||
-        !Number.isFinite(global.reservedQuantity) ||
-        global.physicalQuantity < 0 || global.reservedQuantity < 0 ||
-        global.reservedQuantity > global.physicalQuantity
-      )) {
-        throw new Error(`O saldo global de "${product.name}" está inconsistente. Entrada bloqueada.`);
-      }
+      getOptionalSingleValidGlobalStock(globalRows, product.name);
 
       const effectiveAreaId = item.areaId ?? entry.areaId;
       itemAreas.set(item._id as string, effectiveAreaId as string | undefined);
@@ -550,7 +539,9 @@ export const confirm = mutation({
       });
 
       // Update stock (increase physicalQuantity)
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
+      const stockRows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
       const prevPhysical = stock?.physicalQuantity ?? 0;
       const prevReserved = stock?.reservedQuantity ?? 0;
       const newPhysical = prevPhysical + item.quantity;
@@ -885,9 +876,9 @@ export const reverse = mutation({
 
     for (const item of items) {
       const product = await ctx.db.get(item.productId);
-      const stock = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
-      if (!stock) throw new Error(`Registro de estoque não encontrado para "${product?.name ?? "item"}"`);
+      const stockRows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+      const stock = requireSingleValidGlobalStock(stockRows, product?.name ?? String(item.productId));
 
       // O estorno precisa atingir o lote criado por ESTE item da entrada.
       // Nunca usa outro lote do mesmo produto para compensar uma entrada consumida.
