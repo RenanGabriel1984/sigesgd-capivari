@@ -13,6 +13,7 @@ export type LotLocationMigrationReport = {
     globalStock: { physicalQuantityTotal: number; reservedQuantityTotal: number; invalidRecords: number };
     stockByLocation: { physicalQuantityTotal: number; invalidRecords: number };
     lotLocationBalances: { records: number; quantityAvailableTotal: number; invalidRecords: number };
+    storageLocations: { locations: Array<{ locationId: string; name: string; active: boolean }> };
   };
   products: Array<{
     productId: string;
@@ -107,6 +108,9 @@ export function buildLotLocationMigrationPlan(
     "o total reservado é inválido.",
   );
 
+  const activeLocationIds = new Set(summary.storageLocations.locations.filter((location) => location.active).map((location) => location.locationId));
+  assert(activeLocationIds.size === summary.storageLocations.locations.length, "há local de armazenamento inativo no conjunto auditado.");
+
   const rows: LotLocationMigrationRow[] = [];
   const insertions: LotLocationMigrationRow[] = [];
   const seenLots = new Set<string>();
@@ -144,6 +148,7 @@ export function buildLotLocationMigrationPlan(
       let row: LotLocationMigrationRow;
       if (lot.status === "candidate") {
         assert(!!lot.candidateLocationId, `o lote ${lot.lotNumber} não tem armário candidato.`);
+        assert(activeLocationIds.has(lot.candidateLocationId), `o lote ${lot.lotNumber} aponta para armário inexistente ou inativo.`);
         row = {
           lotId: lot.lotId,
           productId: product.productId,
@@ -155,6 +160,7 @@ export function buildLotLocationMigrationPlan(
       } else if (lot.status === "mapped") {
         assert(lot.mappedLocations.length === 1, `o lote ${lot.lotNumber} não possui exatamente um armário mapeado.`);
         const mapped = lot.mappedLocations[0];
+        assert(activeLocationIds.has(mapped.locationId), `o lote ${lot.lotNumber} aponta para armário mapeado inexistente ou inativo.`);
         assert(
           Math.abs(mapped.quantity - lot.quantityAvailable) <= EPSILON,
           `o lote ${lot.lotNumber} tem quantidade mapeada divergente.`,
