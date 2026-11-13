@@ -135,7 +135,7 @@ export const create = mutation({
     validateUniqueScopedStockRows(toStock, product.name);
     const destStock = toStock.find((s: any) => s.locationId === args.toLocationId);
     const destStockQuantity = destStock?.quantity ?? 0;
-    const lotDoc = args.lotId ? await ctx.db.get(args.lotId) : null;
+    // lotDoc já foi validado antes da leitura/escrita dos saldos.
 
     // Plano puro: valida quantidades e monta registro + auditoria.
     // A origem reduz, o destino aumenta e o lote/origem é PRESERVADO.
