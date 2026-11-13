@@ -87,13 +87,27 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       await signIn("credentials", formData);
       navigate(redirect);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "Erro ao entrar";
-      if (msg.includes("inativo") || msg.includes("desativado")) {
+      const msg = error instanceof Error ? error.message : "Erro desconhecido ao entrar";
+      const normalized = msg.toLocaleLowerCase("pt-BR");
+      if (normalized.includes("inativo") || normalized.includes("desativado")) {
         setError("Seu acesso está desativado. Procure o administrador do sistema.");
-      } else if (msg.includes("bloqueado")) {
+      } else if (normalized.includes("bloqueado")) {
         setError(msg);
-      } else if (msg.includes("não encontrado") || msg.includes("incorretos") || msg.includes("não configurada") || msg.includes("inválidos")) {
+      } else if (
+        normalized.includes("não encontrado") ||
+        normalized.includes("incorretos") ||
+        normalized.includes("não configurada") ||
+        normalized.includes("inválidos") ||
+        normalized.includes("invalid credentials")
+      ) {
         setError("E-mail ou senha inválidos.");
+      } else if (import.meta.env.VITE_APP_ENV === "homologacao") {
+        // Diagnóstico restrito à build isolada de homologação. Nunca expõe
+        // detalhes internos do backend nem altera a mensagem em produção.
+        setError(
+          "Falha técnica na autenticação de homologação (não é possível concluir que a senha esteja errada). " +
+          "Verifique a configuração de sessão/JWT e os logs do backend.",
+        );
       } else {
         setError("E-mail ou senha inválidos.");
       }
