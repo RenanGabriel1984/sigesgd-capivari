@@ -32,20 +32,11 @@ export const stats = query({
       .query("products")
       .withIndex("by_active", (q) => q.eq("active", true))
       .collect();
-    const [stockRows, locationRows, lots, entryItems] = await Promise.all([
+    const [stockRows, locationRows, lots] = await Promise.all([
       ctx.db.query("stock").collect(),
       ctx.db.query("stockByLocation").collect(),
       ctx.db.query("lots").collect(),
-      ctx.db.query("entryItems").collect(),
     ]);
-    // Na estrutura atual, o lote guarda a área e o item da entrada guarda o
-    // armário. O vínculo é entryItems.lotId → lots._id (ou número legado).
-    const locationIdByLot = new Map<string, string>();
-    for (const item of entryItems) {
-      if (item.lotId && item.locationId) {
-        locationIdByLot.set(String(item.lotId), String(item.locationId));
-      }
-    }
     const stockRowsByProduct = new Map<string, typeof stockRows>();
     const locationRowsByProduct = new Map<string, typeof locationRows>();
     const lotsByProduct = new Map<string, typeof lots>();
@@ -74,10 +65,7 @@ export const stats = query({
         inspectProductStockIntegrity(
           stockRowsByProduct.get(String(product._id)) ?? [],
           locationRowsByProduct.get(String(product._id)) ?? [],
-          (lotsByProduct.get(String(product._id)) ?? []).map((lot) => ({
-            ...lot,
-            locationId: locationIdByLot.get(String(lot._id)) ?? locationIdByLot.get(lot.lotNumber),
-          })),
+          lotsByProduct.get(String(product._id)) ?? [],
           product.name,
         ),
       );
@@ -238,7 +226,7 @@ export const stockPosition = query({
   args: {},
   handler: async (ctx) => {
     await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "stockPosition" });
-    const [products, stockRows, locationRows, lots, categories, areas, storageLocations, entryItems] = await Promise.all([
+    const [products, stockRows, locationRows, lots, categories, areas, storageLocations] = await Promise.all([
       ctx.db.query("products").collect(),
       ctx.db.query("stock").collect(),
       ctx.db.query("stockByLocation").collect(),
@@ -246,16 +234,7 @@ export const stockPosition = query({
       ctx.db.query("categories").collect(),
       ctx.db.query("stockAreas").collect(),
       ctx.db.query("storageLocations").collect(),
-      ctx.db.query("entryItems").collect(),
     ]);
-    // Área fica no lote; a localização física é recuperada pelo vínculo
-    // histórico do item de entrada. Não presumir lot.locationId (inexistente).
-    const locationIdByLot = new Map<string, string>();
-    for (const item of entryItems) {
-      if (item.lotId && item.locationId) {
-        locationIdByLot.set(String(item.lotId), String(item.locationId));
-      }
-    }
 
     const stockByProduct = new Map<string, typeof stockRows>();
     const locationsByProduct = new Map<string, typeof locationRows>();
@@ -287,14 +266,10 @@ export const stockPosition = query({
       const productStocks = stockByProduct.get(String(product._id)) ?? [];
       const productLocations = locationsByProduct.get(String(product._id)) ?? [];
       const productLots = lotsByProduct.get(String(product._id)) ?? [];
-      const productLotBalances = productLots.map((lot) => ({
-        ...lot,
-        locationId: locationIdByLot.get(String(lot._id)) ?? locationIdByLot.get(lot.lotNumber),
-      }));
       const integrity = inspectProductStockIntegrity(
         productStocks,
         productLocations,
-        productLotBalances,
+        productLots,
         product.name,
       );
       const stock = integrity.globalStock;
@@ -307,38 +282,36 @@ export const stockPosition = query({
       else if (quantity <= (product.minimumStock ?? 0)) status = "Crítico";
       else if (quantity <= (product.idealStock ?? 0)) status = "Baixo";
 
-      const productLotsWithLocation = productLotBalances.filter((lot) =>
-        typeof lot.quantityAvailable === "number" &&
-        Number.isFinite(lot.quantityAvailable) &&
-        lot.quantityAvailable > 0
-      );
-      const locationIds = new Set<string>([
-        ...productLocations.map((row) => String(row.locationId)),
-        ...productLotsWithLocation.filter((lot) => lot.locationId).map((lot) => String(lot.locationId)),
-      ]);
-      const locationBreakdown = [...locationIds].map((locationId) => {
-        const physicalRows = productLocations.filter((row) => String(row.locationId) === locationId);
-        const physicalQuantity = physicalRows.length > 0 &&
-          physicalRows.every((row) => typeof row.quantity === "number" && Number.isFinite(row.quantity) && row.quantity >= 0)
-          ? physicalRows.reduce((sum, row) => sum + row.quantity, 0)
-          : null;
-        const areaQuantities = new Map<string, { areaName: string; quantity: number }>();
-        for (const lot of productLotsWithLocation.filter((candidate) => String(candidate.locationId) === locationId)) {
-          const areaKey = lot.areaId ? String(lot.areaId) : "__NO_AREA__";
-          const existing = areaQuantities.get(areaKey) ?? {
-            areaName: lot.areaId ? areaById.get(String(lot.areaId)) ?? "Área não encontrada" : "Sem área",
-            quantity: 0,
-          };
-          existing.quantity += lot.quantityAvailable;
-          areaQuantities.set(areaKey, existing);
-        }
-        const locationName = locationById.get(locationId) ?? "Local não encontrado";
-        return {
-          locationName,
-          quantity: physicalQuantity,
-          areaBreakdown: [...areaQuantities.values()].sort((a, b) => a.areaName.localeCompare(b.areaName, "pt-BR")),
+      const locationBreakdown = productLocations.map((row) => ({
+        locationName: locationById.get(String(row.locationId)) ?? "Local não encontrado",
+        quantity: typeof row.quantity === "number" && Number.isFinite(row.quantity) && row.quantity >= 0
+          ? row.quantity
+          : null,
+      })).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR"));
+
+      const areaTotals = new Map<string, { areaName: string; quantity: number; lots: Array<{ lotNumber: string; quantityAvailable: number; active: boolean }> }>();
+      for (const lot of productLots.filter((candidate) =>
+        typeof candidate.quantityAvailable === "number" &&
+        Number.isFinite(candidate.quantityAvailable) &&
+        candidate.quantityAvailable > 0
+      )) {
+        const areaKey = lot.areaId ? String(lot.areaId) : "__NO_AREA__";
+        const existing = areaTotals.get(areaKey) ?? {
+          areaName: lot.areaId ? areaById.get(String(lot.areaId)) ?? "Área não encontrada" : "Sem área",
+          quantity: 0,
+          lots: [],
         };
-      }).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR"));
+        existing.quantity += lot.quantityAvailable;
+        existing.lots.push({
+          lotNumber: lot.lotNumber,
+          quantityAvailable: lot.quantityAvailable,
+          active: lot.active,
+        });
+        areaTotals.set(areaKey, existing);
+      }
+      const areaBreakdown = [...areaTotals.values()]
+        .map((area) => ({ ...area, lots: area.lots.sort((a, b) => a.lotNumber.localeCompare(b.lotNumber)) }))
+        .sort((a, b) => a.areaName.localeCompare(b.areaName, "pt-BR"));
 
       return {
         _id: product._id,
@@ -356,7 +329,9 @@ export const stockPosition = query({
         model: product.model,
         active: product.active,
         locationBreakdown,
+        areaBreakdown,
         integrityIssues: integrity.issues,
+        integrityLimitations: integrity.limitations,
       };
     });
   },
