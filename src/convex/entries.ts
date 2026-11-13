@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { validateEntryUnits } from "../lib/material-types";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import {
   duplicateInvoiceMessage,
   entryInvoiceFingerprint,
@@ -9,8 +10,10 @@ import {
   normalizeInvoiceNumber,
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
+import { attachStorageFile } from "./storage";
+import type { Id } from "./_generated/dataModel";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: entradas exigem sessão com visão de estoque.
@@ -95,7 +98,7 @@ async function generateEntryNumber(ctx: any): Promise<string> {
   const existing = await ctx.db.query("entries").withIndex("by_number", (q: any) => q.gte("entryNumber", prefix)).collect();
   const maxNum = existing.reduce((max: number, e: any) => {
     const match = e.entryNumber.match(/^ENT-\d{4}-(\d+)$/);
-    if (match) {
+    if (match && e.entryNumber.startsWith(prefix)) {
       const num = parseInt(match[1], 10);
       return num > max ? num : max;
     }
@@ -111,7 +114,7 @@ async function generateLotNumber(ctx: any): Promise<string> {
   const existing = await ctx.db.query("lots").withIndex("by_number", (q: any) => q.gte("lotNumber", prefix)).collect();
   const maxNum = existing.reduce((max: number, l: any) => {
     const match = l.lotNumber.match(/^LOT-\d{4}-(\d+)$/);
-    if (match) {
+    if (match && l.lotNumber.startsWith(prefix)) {
       const num = parseInt(match[1], 10);
       return num > max ? num : max;
     }
@@ -209,7 +212,7 @@ export const create = mutation({
     materialType: v.union(v.literal("consumption"), v.literal("permanent")),
     // ── Área/Subestoque de destino — ESCOLHA do usuário (nunca derivada
     // automaticamente do fornecedor nem da categoria) ──
-    areaId: v.optional(v.id("stockAreas")),
+    areaId: v.id("stockAreas"),
     items: v.array(v.object({
       productId: v.id("products"),
       quantity: v.number(),
@@ -278,10 +281,11 @@ export const create = mutation({
       series: args.series,
     });
 
-    // Área/Subestoque precisa existir (cadastro independente)
-    if (args.areaId) {
-      const area = await ctx.db.get(args.areaId);
-      if (!area) throw new Error("Área/Subestoque não encontrada");
+    // Toda entrada nova precisa de área ativa. O campo no schema permanece
+    // opcional apenas para preservar documentos históricos já existentes.
+    const destinationArea = await ctx.db.get(args.areaId);
+    if (!destinationArea || !destinationArea.active) {
+      throw new Error("Selecione uma área/subestoque ativo para esta entrada.");
     }
 
     const entryId = await ctx.db.insert("entries", {
@@ -315,8 +319,15 @@ export const create = mutation({
       updatedAt: now,
     });
 
+    if (args.documentStorageId) {
+      await attachStorageFile(ctx, args.documentStorageId, "entry", String(entryId), String(userId));
+    }
+    if (args.xmlStorageId) {
+      await attachStorageFile(ctx, args.xmlStorageId, "entry", String(entryId), String(userId));
+    }
+
     for (const item of args.items) {
-      await ctx.db.insert("entryItems", {
+      const itemId = await ctx.db.insert("entryItems", {
         entryId,
         productId: item.productId,
         quantity: item.quantity,
@@ -338,6 +349,9 @@ export const create = mutation({
         matchScore: item.matchScore,
         associationType: item.associationType,
       });
+      if (item.photoStorageId) {
+        await attachStorageFile(ctx, item.photoStorageId, "entryItem", String(itemId), String(userId));
+      }
     }
 
     await ctx.db.insert("auditLogs", {
@@ -356,6 +370,38 @@ export const create = mutation({
  * Confirm an entry: atomically creates lots, updates stock, creates movements.
  * This is an indivisible operation.
  */
+/**
+ * Classifica rascunho antigo antes da confirmação, sem reescrever itens
+ * individuais que já tenham uma área própria.
+ */
+export const updateDraftArea = mutation({
+  args: {
+    entryId: v.id("entries"),
+    areaId: v.id("stockAreas"),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    const entry = await ctx.db.get(args.entryId);
+    if (!entry) throw new Error("Entrada não encontrada.");
+    if (entry.status !== "draft") throw new Error("Apenas rascunhos podem receber classificação de área.");
+    const area = await ctx.db.get(args.areaId);
+    if (!area || !area.active) throw new Error("Selecione uma área/subestoque ativo.");
+
+    if (entry.areaId !== args.areaId) {
+      await ctx.db.patch(args.entryId, { areaId: args.areaId, updatedAt: Date.now() });
+      await ctx.db.insert("auditLogs", {
+        userId,
+        action: "update",
+        entity: "entries",
+        entityId: args.entryId,
+        details: `Área/subestoque do rascunho ${entry.entryNumber} definida como "${area.name}" antes da confirmação.`,
+        timestamp: Date.now(),
+      });
+    }
+    return args.entryId;
+  },
+});
+
 export const confirm = mutation({
   args: { entryId: v.id("entries") },
   handler: async (ctx, args) => {
@@ -405,6 +451,7 @@ export const confirm = mutation({
           quantity: item.quantity,
           units: itemUnits,
           productName: product?.name,
+          requireSerial: product?.hasSerial === true,
         });
         if (unitError) throw new Error(unitError);
       }
@@ -415,10 +462,76 @@ export const confirm = mutation({
       );
     }
 
+    // Área de negócio e local físico são dimensões independentes.
+    // entries.areaId é a área padrão; item.areaId pode sobrescrever por linha.
+    const itemAreas = new Map<string, string | undefined>();
+    if (entry.areaId) {
+      const defaultArea = await ctx.db.get(entry.areaId);
+      if (!defaultArea || !defaultArea.active) {
+        throw new Error("A área/subestoque padrão da entrada não existe ou está inativa.");
+      }
+    }
+    for (const item of items) {
+      if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+        throw new Error(`Quantidade inválida para o item ${item.productId}.`);
+      }
+      const product: any = await ctx.db.get(item.productId);
+      if (!product || !product.active) {
+        throw new Error(`Produto ${product?.name ?? item.productId} não encontrado ou inativo.`);
+      }
+      if (product.hasSerial && entry.materialType !== "permanent") {
+        throw new Error(`"${product.name}" exige controle individual por série/patrimônio. Classifique a entrada como material permanente e informe as unidades.`);
+      }
+      if (entry.materialType !== "permanent" &&
+          isDiscreteStockUnit(item.unitOfMeasure, product.hasSerial) &&
+          !Number.isSafeInteger(item.quantity)) {
+        throw new Error(`A quantidade de "${product.name}" deve ser inteira para a unidade ${item.unitOfMeasure}.`);
+      }
+
+      const globalRows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+        .collect();
+      getOptionalSingleValidGlobalStock(globalRows, product.name);
+
+      const effectiveAreaId = item.areaId ?? entry.areaId;
+      if (!effectiveAreaId) {
+        throw new Error(
+          `A entrada ${entry.entryNumber} não possui área/subestoque definida para "${product.name}". ` +
+          "Classifique o rascunho antes de confirmar; o armário não determina a área."
+        );
+      }
+      const area = await ctx.db.get(effectiveAreaId as Id<"stockAreas">);
+      if (!area || !area.active) {
+        throw new Error(`A área selecionada para "${product.name}" não existe ou está inativa.`);
+      }
+      itemAreas.set(item._id as string, effectiveAreaId as string);
+      if (!item.locationId) {
+        const product = await ctx.db.get(item.productId);
+        throw new Error(`Selecione o local físico para "${product?.name ?? "o item"}" antes de confirmar esta entrada.`);
+      }
+      const location = await ctx.db.get(item.locationId);
+      if (!location || !location.active) {
+        throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
+      }
+      const locationRows = await ctx.db.query("stockByLocation")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+        .collect();
+      const sameScope = locationRows.filter((row: any) =>
+        row.locationId === item.locationId &&
+        (row.areaId ?? undefined) === (effectiveAreaId ?? undefined)
+      );
+      if (sameScope.length > 1) {
+        throw new Error("Há saldos físicos duplicados para o produto na mesma área/local. Regularize antes de confirmar a entrada.");
+      }
+      if (sameScope[0] && (!Number.isFinite(sameScope[0].quantity) || sameScope[0].quantity < 0)) {
+        throw new Error("O saldo físico da área/local está inválido. Regularize antes de confirmar a entrada.");
+      }
+    }
     const now = Date.now();
     const confirmedItemDetails: string[] = [];
 
     for (const item of items) {
+      const itemAreaId = itemAreas.get(item._id as string);
       // Validate product
       const product = await ctx.db.get(item.productId);
       if (!product) throw new Error(`Produto não encontrado para item da entrada`);
@@ -445,17 +558,26 @@ export const confirm = mutation({
         active: true,
         observation: item.observation,
         materialType: entry.materialType,
-        areaId: entry.areaId,
+        areaId: itemAreaId as any,
+        locationId: item.locationId,
       });
+      if (item.photoStorageId) {
+        await attachStorageFile(ctx, item.photoStorageId, "lot", String(lotId), String(userId));
+      }
 
       // Rastreabilidade Entrada → EntryItem → Lote → Movimentação.
       // Sem este back-patch, `entryItems.lotId` ficava ausente (foi o caso dos
       // 8 itens da ENT-2026-000002) e o detalhe da entrada não conseguia ligar
       // o item ao lote que ele gerou.
-      await ctx.db.patch(item._id, { lotId: lotId as string });
+      await ctx.db.patch(item._id, {
+        lotId: lotId as string,
+        areaId: itemAreaId as any,
+      });
 
       // Update stock (increase physicalQuantity)
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
+      const stockRows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
       const prevPhysical = stock?.physicalQuantity ?? 0;
       const prevReserved = stock?.reservedQuantity ?? 0;
       const newPhysical = prevPhysical + item.quantity;
@@ -469,11 +591,17 @@ export const confirm = mutation({
       // Update stock by location (saldo por localização) — keeps global × location consistent
       if (item.locationId) {
         const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const sbl = sblList.find((s: any) => s.locationId === item.locationId);
+        const sbl = sblList.find((s: any) =>
+          s.locationId === item.locationId &&
+          (s.areaId ?? undefined) === (itemAreaId ?? undefined)
+        );
         if (sbl) {
           await ctx.db.patch(sbl._id, { quantity: sbl.quantity + item.quantity });
         } else {
-          await ctx.db.insert("stockByLocation", { productId: item.productId, locationId: item.locationId, quantity: item.quantity });
+          await ctx.db.insert("stockByLocation", {
+            productId: item.productId, locationId: item.locationId,
+            quantity: item.quantity, areaId: itemAreaId as any,
+          });
         }
       }
 
@@ -489,6 +617,8 @@ export const confirm = mutation({
         userId,
         entryId: args.entryId,
         lotId: lotNumber,
+        areaId: itemAreaId as any,
+        locationId: item.locationId,
         documentNumber: entry.invoiceNumber,
         observation: `Entrada ${entry.entryNumber} — Lote ${lotNumber}`,
         timestamp: now,
@@ -526,6 +656,7 @@ export const addItem = mutation({
     model: v.optional(v.string()),
     specification: v.optional(v.string()),
     locationId: v.optional(v.id("storageLocations")),
+    areaId: v.optional(v.id("stockAreas")),
     photoStorageId: v.optional(v.string()),
     supplierLotNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
@@ -560,6 +691,7 @@ export const addItem = mutation({
       model: args.model,
       specification: args.specification,
       locationId: args.locationId,
+      areaId: args.areaId,
       photoStorageId: args.photoStorageId,
       supplierLotNumber: args.supplierLotNumber || undefined,
       observation: args.observation,
@@ -572,6 +704,9 @@ export const addItem = mutation({
       associationType: args.associationType,
     });
 
+    if (args.photoStorageId) {
+      await attachStorageFile(ctx, args.photoStorageId, "entryItem", String(itemId), String(userId));
+    }
     await ctx.db.patch(args.entryId, { updatedAt: Date.now() });
     await ctx.db.insert("auditLogs", {
       userId, action: "update", entity: "entryItems", entityId: itemId,
@@ -595,6 +730,7 @@ export const updateItem = mutation({
     model: v.optional(v.string()),
     specification: v.optional(v.string()),
     locationId: v.optional(v.id("storageLocations")),
+    areaId: v.optional(v.id("stockAreas")),
     photoStorageId: v.optional(v.string()),
     supplierLotNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
@@ -632,6 +768,7 @@ export const updateItem = mutation({
     if (args.model !== undefined) updates.model = args.model;
     if (args.specification !== undefined) updates.specification = args.specification;
     if (args.locationId !== undefined) updates.locationId = args.locationId;
+    if (args.areaId !== undefined) updates.areaId = args.areaId;
     if (args.photoStorageId !== undefined) updates.photoStorageId = args.photoStorageId;
     if (args.supplierLotNumber !== undefined) updates.supplierLotNumber = args.supplierLotNumber;
     if (args.observation !== undefined) updates.observation = args.observation;
@@ -640,6 +777,9 @@ export const updateItem = mutation({
     if (args.associationType !== undefined) updates.associationType = args.associationType;
 
     await ctx.db.patch(args.itemId, updates);
+    if (args.photoStorageId) {
+      await attachStorageFile(ctx, args.photoStorageId, "entryItem", String(args.itemId), String(userId));
+    }
     await ctx.db.patch(item.entryId, { updatedAt: Date.now() });
 
     const product = args.productId ? await ctx.db.get(args.productId) : await ctx.db.get(item.productId);
@@ -731,6 +871,9 @@ export const editDraft = mutation({
     }
 
     await ctx.db.patch(args.entryId, updates);
+    if (args.documentStorageId) {
+      await attachStorageFile(ctx, args.documentStorageId, "entry", String(args.entryId), String(userId));
+    }
 
     await ctx.db.insert("auditLogs", {
       userId, action: "update", entity: "entries", entityId: args.entryId,
@@ -750,65 +893,117 @@ export const reverse = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
-    if (!args.reason.trim()) throw new Error("O motivo do estorno é obrigatório");
+    const reason = args.reason.trim();
+    if (!reason) throw new Error("O motivo do estorno é obrigatório");
 
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "confirmed") throw new Error("Apenas entradas confirmadas podem ser estornadas");
 
-    const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
+    const [items, entryLots] = await Promise.all([
+      ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect(),
+      ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect(),
+    ]);
+    if (items.length === 0) throw new Error("Entrada confirmada não possui itens para estornar");
+
     const now = Date.now();
     const reversalDetails: string[] = [];
+    const reversedLotIds = new Set<string>();
 
     for (const item of items) {
       const product = await ctx.db.get(item.productId);
+      const stockRows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+      const stock = requireSingleValidGlobalStock(stockRows, product?.name ?? String(item.productId));
 
-      // Check stock — cannot reverse if consumed
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
-      if (!stock) throw new Error(`Registro de estoque não encontrado para "${product?.name ?? "item"}"`);
-
-      if (stock.physicalQuantity < item.quantity) {
-        throw new Error(
-          `Não é possível estornar "${product?.name ?? "item"}": parte do material já foi consumida. ` +
-          `Saldo atual: ${stock.physicalQuantity}. Quantidade da entrada: ${item.quantity}. ` +
-          `Diferença consumida: ${item.quantity - stock.physicalQuantity}.`
-        );
+      // O estorno precisa atingir o lote criado por ESTE item da entrada.
+      // Nunca usa outro lote do mesmo produto para compensar uma entrada consumida.
+      let lot: any = null;
+      if (item.lotId) {
+        lot = await ctx.db.get(item.lotId as Id<"lots">);
+        if (!lot) lot = entryLots.find((candidate: any) => candidate.lotNumber === item.lotId) ?? null;
       }
+      if (!lot) {
+        const candidates = entryLots.filter((candidate: any) => candidate.productId === item.productId);
+        if (candidates.length === 1) lot = candidates[0];
+        else {
+          throw new Error(
+            `Não é possível estornar "${product?.name ?? "item"}": o lote original não está identificado de forma única. Regularize a rastreabilidade antes do estorno.`,
+          );
+        }
+      }
+      if (
+        lot.entryId !== args.entryId ||
+        lot.productId !== item.productId ||
+        reversedLotIds.has(String(lot._id)) ||
+        lot.active === false
+      ) {
+        throw new Error(`Não é possível estornar "${product?.name ?? "item"}": o lote de origem está inválido ou já foi utilizado no estorno.`);
+      }
+      reversedLotIds.add(String(lot._id));
 
-      // Check reservation integrity
-      if (stock.reservedQuantity > 0 && stock.physicalQuantity - item.quantity < stock.reservedQuantity) {
+      const lotReservations = await ctx.db.query("requestItemReservations")
+        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+      const reservedInLot = lotReservations.reduce(
+        (sum: number, reservation: any) => sum + Number(reservation.quantityRemaining ?? 0),
+        0,
+      );
+      const lotAfter = Number(lot.quantityAvailable) - Number(item.quantity);
+      if (lotAfter < reservedInLot || lotAfter < 0) {
         throw new Error(
-          `Não é possível estornar "${product?.name ?? "item"}": a reserva atual (${stock.reservedQuantity}) consumiria mais que o saldo restante.`
+          `Não é possível estornar "${product?.name ?? "item"}": o lote original foi parcialmente consumido, transferido ou reservado. Saldo do lote: ${lot.quantityAvailable}; quantidade da entrada: ${item.quantity}; reserva remanescente: ${reservedInLot}.`,
         );
       }
 
       const newPhysical = stock.physicalQuantity - item.quantity;
-      await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+      if (newPhysical < 0 || newPhysical < stock.reservedQuantity) {
+        throw new Error(
+          `Não é possível estornar "${product?.name ?? "item"}": o saldo global restante ficaria abaixo das reservas. Saldo atual: ${stock.physicalQuantity}; reservado: ${stock.reservedQuantity}; entrada: ${item.quantity}.`,
+        );
+      }
 
-      // Reverse stock by location (same location used at confirmation)
-      if (item.locationId) {
-        const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const sbl = sblList.find((s: any) => s.locationId === item.locationId);
-        if (sbl && sbl.quantity < item.quantity) {
+      const lotAreaId = lot.areaId ?? undefined;
+      const lotLocationId = lot.locationId ?? undefined;
+      if ((item.areaId ?? undefined) !== lotAreaId || (item.locationId ?? undefined) !== lotLocationId) {
+        throw new Error(`Não é possível estornar "${product?.name ?? "item"}": área/local do item diverge do lote original.`);
+      }
+
+      let locationStock: any = null;
+      if (lotLocationId) {
+        const locationRows = await ctx.db.query("stockByLocation")
+          .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        const matchingRows = locationRows.filter((row: any) =>
+          row.locationId === lotLocationId && (row.areaId ?? undefined) === lotAreaId
+        );
+        if (matchingRows.length !== 1) {
           throw new Error(
-            `Não é possível estornar "${product?.name ?? "item"}" no local: saldo do local (${sbl.quantity}) é menor que a quantidade da entrada (${item.quantity}). ` +
-            `Faça um inventário/transferência para regularizar a localização antes de estornar.`
+            `Não é possível estornar "${product?.name ?? "item"}": o saldo no local físico de origem está ausente ou duplicado para a área correta.`,
           );
         }
-        if (sbl) {
-          await ctx.db.patch(sbl._id, { quantity: sbl.quantity - item.quantity });
+        locationStock = matchingRows[0];
+        const scopeReservations = (await ctx.db.query("requestItemReservations")
+          .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect())
+          .filter((reservation: any) =>
+            reservation.locationId === lotLocationId && reservation.areaId === lotAreaId
+          )
+          .reduce((sum: number, reservation: any) => sum + Number(reservation.quantityRemaining ?? 0), 0);
+        if (locationStock.quantity - item.quantity < scopeReservations) {
+          throw new Error(
+            `Não é possível estornar "${product?.name ?? "item"}": a redução deixaria o local abaixo das reservas existentes.`,
+          );
         }
       }
 
-      // Mark related lots as inactive
-      const lots = await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
-      for (const lot of lots) {
-        if (lot.productId === item.productId) {
-          await ctx.db.patch(lot._id, { active: false, quantityAvailable: 0 });
-        }
+      // Somente após validar lote, reservas e origem física são aplicadas as escritas.
+      await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+      await ctx.db.patch(lot._id, {
+        quantityAvailable: lotAfter,
+        active: lotAfter > 0,
+      });
+      if (locationStock) {
+        await ctx.db.patch(locationStock._id, { quantity: locationStock.quantity - item.quantity });
       }
 
-      // Create reversal movement
       await ctx.db.insert("stockMovements", {
         productId: item.productId,
         type: "adjustment",
@@ -819,18 +1014,23 @@ export const reverse = mutation({
         newReserved: stock.reservedQuantity,
         userId,
         entryId: args.entryId,
-        observation: `Estorno da entrada ${entry.entryNumber}. Motivo: ${args.reason.trim()}`,
+        lotId: lot._id as string,
+        areaId: lotAreaId as any,
+        locationId: lotLocationId as any,
+        observation: `Estorno da entrada ${entry.entryNumber} — lote ${lot.lotNumber}. Motivo: ${reason}`,
         timestamp: now,
       });
 
-      reversalDetails.push(`${product?.name ?? "item"}: -${item.quantity}`);
+      reversalDetails.push(`${product?.name ?? "item"}: -${item.quantity} (${lot.lotNumber})`);
     }
 
     await ctx.db.patch(args.entryId, { status: "reversed", updatedAt: now });
-
     await ctx.db.insert("auditLogs", {
-      userId,      action: "reverse_entry", entity: "entries", entityId: args.entryId,
-      details: `Entrada ${entry.entryNumber} estornada. Itens: ${reversalDetails.join("; ")}. Motivo: ${args.reason.trim()}`,
+      userId,
+      action: "reverse_entry",
+      entity: "entries",
+      entityId: args.entryId,
+      details: `Entrada ${entry.entryNumber} estornada. Itens: ${reversalDetails.join("; ")}. Motivo: ${reason}`,
       timestamp: now,
     });
 
@@ -895,6 +1095,10 @@ export const setUnits = mutation({
       }
     }
 
+    if (args.units.some((unit) => !!unit.patrimonyNumber?.trim())) {
+      throw new Error("O número oficial de patrimônio só pode ser atribuído pelo setor de Patrimônio após a confirmação da entrada.");
+    }
+
     // Patrimônio não pode se repetir dentro da mesma entrada
     const seen = new Set<string>();
     for (const u of args.units) {
@@ -920,6 +1124,9 @@ export const setUnits = mutation({
         entryItemId: u.entryItemId,
         productId: item.productId,
         patrimonyNumber: u.patrimonyNumber?.trim() || undefined,
+        patrimonyRegistrationStatus: "pending",
+        patrimonyAssignedAt: undefined,
+        patrimonyAssignedByUserId: undefined,
         serialNumber: u.serialNumber?.trim() || undefined,
         manufacturer: u.manufacturer?.trim() || undefined,
         model: u.model?.trim() || undefined,
@@ -948,5 +1155,176 @@ export const setUnits = mutation({
       timestamp: now,
     });
     return args.entryId;
+  },
+});
+
+
+// ─── Tombamento posterior pelo setor de Patrimônio ──────────────────────────
+
+const PATRIMONY_ASSET_TYPES = [
+  "desktop", "notebook", "monitor", "server", "printer", "switch",
+  "router", "access_point", "ups", "storage", "phone", "other",
+] as const;
+
+export const listPendingPatrimony = query({
+  args: {},
+  handler: async (ctx) => {
+    await requirePermission(ctx, "patrimony.view", { entity: "entryItemUnits" });
+    const pending = await ctx.db
+      .query("entryItemUnits")
+      .withIndex("by_registration_status", (q) => q.eq("patrimonyRegistrationStatus", "pending"))
+      .collect();
+    const rows = await Promise.all(pending.map(async (unit: any) => {
+      const entry: any = await ctx.db.get(unit.entryId);
+      if (!entry || entry.status !== "confirmed") return null;
+      const item: any = await ctx.db.get(unit.entryItemId);
+      const product: any = item ? await ctx.db.get(item.productId) : null;
+      const supplier: any = entry.supplierId ? await ctx.db.get(entry.supplierId) : null;
+      return {
+        ...unit,
+        entryNumber: entry.entryNumber,
+        invoiceNumber: entry.invoiceNumber,
+        invoiceDate: entry.invoiceDate,
+        receivedAt: entry.receivedAt,
+        supplierName: supplier?.tradeName ?? supplier?.legalName ?? null,
+        productName: product?.name ?? "Produto não encontrado",
+        itemQuantity: item?.quantity ?? null,
+      };
+    }));
+    return rows.filter((row): row is NonNullable<typeof row> => row !== null)
+      .sort((a: any, b: any) => a.createdAt - b.createdAt);
+  },
+});
+
+export const assignPatrimony = mutation({
+  args: {
+    entryItemUnitId: v.id("entryItemUnits"),
+    patrimonyNumber: v.string(),
+    assetType: v.union(...PATRIMONY_ASSET_TYPES.map((value) => v.literal(value))),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "patrimony.assign", {
+      entity: "entryItemUnits", entityId: String(args.entryItemUnitId),
+    });
+    const patrimonyNumber = args.patrimonyNumber.trim();
+    if (!patrimonyNumber || patrimonyNumber.length > 80) {
+      throw new Error("Informe um número de patrimônio válido (até 80 caracteres).");
+    }
+    const normalized = patrimonyNumber.toLocaleUpperCase("pt-BR");
+    const unit = await ctx.db.get(args.entryItemUnitId);
+    if (!unit) throw new Error("Unidade recebida não encontrada.");
+    const entry = await ctx.db.get(unit.entryId);
+    if (!entry || entry.status !== "confirmed") {
+      throw new Error("O tombamento só pode ocorrer após a confirmação da entrada.");
+    }
+    if (unit.patrimonyNumber?.trim()) {
+      throw new Error("Esta unidade já possui patrimônio. Correções exigem procedimento próprio e histórico.");
+    }
+
+    const [units, assets] = await Promise.all([
+      ctx.db.query("entryItemUnits").collect(),
+      ctx.db.query("assets").collect(),
+    ]);
+    if (units.some((row: any) =>
+      row._id !== args.entryItemUnitId &&
+      row.patrimonyNumber?.trim().toLocaleUpperCase("pt-BR") === normalized
+    )) {
+      throw new Error("Este número já está associado a outra unidade recebida.");
+    }
+    const existingAsset = assets.find((asset: any) =>
+      asset.patrimonyNumber?.trim().toLocaleUpperCase("pt-BR") === normalized
+    );
+    if (existingAsset?.entryItemUnitId && existingAsset.entryItemUnitId !== args.entryItemUnitId) {
+      throw new Error("Este número já está vinculado a outro equipamento.");
+    }
+
+    const normalizedSerial = unit.serialNumber?.trim().toLocaleUpperCase("pt-BR");
+    if (normalizedSerial) {
+      if (
+        existingAsset?.serialNumber &&
+        existingAsset.serialNumber.trim().toLocaleUpperCase("pt-BR") !== normalizedSerial
+      ) {
+        throw new Error(
+          "O patrimônio informado já pertence a um equipamento com outro número de série. Faça a conciliação do cadastro antes do tombamento.",
+        );
+      }
+      const serialOwner = assets.find((asset: any) =>
+        asset.serialNumber?.trim().toLocaleUpperCase("pt-BR") === normalizedSerial &&
+        asset.entryItemUnitId !== args.entryItemUnitId
+      );
+      if (serialOwner && serialOwner._id !== existingAsset?._id) {
+        throw new Error(
+          "O número de série desta unidade já consta em outro equipamento. Faça a conciliação do cadastro existente antes do tombamento.",
+        );
+      }
+    }
+
+    const item = await ctx.db.get(unit.entryItemId);
+    const product = await ctx.db.get(unit.productId);
+    if (!item || !product) throw new Error("Produto ou item da entrada não encontrado.");
+    const now = Date.now();
+    const organizationId = unit.unidadeId ?? unit.departamentoId ?? unit.secretariaId;
+    let assetId: any;
+
+    if (existingAsset) {
+      // Reaproveita o cadastro legado para não criar um segundo ativo.
+      assetId = existingAsset._id;
+      await ctx.db.patch(assetId, {
+        entryId: unit.entryId,
+        entryItemId: unit.entryItemId,
+        entryItemUnitId: args.entryItemUnitId,
+        patrimonyNumber,
+        serialNumber: existingAsset.serialNumber ?? (unit.serialNumber?.trim() || undefined),
+        updatedAt: now,
+      });
+      await ctx.db.insert("assetHistory", {
+        assetId, eventType: "assigned", userId,
+        previousStatus: existingAsset.status,
+        newStatus: existingAsset.status,
+        observation: `Vinculado à entrada ${entry.entryNumber}; tombamento ${patrimonyNumber}`,
+        timestamp: now,
+      });
+    } else {
+      assetId = await ctx.db.insert("assets", {
+        patrimonyNumber,
+        serialNumber: unit.serialNumber?.trim() || undefined,
+        entryId: unit.entryId,
+        entryItemId: unit.entryItemId,
+        entryItemUnitId: args.entryItemUnitId,
+        assetType: args.assetType,
+        manufacturer: unit.manufacturer?.trim() || product.manufacturer || undefined,
+        model: unit.model?.trim() || product.model || undefined,
+        organizationId,
+        storageLocationId: unit.locationId,
+        status: "active",
+        acquisitionDate: unit.acquisitionDate || entry.invoiceDate || undefined,
+        observation: unit.observation || `Recebido na entrada ${entry.entryNumber}`,
+        active: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("assetHistory", {
+        assetId, eventType: "created", userId,
+        newOrganizationId: organizationId,
+        newStatus: "active",
+        observation: `Criado a partir da entrada ${entry.entryNumber}; tombamento ${patrimonyNumber}`,
+        timestamp: now,
+      });
+    }
+
+    await ctx.db.patch(args.entryItemUnitId, {
+      patrimonyNumber,
+      patrimonyRegistrationStatus: "registered",
+      patrimonyAssignedAt: now,
+      patrimonyAssignedByUserId: userId,
+      assetId,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId, action: "asset_assign", entity: "entryItemUnits",
+      entityId: args.entryItemUnitId,
+      details: `Tombamento ${patrimonyNumber} atribuído à unidade da entrada ${entry.entryNumber}; ativo ${assetId}`,
+      timestamp: now,
+    });
+    return assetId;
   },
 });

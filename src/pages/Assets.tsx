@@ -18,6 +18,8 @@ import {
 import { Plus, Monitor, Laptop, Server, Printer, Wifi, HardDrive, HelpCircle, Search, Phone, Warehouse } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/use-auth";
+import { getPermissions, type UserRole } from "@/types/constants";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   EQUIPMENT_CATEGORIES,
@@ -39,6 +41,7 @@ import {
 import type { RelatedStockProduct } from "@/lib/equipment-categories";
 
 const ASSET_TYPE_LABELS: Record<string, string> = EQUIPMENT_TYPE_LABELS;
+type AssetType = "desktop" | "notebook" | "monitor" | "server" | "printer" | "switch" | "router" | "access_point" | "ups" | "storage" | "phone" | "other";
 
 const ASSET_STATUS_LABELS: Record<string, string> = {
   active: "Ativo", maintenance: "Manutenção", inactive: "Inativo",
@@ -180,15 +183,18 @@ function AssetsSkeleton() {
 }
 
 export default function AssetsPage() {
+  const { user } = useAuth();
+  const permissions = getPermissions(user?.role as UserRole | undefined);
+  const canAssignOfficialPatrimony = permissions.canViewPatrimony;
   const [searchParams, setSearchParams] = useSearchParams();
   // A categoria vive NA URL: cada uma tem o próprio recorte e permanece na tela
   // mesmo quando não existe nenhum asset cadastrado.
   const category = resolveEquipmentCategory(searchParams);
   const [tab, setTab] = useState("list");
   const [showNew, setShowNew] = useState(false);
-  const [filters, setFilters] = useState({ status: "", assetType: "", search: "" });
+  const [filters, setFilters] = useState<{ status: string; assetType: AssetType | ""; search: string }>({ status: "", assetType: "", search: "" });
   const [form, setForm] = useState({
-    patrimonyNumber: "", serialNumber: "", assetType: "desktop",
+    patrimonyNumber: "", serialNumber: "", assetType: "desktop" as AssetType,
     manufacturer: "", model: "", hostname: "", macAddress: "",
     organizationId: "", responsibleUserId: "", observation: "",
   });
@@ -251,8 +257,8 @@ export default function AssetsPage() {
     if (!form.assetType) { toast.error("Selecione o tipo de equipamento"); return; }
     try {
       await createAsset({
-        assetType: form.assetType as any,
-        patrimonyNumber: form.patrimonyNumber || undefined,
+        assetType: form.assetType,
+        patrimonyNumber: canAssignOfficialPatrimony ? form.patrimonyNumber || undefined : undefined,
         serialNumber: form.serialNumber || undefined,
         manufacturer: form.manufacturer || undefined,
         model: form.model || undefined,
@@ -264,7 +270,7 @@ export default function AssetsPage() {
       });
       toast.success("Equipamento cadastrado com sucesso");
       setShowNew(false);
-      setForm({ patrimonyNumber: "", serialNumber: "", assetType: "desktop", manufacturer: "", model: "", hostname: "", macAddress: "", organizationId: "", responsibleUserId: "", observation: "" });
+      setForm({ patrimonyNumber: "", serialNumber: "", assetType: "desktop" as AssetType, manufacturer: "", model: "", hostname: "", macAddress: "", organizationId: "", responsibleUserId: "", observation: "" });
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao cadastrar equipamento");
     }
@@ -341,7 +347,7 @@ export default function AssetsPage() {
           <select
             className="border rounded-md p-2 text-sm bg-background"
             value={filters.assetType}
-            onChange={(e) => setFilters({ ...filters, assetType: e.target.value })}
+            onChange={(e) => setFilters({ ...filters, assetType: e.target.value as AssetType | "" })}
           >
             <option value="">Todos os tipos</option>
             {Object.entries(ASSET_TYPE_LABELS).map(([k, v]) => (
@@ -475,22 +481,29 @@ export default function AssetsPage() {
             <div className="space-y-4">
               <div>
                 <Label>Tipo de Equipamento *</Label>
-                <select className="w-full border rounded-md p-2 text-sm" value={form.assetType} onChange={(e) => setForm({ ...form, assetType: e.target.value })}>
+                <select className="w-full border rounded-md p-2 text-sm" value={form.assetType} onChange={(e) => setForm({ ...form, assetType: e.target.value as AssetType })}>
                   {Object.entries(ASSET_TYPE_LABELS).map(([k, v]) => (
                     <option key={k} value={k}>{v}</option>
                   ))}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Nº Patrimônio</Label>
-                  <Input value={form.patrimonyNumber} onChange={(e) => setForm({ ...form, patrimonyNumber: e.target.value })} />
-                </div>
+              <div className={canAssignOfficialPatrimony ? "grid grid-cols-2 gap-3" : "grid grid-cols-1 gap-3"}>
+                {canAssignOfficialPatrimony && (
+                  <div>
+                    <Label>Nº Patrimônio oficial</Label>
+                    <Input value={form.patrimonyNumber} onChange={(e) => setForm({ ...form, patrimonyNumber: e.target.value })} />
+                  </div>
+                )}
                 <div>
                   <Label>Nº Série</Label>
                   <Input value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} />
                 </div>
               </div>
+              {!canAssignOfficialPatrimony && (
+                <p className="text-xs text-muted-foreground">
+                  O número oficial de patrimônio é atribuído pelo setor de Patrimônio após o recebimento.
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Fabricante</Label>

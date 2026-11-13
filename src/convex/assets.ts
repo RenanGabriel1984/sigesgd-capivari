@@ -3,8 +3,75 @@ import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { findEquipmentCategory, buildRelatedStockProducts } from "../lib/equipment-categories";
 import type { RelatedStockProduct } from "../lib/equipment-categories";
+import { maskLicenseKey } from "../lib/license-keys";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
+
+const ASSET_TYPES = [
+  "desktop", "notebook", "monitor", "server", "printer", "switch",
+  "router", "access_point", "ups", "storage", "phone", "other",
+] as const;
+const ASSET_STATUSES = [
+  "active", "maintenance", "inactive", "disposal_pending", "disposed", "lost",
+] as const;
+
+function normalizeAssetIdentifier(value?: string): string | undefined {
+  const normalized = value?.trim().toLocaleUpperCase("pt-BR");
+  return normalized || undefined;
+}
+
+async function assertAssetIdentifiersAvailable(
+  ctx: any,
+  input: { patrimonyNumber?: string; serialNumber?: string; macAddress?: string },
+  excludeAssetId?: string,
+): Promise<void> {
+  const patrimony = normalizeAssetIdentifier(input.patrimonyNumber);
+  const serial = normalizeAssetIdentifier(input.serialNumber);
+  const mac = normalizeAssetIdentifier(input.macAddress);
+  if (!patrimony && !serial && !mac) return;
+
+  const assets = await ctx.db.query("assets").collect();
+  const duplicate = assets.find((asset: any) => {
+    if (excludeAssetId && String(asset._id) === excludeAssetId) return false;
+    return (
+      (!!patrimony && normalizeAssetIdentifier(asset.patrimonyNumber) === patrimony) ||
+      (!!serial && normalizeAssetIdentifier(asset.serialNumber) === serial) ||
+      (!!mac && normalizeAssetIdentifier(asset.macAddress) === mac)
+    );
+  });
+  if (!duplicate) return;
+  if (patrimony && normalizeAssetIdentifier(duplicate.patrimonyNumber) === patrimony) {
+    throw new Error(`Já existe equipamento cadastrado com o patrimônio "${patrimony}".`);
+  }
+  if (serial && normalizeAssetIdentifier(duplicate.serialNumber) === serial) {
+    throw new Error(`Já existe equipamento cadastrado com o número de série "${serial}".`);
+  }
+  throw new Error(`Já existe equipamento cadastrado com o endereço MAC "${mac}".`);
+}
+
+async function assertAssetReferences(
+  ctx: any,
+  input: { organizationId?: any; responsibleUserId?: any; storageLocationId?: any },
+): Promise<void> {
+  if (input.organizationId) {
+    const organization = await ctx.db.get(input.organizationId);
+    if (!organization || organization.active === false) {
+      throw new Error("Secretaria/departamento de destino não encontrado ou inativo.");
+    }
+  }
+  if (input.responsibleUserId) {
+    const responsible = await ctx.db.get(input.responsibleUserId);
+    if (!responsible || responsible.active === false) {
+      throw new Error("Servidor responsável não encontrado ou inativo.");
+    }
+  }
+  if (input.storageLocationId) {
+    const location = await ctx.db.get(input.storageLocationId);
+    if (!location || location.active === false) {
+      throw new Error("Local físico não encontrado ou inativo.");
+    }
+  }
+}
 
 async function requireUser(ctx: any) {
   // RBAC central: equipamentos visíveis a quem consulta (incl. gestor/diretor).
@@ -23,7 +90,7 @@ async function requireManagerOrAdmin(ctx: any) {
 export const list = query({
   args: {
     status: v.optional(v.string()),
-    assetType: v.optional(v.string()),
+    assetType: v.optional(v.union(...ASSET_TYPES.map((value) => v.literal(value)))),
     organizationId: v.optional(v.id("organizations")),
     responsibleUserId: v.optional(v.id("users")),
     search: v.optional(v.string()),
@@ -109,7 +176,8 @@ export const relatedStockByCategory = query({
 export const get = query({
   args: { assetId: v.id("assets") },
   handler: async (ctx, args) => {
-    const { userId } = await requireUser(ctx);
+    const { userId, role } = await requireUser(ctx);
+    const isAdmin = role === "admin";
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
 
@@ -133,8 +201,16 @@ export const get = query({
       .withIndex("by_asset", (q) => q.eq("assetId", args.assetId))
       .collect();
     const licensesWithDetails = await Promise.all(assignments.map(async (a: any) => {
-      const license = await ctx.db.get(a.licenseId);
-      return { ...a, license };
+      const license = await ctx.db.get(a.licenseId) as any;
+      if (!license) return { ...a, license: null };
+      return {
+        ...a,
+        license: {
+          ...license,
+          // A chave completa é restrita ao mesmo perfil autorizado em /licenses.
+          key: license.key ? (isAdmin ? license.key : maskLicenseKey(license.key)) : undefined,
+        },
+      };
     }));
 
     // Get maintenances
@@ -180,7 +256,7 @@ export const create = mutation({
   args: {
     patrimonyNumber: v.optional(v.string()),
     serialNumber: v.optional(v.string()),
-    assetType: v.string(),
+    assetType: v.union(...ASSET_TYPES.map((value) => v.literal(value))),
     manufacturer: v.optional(v.string()),
     model: v.optional(v.string()),
     hostname: v.optional(v.string()),
@@ -193,16 +269,31 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
+    const patrimonyNumber = args.patrimonyNumber?.trim() || undefined;
+    if (patrimonyNumber) {
+      await requirePermission(ctx, "patrimony.assign", { entity: "assets" });
+    }
+    const serialNumber = args.serialNumber?.trim() || undefined;
+    const macAddress = args.macAddress?.trim().toUpperCase() || undefined;
+    await assertAssetIdentifiersAvailable(ctx, { patrimonyNumber, serialNumber, macAddress });
+    await assertAssetReferences(ctx, args);
+    if (args.acquisitionDate) {
+      const date = new Date(`${args.acquisitionDate}T00:00:00Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(args.acquisitionDate) || Number.isNaN(date.getTime()) ||
+        date.toISOString().slice(0, 10) !== args.acquisitionDate) {
+        throw new Error("Data de aquisição inválida. Use o formato AAAA-MM-DD.");
+      }
+    }
     const now = Date.now();
 
     const assetId = await ctx.db.insert("assets", {
-      patrimonyNumber: args.patrimonyNumber || undefined,
-      serialNumber: args.serialNumber || undefined,
+      patrimonyNumber,
+      serialNumber,
       assetType: args.assetType as any,
       manufacturer: args.manufacturer || undefined,
       model: args.model || undefined,
       hostname: args.hostname || undefined,
-      macAddress: args.macAddress || undefined,
+      macAddress,
       organizationId: args.organizationId || undefined,
       responsibleUserId: args.responsibleUserId || undefined,
       storageLocationId: args.storageLocationId || undefined,
@@ -245,7 +336,7 @@ export const update = mutation({
     assetId: v.id("assets"),
     patrimonyNumber: v.optional(v.string()),
     serialNumber: v.optional(v.string()),
-    assetType: v.optional(v.string()),
+    assetType: v.optional(v.union(...ASSET_TYPES.map((value) => v.literal(value)))),
     manufacturer: v.optional(v.string()),
     model: v.optional(v.string()),
     hostname: v.optional(v.string()),
@@ -256,17 +347,35 @@ export const update = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    if (args.patrimonyNumber !== undefined) {
+      await requirePermission(ctx, "patrimony.assign", {
+        entity: "assets",
+        entityId: String(args.assetId),
+      });
+    }
+    if (args.assetType !== undefined &&
+        !ASSET_TYPES.includes(args.assetType as (typeof ASSET_TYPES)[number])) {
+      throw new Error("Tipo de equipamento inválido.");
+    }
+
+    const patrimonyNumber = args.patrimonyNumber === undefined
+      ? asset.patrimonyNumber : args.patrimonyNumber.trim() || undefined;
+    const serialNumber = args.serialNumber === undefined
+      ? asset.serialNumber : args.serialNumber.trim() || undefined;
+    const macAddress = args.macAddress === undefined
+      ? asset.macAddress : args.macAddress.trim().toUpperCase() || undefined;
+    await assertAssetIdentifiersAvailable(ctx, { patrimonyNumber, serialNumber, macAddress }, String(args.assetId));
 
     const now = Date.now();
     const updates: Record<string, any> = { updatedAt: now };
 
-    if (args.patrimonyNumber !== undefined) updates.patrimonyNumber = args.patrimonyNumber || undefined;
-    if (args.serialNumber !== undefined) updates.serialNumber = args.serialNumber || undefined;
+    if (args.patrimonyNumber !== undefined) updates.patrimonyNumber = patrimonyNumber;
+    if (args.serialNumber !== undefined) updates.serialNumber = serialNumber;
     if (args.assetType !== undefined) updates.assetType = args.assetType;
     if (args.manufacturer !== undefined) updates.manufacturer = args.manufacturer || undefined;
     if (args.model !== undefined) updates.model = args.model || undefined;
     if (args.hostname !== undefined) updates.hostname = args.hostname || undefined;
-    if (args.macAddress !== undefined) updates.macAddress = args.macAddress || undefined;
+    if (args.macAddress !== undefined) updates.macAddress = macAddress;
     if (args.observation !== undefined) updates.observation = args.observation || undefined;
 
     await ctx.db.patch(args.assetId, updates);
@@ -287,22 +396,36 @@ export const update = mutation({
 export const assign = mutation({
   args: {
     assetId: v.id("assets"),
-    responsibleUserId: v.optional(v.id("users")),
-    organizationId: v.optional(v.id("organizations")),
+    // undefined = manter; null = limpar; id = atribuir.
+    responsibleUserId: v.optional(v.union(v.id("users"), v.null())),
+    organizationId: v.optional(v.union(v.id("organizations"), v.null())),
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    if (asset.status === "disposed" || asset.status === "lost") {
+      throw new Error("Equipamento baixado ou extraviado não pode receber nova atribuição. Regularize o status primeiro.");
+    }
 
+    const nextResponsibleUserId = args.responsibleUserId === undefined
+      ? asset.responsibleUserId
+      : args.responsibleUserId ?? undefined;
+    const nextOrganizationId = args.organizationId === undefined
+      ? asset.organizationId
+      : args.organizationId ?? undefined;
+    await assertAssetReferences(ctx, {
+      organizationId: nextOrganizationId,
+      responsibleUserId: nextResponsibleUserId,
+    });
     const now = Date.now();
     const previousResponsible = asset.responsibleUserId;
     const previousOrg = asset.organizationId;
 
     await ctx.db.patch(args.assetId, {
-      responsibleUserId: args.responsibleUserId || undefined,
-      organizationId: args.organizationId || undefined,
+      responsibleUserId: nextResponsibleUserId,
+      organizationId: nextOrganizationId,
       updatedAt: now,
     });
 
@@ -311,9 +434,9 @@ export const assign = mutation({
       eventType: "assigned",
       userId,
       previousOrganizationId: previousOrg || undefined,
-      newOrganizationId: args.organizationId || asset.organizationId || undefined,
+      newOrganizationId: nextOrganizationId || undefined,
       previousResponsibleUserId: previousResponsible || undefined,
-      newResponsibleUserId: args.responsibleUserId || asset.responsibleUserId || undefined,
+      newResponsibleUserId: nextResponsibleUserId || undefined,
       observation: args.observation || undefined,
       timestamp: now,
     });
@@ -342,7 +465,14 @@ export const transfer = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    if (asset.status === "disposed" || asset.status === "lost") {
+      throw new Error("Equipamento baixado ou extraviado não pode ser transferido. Regularize o status primeiro.");
+    }
 
+    await assertAssetReferences(ctx, {
+      organizationId: args.organizationId,
+      storageLocationId: args.storageLocationId,
+    });
     const now = Date.now();
 
     await ctx.db.patch(args.assetId, {
@@ -377,7 +507,7 @@ export const transfer = mutation({
 export const changeStatus = mutation({
   args: {
     assetId: v.id("assets"),
-    newStatus: v.string(),
+    newStatus: v.union(...ASSET_STATUSES.map((value) => v.literal(value))),
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -385,8 +515,17 @@ export const changeStatus = mutation({
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
 
+    if (!ASSET_STATUSES.includes(args.newStatus as (typeof ASSET_STATUSES)[number])) {
+      throw new Error("Status de equipamento inválido.");
+    }
+    if (args.newStatus === "disposed" && !args.observation?.trim()) {
+      throw new Error("Informe a justificativa da baixa patrimonial.");
+    }
     const now = Date.now();
     const previousStatus = asset.status;
+    if (previousStatus === args.newStatus) {
+      throw new Error("O equipamento já está neste status.");
+    }
 
     await ctx.db.patch(args.assetId, {
       status: args.newStatus as any,

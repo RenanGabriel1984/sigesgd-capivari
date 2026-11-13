@@ -37,6 +37,7 @@ export function FileUpload({
   size = "md",
 }: FileUploadProps) {
   const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
+  const registerUpload = useMutation(api.storage.registerUpload);
   const fileUrl = useQuery(
     api.storage.getUrl,
     storageId ? { storageId } : "skip"
@@ -64,6 +65,7 @@ export function FileUpload({
       if (!response.ok) throw new Error("Falha no upload");
 
       const { storageId: newStorageId } = await response.json();
+      await registerUpload({ storageId: newStorageId });
       onUpload(newStorageId);
       toast.success("Arquivo enviado com sucesso");
     } catch (e: any) {

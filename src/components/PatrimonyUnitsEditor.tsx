@@ -19,28 +19,28 @@ export function PatrimonyUnitsEditor({ items, itemIds, unitsByItem, products, lo
 }) {
   return <div className="border-t pt-3 space-y-3">
     <div className="flex items-center justify-between gap-2">
-      <Label className="text-sm font-medium">Unidades patrimoniais</Label>
+      <Label className="text-sm font-medium">Identificação das unidades recebidas</Label>
       <Button size="sm" variant="outline" onClick={onSave} disabled={saving}>{saving ? "Salvando..." : "Salvar Unidades"}</Button>
     </div>
-    <p className="text-xs text-muted-foreground">Produto → Unidade patrimonial → Patrimônio/Serial. Uma unidade por quantidade recebida. Valores contábeis são apenas registrados, nunca calculados.</p>
+    <p className="text-xs text-muted-foreground">Registre uma identificação por equipamento recebido. O número oficial de patrimônio será informado posteriormente pelo setor responsável. Valores contábeis são apenas registrados, nunca calculados.</p>
     {items.map((item, idx) => {
       const itemId = itemIds[idx];
       if (!itemId || itemId.startsWith("temp_")) return null;
       const units = unitsByItem[itemId] ?? [];
       const qty = Number(item.quantity) || 0;
       const product = products.find((candidate) => candidate._id === item.productId);
-      const unitError = units.length > 0 || qty > 0 ? validateEntryUnits({ materialType: "permanent", quantity: qty, units, productName: product?.name }) : null;
+      const unitError = units.length > 0 || qty > 0 ? validateEntryUnits({ materialType: "permanent", quantity: qty, units, productName: product?.name, requireSerial: product?.hasSerial === true }) : null;
       const update = (unitIndex: number, patch: Partial<PatrimonyUnitDraft>) => onChange(itemId, units.map((unit, i) => i === unitIndex ? { ...unit, ...patch } : unit));
       const orgsOfType = (type: string) => organizations.filter((org) => org.type === type && org.active !== false);
       return <div key={itemId} className="border rounded-lg p-3 bg-background space-y-2">
         <div className="flex items-center justify-between"><p className="text-xs font-medium">{product?.name ?? "Produto"} — quantidade: {qty} · unidades: {units.length}</p>
           <Button size="sm" variant="ghost" className="h-6 px-2 text-xs" onClick={() => onChange(itemId, [...units, { patrimonyNumber: "", serialNumber: "", manufacturer: "", model: "", acquisitionDate: "", incorporationDate: "", acquisitionValue: "", accountingValue: "", residualValue: "", accumulatedDepreciation: "", netBookValue: "", locationId: "", secretariaId: "", departamentoId: "", unidadeId: "", responsibleDestiny: "", patrimonyStatus: "in_stock", observation: "" }])} disabled={units.length >= qty}><Plus className="h-3 w-3 mr-1" /> Unidade</Button>
         </div>
-        {unitError && units.length !== qty && <p className="text-[11px] text-amber-700">{unitError}</p>}
+        {unitError && <p className="text-[11px] text-amber-700">{unitError}</p>}
         {units.map((unit, unitIndex) => <div key={unitIndex} className="rounded-md border p-2 space-y-2">
           <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
-            <div><Label className="text-[10px]">Patrimônio *</Label><Input value={unit.patrimonyNumber ?? ""} onChange={(e) => update(unitIndex, { patrimonyNumber: e.target.value })} className="h-7 text-xs" /></div>
-            <div><Label className="text-[10px]">Série</Label><Input value={unit.serialNumber ?? ""} onChange={(e) => update(unitIndex, { serialNumber: e.target.value })} className="h-7 text-xs" /></div>
+            <div className="col-span-2"><Label className="text-[10px]">Tombamento patrimonial</Label><p className="h-7 flex items-center text-xs text-muted-foreground">Atribuição posterior pelo setor de Patrimônio</p></div>
+            <div><Label className="text-[10px]">Série{product?.hasSerial ? " *" : ""}</Label><Input value={unit.serialNumber ?? ""} onChange={(e) => update(unitIndex, { serialNumber: e.target.value })} className="h-7 text-xs" /></div>
             <div><Label className="text-[10px]">Fabricante</Label><Input value={unit.manufacturer ?? ""} onChange={(e) => update(unitIndex, { manufacturer: e.target.value })} className="h-7 text-xs" /></div>
             <div><Label className="text-[10px]">Modelo</Label><Input value={unit.model ?? ""} onChange={(e) => update(unitIndex, { model: e.target.value })} className="h-7 text-xs" /></div>
             <div><Label className="text-[10px]">Aquisição</Label><Input type="date" value={unit.acquisitionDate ?? ""} onChange={(e) => update(unitIndex, { acquisitionDate: e.target.value })} className="h-7 text-xs" /></div>

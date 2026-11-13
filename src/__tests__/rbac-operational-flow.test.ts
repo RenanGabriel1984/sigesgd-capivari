@@ -50,12 +50,13 @@ describe("etapa 2 — diretor/gestor aprovado reserva estoque", () => {
 
   it("valida disponibilidade ANTES de reservar e aborta sem reserva parcial", () => {
     expect(reqSrc).toContain("const available = stock.physicalQuantity - stock.reservedQuantity;");
-    expect(reqSrc).toContain("Nenhum item foi reservado — operação abortada.");
+    expect(reqSrc).toContain("Nenhuma reserva foi aplicada.");
   });
 
   it("aprovação RESERVA (reservedQuantity += aprovado) com revalidação fresh", () => {
-    expect(reqSrc).toContain("const newReserved = freshStock.reservedQuantity + item.quantityApproved;");
-    expect(reqSrc).toMatch(/const freshStock = await ctx\.db\./);
+    expect(reqSrc).toContain("reservedQuantity: stock.reservedQuantity + input.quantityApproved,");
+    expect(reqSrc).toMatch(/const stockRows = await ctx\.db\.query\("stock"\)/);
+    expect(reqSrc).toContain("requireSingleValidGlobalStock(stockRows, needed.productName)");
   });
 
   it("auditoria 'approve' registrada com usuário e itens", () => {
@@ -66,17 +67,17 @@ describe("etapa 2 — diretor/gestor aprovado reserva estoque", () => {
 describe("etapa 3 — entrega baixa físico e libera reserva", () => {
   it("entrega exige requests.deliver + senha eletrônica", () => {
     const deliver = reqSrc.slice(reqSrc.indexOf("export const deliver"));
-    expect(deliver).toContain('requirePermission(ctx, "requests.deliver"');
+    expect(deliver).toContain('requireRequestAction(\n      ctx, "requests.deliver"');
     expect(deliver).toContain("verifyPassword");
   });
 
   it("baixa efetiva SOMENTE na entrega: físico e reservado descem JUNTOS", () => {
-    expect(reqSrc).toContain("const newPhysical = freshStock.physicalQuantity - input.quantityDelivered;");
-    expect(reqSrc).toContain("const newReserved = freshStock.reservedQuantity - input.quantityDelivered;");
+    expect(reqSrc).toContain("const newPhysical = stock.physicalQuantity - input.quantityDelivered;");
+    expect(reqSrc).toContain("const newReserved = stock.reservedQuantity - input.quantityDelivered;");
   });
 
   it("valida reserva suficiente antes de baixar (nunca reservado < 0)", () => {
-    expect(reqSrc).toContain("Estoque reservado insuficiente");
+    expect(reqSrc).toContain("Estoque físico ou reservado insuficiente");
   });
 
   it("registra movimentação de saída e auditoria 'deliver'", () => {
@@ -115,11 +116,11 @@ describe("etapa 4 — autoaprovação bloqueada em qualquer papel", () => {
 
 describe("invariantes globais de estoque preservadas no código", () => {
   it("reserva usa revalidação fresh (evita condição de corrida)", () => {
-    expect(reqSrc).toMatch(/freshStock\.reservedQuantity \+ item\.quantityApproved/);
+    expect(reqSrc).toMatch(/reservedQuantity: stock\.reservedQuantity \+ input\.quantityApproved/);
   });
 
   it("cancellation libera reserva com guarda de inconsistência explícita", () => {
-    expect(reqSrc).toContain("Inconsistência de estoque: reservado");
+    expect(reqSrc).toContain("Inconsistência de estoque: reserva insuficiente para cancelamento");
   });
 
   it("movimentações diretas de estoque exigem stock.mutate (sem bypass RBAC)", () => {

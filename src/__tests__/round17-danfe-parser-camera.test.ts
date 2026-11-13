@@ -372,6 +372,10 @@ describe("R17 §D — câmera do aparelho restaurada no mobile", () => {
     // de imagens (input file) e o anexo continua disponível:
     expect(DIALOG).toContain('use "Anexar DANFE" para escolher uma foto da galeria');
     expect(DIALOG).toContain("cameraInputRef.current?.click()");
+    // A detecção do user-agent é apenas informativa: nunca pode esconder/desabilitar a captura.
+    expect(DIALOG).toContain('onClick={() => cameraInputRef.current?.click()}');
+    expect(DIALOG).not.toContain('disabled={reading || !cameraAvailable}');
+    expect(DIALOG).toContain('disabled={reading}');
   });
 
   it("câmera usa o MESMO fluxo de importação e conferência (sem componente novo)", () => {

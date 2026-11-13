@@ -8,7 +8,7 @@
  */
 import { useMemo } from "react";
 import { Loader2, ShieldAlert, Home } from "lucide-react";
-import { Link, useLocation } from "react-router";
+import { Link, Navigate, useLocation } from "react-router";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { permissionForRoute, roleHasPermission, type AppRole } from "@/lib/rbac";
@@ -57,6 +57,12 @@ export function RequirePermission({ children }: { children: React.ReactNode }) {
   if (!isAuthenticated || !user) {
     // Sem sessão: deixa o RequireAuth (wrapper externo) tratar o redirect.
     return children;
+  }
+
+  // Contas do setor de Patrimônio entram diretamente na fila de tombamento,
+  // sem abrir o dashboard geral que apresenta indicadores de estoque.
+  if (user.role === "patrimony_manager" && location.pathname === "/dashboard") {
+    return <Navigate to="/patrimony" replace />;
   }
 
   if (required && !roleHasPermission(user.role as AppRole, required)) {

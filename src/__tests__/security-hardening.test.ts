@@ -412,9 +412,12 @@ describe("RESET-BF — limite de tentativas na recuperação de senha (§8)", ()
     expect(src).toMatch(/RESET_MAX_ATTEMPTS\s*=\s*\d+/);
   });
 
-  it("RESET-BF-02: o token registra tentativas e é invalidado ao exceder o limite", () => {
+  it("RESET-BF-02: toda tentativa inválida consome o limite e invalida o token ao esgotar", () => {
     expect(src).toMatch(/attempts:\s*0/);
-    expect(src).toMatch(/usedAt:\s*attempts\s*>=\s*RESET_MAX_ATTEMPTS\s*\?\s*Date\.now\(\)/);
+    expect(src).toContain("const activeToken = tokens");
+    expect(src).toContain("nextResetAttempt(");
+    expect(src).toContain("await ctx.db.patch(activeToken._id, attemptUpdate)");
+    expect(src).not.toMatch(/matching\.token === args\.code/);
   });
 
   it("RESET-BF-03: token usado/expirado/esgotado nunca é aceito", () => {
@@ -567,7 +570,7 @@ describe("SEC — segredos (B-07)", () => {
 describe("SEC — integridade numérica e campos livres (§14/§17)", () => {
   it("SEC-NAN-01: requests rejeita valores não finitos em aprovação e entrega", () => {
     const reqSrc = stripComments(read("src/convex/requests.ts"));
-    expect(reqSrc).toMatch(/Number\.isFinite\(item\.quantityApproved\)/);
+    expect(reqSrc).toMatch(/Number\.isFinite\(input\.quantityApproved\)/);
     expect(reqSrc).toMatch(/Number\.isFinite\(input\.quantityDelivered\)/);
   });
 
@@ -620,10 +623,12 @@ describe("SEC — storage de documentos (§16)", () => {
   it("SEC-STORAGE-02: toda função de storage exige permissão de servidor", () => {
     const storageSrc = stripComments(read("src/convex/storage.ts"));
     const required = storageSrc.match(/requirePermission\(ctx,\s*"[a-z_.]+"/g) ?? [];
-    // generateUploadUrl, getUrl, getUrls = 3 chamadas; canUpload valida sessão.
-    expect(required.length).toBeGreaterThanOrEqual(3);
+    // generateUploadUrl e registerUpload exigem a permissão de estoque diretamente;
+    // getUrl/getUrls usam getStorageViewer + effectiveRole para autorizar pelo dono.
+    expect(required.length).toBeGreaterThanOrEqual(2);
     expect(storageSrc).toMatch(/isAnonymous === true/);
-    expect(storageSrc).toMatch(/if \(!user\.role\)/);
+    expect(storageSrc).toMatch(/effectiveRole\(user\)/);
+    expect(storageSrc).toMatch(/getStorageViewer/);
   });
 });
 

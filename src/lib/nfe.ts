@@ -67,6 +67,7 @@ export interface NfeData {
 export type ProductForMatch = {
   _id: string;
   name: string;
+  hasSerial?: boolean;
   internalCode?: string | null;
   ean?: string | null;
   brand?: string | null;

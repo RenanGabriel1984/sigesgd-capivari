@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "convex/react";
+import { usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,6 +25,7 @@ import {
 import { Shield, Filter } from "lucide-react";
 import { AUDIT_ACTION_LABELS, type AuditAction } from "@/types/constants";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { Id } from "@/convex/_generated/dataModel";
 
 const ALL_ACTIONS = [
   "create",
@@ -36,6 +37,8 @@ const ALL_ACTIONS = [
   "cancel",
   "move_stock",
   "login",
+  "login_failed",
+  "logout",
   "deliver",
   "password_change",
   "password_reset",
@@ -89,23 +92,34 @@ const ENTITY_OPTIONS = [
 export default function Audit() {
   const [actionFilter, setActionFilter] = useState("all");
   const [entityFilter, setEntityFilter] = useState("all");
+  const [userFilter, setUserFilter] = useState("all");
+  const auditUsers = useQuery(api.users.listUserOptions);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [showFilters, setShowFilters] = useState(false);
 
-  const logs = useQuery(api.auditLogs.listFiltered, {
-    action: actionFilter !== "all" ? actionFilter : undefined,
-    entity: entityFilter !== "all" ? entityFilter : undefined,
-    startDate: startDate ? new Date(startDate).getTime() : undefined,
-    endDate: endDate ? new Date(endDate + "T23:59:59").getTime() : undefined,
-    limit: 300,
-  });
+  const {
+    results: logs,
+    status: auditStatus,
+    loadMore: loadMoreAuditLogs,
+  } = usePaginatedQuery(
+    api.auditLogs.listFiltered,
+    {
+      userId: userFilter !== "all" ? userFilter as Id<"users"> : undefined,
+      action: actionFilter !== "all" ? actionFilter : undefined,
+      entity: entityFilter !== "all" ? entityFilter : undefined,
+      startDate: startDate ? new Date(startDate).getTime() : undefined,
+      endDate: endDate ? new Date(endDate + "T23:59:59.999").getTime() : undefined,
+    },
+    { initialNumItems: 50 },
+  );
 
-  const hasFilters = !!(actionFilter !== "all" || entityFilter !== "all" || startDate || endDate);
+  const hasFilters = !!(userFilter !== "all" || actionFilter !== "all" || entityFilter !== "all" || startDate || endDate);
 
   const clearFilters = () => {
     setActionFilter("all");
     setEntityFilter("all");
+    setUserFilter("all");
     setStartDate("");
     setEndDate("");
   };
@@ -117,7 +131,7 @@ export default function Audit() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Auditoria</h1>
             <p className="text-sm text-muted-foreground">
-              Trilha de auditoria completa do sistema — {logs?.length ?? 0} registro(s)
+              Trilha de auditoria completa do sistema — {logs.length} registro(s) carregado(s)
             </p>
           </div>
           <Button
@@ -140,7 +154,23 @@ export default function Audit() {
         {showFilters && (
           <Card className="border-border/50">
             <CardContent className="p-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                <div>
+                  <Label className="text-xs">Usuário / Login</Label>
+                  <Select value={userFilter} onValueChange={setUserFilter}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Todos" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos os usuários</SelectItem>
+                      {(auditUsers ?? []).map((auditUser: any) => (
+                        <SelectItem key={auditUser._id} value={auditUser._id}>
+                          {auditUser.name ?? "Usuário sem nome"}{auditUser.role ? ` — ${auditUser.role}` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div>
                   <Label className="text-xs">Ação</Label>
                   <Select value={actionFilter} onValueChange={setActionFilter}>
@@ -215,12 +245,17 @@ export default function Audit() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {logs?.map((log) => (
+                  {logs.map((log) => (
                     <TableRow key={log._id}>
                       <TableCell className="text-xs whitespace-nowrap">
                         {new Date(log.timestamp).toLocaleString("pt-BR")}
                       </TableCell>
-                      <TableCell className="text-sm">{log.user?.name ?? "Sistema"}</TableCell>
+                      <TableCell className="text-sm">
+                        <div>{log.user?.name ?? (log.action === "login_failed" ? "Tentativa de login" : "Sistema")}</div>
+                        {log.user?.email && (
+                          <div className="text-xs text-muted-foreground">{log.user.email}</div>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Badge
                           variant="secondary"
@@ -239,6 +274,8 @@ export default function Audit() {
                               ? "bg-gray-50 text-gray-700"
                               : log.action === "move_stock"
                               ? "bg-cyan-50 text-cyan-700"
+                              : log.action === "login_failed"
+                              ? "bg-red-50 text-red-700"
                               : log.action === "login"
                               ? "bg-green-50 text-green-700"
                               : ""
@@ -253,7 +290,7 @@ export default function Audit() {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {logs?.length === 0 && (
+                  {logs.length === 0 && auditStatus === "Exhausted" && (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center py-12">
                         <Shield className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
@@ -266,6 +303,30 @@ export default function Audit() {
                 </TableBody>
               </Table>
             </div>
+            {auditStatus === "LoadingFirstPage" && (
+              <div className="space-y-2 p-4" aria-live="polite">
+                <Skeleton className="h-5 w-full" />
+                <Skeleton className="h-5 w-4/5" />
+                <Skeleton className="h-5 w-3/5" />
+              </div>
+            )}
+            {(auditStatus === "CanLoadMore" || auditStatus === "LoadingMore") && (
+              <div className="flex justify-center border-t border-border/50 p-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={auditStatus === "LoadingMore"}
+                  onClick={() => loadMoreAuditLogs(50)}
+                >
+                  {auditStatus === "LoadingMore" ? "Carregando..." : "Carregar mais registros"}
+                </Button>
+              </div>
+            )}
+            {auditStatus === "Exhausted" && logs.length > 0 && (
+              <p className="border-t border-border/50 p-3 text-center text-xs text-muted-foreground">
+                Todos os {logs.length} registros que correspondem à consulta foram carregados.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

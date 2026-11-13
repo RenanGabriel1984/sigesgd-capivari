@@ -164,9 +164,10 @@ describe("PRINT-EXIT-03 — retirada respeita o backend (autoridade final)", () 
   });
 
   it("FIFO de lotes e lotId estruturado preservados na retirada por família", () => {
-    expect(backend).toContain("sort((a, b) => a.receivedAt - b.receivedAt)");
-    expect(backend).toContain("lotId: consumedLots[0]?.lotId as never");
-    expect(backend).toContain("Falha de consistência: lotes insuficientes");
+    expect(backend).toContain("sort((a: any, b: any) => a.receivedAt - b.receivedAt)");
+    expect(backend).toContain("lotId: input.consumedLots[0]?.lotId");
+    expect(backend).toContain('ctx.db.insert("stockMovementLots"');
+    expect(backend).toContain("Estoque livre insuficiente na área Impressoras");
   });
 
   it("a retirada registra destino, secretaria, departamento, unidade, O.S. e motivo", () => {
@@ -184,7 +185,7 @@ describe("PRINT-EXIT-04 — retirada acima do disponível é bloqueada", () => {
 
   it("backend valida contra o estoque real da família em unidades-base", () => {
     expect(backend).toContain("familyAvailable");
-    expect(backend).toContain("Estoque insuficiente. Disponível: ${familyAvailable} ${conv.baseUnit}");
+    expect(backend).toContain("Estoque livre insuficiente na área Impressoras. Disponível: ${familyAvailable}");
     expect(backend).toContain("Composição insuficiente");
   });
 
@@ -207,6 +208,46 @@ describe("PRINT-UOM-01 — 13 caixas × 50 + 18 avulsas = 668 unidades", () => {
   it("a composição física de entrada continua íntegra: 13 caixas e 18 un", () => {
     const [family] = buildSupplyFamilies(protectorInputs);
     expect(family.members.map((m) => m.currentStock)).toEqual([13, 18]);
+  });
+});
+
+describe("PRINT-UOM — disponibilidade e parâmetros são consolidados na unidade-base da área", () => {
+  it("separa estoque global, físico em Impressoras e saldo livre reservado", () => {
+    const [family] = buildSupplyFamilies([
+      familyInput({
+        productId: "closed",
+        productName: "Protetor de crachá — caixa fechada",
+        unitOfMeasure: "caixa",
+        currentStock: 20,
+        minimumStock: 2,
+        idealStock: 4,
+        monthlyConsumptionTarget: 3,
+        inArea: 13,
+        availableInArea: 10,
+        packaging: { baseUnit: "un", packagingUnit: "caixa", factor: 50 },
+      }),
+      familyInput({
+        productId: "loose",
+        productName: "Protetor de crachá — unidade avulsa",
+        unitOfMeasure: "un",
+        currentStock: 30,
+        minimumStock: 5,
+        idealStock: 10,
+        monthlyConsumptionTarget: 7,
+        inArea: 18,
+        availableInArea: 16,
+        packaging: null,
+      }),
+    ]);
+
+    expect(family.baseStock).toBe(1030);
+    expect(family.baseStockInArea).toBe(668);
+    expect(family.baseAvailableInArea).toBe(516);
+    expect(family.minimumStock).toBe(105);
+    expect(family.idealStock).toBe(210);
+    expect(family.monthlyConsumptionTarget).toBe(157);
+    expect(family.compositionLabel).toBe("13 caixas fechadas + 18 un. avulsas");
+    expect(family.suggestedReorder).toBe(0);
   });
 });
 
@@ -254,7 +295,7 @@ describe("PRINT-UOM-03 — o estoque principal mostra 668 un", () => {
     expect(panel).toContain("f.baseUnit");
     // O saldo em unidades-base é o valor principal; a embalagem entra apenas
     // como camada auxiliar ("≈ N caixas") abaixo dele.
-    expect(panel).toContain("{f.baseStock}");
+    expect(panel).toContain("{f.baseAvailableInArea}");
     expect(panel).toContain("PacksApproximation");
   });
 });
@@ -301,7 +342,7 @@ describe("PRINT-UOM-05 — a retirada trabalha em unidade-base", () => {
   });
 
   it("o backend registra a abertura de embalagem como evento explícito e auditado", () => {
-    expect(backend).toContain("Abertura INTEGRAL");
+    expect(backend).toContain("reclassifiedFromLotId");
     expect(backend).toContain("open_pack");
     expect(backend).toContain("Reclassificação de");
   });
@@ -431,10 +472,15 @@ describe("PRINT-UOM-12 — estoque global continua 3338 com divergência 0", () 
     expect(backend).toContain("invariantDivergences");
   });
 
-  it("qualquer mutation aborta em divergência inesperada", () => {
-    expect(backend).toContain("INTEGRIDADE: estoque global divergente antes da operação");
-    expect(backend).toContain("VIOLAÇÃO DE SALDO na retirada");
-    expect(backend).toContain("physicalDelta !== -args.quantity");
+  it("retiradas validam o saldo global, os lotes e os locais antes/depois", () => {
+    expect(backend).toContain("async function readSupplyAreaLedger");
+    expect(backend).toContain("diverge dos lotes");
+    expect(backend).toContain("diverge dos locais físicos");
+    expect(backend).toContain("Reservas por lote");
+    expect(backend).toContain("async function consumeSupplyLotsInArea");
+    expect(backend).toContain("async function changeSupplyLocationQuantity");
+    expect(backend).toContain("Falha na conferência posterior da retirada");
+    expect(backend).toContain("Falha na conferência posterior da retirada por família");
   });
 
   it("a conversa de estoque usa a MESMA unidade-base (4 livros-razão conferidos)", () => {
@@ -476,11 +522,13 @@ describe("PRINT-UOM-14 — nenhuma duplicação de estoque é criada", () => {
     expect(schema).not.toMatch(/defineTable\(\{[^}]*familyStock/);
   });
 
-  it("a abertura de caixa é REPARTIÇÃO, não geração: transferência de unidades entre registros", () => {
-    expect(backend).toContain("transferir as unidades");
-    // A abertura credita as unidades no produto avulso e consome as caixas.
-    expect(backend).toContain("const openedUnits = openPacks * conv.factor");
-    expect(backend).toContain("newLoosePhys = loosePhys + openedUnits");
+  it("a abertura de caixa é reclassificação rastreável, não criação de estoque duplicado", () => {
+    expect(backend).toContain("openedUnits = openPacks * conversion.factor");
+    expect(backend).toContain("reclassifiedFromLotId: source.lotId");
+    expect(backend).toContain("await changeSupplyLocationQuantity");
+    expect(backend).toContain('type: "adjustment"');
+    expect(backend).toContain("quantityAvailable: reclassifiedQuantity");
+    expect(backend).toContain("Falha na conferência posterior da retirada por família");
   });
 
   it("a família deriva de stock/lotes reais (sem cache persistido de família)", () => {

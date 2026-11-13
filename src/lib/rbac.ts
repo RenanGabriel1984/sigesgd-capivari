@@ -23,6 +23,7 @@ export const APP_ROLES = [
   "director",
   "secretary",
   "technician",
+  "patrimony_manager",
 ] as const;
 
 export type AppRole = (typeof APP_ROLES)[number];
@@ -94,12 +95,19 @@ export const APP_PERMISSIONS = [
   "supply_requests.view",
   "supply_requests.manage",
 
+  // Controle interno da compra coletiva e rateio de água mineral.
+  "water.view",
+  "water.manage",
+
   "movements.view",
 
   "reports.view",
 
   "equipment.view",
   "equipment.manage",
+
+  "patrimony.view",
+  "patrimony.assign",
 
   "printers.view",
   "printers.manage",
@@ -150,6 +158,8 @@ const STOCK_MANAGER_ACCESS: readonly AppPermission[] = [
   // Solicitação mensal de suprimentos
   "supply_requests.view",
   "supply_requests.manage",
+  "water.view",
+  "water.manage",
   // Movimentações
   "entries.view",
   "entries.create",
@@ -188,16 +198,28 @@ const DIRECTOR_ACCESS: readonly AppPermission[] = [
   "stock.view",
   "products.view",
   "equipment.view",
+  // Relatórios exigem leitura da estrutura, impressoras e GomaQ.
+  // Diretor recebe somente consulta, sem permissões de gerenciamento.
+  "organizations.view",
+  "printers.view",
+  "gomaq.view",
   // Diretor CONSULTA a parametrização e a solicitação mensal, mas NÃO altera
   // parâmetros nem cria/gera documentos (decisão é de quem opera o estoque).
   "stock_parameters.view",
   "packaging_parameters.view",
   "supply_requests.view",
+  "water.view",
   "requests.view",
   "requests.approve",
   "requests.reject",
   "movements.view",
   "reports.view",
+  "settings.view",
+];
+
+const PATRIMONY_MANAGER_ACCESS: readonly AppPermission[] = [
+  "patrimony.view",
+  "patrimony.assign",
   "settings.view",
 ];
 
@@ -223,6 +245,7 @@ export const ROLE_PERMISSIONS: Record<AppRole, readonly AppPermission[]> = {
   stock_manager: STOCK_MANAGER_ACCESS,
   director: DIRECTOR_ACCESS,
   technician: TECHNICIAN_ACCESS,
+  patrimony_manager: PATRIMONY_MANAGER_ACCESS,
 };
 
 /* ─── API de consulta ───────────────────────────────────────────────────────── */
@@ -286,11 +309,13 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
   "/transfers": "transfers.view",
   "/gomaq": "gomaq.view",
   "/assets": "equipment.view",
+  "/patrimony": "patrimony.view",
   "/licenses": "licenses.view",
   "/movements": "movements.view",
   "/organization": "organizations.view",
   "/users": "users.view",
   "/suppliers": "suppliers.view",
+  "/water": "water.view",
   "/printers": "printers.view",
   "/reports": "reports.view",
   "/audit": "audit.view",

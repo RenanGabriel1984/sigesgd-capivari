@@ -39,10 +39,8 @@ export interface NfeDestination {
   /** Tipo de material escolhido ("consumption" | "permanent"). */
   materialType: MaterialType;
   /**
-   * ID da área/subestoque escolhida, ou `""` quando o usuário optou por
-   * "Sem área (estoque geral)". String vazia é uma ESCOLHA VÁLIDA e significa
-   * explicitamente "estoque geral" — por isso é preciso diferenciá-la de
-   * "ainda não escolhido".
+   * ID de uma área/subestoque ativa escolhida pelo usuário. Área vazia nunca
+   * é um destino válido para novas entradas.
    */
   areaId: string;
 }
@@ -79,7 +77,7 @@ export class NfeDestinationError extends Error {
 }
 
 export const NFE_DESTINATION_REQUIRED_MESSAGE =
-  "Confirme o tipo de material e a área/subestoque de destino antes de registrar a entrada.";
+  "Escolha o tipo de material e uma área/subestoque ativa antes de registrar a entrada.";
 
 /**
  * Resolve o destino da entrada a partir do override explícito e/ou do estado.
@@ -93,17 +91,19 @@ export const NFE_DESTINATION_REQUIRED_MESSAGE =
 export function resolveNfeDestination(
   input: ResolveNfeDestinationInput
 ): NfeDestination {
-  if (input.override) {
-    return {
-      materialType: input.override.materialType,
-      areaId: input.override.areaId,
-    };
-  }
   const state = input.state;
-  if (state && state.materialType) {
-    return { materialType: state.materialType, areaId: state.areaId ?? "" };
+  const destination = input.override ?? (
+    state?.materialType
+      ? { materialType: state.materialType, areaId: state.areaId ?? "" }
+      : null
+  );
+  if (!destination || !destination.areaId.trim()) {
+    throw new NfeDestinationError(NFE_DESTINATION_REQUIRED_MESSAGE);
   }
-  throw new NfeDestinationError(NFE_DESTINATION_REQUIRED_MESSAGE);
+  return {
+    materialType: destination.materialType,
+    areaId: destination.areaId.trim(),
+  };
 }
 
 /**
@@ -116,11 +116,14 @@ export function resolveNfeDestination(
  */
 export function toEntryDestinationPayload(destination: NfeDestination): {
   materialType: MaterialType;
-  areaId?: string;
+  areaId: string;
 } {
   const areaId = destination.areaId.trim();
+  if (!areaId) {
+    throw new NfeDestinationError(NFE_DESTINATION_REQUIRED_MESSAGE);
+  }
   return {
     materialType: destination.materialType,
-    ...(areaId ? { areaId } : {}),
+    areaId,
   };
 }

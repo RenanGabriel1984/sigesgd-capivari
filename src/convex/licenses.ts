@@ -1,8 +1,10 @@
 import { requirePermission } from "./rbac";
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { maskLicenseKey } from "../lib/license-keys";
+import { licenseQuantityError, canAssignLicenseToAsset } from "../lib/license-quantity";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: consulta de licenças.
@@ -12,11 +14,6 @@ async function requireUser(ctx: any) {
 async function requireAdmin(ctx: any) {
   // RBAC central: gerenciamento de licenças.
   return requirePermission(ctx, "licenses.manage", { entity: "licenses" });
-}
-
-function maskKey(key: string): string {
-  if (!key || key.length <= 8) return "****";
-  return "*".repeat(key.length - 4) + key.slice(-4);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -41,7 +38,7 @@ export const list = query({
     // Mask keys for non-admins
     return licenses.map((l: any) => ({
       ...l,
-      key: l.key ? (isAdmin ? l.key : maskKey(l.key)) : undefined,
+      key: l.key ? (isAdmin ? l.key : maskLicenseKey(l.key)) : undefined,
     }));
   },
 });
@@ -72,7 +69,7 @@ export const get = query({
 
     return {
       ...license,
-      key: license.key ? (isAdmin ? license.key : maskKey(license.key)) : undefined,
+      key: license.key ? (isAdmin ? license.key : maskLicenseKey(license.key)) : undefined,
       assignedCount: activeAssignments.length,
       assignments: assignmentsWithDetails,
     };
@@ -97,7 +94,8 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireAdmin(ctx);
-    if (args.quantity <= 0) throw new Error("Quantidade deve ser maior que zero");
+    const quantityError = licenseQuantityError(args.quantity);
+    if (quantityError) throw new Error(quantityError);
 
     const now = Date.now();
 
@@ -156,7 +154,8 @@ export const update = mutation({
     if (args.licenseType !== undefined) updates.licenseType = args.licenseType;
     if (args.key !== undefined) updates.key = args.key || undefined;
     if (args.quantity !== undefined) {
-      if (args.quantity <= 0) throw new Error("Quantidade deve ser maior que zero");
+      const quantityError = licenseQuantityError(args.quantity);
+      if (quantityError) throw new Error(quantityError);
       // Check that we don't reduce below active assignments
       const activeCount = await ctx.db
         .query("licenseAssignments")
@@ -175,6 +174,14 @@ export const update = mutation({
     if (args.active !== undefined) updates.active = args.active;
 
     await ctx.db.patch(args.licenseId, updates);
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "update",
+      entity: "licenses",
+      entityId: args.licenseId,
+      details: `Licença "${license.productName}" atualizada. Campos: ${Object.keys(updates).filter((field) => field !== "updatedAt").join(", ")}.`,
+      timestamp: now,
+    });
 
     return args.licenseId;
   },
@@ -194,6 +201,9 @@ export const assignToAsset = mutation({
 
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    if (!canAssignLicenseToAsset(asset.status)) {
+      throw new Error("Não é possível vincular licença a equipamento baixado ou extraviado.");
+    }
 
     // Check quantity limit
     const existingAssignments = await ctx.db
@@ -248,6 +258,15 @@ export const removeFromAsset = mutation({
 
     const now = Date.now();
     await ctx.db.patch(args.assignmentId, { removedAt: now });
+    const asset = await ctx.db.get(assignment.assetId);
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "update",
+      entity: "licenseAssignments",
+      entityId: args.assignmentId,
+      details: `Vínculo da licença ${assignment.licenseId} removido do equipamento ${asset?.patrimonyNumber ?? assignment.assetId}.`,
+      timestamp: now,
+    });
 
     return args.assignmentId;
   },

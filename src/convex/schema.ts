@@ -9,6 +9,7 @@ export const ROLES = {
   DIRECTOR: "director",
   SECRETARY: "secretary",
   TECHNICIAN: "technician",
+  PATRIMONY_MANAGER: "patrimony_manager",
 } as const;
 
 export const roleValidator = v.union(
@@ -17,6 +18,7 @@ export const roleValidator = v.union(
   v.literal(ROLES.DIRECTOR),
   v.literal(ROLES.SECRETARY),
   v.literal(ROLES.TECHNICIAN),
+  v.literal(ROLES.PATRIMONY_MANAGER),
 );
 
 // ─── Organization Types ──────────────────────────────────────────────────────
@@ -83,6 +85,7 @@ export const AUDIT_ACTIONS = {
   CANCEL: "cancel",
   MOVE_STOCK: "move_stock",
   LOGIN: "login",
+  LOGIN_FAILED: "login_failed",
   LOGOUT: "logout",
   DELIVER: "deliver",
   PASSWORD_CHANGE: "password_change",
@@ -135,6 +138,7 @@ export const auditActionValidator = v.union(
   v.literal(AUDIT_ACTIONS.CANCEL),
   v.literal(AUDIT_ACTIONS.MOVE_STOCK),
   v.literal(AUDIT_ACTIONS.LOGIN),
+  v.literal(AUDIT_ACTIONS.LOGIN_FAILED),
   v.literal(AUDIT_ACTIONS.LOGOUT),
   v.literal(AUDIT_ACTIONS.DELIVER),
   v.literal(AUDIT_ACTIONS.PASSWORD_CHANGE),
@@ -321,7 +325,8 @@ const schema = defineSchema(
       .index("by_active", ["active"])
       .index("by_code", ["internalCode"])
       .index("by_ean", ["ean"])
-      .index("by_name", ["name"]),
+      .index("by_name", ["name"])
+      .index("by_photo", ["photo"]),
 
     // ── Stock (per product) ──
     stock: defineTable({
@@ -448,6 +453,10 @@ const schema = defineSchema(
       exitNumber: v.optional(v.string()),
       // ── Vínculo reverso: movimentação de DEVOLUÇÃO → saída original ──
       exitMovementId: v.optional(v.id("stockMovements")),
+      areaId: v.optional(v.id("stockAreas")),
+      locationId: v.optional(v.id("storageLocations")),
+      toLocationId: v.optional(v.id("storageLocations")),
+      toAreaId: v.optional(v.id("stockAreas")),
       timestamp: v.number(),
       canceled: v.optional(v.boolean()),
       canceledAt: v.optional(v.number()),
@@ -519,6 +528,8 @@ const schema = defineSchema(
       quantityDelivered: v.number(),
       deliveredSerialNumbers: v.optional(v.array(v.string())),
       targetPrinterId: v.optional(v.id("printers")),
+      areaId: v.optional(v.id("stockAreas")),
+      sourceLocationId: v.optional(v.id("storageLocations")),
     }).index("by_request", ["requestId"])
       .index("by_product", ["productId"]),
 
@@ -566,7 +577,9 @@ const schema = defineSchema(
       .index("by_number", ["entryNumber"])
       .index("by_date", ["receivedAt"])
       .index("by_access_key", ["accessKey"])
-      .index("by_invoice_fingerprint", ["invoiceFingerprint"]),
+      .index("by_invoice_fingerprint", ["invoiceFingerprint"])
+      .index("by_documentStorageId", ["documentStorageId"])
+      .index("by_xmlStorageId", ["xmlStorageId"]),
 
     // ── Entry Items (Itens da Entrada) ──
     entryItems: defineTable({
@@ -580,6 +593,8 @@ const schema = defineSchema(
       model: v.optional(v.string()),
       specification: v.optional(v.string()),
       lotId: v.optional(v.string()),
+      // Área do item é independente do local físico; ausente preserva entradas legadas.
+      areaId: v.optional(v.id("stockAreas")),
       locationId: v.optional(v.id("storageLocations")),
       photoStorageId: v.optional(v.string()),
       supplierLotNumber: v.optional(v.string()),
@@ -594,7 +609,8 @@ const schema = defineSchema(
       matchScore: v.optional(v.number()),
       associationType: v.optional(v.string()),
     }).index("by_entry", ["entryId"])
-      .index("by_product", ["productId"]),
+      .index("by_product", ["productId"])
+      .index("by_photoStorageId", ["photoStorageId"]),
 
     // ── Lots (Lotes de Entrada) ──
     lots: defineTable({
@@ -618,17 +634,27 @@ const schema = defineSchema(
       // ── Classificação preservada historicamente no lote ──
       materialType: v.optional(materialTypeValidator),
       areaId: v.optional(v.id("stockAreas")),
+      locationId: v.optional(v.id("storageLocations")),
+      // Origem do lote quando uma embalagem fechada é reclassificada em unidades avulsas.
+      reclassifiedFromLotId: v.optional(v.id("lots")),
     }).index("by_product", ["productId"])
       .index("by_entry", ["entryId"])
+      .index("by_location", ["locationId"])
       .index("by_number", ["lotNumber"])
-      .index("by_active", ["active"]),
+      .index("by_active", ["active"])
+      .index("by_photoStorageId", ["photoStorageId"]),
 
     // ── Storage Locations (Locais de Armazenamento) ──
     storageLocations: defineTable({
       name: v.string(),
       description: v.optional(v.string()),
       active: v.boolean(),
-    }).index("by_active", ["active"]),
+      // Campo legado mantido apenas para compatibilidade de leitura.
+      // Um local físico pode armazenar materiais de diversas áreas; nunca
+      // use este vínculo como regra de classificação ou validação de estoque.
+      areaId: v.optional(v.id("stockAreas")),
+    }).index("by_active", ["active"])
+      .index("by_area", ["areaId"]),
 
     // ── Inventories (Inventários) ──
     inventories: defineTable({
@@ -642,6 +668,8 @@ const schema = defineSchema(
       observation: v.optional(v.string()),
       // ── Escopo do inventário (opcional; vazio = todos os locais/produtos) ──
       locationId: v.optional(v.id("storageLocations")),
+      // Snapshot da área do local no momento em que o inventário foi aberto.
+      areaId: v.optional(v.id("stockAreas")),
       categoryId: v.optional(v.id("categories")),
       productIds: v.optional(v.array(v.id("products"))),
       closedAt: v.optional(v.number()),
@@ -671,6 +699,31 @@ const schema = defineSchema(
     }).index("by_requestItem", ["requestItemId"])
       .index("by_lot", ["lotId"]),
 
+    requestItemReservations: defineTable({
+      requestItemId: v.id("requestItems"),
+      productId: v.id("products"),
+      lotId: v.id("lots"),
+      areaId: v.id("stockAreas"),
+      locationId: v.id("storageLocations"),
+      quantity: v.number(),
+      quantityRemaining: v.number(),
+      quantityDelivered: v.number(),
+      quantityReleased: v.number(),
+      createdAt: v.number(),
+    }).index("by_requestItem", ["requestItemId"])
+      .index("by_lot", ["lotId"])
+      .index("by_product", ["productId"]),
+
+    // ── Lotes consumidos por cada movimentação (permite devolução multi-lote exata) ──
+    stockMovementLots: defineTable({
+      movementId: v.id("stockMovements"),
+      lotId: v.id("lots"),
+      quantity: v.number(),
+      areaId: v.optional(v.id("stockAreas")),
+      locationId: v.optional(v.id("storageLocations")),
+    }).index("by_movement", ["movementId"])
+      .index("by_lot", ["lotId"]),
+
     // ── Returns (Devoluções) — SEMPRE vinculada a uma SAÍDA real ──
     returns: defineTable({
       // Saída real que está sendo revertida (movimentação type "exit")
@@ -684,7 +737,11 @@ const schema = defineSchema(
       reason: v.string(),
       // Condição do material devolvido
       condition: v.optional(returnConditionValidator),
-      // Local físico de destino da devolução (opcional)
+      // false = recebido para avaliação/quarentena; não compõe o saldo utilizável.
+      // Opcional para preservar a leitura de devoluções históricas já lançadas.
+      restocked: v.optional(v.boolean()),
+      // Área e local de destino da devolução; preservam o subestoque de origem.
+      areaId: v.optional(v.id("stockAreas")),
       locationId: v.optional(v.id("storageLocations")),
       returnedByUserId: v.id("users"),
       receivedByUserId: v.optional(v.id("users")),
@@ -712,6 +769,10 @@ const schema = defineSchema(
       entryItemId: v.id("entryItems"),
       productId: v.id("products"),
       patrimonyNumber: v.optional(v.string()),
+      patrimonyRegistrationStatus: v.optional(v.union(v.literal("pending"), v.literal("registered"))),
+      patrimonyAssignedAt: v.optional(v.number()),
+      patrimonyAssignedByUserId: v.optional(v.id("users")),
+      assetId: v.optional(v.id("assets")),
       serialNumber: v.optional(v.string()),
       manufacturer: v.optional(v.string()),
       model: v.optional(v.string()),
@@ -732,13 +793,16 @@ const schema = defineSchema(
       createdAt: v.number(),
     }).index("by_entry", ["entryId"])
       .index("by_entryItem", ["entryItemId"])
-      .index("by_product", ["productId"]),
+      .index("by_product", ["productId"])
+      .index("by_asset", ["assetId"])
+      .index("by_registration_status", ["patrimonyRegistrationStatus"]),
 
     // ── Stock by Location (Estoque por Local de Armazenamento) ──
     stockByLocation: defineTable({
       productId: v.id("products"),
       locationId: v.id("storageLocations"),
       quantity: v.number(),
+      areaId: v.optional(v.id("stockAreas")),
     }).index("by_product", ["productId"])
       .index("by_location", ["locationId"]),
 
@@ -748,6 +812,8 @@ const schema = defineSchema(
       lotId: v.optional(v.id("lots")),
       fromLocationId: v.id("storageLocations"),
       toLocationId: v.id("storageLocations"),
+      fromAreaId: v.optional(v.id("stockAreas")),
+      toAreaId: v.optional(v.id("stockAreas")),
       quantity: v.number(),
       responsibleUserId: v.id("users"),
       observation: v.optional(v.string()),
@@ -755,6 +821,15 @@ const schema = defineSchema(
     }).index("by_product", ["productId"])
       .index("by_from", ["fromLocationId"])
       .index("by_to", ["toLocationId"]),
+
+    stockTransferLots: defineTable({
+      transferId: v.id("stockTransfers"),
+      sourceLotId: v.id("lots"),
+      destinationLotId: v.id("lots"),
+      quantity: v.number(),
+    }).index("by_transfer", ["transferId"])
+      .index("by_sourceLot", ["sourceLotId"])
+      .index("by_destinationLot", ["destinationLotId"]),
 
     // ── GOMAQ Exchanges (Trocas de Suprimento) ──
     gomaQExchanges: defineTable({
@@ -803,12 +878,17 @@ const schema = defineSchema(
       observation: v.optional(v.string()),
       documentStorageId: v.optional(v.string()),
       totalCartridges: v.number(),
-    }).index("by_date", ["collectedAt"]),
+    }).index("by_date", ["collectedAt"])
+      .index("by_documentStorageId", ["documentStorageId"]),
 
     // ── Assets (Equipamentos Patrimoniais) ──
     assets: defineTable({
       patrimonyNumber: v.optional(v.string()),
       serialNumber: v.optional(v.string()),
+      // Origem patrimonial rastreável até a unidade e documento de recebimento.
+      entryId: v.optional(v.id("entries")),
+      entryItemId: v.optional(v.id("entryItems")),
+      entryItemUnitId: v.optional(v.id("entryItemUnits")),
       // Inclui "phone" (categoria Telefonia). Ampliação ADITIVA: registros
       // existentes continuam válidos; nenhuma migração de dados é necessária.
       assetType: v.union(
@@ -837,7 +917,8 @@ const schema = defineSchema(
       .index("by_type", ["assetType"])
       .index("by_organization", ["organizationId"])
       .index("by_responsible", ["responsibleUserId"])
-      .index("by_patrimony", ["patrimonyNumber"]),
+      .index("by_patrimony", ["patrimonyNumber"])
+      .index("by_entryItemUnit", ["entryItemUnitId"]),
 
     // ── Asset History (Histórico de Equipamentos) ──
     assetHistory: defineTable({
@@ -863,14 +944,18 @@ const schema = defineSchema(
     assetParts: defineTable({
       assetId: v.id("assets"),
       productId: v.id("products"),
+      // lotId preserva compatibilidade com registros antigos (primeiro lote).
+      // stockMovementId liga a instalação à relação completa stockMovementLots.
       lotId: v.optional(v.string()),
+      stockMovementId: v.optional(v.id("stockMovements")),
       quantity: v.number(),
       installedAt: v.number(),
       removedAt: v.optional(v.number()),
       installedByUserId: v.id("users"),
       observation: v.optional(v.string()),
     }).index("by_asset", ["assetId"])
-      .index("by_product", ["productId"]),
+      .index("by_product", ["productId"])
+      .index("by_stockMovement", ["stockMovementId"]),
 
     // ── Asset Maintenances (Manutenções) ──
     assetMaintenances: defineTable({
@@ -940,6 +1025,95 @@ const schema = defineSchema(
       lockedUntil: v.optional(v.number()),
     }).index("by_email", ["email"]),
 
+    // ── Controle interno de água mineral, independente do estoque institucional ──
+    waterParticipants: defineTable({
+      name: v.string(),
+      active: v.boolean(),
+      observation: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_name", ["name"])
+      .index("by_active", ["active"]),
+
+    waterPeriods: defineTable({
+      title: v.string(),
+      cadence: v.union(v.literal("monthly"), v.literal("bimonthly"), v.literal("custom")),
+      startAt: v.number(),
+      endAt: v.number(),
+      participantIds: v.array(v.id("waterParticipants")),
+      status: v.union(v.literal("open"), v.literal("closed")),
+      totalValueCents: v.optional(v.number()),
+      createdBy: v.id("users"),
+      createdAt: v.number(),
+      closedAt: v.optional(v.number()),
+    }).index("by_status", ["status"])
+      .index("by_startAt", ["startAt"]),
+
+    waterReceipts: defineTable({
+      periodId: v.id("waterPeriods"),
+      receivedAt: v.number(),
+      gallonsReceived: v.number(),
+      emptyGallonsReturned: v.number(),
+      totalValueCents: v.number(),
+      sourceName: v.optional(v.string()),
+      paidByName: v.optional(v.string()),
+      observation: v.optional(v.string()),
+      createdBy: v.id("users"),
+      createdAt: v.number(),
+    }).index("by_period", ["periodId"])
+      .index("by_receivedAt", ["receivedAt"]),
+
+    waterContainerMovements: defineTable({
+      type: v.union(v.literal("consumption"), v.literal("return"), v.literal("adjustment")),
+      date: v.number(),
+      fullDelta: v.number(),
+      emptyDelta: v.number(),
+      observation: v.optional(v.string()),
+      createdBy: v.id("users"),
+      createdAt: v.number(),
+    }).index("by_date", ["date"]),
+
+    waterShares: defineTable({
+      periodId: v.id("waterPeriods"),
+      participantId: v.id("waterParticipants"),
+      participantName: v.string(),
+      amountDueCents: v.number(),
+      createdAt: v.number(),
+    }).index("by_period", ["periodId"])
+      .index("by_participant", ["participantId"]),
+
+    waterPayments: defineTable({
+      shareId: v.id("waterShares"),
+      amountCents: v.number(),
+      paidAt: v.number(),
+      method: v.optional(v.string()),
+      observation: v.optional(v.string()),
+      createdBy: v.id("users"),
+      createdAt: v.number(),
+    }).index("by_share", ["shareId"])
+      .index("by_paidAt", ["paidAt"]),
+
+    // ── Storage ownership (file-level authorization) ──
+    // "pending" files are visible only to their uploader until attached to a
+    // business entity. Existing legacy references are resolved read-only.
+    storageFiles: defineTable({
+      storageId: v.string(),
+      ownerType: v.union(
+        v.literal("pending"),
+        v.literal("entry"),
+        v.literal("entryItem"),
+        v.literal("product"),
+        v.literal("lot"),
+        v.literal("gomaqCollection"),
+      ),
+      ownerId: v.optional(v.string()),
+      uploaderUserId: v.id("users"),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_storageId", ["storageId"])
+      .index("by_owner", ["ownerType", "ownerId"])
+      .index("by_uploader", ["uploaderUserId"]),
+
     // ── Audit Log ──
     auditLogs: defineTable({
       userId: v.optional(v.id("users")),
@@ -950,6 +1124,7 @@ const schema = defineSchema(
       timestamp: v.number(),
     }).index("by_user", ["userId"])
       .index("by_entity", ["entity"])
+      .index("by_entity_entityId", ["entity", "entityId"])
       .index("by_action", ["action"])
       .index("by_timestamp", ["timestamp"]),
   },

@@ -167,9 +167,9 @@ describe("RBAC-05 technician — interface simplificada", () => {
 /* ═══ RBAC-18/19 — consolidação de papéis ═══════════════════════════════════ */
 
 describe("RBAC-18/19 — papéis existentes cobertos pela matriz", () => {
-  it("os 5 papéis esperados existem e nenhum papel antigo fica sem permissões", () => {
+  it("os 6 papéis esperados existem e nenhum papel fica sem permissões", () => {
     expect(APP_ROLES).toEqual([
-      "admin", "stock_manager", "director", "secretary", "technician",
+      "admin", "stock_manager", "director", "secretary", "technician", "patrimony_manager",
     ]);
     for (const r of APP_ROLES) {
       expect(ROLE_PERMISSIONS[r].length).toBeGreaterThan(0);

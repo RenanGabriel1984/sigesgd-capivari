@@ -2,12 +2,12 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { requirePermission } from "./rbac";
 import { mutation, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
-import { hashPassword, verifyPassword } from "./auth/passwords";
+import { hashPassword, verifyPassword, generateSecureNumericCode, nextResetAttempt } from "./auth/passwords";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 /** Política de senha (§12). Todas as cinco ACTIONS de definição exigem este mínimo. */
 export const MIN_PASSWORD_LENGTH = 8;
@@ -610,7 +610,7 @@ export const requestPasswordReset = mutation({
     }
 
     // Generate 6-digit code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const code = generateSecureNumericCode();
 
     const resetId: Id<"passwordResets"> = await ctx.db.insert("passwordResets", {
       userId: user._id,
@@ -687,20 +687,23 @@ export const confirmPasswordReset = mutation({
     );
 
     if (!validToken) {
-      // Incrementa a contagem do token QUANDO o código confere, para não
-      // penalizar quem digita códigos aleatórios de outro e-mail.
-      const matching = tokens.find(
-        (t) => t.token === args.code && !t.usedAt && t.expiresAt > Date.now(),
-      );
-      if (matching) {
-        const attempts = (matching.attempts ?? 0) + 1;
-        await ctx.db.patch(matching._id, {
-          attempts,
-          // Ao exceder o limite o token é INVALIDADO (usedAt) — o atacante
-          // precisa pedir uma nova recuperação e um novo e-mail é enviado.
-          usedAt: attempts >= RESET_MAX_ATTEMPTS ? Date.now() : undefined,
-        });
+      // Toda confirmação inválida consome uma tentativa do código ativo do
+      // usuário. Antes, somente uma tentativa que coincidisse com um token
+      // era contabilizada, deixando palpites aleatórios ilimitados.
+      const now = Date.now();
+      const activeToken = tokens
+        .filter((token) => !token.usedAt && token.expiresAt > now)
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+
+      if (activeToken) {
+        const attemptUpdate = nextResetAttempt(
+          activeToken.attempts ?? 0,
+          RESET_MAX_ATTEMPTS,
+          now,
+        );
+        await ctx.db.patch(activeToken._id, attemptUpdate);
       }
+
       throw new Error("Código inválido ou expirado");
     }
 
@@ -789,10 +792,6 @@ export const recordFailedLogin = internalMutation({
         attempts: newAttempts,
         lastAttemptAt: now,
       };
-      // Bloqueia após LOGIN_MAX_ATTEMPTS falhas por LOGIN_LOCK_MINUTES.
-      // O bloqueio é REAVALIADO quando a janela anterior expirou — sem isso a
-      // condição `!existing.lockedUntil` nunca voltava a ser verdadeira e a
-      // proteção de força brute deixava de valer depois do 1º bloqueio (§10).
       if (newAttempts >= LOGIN_MAX_ATTEMPTS && (!existing.lockedUntil || lockExpired)) {
         updates.lockedUntil = now + LOGIN_LOCK_MINUTES * 60 * 1000;
       }
@@ -804,12 +803,25 @@ export const recordFailedLogin = internalMutation({
         lastAttemptAt: now,
       });
     }
+
+    // A auditoria registra também tentativas inválidas. Quando o e-mail
+    // pertence a um usuário cadastrado, associa o evento à conta; caso
+    // contrário preserva o login tentado no detalhe, sem inventar identidade.
+    const account = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .first();
+
+    await ctx.db.insert("auditLogs", {
+      userId: account?._id,
+      action: "login_failed",
+      entity: "auth",
+      entityId: account?._id ? String(account._id) : email,
+      details: `Falha de autenticação para o login ${email}`,
+      timestamp: now,
+    });
   },
 });
-
-/**
- * Check if an email is currently locked out due to brute force.
- */
 /**
  * Zera o contador de tentativas após um login BEN-SUCEDIDO (§10).
  *
@@ -824,6 +836,23 @@ export const recordSuccessfulLogin = internalMutation({
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
     if (!email) return { cleared: false };
+
+    const now = Date.now();
+    const account = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .first();
+
+    if (account) {
+      await ctx.db.insert("auditLogs", {
+        userId: account._id,
+        action: "login",
+        entity: "auth",
+        entityId: String(account._id),
+        details: `Login realizado com sucesso: ${email}`,
+        timestamp: now,
+      });
+    }
 
     const existing = await ctx.db
       .query("failedLoginAttempts")
@@ -840,6 +869,21 @@ export const recordSuccessfulLogin = internalMutation({
   },
 });
 
+export const recordLogout = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const { userId, user } = await requireUser(ctx);
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "logout",
+      entity: "auth",
+      entityId: String(userId),
+      details: `Sessão encerrada por ${user.email ?? user.name ?? String(userId)}`,
+      timestamp: Date.now(),
+    });
+    return true;
+  },
+});
 /**
  * Check if an email is currently locked out due to brute force.
  */

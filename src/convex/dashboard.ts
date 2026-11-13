@@ -181,7 +181,7 @@ export const stats = query({
 export const stockPosition = query({
   args: {},
   handler: async (ctx) => {
-    await requireUser(ctx);
+    await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "stockPosition" });
     const products = await ctx.db.query("products").collect();
     return Promise.all(
       products.map(async (p) => {
@@ -225,20 +225,32 @@ export const movementReport = query({
     endDate: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireUser(ctx);
-    let q = ctx.db.query("stockMovements").withIndex("by_timestamp").order("desc");
-    if (args.startDate) {
-      q = ctx.db.query("stockMovements").withIndex("by_timestamp", (idx) =>
-        idx.gte("timestamp", args.startDate!)
-      ).order("desc");
+    await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "movementReport" });
+    const startDate = args.startDate;
+    const endDate = args.endDate;
+    if (startDate !== undefined && !Number.isSafeInteger(startDate)) {
+      throw new Error("A data inicial do relatório é inválida.");
     }
-    const movements = await q.take(500);
-    let filtered = movements;
-    if (args.endDate) {
-      filtered = movements.filter((m) => m.timestamp <= args.endDate!);
+    if (endDate !== undefined && !Number.isSafeInteger(endDate)) {
+      throw new Error("A data final do relatório é inválida.");
     }
+    if (startDate !== undefined && endDate !== undefined && startDate > endDate) {
+      throw new Error("A data inicial não pode ser posterior à data final.");
+    }
+    const movements = await ctx.db
+      .query("stockMovements")
+      .withIndex("by_timestamp", (idx) => {
+        if (startDate !== undefined && endDate !== undefined) {
+          return idx.gte("timestamp", startDate).lte("timestamp", endDate);
+        }
+        if (startDate !== undefined) return idx.gte("timestamp", startDate);
+        if (endDate !== undefined) return idx.lte("timestamp", endDate);
+        return idx;
+      })
+      .order("desc")
+      .take(500);
     return Promise.all(
-      filtered.map(async (m) => {
+      movements.map(async (m) => {
         const product = await ctx.db.get(m.productId);
         const user = await ctx.db.get(m.userId);
         const supplier = m.supplierId ? await ctx.db.get(m.supplierId) : null;
@@ -269,7 +281,7 @@ export const movementReport = query({
 export const consumptionByOrg = query({
   args: { organizationId: v.id("organizations") },
   handler: async (ctx, args) => {
-    await requireUser(ctx);
+    await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "consumptionByOrg" });
     const delivered = await ctx.db
       .query("requests")
       .withIndex("by_secretaria", (q) => q.eq("secretariaId", args.organizationId))

@@ -1,7 +1,7 @@
 import type { Id } from "@/convex/_generated/dataModel";
 
 // ─── Roles ───────────────────────────────────────────────────────────────────
-export type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+export type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 export const ROLE_LABELS: Record<UserRole, string> = {
   admin: "Administrador",
@@ -9,6 +9,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   director: "Diretor",
   secretary: "Secretário",
   technician: "Técnico",
+  patrimony_manager: "Responsável pelo Patrimônio",
 };
 
 export const ROLE_LABELS_EN: Record<UserRole, string> = {
@@ -17,6 +18,7 @@ export const ROLE_LABELS_EN: Record<UserRole, string> = {
   director: "Director",
   secretary: "Secretary",
   technician: "Technician",
+  patrimony_manager: "Patrimony Manager",
 };
 
 // ─── Organization Types ──────────────────────────────────────────────────────
@@ -70,7 +72,7 @@ export const REQUEST_STATUS_COLORS: Record<RequestStatusType, string> = {
 };
 
 // ─── Audit Actions ───────────────────────────────────────────────────────────
-export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update" | "confirm_entry" | "reverse_entry" | "open_inventory" | "count_inventory" | "close_inventory" | "return_stock" | "reverse_exit" | "transfer_stock" | "gomaq_exchange" | "gomaq_collection"  | "gomaq_order"
+export type AuditAction = "create" | "update" | "activate" | "deactivate" | "approve" | "reject" | "cancel" | "move_stock" | "login" | "login_failed" | "logout" | "deliver" | "password_change" | "password_reset" | "reserve" | "toner_update" | "confirm_entry" | "reverse_entry" | "open_inventory" | "count_inventory" | "close_inventory" | "return_stock" | "reverse_exit" | "transfer_stock" | "gomaq_exchange" | "gomaq_collection"  | "gomaq_order"
   | "asset_create"
   | "asset_update"
   | "asset_assign"
@@ -91,7 +93,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   reject: "Rejeição",
   cancel: "Cancelamento",
   move_stock: "Movimentação",
-  login: "Login",
+  login: "Login realizado",
+  login_failed: "Falha de login",
   logout: "Logout",
   deliver: "Entrega",
   password_change: "Alteração de Senha",
@@ -178,7 +181,10 @@ const PERMISSION_FLAGS = {
   // Solicitação mensal de suprimentos (documento de planejamento)
   canViewSupplyRequests: "supply_requests.view",
   canManageSupplyRequests: "supply_requests.manage",
+  canViewWater: "water.view",
+  canManageWater: "water.manage",
   canManageAssets: "equipment.manage",
+  canViewPatrimony: "patrimony.view",
   canManageLicenses: "licenses.manage",
 
   canCreateEntries: "entries.create",
@@ -209,6 +215,7 @@ export const PERMISSIONS: Record<AppRole, Permissions> = {
   stock_manager: derivePermissions("stock_manager"),
   director: derivePermissions("director"),
   technician: derivePermissions("technician"),
+  patrimony_manager: derivePermissions("patrimony_manager"),
 };
 
 export function getPermissions(role: UserRole | undefined): Permissions {

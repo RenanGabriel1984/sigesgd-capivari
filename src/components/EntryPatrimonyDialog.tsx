@@ -27,7 +27,7 @@ export interface EntryPatrimonyDialogProps {
   open: boolean;
   entryId: string | null;
   entryNumber?: string;
-  products: Array<{ _id: string; name: string }>;
+  products: Array<{ _id: string; name: string; hasSerial?: boolean }>;
   locations: Array<{ _id: string; name: string }>;
   organizations: Array<{ _id: string; name: string; type?: string; active?: boolean }>;
   onClose: () => void;
@@ -81,6 +81,7 @@ export function EntryPatrimonyDialog({
         quantity: Number(item.quantity) || 0,
         units,
         productName: product?.name,
+        requireSerial: product?.hasSerial === true,
       });
       if (error) return error;
     }
@@ -128,7 +129,7 @@ export function EntryPatrimonyDialog({
       }
       try {
         await confirmEntry({ entryId: entryId as never });
-        toast.success("Entrada confirmada com unidades patrimoniais registradas.");
+        toast.success("Entrada confirmada. As unidades sem número oficial seguirão para tombamento pelo setor de Patrimônio.");
         onConfirmed(entry?.entryNumber ?? entryNumber ?? "");
       } catch (confirmError) {
         toast.error(
@@ -182,7 +183,7 @@ export function EntryPatrimonyDialog({
 
         {quantityMismatch && entry ? (
           <p className="text-xs text-amber-700">
-            Cada item precisa de exatamente uma unidade patrimonial por unidade recebida.
+            Cada item precisa de exatamente uma identificação por equipamento recebido.
           </p>
         ) : null}
 

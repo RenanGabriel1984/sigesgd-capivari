@@ -4,7 +4,7 @@ import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
 import { requirePermission } from "./rbac";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // Compatibilidade: wrapper fino sobre a camada central src/lib/rbac.ts
@@ -116,7 +116,7 @@ export const listUserOptions = query({
 export const createUser = mutation({
   args: {
     name: v.string(), email: v.string(),
-    role: v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician")),
+    role: v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician"), v.literal("patrimony_manager")),
     organizationId: v.optional(v.id("organizations")),
   },
   handler: async (ctx, args) => {
@@ -141,7 +141,7 @@ export const createUser = mutation({
 export const updateUser = mutation({
   args: {
     userId: v.id("users"), name: v.optional(v.string()), email: v.optional(v.string()),
-    role: v.optional(v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician"))),
+    role: v.optional(v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician"), v.literal("patrimony_manager"))),
     organizationId: v.optional(v.id("organizations")), active: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {

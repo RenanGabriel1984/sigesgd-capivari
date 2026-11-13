@@ -1,0 +1,81 @@
+/**
+ * Regras compartilhadas para quantidades físicas de estoque.
+ * Unidades contáveis não admitem frações; metro e unidades livres podem.
+ */
+const DISCRETE_UNITS = new Set(["un", "pc", "cx", "rl", "pct", "po", "kt"]);
+
+export function isDiscreteStockUnit(
+  unitOfMeasure?: string | null,
+  hasSerial = false,
+): boolean {
+  return hasSerial || DISCRETE_UNITS.has((unitOfMeasure ?? "").trim().toLowerCase());
+}
+
+export function isValidStockQuantity(
+  quantity: number,
+  unitOfMeasure?: string | null,
+  hasSerial = false,
+  allowZero = false,
+): boolean {
+  if (!Number.isFinite(quantity) || (allowZero ? quantity < 0 : quantity <= 0)) {
+    return false;
+  }
+  return !isDiscreteStockUnit(unitOfMeasure, hasSerial) || Number.isSafeInteger(quantity);
+}
+
+
+/**
+ * Retorna o saldo único válido ou null quando o produto ainda não possui
+ * registro global. Duplicidades e valores fisicamente impossíveis bloqueiam.
+ */
+export function getOptionalSingleValidGlobalStock<T>(
+  rows: readonly T[],
+  productLabel: string,
+): T | null {
+  if (rows.length > 1) {
+    throw new Error(`Há registros globais de estoque duplicados para "${productLabel}". Regularize antes de continuar.`);
+  }
+  if (rows.length === 0) return null;
+
+  const stock = rows[0] as { physicalQuantity: number; reservedQuantity: number };
+  const physical = Number(stock.physicalQuantity);
+  const reserved = Number(stock.reservedQuantity);
+  if (
+    !Number.isFinite(physical) ||
+    !Number.isFinite(reserved) ||
+    physical < 0 ||
+    reserved < 0 ||
+    reserved > physical
+  ) {
+    throw new Error(`O saldo global de "${productLabel}" está inconsistente. Regularize antes de continuar.`);
+  }
+  return rows[0] as T;
+}
+
+/** Exige o registro global quando a operação necessariamente consome estoque. */
+export function requireSingleValidGlobalStock<T>(
+  rows: readonly T[],
+  productLabel: string,
+): T {
+  const stock = getOptionalSingleValidGlobalStock(rows, productLabel);
+  if (!stock) {
+    throw new Error(`Registro global de estoque não encontrado para "${productLabel}".`);
+  }
+  return stock;
+}
+
+
+/**
+ * Valida um bucket físico de produto × área × local antes de qualquer escrita.
+ * Comparar NaN com um limite não detecta divergência; por isso a validação é
+ * explícita e anterior aos cálculos de soma/diferença.
+ */
+export function requireValidScopedStockQuantity(
+  quantity: unknown,
+  scopeLabel: string,
+): number {
+  if (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity < 0) {
+    throw new Error(`O saldo físico de ${scopeLabel} está inválido. Regularize antes de continuar.`);
+  }
+  return quantity;
+}

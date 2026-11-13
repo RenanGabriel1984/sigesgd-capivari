@@ -179,6 +179,7 @@ function isImplementationStockDate(receivedAt: number): boolean {
 /** Upload do documento original pelo MESMO mecanismo do XML (storage). */
 async function uploadFile(
   generateUploadUrl: () => Promise<string>,
+  registerUpload: (args: { storageId: string }) => Promise<unknown>,
   file: File,
   contentType?: string,
 ): Promise<string> {
@@ -192,6 +193,7 @@ async function uploadFile(
   });
   if (!response.ok) throw new Error("Falha no upload");
   const payload = (await response.json()) as { storageId: string };
+  await registerUpload({ storageId: payload.storageId });
   return payload.storageId;
 }
 
@@ -322,7 +324,9 @@ function EntriesPage() {
   const createCategory = useMutation(api.categories.create);
   const upsertNfeProductAlias = useMutation(api.nfeProductAliases.upsert);
   const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
+  const registerUpload = useMutation(api.storage.registerUpload);
   const createEntry = useMutation(api.entries.create);
+  const updateDraftArea = useMutation(api.entries.updateDraftArea);
   const confirmEntry = useMutation(api.entries.confirm);
 
   // ── Cadastro rápido de produto (R31 §1) ──
@@ -626,6 +630,21 @@ function EntriesPage() {
     materialType: MaterialType,
     areaId: string,
   ) => {
+    if (!areaId.trim()) {
+      toast.error(NFE_DESTINATION_REQUIRED_MESSAGE);
+      return;
+    }
+    const invalidIndex = nfeItems.findIndex((row) => {
+      if (!row.productId || !row.locationId) return true;
+      const location = locationList.find((item) => item._id === row.locationId);
+      return !location || !location.active;
+    });
+    if (invalidIndex >= 0) {
+      setDestinationOpen(false);
+      setNfeStep("products");
+      toast.error("Associe cada item da NF-e a um local físico ativo. A área é uma classificação independente do armário.");
+      return;
+    }
     setNfeDestination({ materialType, areaId });
     setDestinationOpen(false);
     void handleConfirmImport({ materialType, areaId });
@@ -793,6 +812,12 @@ function EntriesPage() {
             areaId: nfeDestination.areaId ?? "",
           }
         : null);
+    const selectedAreaId = destinationOverride?.areaId ?? nfeDestination.areaId ?? "";
+    if (!selectedAreaId.trim()) {
+      setDestinationOpen(true);
+      toast.error(NFE_DESTINATION_REQUIRED_MESSAGE);
+      return;
+    }
     // D1: material permanente é decidido pelo destino RESOLVIDO (override ou
     // estado persistido), nunca por um default.
     const effectiveMaterialType =
@@ -827,6 +852,12 @@ function EntriesPage() {
 
     setNfeConfirming(true);
     try {
+      if (nfeDraft) {
+        await updateDraftArea({
+          entryId: nfeDraft.entryId as any,
+          areaId: selectedAreaId as any,
+        });
+      }
       const result = await runEntryImport({
         destination: destinationOverride,
         destinationState: nfeDestination,
@@ -836,6 +867,7 @@ function EntriesPage() {
           ? () =>
               uploadFile(
                 generateUploadUrl,
+                registerUpload,
                 danfeFile,
                 danfeFile.type || "application/pdf",
               )
@@ -844,6 +876,7 @@ function EntriesPage() {
           ? () =>
               uploadFile(
                 generateUploadUrl,
+                registerUpload,
                 nfeXmlFile,
                 nfeXmlFile.type || "application/xml",
               )
@@ -956,9 +989,26 @@ function EntriesPage() {
       );
       return;
     }
+    if (!areaId.trim()) {
+      toast.error("Selecione a área/subestoque de destino antes de registrar a entrada.");
+      return;
+    }
+    for (const item of withProduct) {
+      const location = locationList.find((entry) => entry._id === item.locationId);
+      if (!location || !location.active) {
+        toast.error("Selecione um local físico ativo para cada item da entrada.");
+        return;
+      }
+    }
 
     setManualSaving(true);
     try {
+      if (manualDraft) {
+        await updateDraftArea({
+          entryId: manualDraft.entryId as any,
+          areaId: areaId as any,
+        });
+      }
       const result = await runEntryImport({
         destination: { materialType: manualMaterialType, areaId },
         existingDraft: manualDraft,
@@ -1296,13 +1346,15 @@ function EntriesPage() {
                 </SelectContent>
               </Select>
             </FieldRow>
-            <FieldRow label="Área de destino">
-              <Select value={areaId || "none"} onValueChange={(value) => setAreaId(value === "none" ? "" : value)}>
+            <FieldRow
+              label="Área de destino *"
+              tooltip="Obrigatória. A área classifica a finalidade do material; o armário é uma escolha física independente."
+            >
+              <Select value={areaId} onValueChange={setAreaId}>
                 <SelectTrigger className="mt-1 h-10 w-full min-w-0 max-w-full">
-                  <SelectValue placeholder="Selecionar área" />
+                  <SelectValue placeholder="Selecionar área/subestoque" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Sem área definida</SelectItem>
                   {(areas ?? []).map((area) => (
                     <SelectItem key={area._id} value={area._id}>
                       {area.name}
@@ -1346,6 +1398,7 @@ function EntriesPage() {
               items={items}
               products={productOptions}
               locations={locationList}
+              locationRequired
               onUpdateItem={handleManualItemUpdate}
               onAddItem={() => setItems((current) => [...current, emptyEntryItem()])}
               onRemoveItem={(index) =>
@@ -1821,6 +1874,7 @@ function EntriesPage() {
         products={productOptions.map((product) => ({
           _id: product._id,
           name: product.name,
+          hasSerial: product.hasSerial,
         }))}
         locations={locationList.map((location) => ({
           _id: location._id,

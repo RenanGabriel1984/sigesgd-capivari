@@ -28,12 +28,14 @@ import { RotateCcw, PackageCheck, ArrowRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
+import { roleHasPermission } from "@/lib/rbac";
 import {
   RETURN_CONDITION_VALUES,
   RETURN_CONDITION_LABELS,
   validateReturnQuantity,
   returnableQuantity,
   formatExitLabel,
+  shouldRestockReturnedMaterial,
   type ReturnCondition,
 } from "@/lib/returns-rules";
 
@@ -59,6 +61,10 @@ type ExitRow = {
   requesterName?: string | null;
   osNumber?: string | null;
   requestReason?: string | null;
+  areaId?: string | null;
+  locationId?: string | null;
+  area?: { name?: string } | null;
+  location?: { name?: string } | null;
   returned: number;
   available: number;
 };
@@ -114,6 +120,10 @@ export default function ReturnsPage() {
       toast.error("Informe o motivo da devolução");
       return;
     }
+    if (selectedExit.areaId && !selectedExit.locationId) {
+      toast.error("A saída não possui local físico registrado. A devolução precisa ser regularizada pelo responsável pelo estoque.");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -126,7 +136,9 @@ export default function ReturnsPage() {
         observation: observation || undefined,
       });
       toast.success(
-        `Devolução de ${quantity} unidade(s) registrada — estoque recomposto`
+        shouldRestockReturnedMaterial(condition)
+          ? `Devolução de ${quantity} unidade(s) registrada e reintegrada ao estoque`
+          : `Devolução de ${quantity} unidade(s) recebida para avaliação; saldo disponível preservado`
       );
       setSelectedExitId("");
       setSearchParams({}, { replace: true });
@@ -151,11 +163,11 @@ export default function ReturnsPage() {
     setQuantity(row.available >= 1 ? 1 : row.available);
     setReason("");
     setCondition("unused");
-    setLocationId("");
+    setLocationId(row.areaId ? row.locationId ?? "" : "");
     setObservation("");
   };
 
-  const canProcess = user?.role === "admin" || user?.role === "stock_manager";
+  const canProcess = roleHasPermission(user?.role, "returns.create");
 
   if (exits === undefined || returns === undefined) return <LoadingSkeleton />;
 
@@ -266,6 +278,7 @@ export default function ReturnsPage() {
                       <TableHead>Produto</TableHead>
                       <TableHead className="text-center">Qtd</TableHead>
                       <TableHead>Condição</TableHead>
+                      <TableHead>Destino</TableHead>
                       <TableHead>Motivo</TableHead>
                       <TableHead>Devolvido por</TableHead>
                       <TableHead>Recebido por</TableHead>
@@ -290,6 +303,11 @@ export default function ReturnsPage() {
                           {r.condition
                             ? RETURN_CONDITION_LABELS[r.condition as ReturnCondition]
                             : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={(r.restocked ?? true) ? "default" : "secondary"}>
+                            {(r.restocked ?? true) ? "No estoque" : "Em avaliação"}
+                          </Badge>
                         </TableCell>
                         <TableCell className="text-sm max-w-[200px] truncate">
                           {r.reason}
@@ -344,6 +362,8 @@ export default function ReturnsPage() {
                     ...(selectedExit.requestReason
                       ? [["Origem", selectedExit.requestReason]]
                       : []),
+                    ...(selectedExit.area?.name ? [["Área / Subestoque", selectedExit.area.name]] : []),
+                    ...(selectedExit.location?.name ? [["Local físico", selectedExit.location.name]] : []),
                     ["Quantidade retirada", String(selectedExit.quantity)],
                     ["Quantidade já devolvida", String(alreadyReturned)],
                     ["Disponível para devolver", String(maxReturnable)],
@@ -386,6 +406,12 @@ export default function ReturnsPage() {
                       </option>
                     ))}
                   </select>
+                  {!shouldRestockReturnedMaterial(condition) && (
+                    <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      Este material será registrado para avaliação e não retornará ao saldo disponível,
+                      aos lotes utilizáveis ou às solicitações até uma regularização própria.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -398,21 +424,33 @@ export default function ReturnsPage() {
                   />
                 </div>
 
-                <div>
-                  <Label>Local físico de destino (opcional)</Label>
-                  <select
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                    value={locationId}
-                    onChange={(e) => setLocationId(e.target.value)}
-                  >
-                    <option value="">Sem alteração de local</option>
-                    {(locations ?? []).map((l: any) => (
-                      <option key={l._id} value={l._id}>
-                        {l.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {selectedExit.areaId ? (
+                  <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+                    <Label>Destino da devolução</Label>
+                    <p className="mt-1 font-medium">
+                      {selectedExit.area?.name ?? "Área de origem"} / {selectedExit.location?.name ?? "Local físico de origem"}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      A devolução retorna ao mesmo subestoque e local físico da saída. Para mudar o destino depois, utilize Transferências.
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <Label>Local físico de destino (opcional)</Label>
+                    <select
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      value={locationId}
+                      onChange={(e) => setLocationId(e.target.value)}
+                    >
+                      <option value="">Sem alteração de local</option>
+                      {(locations ?? []).filter((l: any) => l.active).map((l: any) => (
+                        <option key={l._id} value={l._id}>
+                          {l.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <Label>Observação</Label>

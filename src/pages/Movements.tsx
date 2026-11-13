@@ -46,7 +46,7 @@ export default function Movements() {
 
         {/* Desktop Table */}
         <Card className="border-border/50 hidden sm:block"><CardContent className="p-0"><div className="overflow-x-auto"><Table>
-          <TableHeader><TableRow><TableHead>Data/Hora</TableHead><TableHead>Produto</TableHead><TableHead>Tipo</TableHead><TableHead className="text-center">Qtd</TableHead><TableHead className="text-center">Est. Anterior</TableHead><TableHead className="text-center">Est. Novo</TableHead><TableHead>Usuário</TableHead><TableHead>Observação</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Data/Hora</TableHead><TableHead>Produto</TableHead><TableHead>Tipo</TableHead><TableHead className="text-center">Qtd</TableHead><TableHead className="text-center">Est. Anterior</TableHead><TableHead className="text-center">Est. Novo</TableHead><TableHead>Usuário</TableHead><TableHead>Área / Local</TableHead><TableHead>Observação</TableHead></TableRow></TableHeader>
           <TableBody>
             {movements.map((m) => (<TableRow key={m._id} className={m.canceled ? "opacity-50" : ""}>
               <TableCell className="text-xs whitespace-nowrap">{new Date(m.timestamp).toLocaleString("pt-BR")}</TableCell>
@@ -56,6 +56,11 @@ export default function Movements() {
               <TableCell className="text-center font-mono text-xs text-muted-foreground">{m.previousPhysical}</TableCell>
               <TableCell className="text-center font-mono text-xs">{m.newPhysical}</TableCell>
               <TableCell className="text-sm">{m.user?.name ?? "—"}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {m.area?.name ?? "Sem área"}
+                {m.location?.name ? ` / ${m.location.name}` : ""}
+                {m.toLocation?.name ? ` → ${m.toArea?.name ? `${m.toArea.name} / ` : ""}${m.toLocation.name}` : ""}
+              </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground max-w-[170px] truncate">{m.observation ?? "—"}</span>
@@ -67,7 +72,7 @@ export default function Movements() {
                 </div>
               </TableCell>
             </TableRow>))}
-            {movements.length === 0 && (<TableRow><TableCell colSpan={8}><div className="empty-state py-12"><ArrowLeftRight className="empty-state-icon" /><p className="empty-state-title">Nenhuma movimentação registrada</p><p className="empty-state-desc">As movimentações aparecerão aqui após entradas, saídas e transferências</p></div></TableCell></TableRow>)}
+            {movements.length === 0 && (<TableRow><TableCell colSpan={9}><div className="empty-state py-12"><ArrowLeftRight className="empty-state-icon" /><p className="empty-state-title">Nenhuma movimentação registrada</p><p className="empty-state-desc">As movimentações aparecerão aqui após entradas, saídas e transferências</p></div></TableCell></TableRow>)}
           </TableBody>
         </Table></div></CardContent></Card>
 
@@ -98,6 +103,13 @@ export default function Movements() {
                     <p className="text-muted-foreground">Depois</p>
                   </div>
                 </div>
+                {(m.area || m.location || m.toLocation) && (
+                  <p className="text-[10px] text-muted-foreground mt-2">
+                    {m.area?.name ?? "Sem área"}
+                    {m.location?.name ? ` / ${m.location.name}` : ""}
+                    {m.toLocation?.name ? ` → ${m.toArea?.name ? `${m.toArea.name} / ` : ""}${m.toLocation.name}` : ""}
+                  </p>
+                )}
                 <div className="flex items-center justify-between mt-2 gap-2">
                   <p className="text-[10px] text-muted-foreground">
                     {new Date(m.timestamp).toLocaleString("pt-BR")} • {m.user?.name ?? "—"}

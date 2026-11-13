@@ -125,7 +125,8 @@ describe("A–T: saída e solicitação (itens I–R)", () => {
 
   it("O) saída maior que disponível é rejeitada no backend (quickExit valida available)", () => {
     const SETUP = readFileSync("src/convex/stockSetup.ts", "utf-8");
-    expect(SETUP).toMatch(/Estoque insuficiente\. Disponível: \$\{available\}/);
+    expect(SETUP).toMatch(/Estoque global insuficiente\. Disponível: \$\{globalAvailable\}/);
+    expect(SETUP).toContain("Estoque insuficiente em");
   });
 
   it("P/Q/R) fluxo solicitação→aprovação→entrega e liberação de reserva mantidos", () => {

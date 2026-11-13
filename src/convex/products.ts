@@ -1,10 +1,13 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { tonerKitObservation } from "./stockHelpers";
+import { tonerKitObservation, generateNextEntryNumber, generateNextLotNumber } from "./stockHelpers";
+import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
+import { validateProductStockSemanticsChange } from "../lib/product-stock-semantics";
 import { requirePermission } from "./rbac";
+import { attachStorageFile } from "./storage";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: catálogo visível a quem pode consultar estoque/produtos.
@@ -74,7 +77,10 @@ export const getById = query({
     const movements = await ctx.db.query("stockMovements").withIndex("by_product", (q) => q.eq("productId", args.id)).order("desc").take(10);
     const movementsWithUser = await Promise.all(movements.map(async (m: any) => {
       const user = await ctx.db.get(m.userId);
-      return { ...m, user };
+      const area = m.areaId ? await ctx.db.get(m.areaId) : null;
+      const location = m.locationId ? await ctx.db.get(m.locationId) : null;
+      const toLocation = m.toLocationId ? await ctx.db.get(m.toLocationId) : null;
+      return { ...m, user, area, location, toLocation };
     }));
     // ── Lotes do produto (rastreabilidade de origem) ──
     const lots = await ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", args.id)).order("desc").collect();
@@ -84,10 +90,28 @@ export const getById = query({
       return { ...l, entry, supplier };
     }));
     // ── Localizações (estoque por local) ──
-    const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
-    const locations = await Promise.all(sbls.map(async (s: any) => {
-      const location = await ctx.db.get(s.locationId);
-      return { location, quantity: s.quantity };
+    const sbls = await ctx.db.query("stockByLocation")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
+    const locations = await Promise.all(sbls.map(async (row: any) => {
+      const location = await ctx.db.get(row.locationId);
+      const area = row.areaId ? await ctx.db.get(row.areaId) : null;
+      const reservations = await ctx.db.query("requestItemReservations")
+        .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
+      const reservedQuantity = reservations
+        .filter((reservation: any) =>
+          reservation.locationId === row.locationId &&
+          reservation.areaId === (row.areaId ?? undefined)
+        )
+        .reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0);
+      return {
+        location,
+        area,
+        areaId: area?._id ?? null,
+        classificationPending: !area,
+        quantity: row.quantity,
+        reservedQuantity,
+        availableQuantity: Math.max(0, row.quantity - reservedQuantity),
+      };
     }));
     return {
       ...product,
@@ -127,14 +151,6 @@ export const belowMinimum = query({
   },
 });
 
-/** Generate lot number: LOT-YYYY-NNNNNN (same pattern as entries/initial load) */
-async function generateLotNumber(ctx: any, productId: string): Promise<string> {
-  const year = new Date().getFullYear();
-  const existingLots = await ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect();
-  const seq = existingLots.length + 1;
-  return `LOT-${year}-${String(seq).padStart(6, "0")}`;
-}
-
 export const create = mutation({
   args: {
     name: v.string(), description: v.optional(v.string()), categoryId: v.id("categories"),
@@ -148,10 +164,12 @@ export const create = mutation({
     // Estoque atual informado no cadastro (carga inicial com rastreabilidade por lote)
     initialStock: v.optional(v.number()),
     locationId: v.optional(v.id("storageLocations")),
+    initialAreaId: v.optional(v.id("stockAreas")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    const { initialStock, locationId, ...productArgs } = args;
+    const { initialStock, locationId, initialAreaId: selectedInitialAreaId, ...productArgs } = args;
+    let initialAreaId: any = selectedInitialAreaId;
     if (!args.name.trim()) throw new Error("Nome do item é obrigatório");
     if (args.ean && !/^\d{8,14}$/.test(args.ean.replace(/\D/g, ""))) {
       throw new Error("EAN/GTIN inválido: use de 8 a 14 dígitos");
@@ -192,12 +210,24 @@ export const create = mutation({
       throw new Error("Estoque atual não pode ser negativo");
     }
     if (initialStock !== undefined && initialStock > 0) {
+      if (args.hasSerial) {
+        throw new Error("Produtos com número de série exigem cadastro individual dos equipamentos; não informe estoque inicial agregado.");
+      }
+      if (isDiscreteStockUnit(args.unitOfMeasure, args.hasSerial) && !Number.isSafeInteger(initialStock)) {
+        throw new Error(`A quantidade inicial deve ser inteira para a unidade ${args.unitOfMeasure}.`);
+      }
       if (!locationId) {
         throw new Error("Informe o local de armazenamento para registrar o estoque atual");
       }
       const location = await ctx.db.get(locationId);
       if (!location) throw new Error("Local de armazenamento não encontrado");
       if (!location.active) throw new Error("O local de armazenamento selecionado está inativo");
+      if (!selectedInitialAreaId) {
+        throw new Error("Informe a área/subestoque do saldo inicial; ela não é determinada pelo armário.");
+      }
+      const area = await ctx.db.get(selectedInitialAreaId);
+      if (!area || !area.active) throw new Error("A área/subestoque selecionada não existe ou está inativa.");
+      initialAreaId = area._id;
     }
 
     // Toners de kit original de 4 cores (VersaLink, AltaLink, Lexmark CX735,
@@ -220,19 +250,20 @@ export const create = mutation({
       active: true,
     });
     const stockId = await ctx.db.insert("stock", { productId: id, physicalQuantity: 0, reservedQuantity: 0 });
+    if (productArgs.photo) {
+      await attachStorageFile(ctx, productArgs.photo, "product", String(id), String(userId));
+    }
 
     // ── Carga inicial: cria entrada, lote, saldo por local, saldo global e movimentação ──
     let initialLotInfo = "";
     if (initialStock !== undefined && initialStock > 0 && locationId) {
       const now = Date.now();
-      const year = new Date().getFullYear();
-
-      const entrySeq = (await ctx.db.query("entries").collect()).length + 1;
-      const entryNumber = `ENT-${year}-${String(entrySeq).padStart(6, "0")}`;
+      const entryNumber = await generateNextEntryNumber(ctx);
       const entryId = await ctx.db.insert("entries", {
         entryNumber,
         receivedAt: now,
         originType: "initial_inventory",
+        areaId: initialAreaId,
         responsibleUserId: userId,
         observation: `Estoque inicial cadastrado junto com o item "${args.name}"`,
         status: "confirmed",
@@ -240,15 +271,20 @@ export const create = mutation({
         updatedAt: now,
       });
 
-      const lotNumber = await generateLotNumber(ctx, id);
+      const lotNumber = await generateNextLotNumber(ctx);
       const lotId = await ctx.db.insert("lots", {
         lotNumber,
         productId: id,
         entryId,
+        brand: args.brand,
+        model: args.model,
+        specification: args.specification,
         quantityReceived: initialStock,
         quantityAvailable: initialStock,
         receivedAt: now,
         active: true,
+        areaId: initialAreaId,
+        locationId,
         observation: `Carga inicial cadastrada junto com o item — ${initialStock} unidades`,
       });
 
@@ -257,13 +293,19 @@ export const create = mutation({
         productId: id,
         quantity: initialStock,
         unitOfMeasure: args.unitOfMeasure,
+        brand: args.brand,
+        model: args.model,
+        specification: args.specification,
         lotId: lotId as string,
         locationId,
+        areaId: initialAreaId,
+        observation: args.observation,
       });
 
       await ctx.db.insert("stockByLocation", {
         productId: id,
         locationId,
+        areaId: initialAreaId,
         quantity: initialStock,
       });
 
@@ -280,6 +322,8 @@ export const create = mutation({
         userId,
         entryId,
         lotId: lotId as string,
+        areaId: initialAreaId,
+        locationId,
         observation: `Estoque inicial — lote ${lotNumber} — ${initialStock} unidades (cadastro do item)`,
         timestamp: now,
       });
@@ -329,14 +373,63 @@ export const update = mutation({
       }
     }
 
+    // Unidade de medida e controle serial alteram o significado de todo o
+    // histórico de quantidades. Só podem ser definidos livremente antes de
+    // existir qualquer movimentação, lote, reserva ou uso patrimonial.
+    if (updates.unitOfMeasure !== undefined) {
+      updates.unitOfMeasure = updates.unitOfMeasure.trim();
+      if (!updates.unitOfMeasure) throw new Error("A unidade de medida não pode ficar vazia.");
+    }
+    const unitChanged = updates.unitOfMeasure !== undefined &&
+      updates.unitOfMeasure !== product.unitOfMeasure;
+    const serialChanged = updates.hasSerial !== undefined &&
+      updates.hasSerial !== product.hasSerial;
+    if (unitChanged || serialChanged) {
+      const [
+        stockRows, lots, movements, entryItems, requestItems,
+        locationRows, assetParts, transfers, returns,
+      ] = await Promise.all([
+        ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("stockMovements").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("entryItems").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("requestItems").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("assetParts").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("stockTransfers").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+        ctx.db.query("returns").withIndex("by_product", (q: any) => q.eq("productId", id)).collect(),
+      ]);
+      const hasStockHistory =
+        lots.length > 0 || movements.length > 0 || entryItems.length > 0 ||
+        requestItems.length > 0 || locationRows.length > 0 || assetParts.length > 0 ||
+        transfers.length > 0 || returns.length > 0 ||
+        stockRows.some((row: any) =>
+          Number(row.physicalQuantity) !== 0 || Number(row.reservedQuantity) !== 0
+        );
+      const semanticsError = validateProductStockSemanticsChange({
+        currentUnit: product.unitOfMeasure,
+        nextUnit: updates.unitOfMeasure,
+        currentHasSerial: product.hasSerial ?? false,
+        nextHasSerial: updates.hasSerial,
+        hasStockHistory,
+      });
+      if (semanticsError) throw new Error(semanticsError);
+    }
+
     // Validate stock values
     if (updates.minimumStock !== undefined && updates.minimumStock < 0) throw new Error("Estoque mínimo não pode ser negativo");
     if (updates.idealStock !== undefined && updates.idealStock < 0) throw new Error("Estoque ideal não pode ser negativo");
     if (updates.maximumStock !== undefined && updates.maximumStock < 0) throw new Error("Estoque máximo não pode ser negativo");
 
-    if (updates.name) updates.name = updates.name.trim();
+    if (updates.name !== undefined) {
+      updates.name = updates.name.trim();
+      if (!updates.name) throw new Error("O nome do item não pode ficar vazio.");
+    }
 
     await ctx.db.patch(id, updates);
+    if (updates.photo) {
+      await attachStorageFile(ctx, updates.photo, "product", String(id), String(userId));
+    }
     const action = updates.active === false ? "deactivate" : updates.active === true ? "activate" : "update";
     await ctx.db.insert("auditLogs", {
       userId, action, entity: "products", entityId: id,
