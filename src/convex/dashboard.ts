@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { getOptionalSingleValidGlobalStock, inspectProductStockIntegrity } from "../lib/stock-read-integrity";
 
 async function requireUser(ctx: any) {
   // RBAC central: dashboard exige permissão de visualização.
@@ -31,14 +32,21 @@ export const stats = query({
       .query("products")
       .withIndex("by_active", (q) => q.eq("active", true))
       .collect();
+    const stockRows = await ctx.db.query("stock").collect();
+    const stockRowsByProduct = new Map<string, typeof stockRows>();
+    for (const row of stockRows) {
+      const key = String(row.productId);
+      const rows = stockRowsByProduct.get(key) ?? [];
+      rows.push(row);
+      stockRowsByProduct.set(key, rows);
+    }
+    const stockForProduct = (product: (typeof products)[number]) =>
+      getOptionalSingleValidGlobalStock(stockRowsByProduct.get(String(product._id)) ?? [], product.name);
 
     // Critical stock count
     let criticalStock = 0;
     for (const p of products) {
-      const stock = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
+      const stock = stockForProduct(p);
       const qty = stock?.physicalQuantity ?? 0;
       // `?? 0` preserva exatamente o comportamento anterior (o campo passou a
       // ser anulável; produto sem mínimo configurado continua com mínimo 0).
@@ -99,10 +107,7 @@ export const stats = query({
     // Urgent alerts (items at or below minimum)
     const urgentAlerts = [];
     for (const p of products) {
-      const stock = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
+      const stock = stockForProduct(p);
       const qty = stock?.physicalQuantity ?? 0;
       if (qty <= (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
@@ -181,38 +186,90 @@ export const stats = query({
 export const stockPosition = query({
   args: {},
   handler: async (ctx) => {
-    await requireUser(ctx);
-    const products = await ctx.db.query("products").collect();
-    return Promise.all(
-      products.map(async (p) => {
-        const category = await ctx.db.get(p.categoryId);
-        const stock = await ctx.db
-          .query("stock")
-          .withIndex("by_product", (q) => q.eq("productId", p._id))
-          .first();
-        const qty = stock?.physicalQuantity ?? 0;
-        let status: string = "Normal";
-        if (qty === 0) status = "Zerado";
-        else if (qty <= (p.minimumStock ?? 0)) status = "Crítico";
-        else if (qty <= (p.idealStock ?? 0)) status = "Baixo";
-        return {
-          _id: p._id,
-          name: p.name,
-          internalCode: p.internalCode ?? "",
-          categoryName: category?.name ?? "",
-          unitOfMeasure: p.unitOfMeasure,
-          currentStock: qty,
-          reservedQuantity: stock?.reservedQuantity ?? 0,
-          minimumStock: p.minimumStock ?? 0,
-          idealStock: p.idealStock ?? 0,
-          maximumStock: p.maximumStock,
-          status,
-          brand: p.brand,
-          model: p.model,
-          active: p.active,
-        };
-      })
-    );
+    await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "stockPosition" });
+    const [products, stockRows, locationRows, lots, categories, areas, storageLocations] = await Promise.all([
+      ctx.db.query("products").collect(),
+      ctx.db.query("stock").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("lots").collect(),
+      ctx.db.query("categories").collect(),
+      ctx.db.query("stockAreas").collect(),
+      ctx.db.query("storageLocations").collect(),
+    ]);
+
+    const stockByProduct = new Map<string, typeof stockRows>();
+    const locationsByProduct = new Map<string, typeof locationRows>();
+    const lotsByProduct = new Map<string, typeof lots>();
+    for (const row of stockRows) {
+      const key = String(row.productId);
+      const group = stockByProduct.get(key) ?? [];
+      group.push(row);
+      stockByProduct.set(key, group);
+    }
+    for (const row of locationRows) {
+      const key = String(row.productId);
+      const group = locationsByProduct.get(key) ?? [];
+      group.push(row);
+      locationsByProduct.set(key, group);
+    }
+    for (const lot of lots) {
+      const key = String(lot.productId);
+      const group = lotsByProduct.get(key) ?? [];
+      group.push(lot);
+      lotsByProduct.set(key, group);
+    }
+
+    const categoryById = new Map(categories.map((category) => [String(category._id), category.name]));
+    const areaById = new Map(areas.map((area) => [String(area._id), area.name]));
+    const locationById = new Map(storageLocations.map((location) => [String(location._id), location.name]));
+
+    return products.map((product) => {
+      const productStocks = stockByProduct.get(String(product._id)) ?? [];
+      const productLocations = locationsByProduct.get(String(product._id)) ?? [];
+      const productLots = lotsByProduct.get(String(product._id)) ?? [];
+      const integrity = inspectProductStockIntegrity(
+        productStocks,
+        productLocations,
+        productLots,
+        product.name,
+      );
+      const stock = integrity.globalStock;
+      const quantity = stock
+        ? stock.physicalQuantity
+        : integrity.issues.length === 0 ? 0 : null;
+      let status: string = "Normal";
+      if (!integrity.consistent) status = "Divergente";
+      else if (quantity === null || quantity === 0) status = "Zerado";
+      else if (quantity <= (product.minimumStock ?? 0)) status = "Crítico";
+      else if (quantity <= (product.idealStock ?? 0)) status = "Baixo";
+
+      const locationBreakdown = productLocations.map((row) => ({
+        areaName: row.areaId ? areaById.get(String(row.areaId)) ?? "Área não encontrada" : "Sem área",
+        locationName: locationById.get(String(row.locationId)) ?? "Local não encontrado",
+        quantity: typeof row.quantity === "number" && Number.isFinite(row.quantity) && row.quantity >= 0
+          ? row.quantity
+          : null,
+      }));
+
+      return {
+        _id: product._id,
+        name: product.name,
+        internalCode: product.internalCode ?? "",
+        categoryName: categoryById.get(String(product.categoryId)) ?? "",
+        unitOfMeasure: product.unitOfMeasure,
+        currentStock: quantity,
+        reservedQuantity: stock?.reservedQuantity ?? 0,
+        minimumStock: product.minimumStock ?? 0,
+        idealStock: product.idealStock ?? 0,
+        maximumStock: product.maximumStock,
+        status,
+        brand: product.brand,
+        model: product.model,
+        active: product.active,
+        locationBreakdown,
+        integrityIssues: integrity.issues,
+      };
+    });
   },
 });
 
