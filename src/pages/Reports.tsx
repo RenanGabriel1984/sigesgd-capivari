@@ -65,7 +65,7 @@ function downloadCSV(filename: string, csvContent: string) {
 }
 
 function exportStockPositionCSV(data: any[]) {
-  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade";
+  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade;Distribuição por Área/Armário;Alertas de Integridade";
   const rows = data.map((r) =>
     [
       r.internalCode,
@@ -79,6 +79,8 @@ function exportStockPositionCSV(data: any[]) {
       r.maximumStock,
       r.status,
       UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure,
+      (r.locationBreakdown ?? []).map((location: any) => `${location.areaName} / ${location.locationName}: ${location.quantity ?? "inválido"}`).join(" | "),
+      (r.integrityIssues ?? []).join(" | "),
     ].join(";")
   );
   downloadCSV("posicao_estoque.csv", [header, ...rows].join("\n"));
@@ -205,17 +207,18 @@ export default function Reports() {
   );
 
   const stockStatusCounts = useMemo(() => {
-    if (!stockPosition) return { normal: 0, baixo: 0, critico: 0, zerado: 0, total: 0 };
+    if (!stockPosition) return { normal: 0, baixo: 0, critico: 0, zerado: 0, divergente: 0, total: 0 };
     return stockPosition.reduce(
       (acc, item) => {
         acc.total++;
-        if (item.status === "Zerado") acc.zerado++;
+        if (item.status === "Divergente") acc.divergente++;
+        else if (item.status === "Zerado") acc.zerado++;
         else if (item.status === "Crítico") acc.critico++;
         else if (item.status === "Baixo") acc.baixo++;
         else acc.normal++;
         return acc;
       },
-      { normal: 0, baixo: 0, critico: 0, zerado: 0, total: 0 }
+      { normal: 0, baixo: 0, critico: 0, zerado: 0, divergente: 0, total: 0 }
     );
   }, [stockPosition]);
 
@@ -273,6 +276,9 @@ export default function Reports() {
                 <Badge variant="destructive" className="text-xs">
                   Zerado: {stockStatusCounts.zerado}
                 </Badge>
+                <Badge variant="destructive" className="text-xs">
+                  Divergente: {stockStatusCounts.divergente}
+                </Badge>
               </div>
               <div className="flex gap-2">
                 <Button
@@ -310,6 +316,7 @@ export default function Reports() {
                         <TableHead className="text-xs text-right">Mínimo</TableHead>
                         <TableHead className="text-xs text-right">Ideal</TableHead>
                         <TableHead className="text-xs text-right">Máximo</TableHead>
+                        <TableHead className="text-xs">Área / Armário</TableHead>
                         <TableHead className="text-xs">Status</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -324,10 +331,20 @@ export default function Reports() {
                           <TableCell className="text-xs text-right font-mono">{item.minimumStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.idealStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.maximumStock}</TableCell>
+                          <TableCell className="text-xs min-w-56">
+                            <div className="space-y-1">
+                              {item.locationBreakdown?.length ? item.locationBreakdown.map((location, index) => (
+                                <div key={index}>{location.areaName} / {location.locationName}: <span className="font-mono">{location.quantity ?? "inválido"}</span></div>
+                              )) : "Sem saldo por localização"}
+                              {item.integrityIssues?.length > 0 && (
+                                <div className="text-destructive text-[11px] whitespace-normal">{item.integrityIssues.join(" ")}</div>
+                              )}
+                            </div>
+                          </TableCell>
                           <TableCell>
                             <Badge
                               variant={
-                                item.status === "Crítico" || item.status === "Zerado"
+                                item.status === "Divergente" || item.status === "Crítico" || item.status === "Zerado"
                                   ? "destructive"
                                   : item.status === "Baixo"
                                   ? "secondary"
@@ -342,7 +359,7 @@ export default function Reports() {
                       ))}
                       {!stockPosition && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={10} className="text-center py-8 text-muted-foreground text-sm">
                             Carregando…
                           </TableCell>
                         </TableRow>
