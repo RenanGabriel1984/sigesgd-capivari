@@ -1,6 +1,6 @@
 # Modelo-alvo de rastreabilidade do estoque por lote e armário
 
-**Status:** integração de entradas, saídas, transferências, devoluções, inventário por lote × armário, operação de peças patrimoniais, troca GomaQ e relatório/CSV integrada em código na branch `codex/stock-read-model-integrity`. A validação final do CI desta revisão permanece pendente. Nenhuma migração de dados reais foi executada.  
+**Status:** integração de entradas, saídas, transferências, devoluções, inventário por lote × armário, operação de peças patrimoniais, troca GomaQ e relatório/CSV concluída em código na branch `codex/stock-read-model-integrity`. CI aprovado no commit `9d903ccbf98babd54396c78ad51e07fad2e9833c`: 71 arquivos de teste, 1.482 testes, TypeScript e build aprovados (execução GitHub Actions `43459923933`). Nenhuma migração ou publicação em produção foi executada.  
 **Restrição operacional:** qualquer migração de dados reais depende de autorização explícita; esta especificação não autoriza execução em produção.
 
 ## 1. Situação encontrada
@@ -112,10 +112,9 @@ A migração deve ter duas fases independentes:
 
 ## 7. Pendências de integração antes de considerar o livro-razão completo
 
-- Confirmar o CI completo da revisão final e corrigir qualquer incompatibilidade apontada.
-- Executar o diagnóstico read-only no deployment real somente após autorização explícita para consultar esses dados; analisar individualmente os lotes do inventário inicial e da DANFE de toners da GomaQ.
+- Executar o diagnóstico read-only `stockSetup.lotLocationReadiness` no deployment real somente após autorização explícita para consultar esses dados; analisar individualmente os lotes do inventário inicial e da DANFE de toners da GomaQ.
 - Preparar migração assistida apenas para os casos comprovados, com plano de reversão, conferência humana e autorização explícita.
-- Validar operacionalmente os fluxos com dados de teste antes de qualquer publicação.
+- Fazer a validação operacional das telas e permissões com uma cópia de dados representativa antes de publicar.
 
 ## 8. Fora desta especificação
 
