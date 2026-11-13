@@ -3,7 +3,7 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
-import { consumeLotLocationStock, resolveWithdrawalLocation } from "./lotLocationLedger";
+import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -111,6 +111,10 @@ export const createExit = mutation({
       locationId: sourceLocationId,
       observation: `${args.observation ?? "Saída direta"} — armário ${sourceLocation?.name ?? sourceLocationId}; lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
       timestamp: Date.now(),
+    });
+    await recordLotMovementAllocations(ctx, {
+      movementId, productId: args.productId, locationId: sourceLocationId,
+      allocations: lotConsumption.allocations,
     });
     await ctx.db.insert("auditLogs", {
       userId, action: "move_stock", entity: "stockMovements", entityId: movementId,
