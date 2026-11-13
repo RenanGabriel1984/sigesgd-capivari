@@ -203,7 +203,7 @@ export function inspectProductStockIntegrity(
 
   if (globalStock) {
     if (Math.abs(globalStock.physicalQuantity - locationQuantity) > TOLERANCE) {
-      issues.push("O saldo global diverge da soma dos saldos por área/local.");
+      issues.push("O saldo global diverge da soma dos saldos por armário.");
     }
     if (Math.abs(globalStock.physicalQuantity - lotQuantity) > TOLERANCE) {
       issues.push("O saldo global diverge da soma dos saldos dos lotes.");
