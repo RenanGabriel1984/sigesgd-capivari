@@ -1,6 +1,6 @@
 # Modelo-alvo de rastreabilidade do estoque por lote e armário
 
-**Status:** especificação técnica para a próxima fase. Não implementada nesta etapa.  
+**Status:** implementação inicial em andamento na branch `codex/stock-read-model-integrity`. Schema, recebimentos com local, transferências por lote e devoluções rastreadas foram iniciados; saídas, requisições e fluxos especializados ainda não foram integrados.  
 **Restrição operacional:** qualquer migração de dados reais depende de autorização explícita; esta especificação não autoriza execução em produção.
 
 ## 1. Situação encontrada
@@ -21,7 +21,7 @@ Não se deve inferir que o armário de recebimento continua sendo o armário atu
 
 ## 2. Estrutura proposta
 
-Adicionar uma tabela `lotLocationBalances` (nome provisório) com um registro por combinação **lote × localização física**:
+A tabela `lotLocationBalances` foi adicionada ao schema nesta fase, com um registro por combinação **lote × localização física**:
 
 | Campo | Finalidade |
 | --- | --- |
@@ -58,11 +58,9 @@ As mutations devem atualizar os registros envolvidos em uma única transação C
 ## 4. Regras por fluxo
 
 ### Recebimento
-Ao confirmar uma entrada, criar:
-- lote com sua área;
-- saldo do lote no armário de destino;
-- saldo físico do produto no armário;
-- saldo global e movimentação/auditoria.
+**Implementado parcialmente:** ao confirmar uma entrada com locationId, o fluxo cria/atualiza o saldo do lote naquele armário. Entrada sem local continua compatível com o legado e não recebe localização presumida.
+
+O fluxo também atualiza lote com sua área, saldo físico do produto no armário (quando informado), saldo global e movimentação/auditoria. A conciliação completa ainda depende da regularização de registros antigos e da cobertura dos fluxos alternativos de entrada.
 
 ### Saídas, requisições e consumos
 O FIFO deve consumir simultaneamente:
@@ -74,17 +72,10 @@ O FIFO deve consumir simultaneamente:
 O fluxo deve respeitar a área/localidade quando a solicitação as especificar. GomaQ, suprimentos de impressão, peças patrimoniais e saídas diretas devem usar o mesmo serviço de consumo, preservando seus dados operacionais e auditorias específicas.
 
 ### Transferência
-Para transferência parcial de um lote:
-- reduzir o saldo daquele lote no armário de origem;
-- aumentar o saldo do mesmo lote no armário de destino;
-- não reduzir `lots.quantityAvailable`;
-- não alterar o saldo global do produto;
-- registrar transferência e auditoria.
-
-Se o lote já tiver saldo em ambos os armários, atualizar os dois buckets existentes sem criar duplicidade lógica.
+**Implementado para transferências novas com lote e saldo rastreável na origem.** O fluxo reduz o saldo do lote no armário de origem, aumenta o mesmo lote no destino, não reduz `lots.quantityAvailable`, não altera o saldo global e registra transferência/auditoria. Se já houver saldo nos dois armários, atualiza os dois buckets. Se não houver saldo rastreável na origem, bloqueia e exige regularização — não infere localização pelo recebimento. Transferências legadas sem lote seguem pendentes de cobertura e diagnóstico.
 
 ### Devolução
-A devolução deve informar o armário de destino e o lote original (quando rastreável). A quantidade volta ao mesmo lote no armário de destino, elevando os saldos físico, local e do lote na mesma transação. Material avariado/não reutilizável continua fora do saldo disponível.
+**Implementado parcialmente para devoluções com lote resolvido:** exige armário de destino e recompõe o saldo do lote naquele local, além dos saldos global, físico-local e do lote. Material avariado/não reutilizável continua fora do saldo disponível. A ligação confiável entre saída original, ID do lote consumido e armário de origem ainda precisa ser padronizada em todos os fluxos de saída.
 
 ### Inventário
 O inventário que ajusta estoque deve contar por lote e armário, não somente por produto agregado. Diferenças devem ser atribuídas aos lotes efetivamente contados. Não distribuir diferença automaticamente por FIFO, pelo lote mais novo ou por qualquer outro critério presumido.
@@ -117,7 +108,16 @@ A migração deve ter duas fases independentes:
 - Dashboard, relatório e CSV conciliam os mesmos totais e exibem exceções com causa rastreável.
 - GomaQ, impressão, requisições, patrimônio, água e os demais fluxos existentes mantêm seus dados e auditorias.
 
-## 7. Fora desta especificação
+## 7. Pendências de integração antes de considerar o livro-razão completo
+
+- Saídas diretas precisam aceitar/definir local e consumir lotes e buckets lote × local em FIFO.
+- Entregas de requisições precisam registrar quais lotes e armários foram consumidos, preservando reserva e auditoria.
+- GomaQ, suprimentos de impressão e peças patrimoniais precisam usar o mesmo serviço de baixa, sem quebrar seus fluxos específicos.
+- Inventário precisa contar e ajustar por lote × armário, sem distribuir diferenças automaticamente.
+- O identificador de lote nos movimentos deve ser padronizado para um ID Convex estável; número de lote é dado de exibição, não chave.
+- A consulta de posição e os CSVs devem incluir a nova dimensão e sinalizar lotes sem saldo por localização.
+
+## 8. Fora desta especificação
 
 - Não alterar saldos existentes automaticamente.
 - Não reclassificar lotes históricos sem evidência.
