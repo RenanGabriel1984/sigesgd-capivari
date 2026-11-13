@@ -579,7 +579,7 @@ export const quickExit = mutation({
       quantity: args.quantity,
       product: product.name,
       newAvailable: newPhysical - previousReserved,
-      lotsConsumed: consumedLots.length,
+      lotsConsumed: lotConsumption.allocations.length,
     };
   },
 });
