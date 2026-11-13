@@ -1,6 +1,6 @@
 # Modelo-alvo de rastreabilidade do estoque por lote e armário
 
-**Status:** integração do livro-razão de saídas em validação na branch `codex/stock-read-model-integrity`. Entradas novas, carga inicial nova, transferências, devoluções e saídas FIFO centrais foram integradas em código; o CI ainda precisa aprovar a revisão mais recente e os fluxos de inventário/reconciliação legada permanecem pendentes.  
+**Status:** integração de entradas, saídas, transferências, devoluções, inventário por lote × armário, operação de peças patrimoniais, troca GomaQ e relatório/CSV integrada em código na branch `codex/stock-read-model-integrity`. A validação final do CI desta revisão permanece pendente. Nenhuma migração de dados reais foi executada.  
 **Restrição operacional:** qualquer migração de dados reais depende de autorização explícita; esta especificação não autoriza execução em produção.
 
 ## 1. Situação encontrada
@@ -68,7 +68,7 @@ As mutations devem atualizar os registros envolvidos em uma única transação C
 ### Saídas, requisições e consumos
 **Integrado em código na branch:** existe um serviço compartilhado que calcula FIFO por `receivedAt` e consome exclusivamente do armário escolhido. Ele valida duplicidades, quantidades inválidas e conciliação integral entre lote × armários e `stockByLocation` antes de gravar. A mutation Convex aplica atomicamente a baixa em `lotLocationBalances`, `lots.quantityAvailable`, `stockByLocation.quantity` e, na chamadora, `stock.physicalQuantity`.
 
-Os fluxos conectados são: saída rápida (`stockSetup.quickExit`), saída direta (`stockMovements.createExit`), entrega de requisições (`requests.deliver`), troca GomaQ (`gomaQ.createExchange`), retirada unitária e por família de suprimentos (`printSupplies.withdraw`/`withdrawFamily`) e instalação de peças (`assetParts.installPart`). Cada saída já grava alocações estruturadas de todos os lotes consumidos na tabela `stockMovementLotAllocations`; a abertura de embalagem registra a retirada dos lotes fechados separadamente da reclassificação e da saída das unidades avulsas. As telas de saída rápida, entrega de requisição e suprimentos de impressão pedem o armário de origem quando há mais de uma opção. A troca GomaQ e a instalação de peças ainda precisam de validação do fluxo de tela para seleção explícita quando o produto estiver em mais de um armário.
+Os fluxos conectados são: saída rápida (`stockSetup.quickExit`), saída direta (`stockMovements.createExit`), entrega de requisições (`requests.deliver`), troca GomaQ (`gomaQ.createExchange`), retirada unitária e por família de suprimentos (`printSupplies.withdraw`/`withdrawFamily`) e instalação de peças (`assetParts.installPart`). Cada saída grava alocações estruturadas de todos os lotes consumidos na tabela `stockMovementLotAllocations`; a abertura de embalagem registra a retirada dos lotes fechados separadamente da reclassificação e da saída das unidades avulsas. As telas de saída rápida, entrega de requisição e suprimentos de impressão pedem o armário de origem. A tela GomaQ possui formulário para selecionar impressora, suprimento compatível, armário, quantidade entregue e carcaças recebidas; a ficha patrimonial possui formulário para instalação de peça com seleção explícita de armário. Os formulários chamam as mutations já protegidas por permissão no backend.
 
 **Regra de segurança para legado:** se um lote antigo não estiver integralmente mapeado ou os totais não fecharem, a retirada é bloqueada com motivo; não há fallback para baixa global nem seleção arbitrária de lote/local.
 
@@ -76,10 +76,10 @@ Os fluxos conectados são: saída rápida (`stockSetup.quickExit`), saída diret
 **Implementado para transferências novas com lote e saldo rastreável na origem.** O fluxo reduz o saldo do lote no armário de origem, aumenta o mesmo lote no destino, não reduz `lots.quantityAvailable`, não altera o saldo global e registra transferência/auditoria. Se já houver saldo nos dois armários, atualiza os dois buckets. Se não houver saldo rastreável na origem, bloqueia e exige regularização — não infere localização pelo recebimento. Transferências legadas sem lote seguem pendentes de cobertura e diagnóstico.
 
 ### Devolução
-**Implementado parcialmente para devoluções com lote resolvido:** exige armário de destino e recompõe o saldo do lote naquele local, além dos saldos global, físico-local e do lote. Material avariado/não reutilizável continua fora do saldo disponível. A ligação confiável entre saída original, ID do lote consumido e armário de origem ainda precisa ser padronizada em todos os fluxos de saída.
+**Implementado em código para saídas multi-lote:** a consulta de saídas devolvíveis carrega as alocações reais da movimentação original. A tela exige que o operador distribua a quantidade devolvida entre os lotes/armários efetivamente consumidos e selecione o armário de destino. A mutation valida o limite remanescente de cada alocação, repõe cada lote no destino informado e grava os detalhes em `returnLotAllocations`. Devoluções parciais são permitidas; devoluções legadas ambíguas ficam bloqueadas para regularização, sem presumir lote ou origem.
 
 ### Inventário
-O inventário inicial já feito é preservado. O fluxo de inventário ainda precisa contar e ajustar por lote e armário. Até essa etapa estar concluída, inventários posteriores que alterem apenas saldos agregados podem tornar o livro-razão inconsistente; a rotina de baixa detectará a diferença e bloqueará a operação. Não distribuir diferença automaticamente por FIFO, pelo lote mais novo ou por qualquer outro critério presumido.
+O inventário inicial já feito é preservado. Novos inventários são abertos por produto × armário e, para produtos rastreados, por lote × armário. O saldo do sistema é capturado para cada combinação; o operador registra a quantidade física contada. O fechamento valida se os saldos não mudaram desde a abertura, atualiza os saldos lote × armário, recalcula o total de cada lote e consolida os saldos por armário e global em uma única mutation. Diferenças são registradas como movimentações de ajuste, por lote/armário, com justificativa obrigatória. Inventários antigos agregados não podem fechar produtos que agora exigem rastreabilidade por lote; devem ser cancelados e reabertos no modelo novo. Não há distribuição automática por FIFO ou por lote presumido.
 
 ## 5. Migração dos registros atuais
 
@@ -107,17 +107,15 @@ A migração deve ter duas fases independentes:
 - Uma saída FIFO reduz exatamente os lotes e armários que forneceram as unidades.
 - Uma devolução pode retornar a um armário diferente do originalmente usado, sem distorcer a localização do saldo remanescente do lote.
 - Inventário por lote/local corrige quantidades sem escolher lote arbitrariamente.
-- Dashboard, relatório e CSV conciliam os mesmos totais e exibem exceções com causa rastreável.
+- Dashboard, relatório e CSV exibem a distribuição de cada lote por armário, além dos totais por área e por localização, e mantêm alertas de integridade quando há divergências.
 - GomaQ, impressão, requisições, patrimônio, água e os demais fluxos existentes mantêm seus dados e auditorias.
 
 ## 7. Pendências de integração antes de considerar o livro-razão completo
 
-- Confirmar CI completo da branch após as integrações de saída e corrigir eventuais incompatibilidades de código/testes.
-- Implementar inventário e reconciliação por lote × armário, sem distribuir diferenças automaticamente.
-- Integrar `stockMovementLotAllocations` às consultas, relatórios e ao fluxo de devolução para restaurar exatamente cada lote e armário, inclusive em saídas multi-lote.
-- Executar o diagnóstico read-only no deployment somente após autorização para consulta; analisar individualmente os lotes do inventário inicial e os lotes da DANFE de toners da GomaQ.
-- Preparar eventual migração assistida apenas para os casos comprovados, com plano de reversão e autorização explícita.
-- Atualizar relatório e CSV com a nova dimensão e a situação da conciliação.
+- Confirmar o CI completo da revisão final e corrigir qualquer incompatibilidade apontada.
+- Executar o diagnóstico read-only no deployment real somente após autorização explícita para consultar esses dados; analisar individualmente os lotes do inventário inicial e da DANFE de toners da GomaQ.
+- Preparar migração assistida apenas para os casos comprovados, com plano de reversão, conferência humana e autorização explícita.
+- Validar operacionalmente os fluxos com dados de teste antes de qualquer publicação.
 
 ## 8. Fora desta especificação
 
