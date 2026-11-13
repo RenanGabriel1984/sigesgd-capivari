@@ -455,6 +455,34 @@ export const confirm = mutation({
       // o item ao lote que ele gerou.
       await ctx.db.patch(item._id, { lotId: lotId as string });
 
+      // Saldo rastreável do lote no armário informado no recebimento.
+      // Entradas legadas sem local continuam preservadas, mas não recebem
+      // localização presumida.
+      if (item.locationId) {
+        const existingLotLocation = await ctx.db
+          .query("lotLocationBalances")
+          .withIndex("by_lot", (q: any) => q.eq("lotId", lotId))
+          .collect();
+        const duplicate = existingLotLocation.filter((row: any) => row.locationId === item.locationId);
+        if (duplicate.length > 1) {
+          throw new Error(`Saldo duplicado do lote ${lotNumber} no local informado.`);
+        }
+        if (duplicate.length === 1) {
+          await ctx.db.patch(duplicate[0]._id, {
+            quantityAvailable: duplicate[0].quantityAvailable + item.quantity,
+            updatedAt: now,
+          });
+        } else {
+          await ctx.db.insert("lotLocationBalances", {
+            lotId,
+            productId: item.productId,
+            locationId: item.locationId,
+            quantityAvailable: item.quantity,
+            updatedAt: now,
+          });
+        }
+      }
+
       // Update stock (increase physicalQuantity)
       const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
       const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
