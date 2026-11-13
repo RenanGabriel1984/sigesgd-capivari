@@ -40,6 +40,9 @@ A área continua pertencendo ao lote (`lots.areaId`), evitando manter duas class
 
 A unicidade lógica de `lotId + locationId` deve ser garantida na camada de mutation, pois um índice Convex comum não impõe unicidade.
 
+Também foi adicionada a tabela `stockMovementLotAllocations`, vinculando cada movimentação a **todos** os lotes e armários que participaram, com quantidade e tipo da alocação (`withdrawal` ou `reclassification`). O campo legado `stockMovements.lotId` continua disponível para compatibilidade e aponta para um lote principal quando aplicável; relatórios e devoluções devem usar a tabela de alocações para rastreabilidade completa.
+
+
 ## 3. Invariantes obrigatórios
 
 Para cada produto:
@@ -65,7 +68,7 @@ As mutations devem atualizar os registros envolvidos em uma única transação C
 ### Saídas, requisições e consumos
 **Integrado em código na branch:** existe um serviço compartilhado que calcula FIFO por `receivedAt` e consome exclusivamente do armário escolhido. Ele valida duplicidades, quantidades inválidas e conciliação integral entre lote × armários e `stockByLocation` antes de gravar. A mutation Convex aplica atomicamente a baixa em `lotLocationBalances`, `lots.quantityAvailable`, `stockByLocation.quantity` e, na chamadora, `stock.physicalQuantity`.
 
-Os fluxos conectados são: saída rápida (`stockSetup.quickExit`), saída direta (`stockMovements.createExit`), entrega de requisições (`requests.deliver`), troca GomaQ (`gomaQ.createExchange`), retirada unitária e por família de suprimentos (`printSupplies.withdraw`/`withdrawFamily`) e instalação de peças (`assetParts.installPart`). As telas de saída rápida, entrega de requisição e suprimentos de impressão pedem o armário de origem quando há mais de uma opção. A troca GomaQ e a instalação de peças ainda precisam de validação do fluxo de tela para seleção explícita quando o produto estiver em mais de um armário.
+Os fluxos conectados são: saída rápida (`stockSetup.quickExit`), saída direta (`stockMovements.createExit`), entrega de requisições (`requests.deliver`), troca GomaQ (`gomaQ.createExchange`), retirada unitária e por família de suprimentos (`printSupplies.withdraw`/`withdrawFamily`) e instalação de peças (`assetParts.installPart`). Cada saída já grava alocações estruturadas de todos os lotes consumidos na tabela `stockMovementLotAllocations`; a abertura de embalagem registra a retirada dos lotes fechados separadamente da reclassificação e da saída das unidades avulsas. As telas de saída rápida, entrega de requisição e suprimentos de impressão pedem o armário de origem quando há mais de uma opção. A troca GomaQ e a instalação de peças ainda precisam de validação do fluxo de tela para seleção explícita quando o produto estiver em mais de um armário.
 
 **Regra de segurança para legado:** se um lote antigo não estiver integralmente mapeado ou os totais não fecharem, a retirada é bloqueada com motivo; não há fallback para baixa global nem seleção arbitrária de lote/local.
 
@@ -110,9 +113,8 @@ A migração deve ter duas fases independentes:
 ## 7. Pendências de integração antes de considerar o livro-razão completo
 
 - Confirmar CI completo da branch após as integrações de saída e corrigir eventuais incompatibilidades de código/testes.
-- Validar a seleção de armário na interface de troca GomaQ e instalação de peças para produtos com saldo em mais de um armário.
 - Implementar inventário e reconciliação por lote × armário, sem distribuir diferenças automaticamente.
-- Revisar o formato estruturado de alocação multi-lote nos movimentos e nos vínculos específicos de GomaQ/peças.
+- Integrar `stockMovementLotAllocations` às consultas, relatórios e ao fluxo de devolução para restaurar exatamente cada lote e armário, inclusive em saídas multi-lote.
 - Executar o diagnóstico read-only no deployment somente após autorização para consulta; analisar individualmente os lotes do inventário inicial e os lotes da DANFE de toners da GomaQ.
 - Preparar eventual migração assistida apenas para os casos comprovados, com plano de reversão e autorização explícita.
 - Atualizar relatório e CSV com a nova dimensão e a situação da conciliação.
