@@ -1,4 +1,5 @@
 import { requirePermission } from "./rbac";
+import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
@@ -77,7 +78,7 @@ export const installPart = mutation({
       locationId: sourceLocationId,
       quantity: args.quantity,
     });
-    const sourceLocation = await ctx.db.get(sourceLocationId);
+    const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
 
     // Re-read stock for concurrency safety (double-check pattern)
     const freshStockRows = await ctx.db
