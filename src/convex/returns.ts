@@ -85,7 +85,7 @@ export const returnable = query({
           .withIndex("by_exitMovement", (q: any) => q.eq("exitMovementId", m._id))
           .collect(),
       ]);
-      let sourceAllocations = sourceRows
+      let sourceAllocations: Array<{ lotId: string; sourceLocationId?: string; quantity: number }> = sourceRows
         .filter((row: any) => row.allocationType === "withdrawal")
         .map((row: any) => ({
           lotId: String(row.lotId),
