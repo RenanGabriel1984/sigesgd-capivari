@@ -117,3 +117,104 @@ export function buildWaterSupplierReturnDeltas(
     emptyDelta: -emptyGallonsReturned,
   };
 }
+
+
+export interface WaterFinanceReceiptInput {
+  totalValueCents: number;
+}
+
+export interface WaterFinanceShareInput {
+  shareId: string;
+  participantId: string;
+  participantName: string;
+  amountDueCents: number;
+}
+
+export interface WaterFinancePaymentInput {
+  shareId: string;
+  amountCents: number;
+}
+
+/**
+ * Consolida compras, rateios e pagamentos de todos os períodos.
+ * A dívida é apurada por parcela antes de somar por pessoa, para que um
+ * pagamento excedente numa competência não esconda dívida de outra.
+ */
+export function summarizeWaterFinances(
+  receipts: readonly WaterFinanceReceiptInput[],
+  shares: readonly WaterFinanceShareInput[],
+  payments: readonly WaterFinancePaymentInput[],
+) {
+  const sharesById = new Map(shares.map((share) => [share.shareId, share]));
+  const paidByShare = new Map<string, number>();
+  let unmatchedPaymentCount = 0;
+
+  for (const payment of payments) {
+    if (!sharesById.has(payment.shareId)) {
+      unmatchedPaymentCount += 1;
+      continue;
+    }
+    paidByShare.set(
+      payment.shareId,
+      (paidByShare.get(payment.shareId) ?? 0) + payment.amountCents,
+    );
+  }
+
+  const byParticipant = new Map<string, {
+    participantId: string;
+    participantName: string;
+    totalDueCents: number;
+    totalPaidCents: number;
+    outstandingCents: number;
+    overpaidCents: number;
+  }>();
+
+  let totalAllocatedCents = 0;
+  let totalPaidCents = 0;
+  let totalOutstandingCents = 0;
+  let totalOverpaidCents = 0;
+
+  for (const share of shares) {
+    const paid = paidByShare.get(share.shareId) ?? 0;
+    const outstanding = Math.max(0, share.amountDueCents - paid);
+    const overpaid = Math.max(0, paid - share.amountDueCents);
+    const current = byParticipant.get(share.participantId) ?? {
+      participantId: share.participantId,
+      participantName: share.participantName,
+      totalDueCents: 0,
+      totalPaidCents: 0,
+      outstandingCents: 0,
+      overpaidCents: 0,
+    };
+
+    current.totalDueCents += share.amountDueCents;
+    current.totalPaidCents += paid;
+    current.outstandingCents += outstanding;
+    current.overpaidCents += overpaid;
+    byParticipant.set(share.participantId, current);
+
+    totalAllocatedCents += share.amountDueCents;
+    totalPaidCents += paid;
+    totalOutstandingCents += outstanding;
+    totalOverpaidCents += overpaid;
+  }
+
+  const totalPurchasedCents = receipts.reduce(
+    (sum, receipt) => sum + receipt.totalValueCents,
+    0,
+  );
+
+  return {
+    totalPurchasedCents,
+    totalAllocatedCents,
+    totalPaidCents,
+    totalOutstandingCents,
+    pendingAllocationCents: Math.max(0, totalPurchasedCents - totalAllocatedCents),
+    unallocatedOverageCents: Math.max(0, totalAllocatedCents - totalPurchasedCents),
+    totalOverpaidCents,
+    unmatchedPaymentCount,
+    participants: [...byParticipant.values()].sort((a, b) =>
+      a.participantName.localeCompare(b.participantName, "pt-BR")
+    ),
+  };
+}
