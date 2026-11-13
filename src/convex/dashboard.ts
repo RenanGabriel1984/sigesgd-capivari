@@ -243,13 +243,38 @@ export const stockPosition = query({
       else if (quantity <= (product.minimumStock ?? 0)) status = "Crítico";
       else if (quantity <= (product.idealStock ?? 0)) status = "Baixo";
 
-      const locationBreakdown = productLocations.map((row) => ({
-        areaName: row.areaId ? areaById.get(String(row.areaId)) ?? "Área não encontrada" : "Sem área",
-        locationName: locationById.get(String(row.locationId)) ?? "Local não encontrado",
-        quantity: typeof row.quantity === "number" && Number.isFinite(row.quantity) && row.quantity >= 0
-          ? row.quantity
-          : null,
-      }));
+      const productLotsWithLocation = productLots.filter((lot) =>
+        typeof lot.quantityAvailable === "number" &&
+        Number.isFinite(lot.quantityAvailable) &&
+        lot.quantityAvailable > 0
+      );
+      const locationIds = new Set<string>([
+        ...productLocations.map((row) => String(row.locationId)),
+        ...productLotsWithLocation.filter((lot) => lot.locationId).map((lot) => String(lot.locationId)),
+      ]);
+      const locationBreakdown = [...locationIds].map((locationId) => {
+        const physicalRows = productLocations.filter((row) => String(row.locationId) === locationId);
+        const physicalQuantity = physicalRows.length > 0 &&
+          physicalRows.every((row) => typeof row.quantity === "number" && Number.isFinite(row.quantity) && row.quantity >= 0)
+          ? physicalRows.reduce((sum, row) => sum + row.quantity, 0)
+          : null;
+        const areaQuantities = new Map<string, { areaName: string; quantity: number }>();
+        for (const lot of productLotsWithLocation.filter((candidate) => String(candidate.locationId) === locationId)) {
+          const areaKey = lot.areaId ? String(lot.areaId) : "__NO_AREA__";
+          const existing = areaQuantities.get(areaKey) ?? {
+            areaName: lot.areaId ? areaById.get(String(lot.areaId)) ?? "Área não encontrada" : "Sem área",
+            quantity: 0,
+          };
+          existing.quantity += lot.quantityAvailable;
+          areaQuantities.set(areaKey, existing);
+        }
+        const locationName = locationById.get(locationId) ?? "Local não encontrado";
+        return {
+          locationName,
+          quantity: physicalQuantity,
+          areaBreakdown: [...areaQuantities.values()].sort((a, b) => a.areaName.localeCompare(b.areaName, "pt-BR")),
+        };
+      }).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR"));
 
       return {
         _id: product._id,
