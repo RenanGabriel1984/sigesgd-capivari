@@ -83,7 +83,7 @@ describe("stock read integrity", () => {
     ).toThrow(/local físico/i);
   });
 
-  it("reports a consistent product when global, area/location and lot balances match", () => {
+  it("reports a consistent product when global, location and lot totals match", () => {
     const result = inspectProductStockIntegrity(
       [{ physicalQuantity: 7, reservedQuantity: 2 }],
       [{ areaId: "ti", locationId: "cabinet-1", quantity: 4 }, { areaId: "printers", locationId: "cabinet-2", quantity: 3 }],
@@ -98,6 +98,22 @@ describe("stock read integrity", () => {
     expect(result.globalStock?.physicalQuantity).toBe(7);
     expect(result.locationQuantity).toBe(7);
     expect(result.lotQuantity).toBe(7);
+    expect(result.limitations).toEqual([]);
+  });
+
+  it("separates area totals from physical cabinet totals when current lot location is not modeled", () => {
+    const result = inspectProductStockIntegrity(
+      [{ physicalQuantity: 7, reservedQuantity: 0 }],
+      [{ locationId: "cabinet-1", quantity: 7 }],
+      [
+        { lotNumber: "LOT-TI", areaId: "ti", quantityAvailable: 4, active: true },
+        { lotNumber: "LOT-PRINT", areaId: "printers", quantityAvailable: 3, active: true },
+      ],
+      "Mouse",
+    );
+    expect(result.consistent).toBe(true);
+    expect(result.issues).toEqual([]);
+    expect(result.limitations).toContain("O modelo atual não registra a localização atual por lote; não é possível conciliar lote × armário com segurança.");
   });
 
   it("reconciles a legacy physical cabinet bucket against lots split across multiple areas", () => {
@@ -129,7 +145,7 @@ describe("stock read integrity", () => {
     expect(result.issues).toContain("O saldo físico da área/local (ti|cabinet-1) diverge da soma dos lotes.");
   });
 
-  it("flags positive lots that have no area/location classification and inactive positive lots", () => {
+  it("flags missing area classification and inactive positive lots, while reporting the cabinet-link limitation", () => {
     const result = inspectProductStockIntegrity(
       [{ physicalQuantity: 4, reservedQuantity: 0 }],
       [],
@@ -142,6 +158,7 @@ describe("stock read integrity", () => {
     expect(result.consistent).toBe(false);
     expect(result.issues.some((issue) => /não possui área e\/ou local físico/.test(issue))).toBe(true);
     expect(result.issues.some((issue) => /inativo com saldo positivo/.test(issue))).toBe(true);
+    expect(result.limitations.some((issue) => /localização atual por lote/.test(issue))).toBe(true);
   });
 
   it("accepts a new product with no stock row or lot balance", () => {
