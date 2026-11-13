@@ -1,9 +1,6 @@
 import { requirePermission } from "./rbac";
-import {
-  resolveConsumedLotId,
-  formatConsumedLots,
-  type LotConsumption,
-} from "../lib/stock-consumption";
+import { consumeLotLocationStock, resolveWithdrawalLocation } from "./lotLocationLedger";
+import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import {
@@ -138,6 +135,16 @@ async function performInitialLoad(
         receivedAt: now,
         active: true,
         observation: `Carga inicial — ${item.quantity} unidades`,
+      });
+
+      // Novas cargas iniciais já nascem com a ligação explícita lote × armário.
+      // Não retroage nem presume a localização atual de cargas antigas.
+      await ctx.db.insert("lotLocationBalances", {
+        lotId,
+        productId: item.productId,
+        locationId: item.locationId as Id<"storageLocations">,
+        quantityAvailable: item.quantity,
+        updatedAt: now,
       });
 
       // ── 2. Create entry item ──
@@ -506,78 +513,26 @@ export const quickExit = mutation({
       );
     }
 
+    const sourceLocationId = await resolveWithdrawalLocation(ctx, args.productId, args.locationId);
+    const lotConsumption = await consumeLotLocationStock(ctx, {
+      productId: args.productId,
+      locationId: sourceLocationId,
+      quantity: args.quantity,
+    });
+    const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
+
     const now = Date.now();
     const previousPhysical = stock?.physicalQuantity ?? 0;
     const previousReserved = stock?.reservedQuantity ?? 0;
-
-    // ── 1. Consume lots (FIFO: oldest first, then by lotNumber) ──
-    const lots = await ctx.db
-      .query("lots")
-      .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .collect();
-
-    const activeLots = lots
-      .filter((l) => l.active && l.quantityAvailable > 0)
-      .sort(
-        (a, b) =>
-          a.receivedAt - b.receivedAt ||
-          a.lotNumber.localeCompare(b.lotNumber)
-      );
-
-    let remaining = args.quantity;
-    const consumedLots: Array<{ lotId: string; quantity: number }> = [];
-
-    for (const lot of activeLots) {
-      if (remaining <= 0) break;
-      const consume = Math.min(remaining, lot.quantityAvailable);
-      await ctx.db.patch(lot._id, {
-        quantityAvailable: lot.quantityAvailable - consume,
-      });
-      consumedLots.push({ lotId: lot._id, quantity: consume });
-      remaining -= consume;
-    }
-
-    if (remaining > 0) {
-      throw new Error(
-        `Lotes insuficientes. Faltam ${remaining} ${product.unitOfMeasure} para consumo`
-      );
-    }
-
-    // ── 2. Reduce global stock ──
     const newPhysical = previousPhysical - args.quantity;
-    await ctx.db.patch(stock!._id, { physicalQuantity: newPhysical });
+    if (!stock) throw new Error("Registro global de estoque não encontrado.");
 
-    // ── 3. Reduce location stock if specified ──
-    if (args.locationId) {
-      const sbl = await ctx.db
-        .query("stockByLocation")
-        .withIndex("by_product", (q) => q.eq("productId", args.productId))
-        .collect();
-      validateUniqueScopedStockRows(sbl, product.name);
-      const sblForLocation = sbl.find(
-        (s) => s.locationId === args.locationId
-      );
+    await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
 
-      if (sblForLocation) {
-        const newLocQty = sblForLocation.quantity - args.quantity;
-        if (newLocQty < 0) {
-          throw new Error(
-            `Estoque insuficiente no local. Disponível: ${sblForLocation.quantity}`
-          );
-        }
-        await ctx.db.patch(sblForLocation._id, { quantity: newLocQty });
-      }
-    }
-
-    // ── 4. Create stock movement ──
-    // CORREÇÃO: o lote consumido passa a ser gravado no campo ESTRUTURADO
-    // `lotId`. Antes ele existia apenas dentro do texto da observation, o que
-    // impedia a devolução de restaurar o `quantityAvailable` do lote e gerava
-    // a divergência 3337 x 3338. A observation é mantida para compatibilidade.
-    const consumedLotId = resolveConsumedLotId(consumedLots as LotConsumption[]);
-    const lotInfo = formatConsumedLots(consumedLots, (id) =>
-      lots.find((l) => l._id === id)?.lotNumber,
-    );
+    const consumedLotId = lotConsumption.allocations[0]?.lotId;
+    const lotInfo = lotConsumption.allocations
+      .map((allocation) => `${allocation.lotNumber}(${allocation.quantity})`)
+      .join(", ");
 
     // Número sequencial da saída (SAI-ANO-SEQ) — usado no vínculo de devoluções
     const exitNumber = await generateExitNumber(ctx);
@@ -593,12 +548,14 @@ export const quickExit = mutation({
       userId,
       exitNumber,
       lotId: consumedLotId ?? undefined,
+      locationId: sourceLocationId,
       observation: [
         `Saída rápida — ${args.receiverName}`,
         args.reason ? `Motivo: ${args.reason}` : "",
         args.osNumber ? `O.S.: ${args.osNumber}` : "",
         args.observation ?? "",
         `Destino: ${args.destination}`,
+        `Armário: ${sourceLocation?.name ?? sourceLocationId}`,
         `Lotes: ${lotInfo}`,
       ]
         .filter(Boolean)
