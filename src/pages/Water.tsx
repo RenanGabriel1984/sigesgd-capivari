@@ -190,6 +190,14 @@ export default function WaterPage() {
   const selectedPeriod = periods.find((period: any) => period._id === activePeriodId);
   const totalValueCents = details?.totalValueCents ?? 0;
   const paidCents = details?.totalPaidCents ?? 0;
+  const financialSummary = dashboard.financialSummary ?? {
+    totalPurchasedCents: 0,
+    totalAllocatedCents: 0,
+    totalPaidCents: 0,
+    totalOutstandingCents: 0,
+    pendingAllocationCents: 0,
+    participants: [],
+  };
 
   return (
     <AppShell>
@@ -208,6 +216,40 @@ export default function WaterPage() {
           <Card><CardContent className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><Users className="h-4 w-4" /> Participantes ativos</div><p className="mt-2 text-2xl font-semibold tabular-nums">{activeParticipants.length}</p></CardContent></Card>
           <Card><CardContent className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><Wallet className="h-4 w-4" /> Total do período</div><p className="mt-2 text-xl font-semibold tabular-nums">{money(totalValueCents)}</p><p className="text-xs text-muted-foreground">{money(paidCents)} recebido</p></CardContent></Card>
         </div>
+
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-base font-semibold">Resumo financeiro acumulado</h2>
+            <p className="text-xs text-muted-foreground">Consolidado de todos os períodos, sem reiniciar saldos a cada mês.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+            <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Comprado</p><p className="mt-1 text-lg font-semibold tabular-nums">{money(financialSummary.totalPurchasedCents)}</p></CardContent></Card>
+            <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Rateado</p><p className="mt-1 text-lg font-semibold tabular-nums">{money(financialSummary.totalAllocatedCents)}</p></CardContent></Card>
+            <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Pago</p><p className="mt-1 text-lg font-semibold tabular-nums">{money(financialSummary.totalPaidCents)}</p></CardContent></Card>
+            <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Em aberto</p><p className="mt-1 text-lg font-semibold tabular-nums">{money(financialSummary.totalOutstandingCents)}</p></CardContent></Card>
+            <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Aguardando rateio</p><p className="mt-1 text-lg font-semibold tabular-nums">{money(financialSummary.pendingAllocationCents)}</p></CardContent></Card>
+          </div>
+          <Card>
+            <CardHeader><CardTitle className="text-base">Saldo devedor acumulado por participante</CardTitle></CardHeader>
+            <CardContent>
+              {financialSummary.participants.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50"><tr><th className="p-2 text-left">Participante</th><th className="p-2 text-right">Rateado</th><th className="p-2 text-right">Pago</th><th className="p-2 text-right">Saldo devedor</th></tr></thead>
+                    <tbody>{financialSummary.participants.map((person: any) => (
+                      <tr key={person.participantId} className="border-t">
+                        <td className="p-2 font-medium">{person.participantName}</td>
+                        <td className="p-2 text-right tabular-nums">{money(person.totalDueCents)}</td>
+                        <td className="p-2 text-right tabular-nums">{money(person.totalPaidCents)}</td>
+                        <td className="p-2 text-right font-semibold tabular-nums">{money(person.outstandingCents)}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              ) : <p className="text-sm text-muted-foreground">Ainda não há rateios fechados para consolidar dívidas por pessoa.</p>}
+            </CardContent>
+          </Card>
+        </section>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <Card>
