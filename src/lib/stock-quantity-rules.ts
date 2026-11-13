@@ -27,23 +27,20 @@ export function isValidStockQuantity(
 export interface GlobalStockBalanceRow {
   physicalQuantity: number;
   reservedQuantity: number;
-  [key: string]: unknown;
 }
 
 /**
- * Exige um único saldo global íntegro antes de aprovar, entregar ou liberar
- * reservas. Nunca escolhe silenciosamente o primeiro de registros duplicados.
+ * Retorna o saldo único válido ou null quando o produto ainda não possui
+ * registro global. Duplicidades e valores fisicamente impossíveis bloqueiam.
  */
-export function requireSingleValidGlobalStock<T extends GlobalStockBalanceRow>(
+export function getOptionalSingleValidGlobalStock<T extends GlobalStockBalanceRow>(
   rows: readonly T[],
   productLabel: string,
-): T {
-  if (rows.length === 0) {
-    throw new Error(`Registro global de estoque não encontrado para "${productLabel}".`);
-  }
+): T | null {
   if (rows.length > 1) {
     throw new Error(`Há registros globais de estoque duplicados para "${productLabel}". Regularize antes de continuar.`);
   }
+  if (rows.length === 0) return null;
 
   const stock = rows[0];
   const physical = Number(stock.physicalQuantity);
@@ -56,6 +53,18 @@ export function requireSingleValidGlobalStock<T extends GlobalStockBalanceRow>(
     reserved > physical
   ) {
     throw new Error(`O saldo global de "${productLabel}" está inconsistente. Regularize antes de continuar.`);
+  }
+  return stock;
+}
+
+/** Exige o registro global quando a operação necessariamente consome estoque. */
+export function requireSingleValidGlobalStock<T extends GlobalStockBalanceRow>(
+  rows: readonly T[],
+  productLabel: string,
+): T {
+  const stock = getOptionalSingleValidGlobalStock(rows, productLabel);
+  if (!stock) {
+    throw new Error(`Registro global de estoque não encontrado para "${productLabel}".`);
   }
   return stock;
 }
