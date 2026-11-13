@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -127,12 +128,13 @@ export const create = mutation({
     ].filter(Boolean).join(", ");
 
     for (const product of products) {
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", product._id)).first();
-      let systemQuantity = stock?.physicalQuantity ?? 0;
-      if (args.locationId) {
-        const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", product._id)).collect();
-        systemQuantity = sbls.find((s) => s.locationId === args.locationId)?.quantity ?? 0;
-      }
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", product._id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
+      const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", product._id)).collect();
+      validateUniqueScopedStockRows(sbls, product.name);
+      const systemQuantity = args.locationId
+        ? sbls.find((row) => row.locationId === args.locationId)?.quantity ?? 0
+        : stock?.physicalQuantity ?? 0;
       await ctx.db.insert("inventoryCounts", {
         inventoryId,
         productId: product._id,
@@ -261,16 +263,21 @@ export const close = mutation({
 
     for (const count of countsWithDiff) {
       const countProduct = await ctx.db.get(count.productId);
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, countProduct?.name ?? String(count.productId));
       const counted = count.countedQuantity ?? 0;
+      if (!Number.isFinite(counted) || counted < 0) {
+        throw new Error(`A contagem de "${countProduct?.name ?? "item"}" está inválida.`);
+      }
       const prevPhysical = stock?.physicalQuantity ?? 0;
       const reserved = stock?.reservedQuantity ?? 0;
 
       let newPhysical: number;
 
       if (inv.locationId) {
-        // ── Inventário por local: ajusta o saldo do local e recalcula o global ──
+        // ── Inventário por local: valida bucket único antes do ajuste ──
         const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
+        validateUniqueScopedStockRows(sbls, countProduct?.name ?? String(count.productId));
         const sbl = sbls.find((s) => s.locationId === inv.locationId);
         if (sbl) {
           await ctx.db.patch(sbl._id, { quantity: counted });
@@ -282,7 +289,9 @@ export const close = mutation({
           });
         }
         const allSbl = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect();
+        validateUniqueScopedStockRows(allSbl, countProduct?.name ?? String(count.productId));
         newPhysical = allSbl.reduce((sum, s) => sum + s.quantity, 0);
+        if (!Number.isFinite(newPhysical)) throw new Error("O saldo consolidado por localização ficou inválido.");
       } else {
         // ── Inventário geral: saldo global é a contagem ──
         newPhysical = counted;
