@@ -6,7 +6,7 @@ import { requirePermission, requireRequestAction } from "./rbac";
 import type { Id } from "./_generated/dataModel";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
-import { planFifoAreaLotAllocation } from "../lib/area-stock";
+import { planFifoAreaLotAllocation, validateAreaLocationLotBalance } from "../lib/area-stock";
 import { isDiscreteStockUnit, requireSingleValidGlobalStock } from "../lib/stock-quantity-rules";
 import { validateRequestItemReservationLedger } from "../lib/request-reservation-ledger";
 
@@ -302,14 +302,35 @@ export const approve = mutation({
       const productLots = await ctx.db.query("lots")
         .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
         .collect();
+      const scopedLots = productLots.filter((lot: any) =>
+        lot.areaId === requestItem.areaId && lot.locationId === requestItem.sourceLocationId
+      );
+      const locationRows = await ctx.db.query("stockByLocation")
+        .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
+        .collect();
+      const matchingLocationRows = locationRows.filter((row: any) =>
+        row.locationId === requestItem.sourceLocationId && row.areaId === requestItem.areaId
+      );
       const candidates = [];
-      for (const lot of productLots) {
-        if (lot.areaId !== requestItem.areaId || lot.locationId !== requestItem.sourceLocationId || !lot.active) continue;
+      const scopedLotBalances = [];
+      for (const lot of scopedLots) {
         const reservations = await ctx.db.query("requestItemReservations")
           .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id))
           .collect();
+        if (reservations.some((reservation: any) =>
+          !Number.isFinite(reservation.quantityRemaining) || reservation.quantityRemaining < 0
+        )) {
+          throw new Error(`O lote ${lot.lotNumber} possui reserva inválida. Regularize antes de aprovar.`);
+        }
         const alreadyReserved = reservations.reduce((sum: number, reservation: any) =>
           sum + reservation.quantityRemaining, 0);
+        scopedLotBalances.push({
+          lotNumber: lot.lotNumber,
+          quantityAvailable: lot.quantityAvailable,
+          quantityReserved: alreadyReserved,
+          active: lot.active,
+        });
+        if (!lot.active) continue;
         candidates.push({
           lotId: lot._id as string,
           lotNumber: lot.lotNumber,
@@ -320,6 +341,16 @@ export const approve = mutation({
           locationId: lot.locationId as string | undefined,
           active: lot.active,
         });
+      }
+
+      const sourceBalance = validateAreaLocationLotBalance(
+        matchingLocationRows,
+        scopedLotBalances,
+      );
+      if (!sourceBalance.valid) {
+        throw new Error(
+          `Não é seguro reservar "${productName}" em "${area.name}" / "${location.name}": ${sourceBalance.error}`
+        );
       }
 
       const allocation = planFifoAreaLotAllocation(
