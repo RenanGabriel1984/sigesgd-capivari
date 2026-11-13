@@ -272,7 +272,7 @@ async function performInitialLoad(
         .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
         .collect();
       const productForLabel = await ctx.db.get(item.productId as any);
-      const existingStock = getOptionalSingleValidGlobalStock(existingStockRows, productForLabel?.name ?? String(item.productId));
+      const existingStock = getOptionalSingleValidGlobalStock<any>(existingStockRows, productForLabel?.name ?? String(item.productId));
 
       const previousGlobal = existingStock?.physicalQuantity ?? 0;
       // Em produtos existentes, somar a carga ao saldo global preserva estoque
