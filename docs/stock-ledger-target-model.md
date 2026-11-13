@@ -1,6 +1,6 @@
 # Modelo-alvo de rastreabilidade do estoque por lote e armário
 
-**Status:** implementação inicial em andamento na branch `codex/stock-read-model-integrity`. Schema, recebimentos com local, transferências por lote e devoluções rastreadas foram iniciados; saídas, requisições e fluxos especializados ainda não foram integrados.  
+**Status:** integração do livro-razão de saídas em validação na branch `codex/stock-read-model-integrity`. Entradas novas, carga inicial nova, transferências, devoluções e saídas FIFO centrais foram integradas em código; o CI ainda precisa aprovar a revisão mais recente e os fluxos de inventário/reconciliação legada permanecem pendentes.  
 **Restrição operacional:** qualquer migração de dados reais depende de autorização explícita; esta especificação não autoriza execução em produção.
 
 ## 1. Situação encontrada
@@ -58,18 +58,16 @@ As mutations devem atualizar os registros envolvidos em uma única transação C
 ## 4. Regras por fluxo
 
 ### Recebimento
-**Implementado parcialmente:** ao confirmar uma entrada com locationId, o fluxo cria/atualiza o saldo do lote naquele armário. Entrada sem local continua compatível com o legado e não recebe localização presumida.
+**Implementado para novas entradas com localização:** ao confirmar uma entrada com locationId, o fluxo cria/atualiza o saldo do lote naquele armário. Entradas sem local continuam sem localização presumida. A carga inicial nova também cria `lotLocationBalances` no armário informado e grava `locationId` no movimento de implantação.
 
-O fluxo também atualiza lote com sua área, saldo físico do produto no armário (quando informado), saldo global e movimentação/auditoria. A conciliação completa ainda depende da regularização de registros antigos e da cobertura dos fluxos alternativos de entrada.
+**Importante para o estoque já existente:** o inventário inicial já realizado e a DANFE de toners da GomaQ não são recriados nem alterados por estas mudanças. Como foram registrados antes da adoção integral do livro-razão, podem não possuir linhas em `lotLocationBalances`; o novo diagnóstico apenas identifica candidatos e divergências, sem gravar ou migrar dados.
 
 ### Saídas, requisições e consumos
-O FIFO deve consumir simultaneamente:
-- `lotLocationBalances` do armário/lote de origem;
-- `lots.quantityAvailable`;
-- `stockByLocation.quantity`;
-- `stock.physicalQuantity`.
+**Integrado em código na branch:** existe um serviço compartilhado que calcula FIFO por `receivedAt` e consome exclusivamente do armário escolhido. Ele valida duplicidades, quantidades inválidas e conciliação integral entre lote × armários e `stockByLocation` antes de gravar. A mutation Convex aplica atomicamente a baixa em `lotLocationBalances`, `lots.quantityAvailable`, `stockByLocation.quantity` e, na chamadora, `stock.physicalQuantity`.
 
-O fluxo deve respeitar a área/localidade quando a solicitação as especificar. GomaQ, suprimentos de impressão, peças patrimoniais e saídas diretas devem usar o mesmo serviço de consumo, preservando seus dados operacionais e auditorias específicas.
+Os fluxos conectados são: saída rápida (`stockSetup.quickExit`), saída direta (`stockMovements.createExit`), entrega de requisições (`requests.deliver`), troca GomaQ (`gomaQ.createExchange`), retirada unitária e por família de suprimentos (`printSupplies.withdraw`/`withdrawFamily`) e instalação de peças (`assetParts.installPart`). As telas de saída rápida, entrega de requisição e suprimentos de impressão pedem o armário de origem quando há mais de uma opção. A troca GomaQ e a instalação de peças ainda precisam de validação do fluxo de tela para seleção explícita quando o produto estiver em mais de um armário.
+
+**Regra de segurança para legado:** se um lote antigo não estiver integralmente mapeado ou os totais não fecharem, a retirada é bloqueada com motivo; não há fallback para baixa global nem seleção arbitrária de lote/local.
 
 ### Transferência
 **Implementado para transferências novas com lote e saldo rastreável na origem.** O fluxo reduz o saldo do lote no armário de origem, aumenta o mesmo lote no destino, não reduz `lots.quantityAvailable`, não altera o saldo global e registra transferência/auditoria. Se já houver saldo nos dois armários, atualiza os dois buckets. Se não houver saldo rastreável na origem, bloqueia e exige regularização — não infere localização pelo recebimento. Transferências legadas sem lote seguem pendentes de cobertura e diagnóstico.
@@ -78,18 +76,19 @@ O fluxo deve respeitar a área/localidade quando a solicitação as especificar.
 **Implementado parcialmente para devoluções com lote resolvido:** exige armário de destino e recompõe o saldo do lote naquele local, além dos saldos global, físico-local e do lote. Material avariado/não reutilizável continua fora do saldo disponível. A ligação confiável entre saída original, ID do lote consumido e armário de origem ainda precisa ser padronizada em todos os fluxos de saída.
 
 ### Inventário
-O inventário que ajusta estoque deve contar por lote e armário, não somente por produto agregado. Diferenças devem ser atribuídas aos lotes efetivamente contados. Não distribuir diferença automaticamente por FIFO, pelo lote mais novo ou por qualquer outro critério presumido.
+O inventário inicial já feito é preservado. O fluxo de inventário ainda precisa contar e ajustar por lote e armário. Até essa etapa estar concluída, inventários posteriores que alterem apenas saldos agregados podem tornar o livro-razão inconsistente; a rotina de baixa detectará a diferença e bloqueará a operação. Não distribuir diferença automaticamente por FIFO, pelo lote mais novo ou por qualquer outro critério presumido.
 
 ## 5. Migração dos registros atuais
 
 A migração deve ter duas fases independentes:
 
 **Fase A — diagnóstico sem escrita**
-- Para cada lote, localizar os `entryItems` vinculados por `lotId`.
-- Verificar se existe exatamente um destino de recebimento e se a quantidade do lote é conciliável com o saldo físico do produto/armário.
-- Identificar produtos com transferências, devoluções, baixas sem localização e entradas legadas sem `lotId`.
-- Gerar relatório de classificados, ambíguos e não conciliados, com quantidades e motivos.
-- Não assumir que `entryItems.locationId` ainda é a localização atual quando há indícios de transferência ou divisão.
+- Foi adicionada a consulta read-only `stockSetup.lotLocationReadiness`.
+- Para cada lote, localiza `entryItems` por `lotId`, compara saldos lote × armário, saldo por armário e saldo global.
+- Exibe o local informado no recebimento apenas como candidato, e somente quando não identifica saídas/ajustes, transferências ou devoluções posteriores para o produto. Mesmo assim, exige conferência humana.
+- Identifica registros globais/físicos duplicados ou inválidos, lotes órfãos, saldos lote × armário duplicados, divergências, candidatos e lotes sem origem de localização suficiente.
+- A consulta retorna `readOnly: true` e `migrationApplied: false`; não faz qualquer escrita.
+- Não assume que `entryItems.locationId` ainda é a localização atual quando há indícios de transferência ou divisão.
 
 **Fase B — execução autorizada**
 - Criar saldo por lote/local somente para os casos cuja localização atual seja comprovável.
@@ -110,12 +109,13 @@ A migração deve ter duas fases independentes:
 
 ## 7. Pendências de integração antes de considerar o livro-razão completo
 
-- Saídas diretas precisam aceitar/definir local e consumir lotes e buckets lote × local em FIFO.
-- Entregas de requisições precisam registrar quais lotes e armários foram consumidos, preservando reserva e auditoria.
-- GomaQ, suprimentos de impressão e peças patrimoniais precisam usar o mesmo serviço de baixa, sem quebrar seus fluxos específicos.
-- Inventário precisa contar e ajustar por lote × armário, sem distribuir diferenças automaticamente.
-- O identificador de lote nos movimentos deve ser padronizado para um ID Convex estável; número de lote é dado de exibição, não chave.
-- A consulta de posição e os CSVs devem incluir a nova dimensão e sinalizar lotes sem saldo por localização.
+- Confirmar CI completo da branch após as integrações de saída e corrigir eventuais incompatibilidades de código/testes.
+- Validar a seleção de armário na interface de troca GomaQ e instalação de peças para produtos com saldo em mais de um armário.
+- Implementar inventário e reconciliação por lote × armário, sem distribuir diferenças automaticamente.
+- Revisar o formato estruturado de alocação multi-lote nos movimentos e nos vínculos específicos de GomaQ/peças.
+- Executar o diagnóstico read-only no deployment somente após autorização para consulta; analisar individualmente os lotes do inventário inicial e os lotes da DANFE de toners da GomaQ.
+- Preparar eventual migração assistida apenas para os casos comprovados, com plano de reversão e autorização explícita.
+- Atualizar relatório e CSV com a nova dimensão e a situação da conciliação.
 
 ## 8. Fora desta especificação
 
