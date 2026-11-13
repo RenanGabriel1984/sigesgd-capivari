@@ -21,6 +21,7 @@
  */
 import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { getOptionalSingleValidGlobalStock } from "../lib/stock-read-integrity";
 import {
   applyImplementationStockStamp,
   IMPLEMENTATION_STOCK_DATE,
@@ -254,7 +255,8 @@ export const registerGomaqNfe372043 = internalMutation({
     for (const r of resolved) {
       lotSeq += 1;
       const lotNumber = "LOT-" + year + "-" + String(lotSeq).padStart(6, "0");
-      const prevStock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", r.productId)).first();
+      const prevStockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", r.productId)).collect();
+      const prevStock = getOptionalSingleValidGlobalStock(prevStockRows, r.name);
       const prevPhysical = prevStock?.physicalQuantity ?? 0;
       const prevReserved = prevStock?.reservedQuantity ?? 0;
 
