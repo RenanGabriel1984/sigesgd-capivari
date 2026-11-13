@@ -155,16 +155,23 @@ export function inspectProductStockIntegrity(
     lotTotalsByLocation.set(locationId, (lotTotalsByLocation.get(locationId) ?? 0) + quantity);
   }
 
-  for (const key of new Set([...locationByScope.keys(), ...lotsByScope.keys()])) {
+  for (const [key, localQuantity] of locationByScope) {
     const [areaId, locationId] = key.split("|");
-    const localQuantity = locationByScope.get(key) ?? 0;
     // Um registro físico legado sem areaId representa todas as áreas do
     // armário. Só comparamos o total do armário; a abertura por área vem dos lotes.
-    const scopedLotQuantity = areaId === "*"
+    const expectedLotQuantity = areaId === "*"
       ? lotTotalsByLocation.get(locationId) ?? 0
       : lotsByScope.get(key) ?? 0;
-    if (Math.abs(localQuantity - scopedLotQuantity) > TOLERANCE) {
+    if (Math.abs(localQuantity - expectedLotQuantity) > TOLERANCE) {
       issues.push(`O saldo físico da área/local (${key}) diverge da soma dos lotes.`);
+    }
+  }
+
+  for (const key of lotsByScope.keys()) {
+    const locationId = key.slice(key.lastIndexOf("|") + 1);
+    const wildcardKey = `*|${locationId}`;
+    if (!locationByScope.has(key) && !locationByScope.has(wildcardKey)) {
+      issues.push(`Há lote com saldo sem bucket físico correspondente na localização ${locationId}.`);
     }
   }
 
