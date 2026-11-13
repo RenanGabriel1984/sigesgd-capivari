@@ -5,6 +5,7 @@ import { generateExitNumber } from "./stockHelpers";
 import { requirePermission, requireRequestAction } from "./rbac";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -261,12 +262,11 @@ export const approve = mutation({
     // Validate stock for each product (fresh read)
     const stockMap: Record<string, any> = {};
     for (const [productId, needed] of Object.entries(stockNeeded)) {
-      const stock = await ctx.db
+      const stockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", productId as any))
-        .first();
-
-      if (!stock) throw new Error(`Registro de estoque não encontrado para "${needed.productName}"`);
+        .collect();
+      const stock = requireSingleValidGlobalStock(stockRows, needed.productName);
 
       const available = stock.physicalQuantity - stock.reservedQuantity;
       if (available < needed.quantity) {
@@ -295,15 +295,13 @@ export const approve = mutation({
       await ctx.db.patch(item.itemId, { quantityApproved: item.quantityApproved });
 
       // Reserve stock (re-read for safety)
-      const freshStock = await ctx.db
+      const freshStockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
-        .first();
-
-      if (freshStock) {
-        const newReserved = freshStock.reservedQuantity + item.quantityApproved;
-        await ctx.db.patch(freshStock._id, { reservedQuantity: newReserved });
-      }
+        .collect();
+      const freshStock = requireSingleValidGlobalStock(freshStockRows, String(requestItem.productId));
+      const newReserved = freshStock.reservedQuantity + item.quantityApproved;
+      await ctx.db.patch(freshStock._id, { reservedQuantity: newReserved });
     }
 
     // Update request status
@@ -420,8 +418,8 @@ export const deliver = mutation({
       if (input.quantityDelivered <= 0) continue;
       const requestItem = await ctx.db.get(input.itemId);
       if (!requestItem) continue;
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", requestItem.productId)).first();
-      if (!stock) throw new Error(`Registro de estoque não encontrado para o produto`);
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", requestItem.productId)).collect();
+      const stock = requireSingleValidGlobalStock(stockRows, String(requestItem.productId));
       if (stock.physicalQuantity < input.quantityDelivered) {
         throw new Error(`Estoque insuficiente. Disponível: ${stock.physicalQuantity}. Entrega: ${input.quantityDelivered}.`);
       }
@@ -436,8 +434,8 @@ export const deliver = mutation({
       if (input.quantityDelivered <= 0) continue;
       const requestItem = await ctx.db.get(input.itemId);
       if (!requestItem) continue;
-      const freshStock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", requestItem.productId)).first();
-      if (!freshStock) throw new Error("Registro de estoque desapareceu durante a entrega");
+      const freshStockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", requestItem.productId)).collect();
+      const freshStock = requireSingleValidGlobalStock(freshStockRows, String(requestItem.productId));
       if (freshStock.physicalQuantity < input.quantityDelivered) throw new Error(`Estoque insuficiente (concorrência). Disponível: ${freshStock.physicalQuantity}.`);
       if (freshStock.reservedQuantity < input.quantityDelivered) throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}.`);
       const newPhysical = freshStock.physicalQuantity - input.quantityDelivered;
@@ -539,14 +537,11 @@ export const cancel = mutation({
         if (item.quantityApproved <= 0) continue;
 
         // Re-read stock for consistency
-        const stock = await ctx.db
+        const stockRows = await ctx.db
           .query("stock")
           .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
-          .first();
-
-        if (!stock) {
-          throw new Error(`Registro de estoque não encontrado para o produto. Não é possível liberar reserva.`);
-        }
+          .collect();
+        const stock = requireSingleValidGlobalStock(stockRows, String(item.productId));
 
         // Safety: never allow reservedQuantity to go below 0
         if (stock.reservedQuantity < item.quantityApproved) {
