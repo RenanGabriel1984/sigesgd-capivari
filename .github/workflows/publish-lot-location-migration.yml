@@ -1,0 +1,72 @@
+name: Publicar mutation controlada em first-herring-264
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-lot-location-migration-first-herring
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TARGET_DEPLOYMENT: first-herring-264
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validar branch e deploy key restrita
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/codex/lot-location-migration-preparation" ]; then
+            echo "::error::Branch inesperada. Nada será publicado."
+            exit 1
+          fi
+          if [ -n "${CONVEX_DEPLOYMENT:-}" ]; then
+            echo "::error::CONVEX_DEPLOYMENT está definida. Nada será publicado."
+            exit 1
+          fi
+          if [ -z "${CONVEX_DEPLOY_KEY:-}" ]; then
+            echo "::error::Secret CONVEX_DEPLOY_KEY_FIRST_HERRING ausente."
+            exit 1
+          fi
+          prefix="${CONVEX_DEPLOY_KEY%%|*}"
+          if [ "${prefix}" != "dev:${TARGET_DEPLOYMENT}" ]; then
+            echo "::error::Deploy key não corresponde ao deployment dev:${TARGET_DEPLOYMENT}."
+            exit 1
+          fi
+          grep -q 'export const applyLotLocationBalancesMigration = internalMutation(' src/convex/stockSetup.ts
+          grep -q 'export const lotLocationReadiness = internalQuery(' src/convex/stockSetup.ts
+          grep -q 'lotLocationBalances: defineTable' src/convex/schema.ts
+          echo "Branch e destino confirmados: dev:${TARGET_DEPLOYMENT}."
+
+      - name: Instalar dependências
+        run: bun install --frozen-lockfile
+
+      - name: Publicar somente código/schema no deployment confirmado
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
+        run: |
+          set -euo pipefail
+          bunx convex dev --once --tail-logs disable
+
+      - name: Resumo e limite de escopo
+        run: |
+          {
+            echo "### Publicação concluída"
+            echo ""
+            echo "- Destino: `dev:first-herring-264`"
+            echo "- Mutation publicada: `stockSetup:applyLotLocationBalancesMigration` (internal)"
+            echo "- Nenhuma mutation foi executada por este workflow."
+            echo "- Nenhum dado de estoque foi gravado ou alterado."
+            echo "- A gravação controlada deverá ser iniciada separadamente no painel Convex."
+          } >> "${GITHUB_STEP_SUMMARY}"
