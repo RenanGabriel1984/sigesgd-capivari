@@ -564,6 +564,12 @@ export const close = mutation({
         );
       }
 
+      if (trackedLots.length > 0 && lotCounts.length === 0) {
+        throw new Error(
+          `O inventário de "${productName}" foi aberto sem divisão por lote. Como o produto possui lotes rastreados, cancele e abra um inventário novo para contar lote × armário.`,
+        );
+      }
+
       if (productLocationCounts.length > 0) {
         const seenLocations = new Set<string>();
         const locationChanges: Array<{ locationId: any; delta: number; previousQuantity: number; countedQuantity: number }> = [];
