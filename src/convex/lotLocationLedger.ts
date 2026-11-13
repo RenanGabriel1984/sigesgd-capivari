@@ -189,10 +189,12 @@ export async function recordLotMovementAllocations(
   },
 ): Promise<void> {
   const allocationType = input.allocationType ?? "withdrawal";
+  if (input.allocations.some((allocation) =>
+    !Number.isFinite(allocation.quantity) || allocation.quantity <= 0,
+  )) {
+    throw new Error("Alocação de lote inválida para a movimentação.");
+  }
   for (const allocation of input.allocations) {
-    if (!Number.isFinite(allocation.quantity) || allocation.quantity <= 0) {
-      throw new Error("Alocação de lote inválida para a movimentação.");
-    }
     await ctx.db.insert("stockMovementLotAllocations", {
       movementId: input.movementId,
       productId: input.productId,
