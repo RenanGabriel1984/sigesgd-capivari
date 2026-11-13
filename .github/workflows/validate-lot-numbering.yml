@@ -3,6 +3,7 @@ name: SIGESGD — validação de código (sem deploy)
 on:
   push:
     branches:
+      - main
       - codex/fix-global-lot-numbering
   pull_request:
     branches:
