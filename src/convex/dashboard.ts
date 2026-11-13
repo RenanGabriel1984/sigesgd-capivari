@@ -32,11 +32,20 @@ export const stats = query({
       .query("products")
       .withIndex("by_active", (q) => q.eq("active", true))
       .collect();
-    const [stockRows, locationRows, lots] = await Promise.all([
+    const [stockRows, locationRows, lots, entryItems] = await Promise.all([
       ctx.db.query("stock").collect(),
       ctx.db.query("stockByLocation").collect(),
       ctx.db.query("lots").collect(),
+      ctx.db.query("entryItems").collect(),
     ]);
+    // Na estrutura atual, o lote guarda a área e o item da entrada guarda o
+    // armário. O vínculo é entryItems.lotId → lots._id (ou número legado).
+    const locationIdByLot = new Map<string, string>();
+    for (const item of entryItems) {
+      if (item.lotId && item.locationId) {
+        locationIdByLot.set(String(item.lotId), String(item.locationId));
+      }
+    }
     const stockRowsByProduct = new Map<string, typeof stockRows>();
     const locationRowsByProduct = new Map<string, typeof locationRows>();
     const lotsByProduct = new Map<string, typeof lots>();
@@ -65,7 +74,10 @@ export const stats = query({
         inspectProductStockIntegrity(
           stockRowsByProduct.get(String(product._id)) ?? [],
           locationRowsByProduct.get(String(product._id)) ?? [],
-          lotsByProduct.get(String(product._id)) ?? [],
+          (lotsByProduct.get(String(product._id)) ?? []).map((lot) => ({
+            ...lot,
+            locationId: locationIdByLot.get(String(lot._id)) ?? locationIdByLot.get(lot.lotNumber),
+          })),
           product.name,
         ),
       );
@@ -226,7 +238,7 @@ export const stockPosition = query({
   args: {},
   handler: async (ctx) => {
     await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "stockPosition" });
-    const [products, stockRows, locationRows, lots, categories, areas, storageLocations] = await Promise.all([
+    const [products, stockRows, locationRows, lots, categories, areas, storageLocations, entryItems] = await Promise.all([
       ctx.db.query("products").collect(),
       ctx.db.query("stock").collect(),
       ctx.db.query("stockByLocation").collect(),
@@ -234,7 +246,16 @@ export const stockPosition = query({
       ctx.db.query("categories").collect(),
       ctx.db.query("stockAreas").collect(),
       ctx.db.query("storageLocations").collect(),
+      ctx.db.query("entryItems").collect(),
     ]);
+    // Área fica no lote; a localização física é recuperada pelo vínculo
+    // histórico do item de entrada. Não presumir lot.locationId (inexistente).
+    const locationIdByLot = new Map<string, string>();
+    for (const item of entryItems) {
+      if (item.lotId && item.locationId) {
+        locationIdByLot.set(String(item.lotId), String(item.locationId));
+      }
+    }
 
     const stockByProduct = new Map<string, typeof stockRows>();
     const locationsByProduct = new Map<string, typeof locationRows>();
@@ -266,10 +287,14 @@ export const stockPosition = query({
       const productStocks = stockByProduct.get(String(product._id)) ?? [];
       const productLocations = locationsByProduct.get(String(product._id)) ?? [];
       const productLots = lotsByProduct.get(String(product._id)) ?? [];
+      const productLotBalances = productLots.map((lot) => ({
+        ...lot,
+        locationId: locationIdByLot.get(String(lot._id)) ?? locationIdByLot.get(lot.lotNumber),
+      }));
       const integrity = inspectProductStockIntegrity(
         productStocks,
         productLocations,
-        productLots,
+        productLotBalances,
         product.name,
       );
       const stock = integrity.globalStock;
@@ -282,7 +307,7 @@ export const stockPosition = query({
       else if (quantity <= (product.minimumStock ?? 0)) status = "Crítico";
       else if (quantity <= (product.idealStock ?? 0)) status = "Baixo";
 
-      const productLotsWithLocation = productLots.filter((lot) =>
+      const productLotsWithLocation = productLotBalances.filter((lot) =>
         typeof lot.quantityAvailable === "number" &&
         Number.isFinite(lot.quantityAvailable) &&
         lot.quantityAvailable > 0
