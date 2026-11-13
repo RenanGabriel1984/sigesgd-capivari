@@ -927,9 +927,14 @@ export const getInitialLoadStatus = query({
  * transferência ou devolução tornam a associação ambígua para revisão humana.
  */
 export const lotLocationReadiness = internalQuery({
-  args: { productId: v.optional(v.id("products")) },
+  args: {},
   handler: async (ctx, args) => {
-    const [allProducts, allLots, allBalances, allLocations, allGlobalStock, allLocalStock, allEntryItems, allEntries, allMovements, allTransfers, allReturns] = await Promise.all([
+    const [
+      allProducts, allLots, allBalances, allLocations, allGlobalStock,
+      allLocalStock, allEntryItems, allEntries, allMovements, allTransfers,
+      allReturns, allSuppliers, allGomaQExchanges, allGomaQEmptyCartridges,
+      allGomaQCollections,
+    ] = await Promise.all([
       ctx.db.query("products").collect(),
       ctx.db.query("lots").collect(),
       ctx.db.query("lotLocationBalances").collect(),
@@ -941,11 +946,15 @@ export const lotLocationReadiness = internalQuery({
       ctx.db.query("stockMovements").collect(),
       ctx.db.query("stockTransfers").collect(),
       ctx.db.query("returns").collect(),
+      ctx.db.query("suppliers").collect(),
+      ctx.db.query("gomaQExchanges").collect(),
+      ctx.db.query("gomaQEmptyCartridges").collect(),
+      ctx.db.query("gomaQCollections").collect(),
     ]);
 
-    const products = args.productId
-      ? allProducts.filter((product) => product._id === args.productId)
-      : allProducts;
+    // Escopo intencionalmente global: não aceita productId para evitar
+    // que uma leitura parcial seja confundida com auditoria da produção.
+    const products = allProducts;
     const locationNames = new Map(allLocations.map((location) => [String(location._id), location.name]));
     const entryNumbers = new Map(allEntries.map((entry) => [String(entry._id), entry.entryNumber]));
     const productsResult: Array<Record<string, any>> = [];
@@ -1158,11 +1167,166 @@ export const lotLocationReadiness = internalQuery({
       });
     }
 
+    const countBy = (rows: any[], field: string): Record<string, number> =>
+      rows.reduce((counts: Record<string, number>, row: any) => {
+        const key = String(row[field] ?? "unknown");
+        counts[key] = (counts[key] ?? 0) + 1;
+        return counts;
+      }, {});
+    const sumField = (rows: any[], field: string): number =>
+      rows.reduce((sum: number, row: any) => sum + (Number.isFinite(row[field]) ? row[field] : 0), 0);
+    const supplierNames = new Map(
+      allSuppliers.map((supplier) => [
+        String(supplier._id),
+        supplier.tradeName ?? supplier.legalName ?? "Fornecedor sem nome",
+      ]),
+    );
+    const productById = new Map(allProducts.map((product) => [String(product._id), product]));
+    const lotById = new Map(allLots.map((lot) => [String(lot._id), lot]));
+    const entryHighlights = allEntries
+      .filter((entry) => {
+        const invoiceDigits = String(entry.invoiceNumber ?? "").replace(/\D/g, "");
+        const supplierName = entry.supplierId ? supplierNames.get(String(entry.supplierId)) ?? "" : "";
+        return (
+          entry.entryNumber === "ENT-2026-000001" ||
+          invoiceDigits === "372043" ||
+          invoiceDigits === "2967" ||
+          entry.originType === "gomaq" ||
+          supplierName.toLowerCase().includes("gomaq")
+        );
+      })
+      .sort((a, b) => b.receivedAt - a.receivedAt)
+      .map((entry) => {
+        const items = allEntryItems
+          .filter((item) => item.entryId === entry._id)
+          .map((item) => {
+            const product = productById.get(String(item.productId));
+            const lot = item.lotId ? lotById.get(String(item.lotId)) : null;
+            const locationId = item.locationId ? String(item.locationId) : null;
+            return {
+              productId: String(item.productId),
+              productName: product?.name ?? "Produto inexistente",
+              quantity: item.quantity,
+              unitOfMeasure: item.unitOfMeasure,
+              lotNumber: lot?.lotNumber ?? null,
+              locationId,
+              locationName: locationId ? locationNames.get(locationId) ?? "Local inexistente" : null,
+            };
+          });
+        return {
+          entryId: String(entry._id),
+          entryNumber: entry.entryNumber,
+          originType: entry.originType,
+          status: entry.status,
+          receivedAt: entry.receivedAt,
+          invoiceNumber: entry.invoiceNumber ?? null,
+          invoiceDate: entry.invoiceDate ?? null,
+          supplierName: entry.supplierId ? supplierNames.get(String(entry.supplierId)) ?? "Fornecedor inexistente" : null,
+          itemCount: items.length,
+          totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
+          items,
+        };
+      });
+
+    const invalidGlobalStockCount = allGlobalStock.filter((row) =>
+      !Number.isFinite(row.physicalQuantity) ||
+      !Number.isFinite(row.reservedQuantity) ||
+      row.physicalQuantity < 0 ||
+      row.reservedQuantity < 0 ||
+      row.reservedQuantity > row.physicalQuantity,
+    ).length;
+    const invalidLocalStockCount = allLocalStock.filter((row) =>
+      !Number.isFinite(row.quantity) || row.quantity < 0,
+    ).length;
+    const invalidLotBalanceCount = allBalances.filter((row) =>
+      !Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0,
+    ).length;
+    const productsWithoutGlobalStock = allProducts.filter((product) =>
+      !allGlobalStock.some((row) => row.productId === product._id),
+    ).length;
+    const productsWithLotOrLocationStock = allProducts.filter((product) =>
+      allLots.some((lot) => lot.productId === product._id && lot.quantityAvailable > 0) ||
+      allLocalStock.some((row) => row.productId === product._id && row.quantity > 0),
+    ).length;
+
     return {
       generatedAt: Date.now(),
       readOnly: true,
       migrationApplied: false,
-      totalProducts: productsResult.length,
+      scope: "all_products_and_stock_records",
+      summary: {
+        products: {
+          total: allProducts.length,
+          active: allProducts.filter((product) => product.active).length,
+          inactive: allProducts.filter((product) => !product.active).length,
+          withoutGlobalStockRecord: productsWithoutGlobalStock,
+          withLotOrLocationStock: productsWithLotOrLocationStock,
+        },
+        entries: {
+          total: allEntries.length,
+          byOriginType: countBy(allEntries, "originType"),
+          byStatus: countBy(allEntries, "status"),
+        },
+        entryItems: { total: allEntryItems.length, totalQuantity: sumField(allEntryItems, "quantity") },
+        lots: {
+          total: allLots.length,
+          active: allLots.filter((lot) => lot.active).length,
+          withAvailableQuantity: allLots.filter((lot) => lot.quantityAvailable > 0).length,
+          quantityReceivedTotal: sumField(allLots, "quantityReceived"),
+          quantityAvailableTotal: sumField(allLots, "quantityAvailable"),
+        },
+        globalStock: {
+          records: allGlobalStock.length,
+          physicalQuantityTotal: sumField(allGlobalStock, "physicalQuantity"),
+          reservedQuantityTotal: sumField(allGlobalStock, "reservedQuantity"),
+          invalidRecords: invalidGlobalStockCount,
+        },
+        stockByLocation: {
+          records: allLocalStock.length,
+          physicalQuantityTotal: sumField(allLocalStock, "quantity"),
+          invalidRecords: invalidLocalStockCount,
+        },
+        lotLocationBalances: {
+          records: allBalances.length,
+          quantityAvailableTotal: sumField(allBalances, "quantityAvailable"),
+          invalidRecords: invalidLotBalanceCount,
+        },
+        movements: {
+          total: allMovements.length,
+          byType: countBy(allMovements, "type"),
+          canceled: allMovements.filter((movement) => movement.canceled === true).length,
+        },
+        transfers: { total: allTransfers.length },
+        returns: { total: allReturns.length },
+        storageLocations: {
+          total: allLocations.length,
+          active: allLocations.filter((location) => location.active).length,
+          locations: allLocations.map((location) => ({
+            locationId: String(location._id), name: location.name, active: location.active,
+          })),
+        },
+        gomaq: {
+          exchanges: allGomaQExchanges.length,
+          emptyCartridgeRecords: allGomaQEmptyCartridges.length,
+          emptyCartridgeQuantity: sumField(allGomaQEmptyCartridges, "quantity"),
+          pendingEmptyCartridges: allGomaQEmptyCartridges.filter((item) => item.status === "awaiting_collection").length,
+          collections: allGomaQCollections.length,
+          collectedCartridgeTotal: sumField(allGomaQCollections, "totalCartridges"),
+        },
+      },
+      entryHighlights,
+      gomaqExchanges: allGomaQExchanges
+        .slice()
+        .sort((a, b) => b.exchangedAt - a.exchangedAt)
+        .slice(0, 100)
+        .map((exchange) => ({
+          exchangeNumber: exchange.exchangeNumber,
+          productName: productById.get(String(exchange.productId))?.name ?? "Produto inexistente",
+          quantityDelivered: exchange.quantityDelivered,
+          quantityEmptyReceived: exchange.quantityEmptyReceived,
+          exchangedAt: exchange.exchangedAt,
+        })),
+      totalProducts: allProducts.length,
       productsRequiringReview: productsResult.filter((product) => !product.readyForTrackedWithdrawal).length,
       products: productsResult,
     };
