@@ -34,6 +34,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
 import { buildEstimatedNeedRow, NEED_SOURCE_LABELS } from "@/lib/supply-requests";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -1066,14 +1067,14 @@ type OrderItem = {
 };
 
 function ReversaTab() {
+  const { user } = useAuth();
+  const permissions = getPermissions((user?.role ?? "technician") as UserRole);
   const exchanges = useQuery(api.gomaQ.listExchanges, {}) as Exchange[] | undefined;
   const exchangeOptions = useQuery(api.gomaQ.exchangeOptions, permissions.canManageGomaQ ? {} : "skip");
   const createExchange = useMutation(api.gomaQ.createExchange);
   const cartridges = useQuery(api.gomaQ.listEmptyCartridges, {}) as Cartridge[] | undefined;
   const collections = useQuery(api.gomaQ.listCollections, {}) as Collection[] | undefined;
   const order = useQuery(api.gomaQ.monthlyOrder, {}) as OrderItem[] | undefined;
-  const { user } = useAuth();
-  const permissions = getPermissions((user?.role ?? "technician") as UserRole);
   const [exchangeOpen, setExchangeOpen] = useState(false);
   const [exchangePrinterId, setExchangePrinterId] = useState("");
   const [exchangeProductId, setExchangeProductId] = useState("");
