@@ -69,6 +69,8 @@ describe("estoque por área e local físico — regressões de segurança", () =
   it("entrega apenas lotes reservados e reduz o saldo do local/área de origem", () => {
     const deliver = mutationBlock(requests, "deliver");
     expect(deliver).toContain('ctx.db.query("requestItemReservations")');
+    expect(deliver).toContain("validateAreaLocationLotBalance");
+    expect(deliver).toContain("O saldo físico da área/local diverge da soma dos lotes.");
     expect(deliver).toContain("lot.areaId !== item.areaId");
     expect(deliver).toContain("lot.locationId !== item.sourceLocationId");
     expect(deliver).toContain('ctx.db.patch(source._id, { quantity: source.quantity - input.quantityDelivered })');
