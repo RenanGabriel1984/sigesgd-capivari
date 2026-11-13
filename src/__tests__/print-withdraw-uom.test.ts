@@ -37,6 +37,7 @@ const read = (p: string) => readFileSync(resolve(ROOT, p), "utf-8");
 const backend = read("src/convex/printSupplies.ts");
 const panel = read("src/pages/GomaQ.tsx");
 const schema = read("src/convex/schema.ts");
+const ledger = read("src/convex/lotLocationLedger.ts");
 const orgsBackend = read("src/convex/organizations.ts");
 
 /* ─── Ativos reconciliados (read-only, 2026-09) ─────────────────────────── */
@@ -164,9 +165,11 @@ describe("PRINT-EXIT-03 — retirada respeita o backend (autoridade final)", () 
   });
 
   it("FIFO de lotes e lotId estruturado preservados na retirada por família", () => {
-    expect(backend).toContain("sort((a, b) => a.receivedAt - b.receivedAt)");
+    expect(backend).toContain("consumeLotLocationStock");
     expect(backend).toContain("lotId: consumedLots[0]?.lotId as never");
-    expect(backend).toContain("Falha de consistência: lotes insuficientes");
+    expect(backend).toContain("locationId: args.locationId");
+    expect(ledger).toContain("planFifoLotLocationConsumption");
+    expect(ledger).toContain("Saldo rastreável insuficiente no armário selecionado");
   });
 
   it("a retirada registra destino, secretaria, departamento, unidade, O.S. e motivo", () => {
@@ -471,9 +474,11 @@ describe("PRINT-UOM-13 — nenhuma conversão automática indevida de papel tér
 });
 
 describe("PRINT-UOM-14 — nenhuma duplicação de estoque é criada", () => {
-  it("não existe nova tabela de estoque no painel de suprimentos", () => {
-    expect(backend).not.toMatch(/insert\("(stock|printSuppliesStock|supplyStock|familyStock)"/);
-    expect(schema).not.toMatch(/defineTable\(\{[^}]*familyStock/);
+  it("não existe tabela paralela: os saldos continuam nas tabelas canônicas", () => {
+    expect(schema).toMatch(/stock:\s*defineTable\(/);
+    expect(schema).toContain("lotLocationBalances: defineTable");
+    expect(schema).not.toMatch(/printSuppliesStock|supplyStock|familyStock/);
+    expect(backend).toContain('ctx.db.insert("stock"');
   });
 
   it("a abertura de caixa é REPARTIÇÃO, não geração: transferência de unidades entre registros", () => {
