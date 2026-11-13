@@ -1,5 +1,5 @@
 import { requirePermission } from "./rbac";
-import { consumeLotLocationStock, resolveWithdrawalLocation } from "./lotLocationLedger";
+import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
@@ -781,7 +781,7 @@ export const quickExit = mutation({
     // Número sequencial da saída (SAI-ANO-SEQ) — usado no vínculo de devoluções
     const exitNumber = await generateExitNumber(ctx);
 
-    await ctx.db.insert("stockMovements", {
+    const movementId = await ctx.db.insert("stockMovements", {
       productId: args.productId,
       type: "exit",
       quantity: args.quantity,
@@ -805,6 +805,11 @@ export const quickExit = mutation({
         .filter(Boolean)
         .join(" | "),
       timestamp: now,
+    });
+
+    await recordLotMovementAllocations(ctx, {
+      movementId, productId: args.productId, locationId: sourceLocationId,
+      allocations: lotConsumption.allocations,
     });
 
     // ── 5. Audit ──
