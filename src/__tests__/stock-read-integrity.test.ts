@@ -140,7 +140,7 @@ describe("stock read integrity", () => {
       "Mouse",
     );
     expect(result.consistent).toBe(false);
-    expect(result.issues).toContain("O saldo global diverge da soma dos saldos por área/local.");
+    expect(result.issues).toContain("O saldo global diverge da soma dos saldos por armário.");
     expect(result.issues).toContain("O saldo global diverge da soma dos saldos dos lotes.");
     expect(result.issues).toContain("O saldo físico da área/local (ti|cabinet-1) diverge da soma dos lotes.");
   });
