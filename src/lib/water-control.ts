@@ -113,8 +113,8 @@ export function buildWaterSupplierReturnDeltas(
     throw new Error("Informe ao menos um galão cheio ou vazio para devolver.");
   }
   return {
-    fullDelta: -fullGallonsReturned,
-    emptyDelta: -emptyGallonsReturned,
+    fullDelta: fullGallonsReturned === 0 ? 0 : -fullGallonsReturned,
+    emptyDelta: emptyGallonsReturned === 0 ? 0 : -emptyGallonsReturned,
   };
 }
 
