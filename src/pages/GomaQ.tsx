@@ -1050,6 +1050,8 @@ function PlanejamentoReposicaoTab() {
 type Exchange = {
   _id: string; exchangeNumber: string; productId: string;
   quantityDelivered: number; quantityEmptyReceived: number; exchangedAt: number;
+  product?: { name?: string } | null;
+  printer?: { name?: string; model?: string } | null;
 };
 type Cartridge = {
   _id: string; productId: string; quantity: number;
@@ -1065,11 +1067,74 @@ type OrderItem = {
 
 function ReversaTab() {
   const exchanges = useQuery(api.gomaQ.listExchanges, {}) as Exchange[] | undefined;
+  const exchangeOptions = useQuery(api.gomaQ.exchangeOptions, permissions.canManageGomaQ ? {} : "skip");
+  const createExchange = useMutation(api.gomaQ.createExchange);
   const cartridges = useQuery(api.gomaQ.listEmptyCartridges, {}) as Cartridge[] | undefined;
   const collections = useQuery(api.gomaQ.listCollections, {}) as Collection[] | undefined;
   const order = useQuery(api.gomaQ.monthlyOrder, {}) as OrderItem[] | undefined;
   const { user } = useAuth();
   const permissions = getPermissions((user?.role ?? "technician") as UserRole);
+  const [exchangeOpen, setExchangeOpen] = useState(false);
+  const [exchangePrinterId, setExchangePrinterId] = useState("");
+  const [exchangeProductId, setExchangeProductId] = useState("");
+  const [exchangeLocationId, setExchangeLocationId] = useState("");
+  const [exchangeDelivered, setExchangeDelivered] = useState("1");
+  const [exchangeEmpties, setExchangeEmpties] = useState("1");
+  const [exchangeReceiver, setExchangeReceiver] = useState("");
+  const [exchangeObservation, setExchangeObservation] = useState("");
+  const [savingExchange, setSavingExchange] = useState(false);
+
+  const selectedExchangePrinter = exchangeOptions?.printers.find(
+    (printer: any) => printer._id === exchangePrinterId,
+  );
+  const compatibleExchangeProducts = (exchangeOptions?.products ?? []).filter(
+    (product: any) => selectedExchangePrinter
+      && product.compatibleModels.some((model: string) =>
+        model.trim().toLowerCase() === selectedExchangePrinter.model.trim().toLowerCase(),
+      ),
+  );
+
+  const handleCreateExchange = async () => {
+    if (!exchangePrinterId || !exchangeProductId || !exchangeLocationId) {
+      toast.error("Selecione a impressora, o suprimento e o armário de origem");
+      return;
+    }
+    if (!exchangeReceiver.trim()) {
+      toast.error("Informe o nome de quem recebeu o suprimento");
+      return;
+    }
+    const delivered = Number(exchangeDelivered);
+    const empties = Number(exchangeEmpties);
+    if (!Number.isFinite(delivered) || delivered <= 0 || !Number.isFinite(empties) || empties < 0) {
+      toast.error("Informe quantidades válidas");
+      return;
+    }
+    setSavingExchange(true);
+    try {
+      await createExchange({
+        printerId: exchangePrinterId as Id<"printers">,
+        productId: exchangeProductId as Id<"products">,
+        locationId: exchangeLocationId as Id<"storageLocations">,
+        quantityDelivered: delivered,
+        quantityEmptyReceived: empties,
+        receivedByName: exchangeReceiver.trim(),
+        observation: exchangeObservation.trim() || undefined,
+      });
+      toast.success("Troca Gomaq registrada; saída e lotes foram auditados");
+      setExchangeOpen(false);
+      setExchangePrinterId("");
+      setExchangeProductId("");
+      setExchangeLocationId("");
+      setExchangeDelivered("1");
+      setExchangeEmpties("1");
+      setExchangeReceiver("");
+      setExchangeObservation("");
+    } catch (e: any) {
+      toast.error(e.message ?? "Erro ao registrar troca Gomaq");
+    } finally {
+      setSavingExchange(false);
+    }
+  };
 
   const awaiting = (cartridges ?? []).filter((c) => c.status === "awaiting_collection").length;
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
@@ -1100,14 +1165,22 @@ function ReversaTab() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="rounded-lg border p-4">
-          <h3 className="mb-2 flex items-center gap-2 text-sm font-medium">
-            <RefreshCcw className="size-4 text-muted-foreground" /> Últimas trocas
-          </h3>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="flex items-center gap-2 text-sm font-medium">
+              <RefreshCcw className="size-4 text-muted-foreground" /> Últimas trocas
+            </h3>
+            {permissions.canManageGomaQ && (
+              <Button size="sm" onClick={() => setExchangeOpen(true)}>Registrar troca</Button>
+            )}
+          </div>
           <div className="space-y-1.5">
             {(exchanges ?? []).slice(0, 6).map((e) => (
               <div key={e._id} className="flex items-center justify-between rounded-md border px-3 py-1.5 text-sm">
-                <span className="font-mono text-xs text-muted-foreground">{e.exchangeNumber}</span>
-                <span className="tabular-nums">{e.quantityDelivered} entregue(s) · {e.quantityEmptyReceived} carcaça(s)</span>
+                <span className="min-w-0">
+                  <span className="block font-mono text-xs text-muted-foreground">{e.exchangeNumber}</span>
+                  <span className="block text-xs">{e.product?.name ?? "Suprimento"} · {e.printer?.name ?? "Impressora"}</span>
+                </span>
+                <span className="shrink-0 text-right tabular-nums">{e.quantityDelivered} entregue(s) · {e.quantityEmptyReceived} carcaça(s)</span>
               </div>
             ))}
             {(exchanges ?? []).length === 0 && (
@@ -1177,6 +1250,85 @@ function ReversaTab() {
           </Table>
         </div>
       </section>
+      <Dialog open={exchangeOpen} onOpenChange={setExchangeOpen}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Registrar troca de suprimento Gomaq</DialogTitle>
+            <DialogDescription>
+              A baixa será feita no armário escolhido e vinculada aos lotes consumidos. A quantidade de carcaças recebidas será registrada para logística reversa.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Impressora *</Label>
+              <Select value={exchangePrinterId} onValueChange={(value) => {
+                setExchangePrinterId(value);
+                setExchangeProductId("");
+              }}>
+                <SelectTrigger><SelectValue placeholder="Selecione a impressora..." /></SelectTrigger>
+                <SelectContent>
+                  {(exchangeOptions?.printers ?? []).map((printer: any) => (
+                    <SelectItem key={printer._id} value={printer._id}>
+                      {printer.name} · {printer.brand} {printer.model}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Suprimento compatível *</Label>
+              <Select value={exchangeProductId} onValueChange={setExchangeProductId} disabled={!exchangePrinterId}>
+                <SelectTrigger><SelectValue placeholder="Selecione o suprimento..." /></SelectTrigger>
+                <SelectContent>
+                  {compatibleExchangeProducts.map((product: any) => (
+                    <SelectItem key={product._id} value={product._id}>
+                      {product.name} · disponível {product.availableQuantity}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {exchangePrinterId && compatibleExchangeProducts.length === 0 && (
+                <p className="mt-1 text-xs text-destructive">Não há suprimento cadastrado como compatível com este modelo de impressora.</p>
+              )}
+            </div>
+            <div>
+              <Label>Armário de origem *</Label>
+              <Select value={exchangeLocationId} onValueChange={setExchangeLocationId}>
+                <SelectTrigger><SelectValue placeholder="Selecione de onde o suprimento será retirado..." /></SelectTrigger>
+                <SelectContent>
+                  {(exchangeOptions?.locations ?? []).map((location: any) => (
+                    <SelectItem key={location._id} value={location._id}>{location.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Unidades entregues *</Label>
+                <Input type="number" min="0.001" step="any" value={exchangeDelivered} onChange={(e) => setExchangeDelivered(e.target.value)} />
+              </div>
+              <div>
+                <Label>Carcaças vazias recebidas</Label>
+                <Input type="number" min="0" step="1" value={exchangeEmpties} onChange={(e) => setExchangeEmpties(e.target.value)} />
+              </div>
+            </div>
+            <div>
+              <Label>Nome de quem recebeu *</Label>
+              <Input value={exchangeReceiver} onChange={(e) => setExchangeReceiver(e.target.value)} placeholder="Nome do responsável na unidade" />
+            </div>
+            <div>
+              <Label>Observação</Label>
+              <Textarea value={exchangeObservation} onChange={(e) => setExchangeObservation(e.target.value)} placeholder="Observações da troca..." />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExchangeOpen(false)} disabled={savingExchange}>Cancelar</Button>
+            <Button onClick={handleCreateExchange} disabled={savingExchange || !exchangeOptions}>
+              {savingExchange ? "Registrando..." : "Confirmar troca"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
