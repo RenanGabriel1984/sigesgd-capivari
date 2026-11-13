@@ -212,7 +212,7 @@ export const create = mutation({
     materialType: v.union(v.literal("consumption"), v.literal("permanent")),
     // ── Área/Subestoque de destino — ESCOLHA do usuário (nunca derivada
     // automaticamente do fornecedor nem da categoria) ──
-    areaId: v.optional(v.id("stockAreas")),
+    areaId: v.id("stockAreas"),
     items: v.array(v.object({
       productId: v.id("products"),
       quantity: v.number(),
@@ -281,10 +281,11 @@ export const create = mutation({
       series: args.series,
     });
 
-    // Área/Subestoque precisa existir (cadastro independente)
-    if (args.areaId) {
-      const area = await ctx.db.get(args.areaId);
-      if (!area) throw new Error("Área/Subestoque não encontrada");
+    // Toda entrada nova precisa de área ativa. O campo no schema permanece
+    // opcional apenas para preservar documentos históricos já existentes.
+    const destinationArea = await ctx.db.get(args.areaId);
+    if (!destinationArea || !destinationArea.active) {
+      throw new Error("Selecione uma área/subestoque ativo para esta entrada.");
     }
 
     const entryId = await ctx.db.insert("entries", {
@@ -369,6 +370,38 @@ export const create = mutation({
  * Confirm an entry: atomically creates lots, updates stock, creates movements.
  * This is an indivisible operation.
  */
+/**
+ * Classifica rascunho antigo antes da confirmação, sem reescrever itens
+ * individuais que já tenham uma área própria.
+ */
+export const updateDraftArea = mutation({
+  args: {
+    entryId: v.id("entries"),
+    areaId: v.id("stockAreas"),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    const entry = await ctx.db.get(args.entryId);
+    if (!entry) throw new Error("Entrada não encontrada.");
+    if (entry.status !== "draft") throw new Error("Apenas rascunhos podem receber classificação de área.");
+    const area = await ctx.db.get(args.areaId);
+    if (!area || !area.active) throw new Error("Selecione uma área/subestoque ativo.");
+
+    if (entry.areaId !== args.areaId) {
+      await ctx.db.patch(args.entryId, { areaId: args.areaId, updatedAt: Date.now() });
+      await ctx.db.insert("auditLogs", {
+        userId,
+        action: "update",
+        entity: "entries",
+        entityId: args.entryId,
+        details: `Área/subestoque do rascunho ${entry.entryNumber} definida como "${area.name}" antes da confirmação.`,
+        timestamp: Date.now(),
+      });
+    }
+    return args.entryId;
+  },
+});
+
 export const confirm = mutation({
   args: { entryId: v.id("entries") },
   handler: async (ctx, args) => {
@@ -461,14 +494,17 @@ export const confirm = mutation({
       getOptionalSingleValidGlobalStock(globalRows, product.name);
 
       const effectiveAreaId = item.areaId ?? entry.areaId;
-      itemAreas.set(item._id as string, effectiveAreaId as string | undefined);
-      if (effectiveAreaId) {
-        const area = await ctx.db.get(effectiveAreaId as Id<"stockAreas">);
-        if (!area || !area.active) {
-          const product = await ctx.db.get(item.productId);
-          throw new Error(`A área selecionada para "${product?.name ?? "o item"}" não existe ou está inativa.`);
-        }
+      if (!effectiveAreaId) {
+        throw new Error(
+          `A entrada ${entry.entryNumber} não possui área/subestoque definida para "${product.name}". ` +
+          "Classifique o rascunho antes de confirmar; o armário não determina a área."
+        );
       }
+      const area = await ctx.db.get(effectiveAreaId as Id<"stockAreas">);
+      if (!area || !area.active) {
+        throw new Error(`A área selecionada para "${product.name}" não existe ou está inativa.`);
+      }
+      itemAreas.set(item._id as string, effectiveAreaId as string);
       if (!item.locationId) {
         const product = await ctx.db.get(item.productId);
         throw new Error(`Selecione o local físico para "${product?.name ?? "o item"}" antes de confirmar esta entrada.`);
