@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { BASELINE_STOCK_AREAS, NO_AREA_LABEL } from "../lib/stock-areas";
 import { requirePermission } from "./rbac";
+import { requireSingleValidGlobalStock } from "../lib/stock-quantity-rules";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -245,12 +246,20 @@ export const classifyLot = mutation({
       throw new Error("Há vínculo de movimentação por lote com área/local divergente. Regularize a trilha antes de classificar.");
     }
 
-    const productStock = await ctx.db.query("stock")
-      .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).first();
-    if (!productStock) throw new Error("Registro global de estoque não encontrado; classificação cancelada.");
+    const productStockRows = await ctx.db.query("stock")
+      .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).collect();
+    const productStock = requireSingleValidGlobalStock(productStockRows, String(lot.productId));
     const productReservations = await ctx.db.query("requestItemReservations")
       .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).collect();
+    if (productReservations.some((item: any) =>
+      !Number.isFinite(item.quantityRemaining) || item.quantityRemaining < 0
+    )) {
+      throw new Error("Há reserva por lote inválida para este produto. Regularize antes de classificar.");
+    }
     const areaReserved = productReservations.reduce((sum: number, item: any) => sum + item.quantityRemaining, 0);
+    if (areaReserved - productStock.reservedQuantity > 1e-9) {
+      throw new Error("As reservas por lote excedem o saldo reservado global. Classificação cancelada.");
+    }
     const legacyReserved = Math.max(0, productStock.reservedQuantity - areaReserved);
     if (legacyReserved > 0) {
       throw new Error("Há solicitações antigas aprovadas sem reserva por lote para este produto. Conclua ou cancele essas solicitações antes de classificar o saldo.");
