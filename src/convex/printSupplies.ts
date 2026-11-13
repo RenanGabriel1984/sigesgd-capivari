@@ -449,10 +449,14 @@ export const withdraw = mutation({
         `| Armário: ${sourceLocation?.name ?? sourceLocationId} ` +
         `| O.S.: ${args.osNumber ?? "—"} | Destino: ${args.secretariaId ?? "—"} ` +
         `| Lotes retirados: ${consumedLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}` +
-        (reclassifiedFromLots.length ? ` | Embalagens abertas: ${reclassifiedFromLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}` : "") +
         (args.observation ? ` | Obs: ${args.observation}` : ""),
       timestamp: now,
     } as never);
+
+    await recordLotMovementAllocations(ctx, {
+      movementId, productId: args.productId, locationId: sourceLocationId,
+      allocations: lotConsumption.allocations,
+    });
 
     await ctx.db.insert("auditLogs", {
       userId: userId as never,
@@ -462,7 +466,6 @@ export const withdraw = mutation({
       details:
         `Retirada rápida de suprimento de impressão: ${args.quantity} ${product.unitOfMeasure} de "${product.name}". ` +
         `Lotes retirados: ${consumedLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}. ` +
-        (reclassifiedFromLots.length ? `Lotes reclassificados: ${reclassifiedFromLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}. ` : "") +
         `Motivo: ${args.reason ?? "—"}; O.S.: ${args.osNumber ?? "—"}; Destino: ${args.secretariaId ?? "—"}.` +
         (args.observation ? ` Obs: ${args.observation}` : ""),
       timestamp: now,
@@ -876,7 +879,8 @@ export const withdrawFamily = mutation({
         `| Operação: ${plan.operation === "open_pack" ? `abertura integral de ${plan.packs} ${conv.packagingUnit}(s)` : `${plan.packs > 0 ? `${plan.packs} ${conv.packagingUnit}(s) fechada(s)` : ""}${plan.packs > 0 && looseExitUnits > 0 ? " + " : ""}${looseExitUnits} ${conv.baseUnit}. avulsa(s)`} ` +
         `| Composição antes: ${closedAvailable} ${conv.packagingUnit}(s) fechada(s) + ${looseAvailable} ${conv.baseUnit}. avulsa(s) ` +
         `| O.S.: ${args.osNumber ?? "—"} | Destino: ${args.secretariaId ?? "—"} ` +
-        `| Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(", ")}` +
+        `| Lotes retirados: ${consumedLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}` +
+        (reclassifiedFromLots.length ? ` | Embalagens abertas: ${reclassifiedFromLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}` : "") +
         (args.observation ? ` | Obs: ${args.observation}` : ""),
       timestamp: now,
     } as never);
@@ -913,7 +917,8 @@ export const withdrawFamily = mutation({
       details:
         `Retirada por família em unidades-base: ${args.quantity} ${conv.baseUnit} de "${product.name}". ` +
         `Operação ${plan.operation === "open_pack" ? `open_pack(${plan.packs} ${conv.packagingUnit})` : `take_pack(${plan.packs} ${conv.packagingUnit}, ${looseExitUnits} ${conv.baseUnit} avulsas)`}. ` +
-        `Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(", ")}. ` +
+        `Lotes retirados: ${consumedLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}. ` +
+        (reclassifiedFromLots.length ? `Lotes reclassificados: ${reclassifiedFromLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}. ` : "") +
         `Motivo: ${args.reason ?? "—"}; O.S.: ${args.osNumber ?? "—"}; Destino: ${args.secretariaId ?? "—"}. ` +
         `Invariante global preservado (Δphysical=${-args.quantity}, Δreserved=0).`,
       timestamp: now,
