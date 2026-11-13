@@ -505,11 +505,21 @@ export const lotLocationReadiness = query({
       const balances = allBalances.filter((balance) => balance.productId === product._id);
       const localRows = allLocalStock.filter((row) => row.productId === product._id);
       const globalRows = allGlobalStock.filter((row) => row.productId === product._id);
+      const orphanBalanceCount = balances.filter((balance) =>
+        !lots.some((lot) => lot._id === balance.lotId),
+      ).length;
+      const invalidLotCount = lots.filter((lot) =>
+        !Number.isFinite(lot.quantityAvailable) ||
+        lot.quantityAvailable < 0 ||
+        !Number.isFinite(lot.receivedAt),
+      ).length;
 
       let global: (typeof globalRows)[number] | null = null;
       let globalError: string | null = null;
       if (globalRows.length > 1) {
         globalError = `Existem ${globalRows.length} registros globais de estoque para o produto.`;
+      } else if (globalRows.length === 0 && (localRows.some((row) => row.quantity > 0) || lots.some((lot) => lot.quantityAvailable > 0))) {
+        globalError = "Há saldo físico ou lote disponível sem registro global de estoque.";
       } else if (globalRows.length === 1) {
         global = globalRows[0];
         if (
@@ -672,8 +682,12 @@ export const lotLocationReadiness = query({
         candidateTotalsAlign:
           localComparison.every((row) => Math.abs(row.physicalQuantity - (row.mappedLotQuantity + row.candidateLotQuantity)) <= 1e-9) &&
           Math.abs(globalPhysical - (mappedLotTotal + candidateLotTotal)) <= 1e-9,
+        invalidLotCount,
+        orphanBalanceCount,
         readyForTrackedWithdrawal:
           !globalError &&
+          invalidLotCount === 0 &&
+          orphanBalanceCount === 0 &&
           statusCounts.divergent === 0 &&
           statusCounts.candidate === 0 &&
           statusCounts.ambiguous === 0 &&
@@ -691,7 +705,7 @@ export const lotLocationReadiness = query({
       migrationApplied: false,
       totalProducts: productsResult.length,
       productsRequiringReview: productsResult.filter((product) => !product.readyForTrackedWithdrawal).length,
-      products,
+      products: productsResult,
     };
   },
 });
