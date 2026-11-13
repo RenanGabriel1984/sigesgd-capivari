@@ -725,8 +725,9 @@ export const withdrawFamily = mutation({
         newClosedPhys = closedPhys - closedExitUnits;
       }
     } else {
-      // Abrir embalagem é reclassificação: baixa o lote fechado no armário,
-      // cria novo lote avulso com origem rastreável e só então faz a saída.
+      // Abertura INTEGRAL: transferir as unidades do registro de embalagem
+      // fechada para um lote avulso derivado, no MESMO armário. Não é compra,
+      // entrada nova nem geração de saldo global: é reclassificação física.
       const openPacks = plan.packs;
       const openedUnits = openPacks * conv.factor;
       const opened = await consumeAtLocation(closedMember._id, openedUnits, args.locationId);
