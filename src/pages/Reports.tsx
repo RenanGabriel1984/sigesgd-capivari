@@ -79,7 +79,7 @@ function exportStockPositionCSV(data: any[]) {
       r.maximumStock,
       r.status,
       UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure,
-      (r.locationBreakdown ?? []).map((location: any) => `${location.areaName} / ${location.locationName}: ${location.quantity ?? "inválido"}`).join(" | "),
+      (r.locationBreakdown ?? []).map((location: any) => `${location.locationName} (saldo físico: ${location.quantity ?? "inválido"}; áreas pelos lotes: ${(location.areaBreakdown ?? []).map((area: any) => `${area.areaName}: ${area.quantity}`).join(", ") || "sem lotes classificados"})`).join(" | "),
       (r.integrityIssues ?? []).join(" | "),
     ].join(";")
   );
@@ -316,7 +316,7 @@ export default function Reports() {
                         <TableHead className="text-xs text-right">Mínimo</TableHead>
                         <TableHead className="text-xs text-right">Ideal</TableHead>
                         <TableHead className="text-xs text-right">Máximo</TableHead>
-                        <TableHead className="text-xs">Área / Armário</TableHead>
+                        <TableHead className="text-xs">Armário / Área (lotes)</TableHead>
                         <TableHead className="text-xs">Status</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -334,7 +334,12 @@ export default function Reports() {
                           <TableCell className="text-xs min-w-56">
                             <div className="space-y-1">
                               {item.locationBreakdown?.length ? item.locationBreakdown.map((location, index) => (
-                                <div key={index}>{location.areaName} / {location.locationName}: <span className="font-mono">{location.quantity ?? "inválido"}</span></div>
+                                <div key={index} className="space-y-0.5">
+                                  <div>{location.locationName} — físico: <span className="font-mono">{location.quantity ?? "inválido"}</span></div>
+                                  {location.areaBreakdown?.length ? location.areaBreakdown.map((area, areaIndex) => (
+                                    <div key={areaIndex} className="pl-3 text-muted-foreground">{area.areaName}: <span className="font-mono">{area.quantity}</span> <span className="text-[10px]">(soma dos lotes)</span></div>
+                                  )) : <div className="pl-3 text-muted-foreground text-[11px]">Sem lotes classificados neste armário</div>}
+                                </div>
                               )) : "Sem saldo por localização"}
                               {item.integrityIssues?.length > 0 && (
                                 <div className="text-destructive text-[11px] whitespace-normal">{item.integrityIssues.join(" ")}</div>
