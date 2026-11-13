@@ -74,7 +74,7 @@ jobs:
             exit 1
           fi
 
-          if grep -nE '\\.(insert|patch|replace|delete)[[:space:]]*\\(' <(sed -n '/export const lotLocationReadiness = internalQuery(/,/^});/p' src/convex/stockSetup.ts); then
+          if grep -nE '\.(insert|patch|replace|delete)[[:space:]]*\(' <(sed -n '/export const lotLocationReadiness = internalQuery(/,/^[[:space:]]*});/p' src/convex/stockSetup.ts); then
             echo "::error::Foi encontrada operação de escrita no bloco de diagnóstico. Nada foi publicado."
             exit 1
           fi
