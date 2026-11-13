@@ -29,6 +29,7 @@ const ROOT = resolve(__dirname, "../..");
 const read = (p: string) => readFileSync(resolve(ROOT, p), "utf-8");
 
 const backend = read("src/convex/printSupplies.ts");
+const ledger = read("src/convex/lotLocationLedger.ts");
 const panel = read("src/pages/GomaQ.tsx");
 
 const IMP = "q97b7737gv98ajm8qqpmjmzjs18ezb58"; // Impressoras
@@ -154,8 +155,11 @@ describe("PRINT-09 — retirada registra lotId", () => {
     expect(backend).toContain("lotId: consumedLots[0].lotId");
   });
   it("consome lotes FIFO por recebimento e registra todos na observation", () => {
-    expect(backend).toMatch(/sort\(\(a, b\) => a\.receivedAt - b\.receivedAt\)/);
+    expect(backend).toContain("consumeLotLocationStock");
+    expect(backend).toContain("resolveWithdrawalLocation");
     expect(backend).toContain("Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(\", \")}");
+    expect(ledger).toContain("planFifoLotLocationConsumption");
+    expect(ledger).toContain("lotLocationBalances");
   });
 });
 
@@ -188,10 +192,14 @@ describe("PRINT-11 — transferência não altera estoque global", () => {
 });
 
 describe("PRINT-19 — nenhuma duplicação de estoque é criada", () => {
-  it("o painel lê stock/lots existentes — sem nova tabela de estoque", () => {
+  it("o painel reutiliza as tabelas canônicas — sem criar outro estoque", () => {
+    const schema = read("src/convex/schema.ts");
     expect(backend).toContain('ctx.db.query("stock")');
     expect(backend).toContain('ctx.db.query("lots")');
-    expect(backend).not.toMatch(/insert\("(stock|printSuppliesStock|supplyStock)"/);
+    expect(schema).toMatch(/stock:\s*defineTable\(/);
+    expect(schema).not.toMatch(/printSuppliesStock|supplyStock|familyStock/);
+    // Uma linha ausente é criada na tabela stock já existente, sem tabela paralela.
+    expect(backend).toContain('ctx.db.insert("stock"');
   });
 });
 
