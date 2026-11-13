@@ -79,8 +79,10 @@ function exportStockPositionCSV(data: any[]) {
       r.maximumStock,
       r.status,
       UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure,
-      (r.locationBreakdown ?? []).map((location: any) => `${location.locationName} (saldo físico: ${location.quantity ?? "inválido"}; áreas pelos lotes: ${(location.areaBreakdown ?? []).map((area: any) => `${area.areaName}: ${area.quantity}`).join(", ") || "sem lotes classificados"})`).join(" | "),
+      (r.locationBreakdown ?? []).map((location: any) => `${location.locationName}: ${location.quantity ?? "inválido"}`).join(" | "),
+      (r.areaBreakdown ?? []).map((area: any) => `${area.areaName}: ${area.quantity} [${(area.lots ?? []).map((lot: any) => `${lot.lotNumber}=${lot.quantityAvailable}`).join(", ")}]`).join(" | "),
       (r.integrityIssues ?? []).join(" | "),
+      (r.integrityLimitations ?? []).join(" | "),
     ].join(";")
   );
   downloadCSV("posicao_estoque.csv", [header, ...rows].join("\n"));
