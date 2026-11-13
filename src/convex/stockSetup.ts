@@ -4,7 +4,9 @@ import {
   formatConsumedLots,
   type LotConsumption,
 } from "../lib/stock-consumption";
-import { internalQuery, mutation, query } from "./_generated/server";
+import { internalQuery, internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { buildLotLocationMigrationPlan } from "../lib/lot-location-migration";
 import { v } from "convex/values";
 import {
   isClosedUnusedReturnAtSource,
@@ -1414,6 +1416,89 @@ export const lotLocationReadiness = internalQuery({
       totalProducts: allProducts.length,
       productsRequiringReview: productsResult.filter((product) => !product.readyForTrackedWithdrawal).length,
       products: productsResult,
+    };
+  },
+});
+
+
+/**
+ * Aplica a migração lote × armário após validação integral do diagnóstico.
+ *
+ * Esta mutation é INTERNAL (não integra a API pública do aplicativo). Só deve
+ * ser chamada manualmente no deployment first-herring-264, após autorização
+ * explícita do responsável. A transação é atômica: qualquer conflito aborta
+ * todas as inserções. Não altera estoque global, saldos físicos por armário,
+ * lotes, entradas, movimentações ou devoluções.
+ */
+export const applyLotLocationBalancesMigration = internalMutation({
+  args: {
+    confirmation: v.literal("CONFIRMAR_MIGRACAO_LOTES_FIRST_HERRING"),
+  },
+  handler: async (ctx) => {
+    const report = await ctx.runQuery(internal.stockSetup.lotLocationReadiness, {});
+    const plan = buildLotLocationMigrationPlan(report as Parameters<typeof buildLotLocationMigrationPlan>[0]);
+    const now = Date.now();
+    let inserted = 0;
+    let skipped = 0;
+
+    const insertableLotIds = new Set(plan.insertions.map((row) => row.lotId));
+
+    for (const row of plan.rows) {
+      const existing = await ctx.db
+        .query("lotLocationBalances")
+        .withIndex("by_lot", (q) => q.eq("lotId", row.lotId as any))
+        .collect();
+
+      if (existing.length > 0) {
+        if (
+          existing.length !== 1 ||
+          existing[0].productId !== row.productId ||
+          existing[0].locationId !== row.locationId ||
+          Math.abs(existing[0].quantityAvailable - row.quantityAvailable) > 1e-9
+        ) {
+          throw new Error(
+            `Migração lote × armário abortada: conflito no lote ${row.lotNumber}. Nenhuma gravação será confirmada.`,
+          );
+        }
+        skipped++;
+        continue;
+      }
+
+      if (!insertableLotIds.has(row.lotId)) {
+        throw new Error(
+          `Migração lote × armário abortada: diagnóstico considera ${row.lotNumber} mapeado, mas o registro não existe.`,
+        );
+      }
+
+      await ctx.db.insert("lotLocationBalances", {
+        lotId: row.lotId as any,
+        productId: row.productId as any,
+        locationId: row.locationId as any,
+        quantityAvailable: row.quantityAvailable,
+        updatedAt: now,
+      });
+      inserted++;
+    }
+
+    if (inserted + skipped !== plan.totalLots) {
+      throw new Error("Migração lote × armário abortada: contagem final de registros inesperada.");
+    }
+
+    await ctx.db.insert("auditLogs", {
+      action: "update",
+      entity: "lotLocationBalances",
+      details:
+        `Migração controlada lote × armário: ${inserted} registro(s) inserido(s), ${skipped} já existente(s) idêntico(s), ${plan.totalLots} lotes, ${plan.totalQuantity} unidades. Nenhuma quantidade física/global, lote, entrada, movimentação ou devolução foi alterada.`,
+      timestamp: now,
+    });
+
+    return {
+      migrationApplied: true,
+      inserted,
+      skipped,
+      totalLots: plan.totalLots,
+      totalQuantity: plan.totalQuantity,
+      updatedAt: now,
     };
   },
 });
