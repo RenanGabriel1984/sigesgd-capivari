@@ -100,9 +100,13 @@ export function resolveNfeDestination(
   if (!destination || !destination.areaId.trim()) {
     throw new NfeDestinationError(NFE_DESTINATION_REQUIRED_MESSAGE);
   }
+  const areaId = destination.areaId.trim();
+  if (!areaId) {
+    throw new NfeDestinationError(NFE_DESTINATION_REQUIRED_MESSAGE);
+  }
   return {
     materialType: destination.materialType,
-    areaId: destination.areaId.trim(),
+    areaId,
   };
 }
 
