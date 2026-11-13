@@ -6,6 +6,7 @@ import { requirePermission, requireRequestAction } from "./rbac";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
+import { consumeLotLocationStock, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -356,6 +357,7 @@ export const deliver = mutation({
       itemId: v.id("requestItems"),
       quantityDelivered: v.number(),
       serialNumbers: v.optional(v.array(v.string())),
+      locationId: v.optional(v.id("storageLocations")),
     }))),
     receivedByUserId: v.optional(v.id("users")),
     confirmationPassword: v.string(),
@@ -438,6 +440,16 @@ export const deliver = mutation({
       const freshStock = requireSingleValidGlobalStock(freshStockRows, String(requestItem.productId));
       if (freshStock.physicalQuantity < input.quantityDelivered) throw new Error(`Estoque insuficiente (concorrência). Disponível: ${freshStock.physicalQuantity}.`);
       if (freshStock.reservedQuantity < input.quantityDelivered) throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}.`);
+      // Resolve the source cabinet without guessing and consume lot/location
+      // balances before changing the global balance. Convex rolls back the
+      // whole mutation if any validation fails.
+      const sourceLocationId = await resolveWithdrawalLocation(ctx, requestItem.productId, input.locationId);
+      const lotConsumption = await consumeLotLocationStock(ctx, {
+        productId: requestItem.productId,
+        locationId: sourceLocationId,
+        quantity: input.quantityDelivered,
+      });
+      const sourceLocation = await ctx.db.get(sourceLocationId);
       const newPhysical = freshStock.physicalQuantity - input.quantityDelivered;
       const newReserved = freshStock.reservedQuantity - input.quantityDelivered;
       await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical, reservedQuantity: newReserved });
@@ -447,47 +459,24 @@ export const deliver = mutation({
         previousPhysical: freshStock.physicalQuantity, newPhysical,
         previousReserved: freshStock.reservedQuantity, newReserved,
         userId, requestId: args.requestId, exitNumber,
-        observation: "Entrega da solicitação", timestamp: now,
+        lotId: lotConsumption.allocations[0]?.lotId as any,
+        locationId: sourceLocationId,
+        observation: `Entrega da solicitação — armário ${sourceLocation?.name ?? sourceLocationId}. Lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
+        timestamp: now,
       });
       await ctx.db.patch(input.itemId, {
         quantityDelivered: input.quantityDelivered,
         deliveredSerialNumbers: input.serialNumbers?.length ? input.serialNumbers : undefined,
       });
 
-      // FIFO Lot Consumption: find lots for this product, ordered by receivedAt ascending
-      let remainingToConsume = input.quantityDelivered;
-      const lots = await ctx.db
-        .query("lots")
-        .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
-        .collect();
-      // Sort by receivedAt ascending (FIFO), then by lotNumber
-      const sortedLots = lots
-        .filter((l) => l.quantityAvailable > 0)
-        .sort((a, b) => a.receivedAt - b.receivedAt || a.lotNumber.localeCompare(b.lotNumber));
-
-      for (const lot of sortedLots) {
-        if (remainingToConsume <= 0) break;
-        const consumeFromLot = Math.min(lot.quantityAvailable, remainingToConsume);
-        if (consumeFromLot <= 0) continue;
-
-        // Reduce lot available
-        await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consumeFromLot });
-
-        // Record which lot was consumed
+      // Preserve full lot/location traceability for each allocation.
+      for (const allocation of lotConsumption.allocations) {
         await ctx.db.insert("requestItemLots", {
           requestItemId: input.itemId,
-          lotId: lot._id,
-          quantity: consumeFromLot,
+          lotId: allocation.lotId,
+          quantity: allocation.quantity,
+          locationId: sourceLocationId,
         });
-
-        remainingToConsume -= consumeFromLot;
-      }
-
-      if (remainingToConsume > 0) {
-        throw new Error(
-          `Lotes insuficientes para "${(await ctx.db.get(requestItem.productId))?.name ?? "item"}". ` +
-          `Faltam ${remainingToConsume} unidades sem lote disponível.`
-        );
       }
     }
 
