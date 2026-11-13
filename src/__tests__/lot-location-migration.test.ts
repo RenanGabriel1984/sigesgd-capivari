@@ -21,6 +21,7 @@ function report(overrides: Partial<LotLocationMigrationReport> = {}): LotLocatio
       globalStock: { physicalQuantityTotal: 3338, reservedQuantityTotal: 0, invalidRecords: 0 },
       stockByLocation: { physicalQuantityTotal: 3338, invalidRecords: 0 },
       lotLocationBalances: { records: 0, quantityAvailableTotal: 0, invalidRecords: 0 },
+      storageLocations: { locations: [{ locationId: "loc-1", name: "Armário TI 01", active: true }, { locationId: "loc-2", name: "Armário TI 02", active: true }] },
     },
     products: [{
       productId: "product-1",
@@ -72,6 +73,7 @@ describe("planejamento da migração lote × armário", () => {
       summary: {
         ...base.summary,
         lotLocationBalances: { records: 61, quantityAvailableTotal: 3338, invalidRecords: 0 },
+        storageLocations: base.summary.storageLocations,
       },
       products: [{
         ...base.products[0],
@@ -118,6 +120,7 @@ describe("planejamento da migração lote × armário", () => {
       summary: {
         ...base.summary,
         lotLocationBalances: { records: 1, quantityAvailableTotal: 3277, invalidRecords: 0 },
+        storageLocations: base.summary.storageLocations,
       },
       products: [{
         ...base.products[0],
