@@ -1,5 +1,5 @@
 import { planFifoLotLocationConsumption } from "../lib/lot-location-rules";
-import { validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 
 const QUANTITY_EPSILON = 1e-9;
 
@@ -71,7 +71,7 @@ export async function consumeLotLocationStock(
     throw new Error("A quantidade da retirada deve ser positiva e finita.");
   }
 
-  const [lots, balances, locationRows] = await Promise.all([
+  const [lots, balances, locationRows, globalRows] = await Promise.all([
     ctx.db.query("lots")
       .withIndex("by_product", (q: any) => q.eq("productId", input.productId))
       .collect(),
@@ -81,9 +81,22 @@ export async function consumeLotLocationStock(
     ctx.db.query("stockByLocation")
       .withIndex("by_product", (q: any) => q.eq("productId", input.productId))
       .collect(),
+    ctx.db.query("stock")
+      .withIndex("by_product", (q: any) => q.eq("productId", input.productId))
+      .collect(),
   ]);
 
   validateUniqueScopedStockRows(locationRows, String(input.productId));
+  const globalStock = requireSingleValidGlobalStock(globalRows, String(input.productId));
+  const totalPhysicalByLocation = locationRows.reduce(
+    (sum: number, row: any) => sum + row.quantity,
+    0,
+  );
+  if (!sameQuantity(globalStock.physicalQuantity, totalPhysicalByLocation)) {
+    throw new Error(
+      `O saldo global (${globalStock.physicalQuantity}) diverge do saldo físico por armário (${totalPhysicalByLocation}). A baixa foi bloqueada.`,
+    );
+  }
 
   const lotsById = new Map<string, any>();
   for (const lot of lots) lotsById.set(String(lot._id), lot);
