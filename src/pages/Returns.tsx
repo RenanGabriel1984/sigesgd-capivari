@@ -61,6 +61,15 @@ type ExitRow = {
   requestReason?: string | null;
   returned: number;
   available: number;
+  lotAllocations?: Array<{
+    lotId: string;
+    lotNumber: string;
+    sourceLocationId?: string;
+    sourceLocationName: string;
+    allocatedQuantity: number;
+    alreadyReturned: number;
+    remaining: number;
+  }>;
 };
 
 export default function ReturnsPage() {
@@ -76,6 +85,7 @@ export default function ReturnsPage() {
   const [reason, setReason] = useState("");
   const [condition, setCondition] = useState<ReturnCondition>("unused");
   const [locationId, setLocationId] = useState("");
+  const [lotReturnQuantities, setLotReturnQuantities] = useState<Record<string, string>>({});
   const [observation, setObservation] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -95,16 +105,36 @@ export default function ReturnsPage() {
   const alreadyReturned = selectedExit?.returned ?? 0;
   const exitQty = selectedExit?.quantity ?? 0;
   const maxReturnable = returnableQuantity(exitQty, alreadyReturned);
+  const hasTrackedLots = (selectedExit?.lotAllocations?.length ?? 0) > 0;
+  const lotReturnTotal = Object.values(lotReturnQuantities).reduce(
+    (sum, value) => sum + (Number(value) || 0),
+    0,
+  );
 
   const handleSubmit = async () => {
     if (!selectedExit) {
       toast.error("Selecione a saída da qual o material será devolvido");
       return;
     }
+    const selectedLotAllocations = (selectedExit.lotAllocations ?? [])
+      .map((allocation) => ({
+        lotId: allocation.lotId,
+        sourceLocationId: allocation.sourceLocationId,
+        quantity: Number(lotReturnQuantities[`${allocation.lotId}::${allocation.sourceLocationId ?? ""}`] ?? 0),
+      }))
+      .filter((allocation) => allocation.quantity > 0);
+    const returnQuantity = hasTrackedLots
+      ? selectedLotAllocations.reduce((sum, allocation) => sum + allocation.quantity, 0)
+      : quantity;
+
+    if (hasTrackedLots && !locationId) {
+      toast.error("Selecione o armário onde o material está sendo recebido");
+      return;
+    }
     const validationError = validateReturnQuantity({
       exitQuantity: exitQty,
       alreadyReturned,
-      requested: quantity,
+      requested: returnQuantity,
     });
     if (validationError) {
       toast.error(validationError);
@@ -119,14 +149,15 @@ export default function ReturnsPage() {
     try {
       await createReturn({
         exitMovementId: selectedExit._id as any,
-        quantity,
+        quantity: returnQuantity,
         reason: reason.trim(),
         condition: condition as any,
         locationId: locationId ? (locationId as any) : undefined,
+        lotAllocations: hasTrackedLots ? selectedLotAllocations as any : undefined,
         observation: observation || undefined,
       });
       toast.success(
-        `Devolução de ${quantity} unidade(s) registrada — estoque recomposto`
+        `Devolução de ${returnQuantity} unidade(s) registrada — estoque recomposto`
       );
       setSelectedExitId("");
       setSearchParams({}, { replace: true });
@@ -143,15 +174,17 @@ export default function ReturnsPage() {
     setReason("");
     setCondition("unused");
     setLocationId("");
+    setLotReturnQuantities({});
     setObservation("");
   };
 
   const openReturn = (row: ExitRow) => {
     setSelectedExitId(row._id);
-    setQuantity(row.available >= 1 ? 1 : row.available);
+    setQuantity((row.lotAllocations?.length ?? 0) > 0 ? 0 : (row.available >= 1 ? 1 : row.available));
     setReason("");
     setCondition("unused");
     setLocationId("");
+    setLotReturnQuantities({});
     setObservation("");
   };
 
@@ -358,20 +391,63 @@ export default function ReturnsPage() {
                   ))}
                 </div>
 
-                <div>
-                  <Label>Quantidade a devolver (parcial permitida)</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={maxReturnable}
-                    value={quantity}
-                    onChange={(e) => setQuantity(Number(e.target.value))}
-                    className="mt-1"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Disponível para devolver: {maxReturnable}
-                  </p>
-                </div>
+                {hasTrackedLots ? (
+                  <div className="space-y-3 rounded-lg border p-3">
+                    <div>
+                      <Label>Distribuição da devolução por lote</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Informe quanto está retornando de cada lote retirado. O sistema não distribui a quantidade automaticamente.
+                      </p>
+                    </div>
+                    {(selectedExit?.lotAllocations ?? []).map((allocation) => {
+                      const key = `${allocation.lotId}::${allocation.sourceLocationId ?? ""}`;
+                      return (
+                        <div key={key} className="grid grid-cols-[1fr_96px] gap-3 items-center">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">{allocation.lotNumber}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Origem: {allocation.sourceLocationName} · Restante: {allocation.remaining}
+                            </p>
+                          </div>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={allocation.remaining}
+                            step="any"
+                            value={lotReturnQuantities[key] ?? ""}
+                            onChange={(e) => setLotReturnQuantities((current) => ({
+                              ...current,
+                              [key]: e.target.value,
+                            }))}
+                            placeholder="0"
+                          />
+                        </div>
+                      );
+                    })}
+                    <div className="flex justify-between border-t pt-2 text-sm">
+                      <span className="text-muted-foreground">Total a devolver</span>
+                      <span className="font-semibold tabular-nums">{lotReturnTotal}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Limite total da saída: {maxReturnable}
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <Label>Quantidade a devolver (parcial permitida)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={maxReturnable}
+                      value={quantity}
+                      onChange={(e) => setQuantity(Number(e.target.value))}
+                      className="mt-1"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Disponível para devolver: {maxReturnable}
+                    </p>
+                  </div>
+                )}
 
                 <div>
                   <Label>Condição do material</Label>
@@ -399,13 +475,13 @@ export default function ReturnsPage() {
                 </div>
 
                 <div>
-                  <Label>Local físico de destino (opcional)</Label>
+                  <Label>Armário de destino {hasTrackedLots ? "*" : "(opcional)"}</Label>
                   <select
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={locationId}
                     onChange={(e) => setLocationId(e.target.value)}
                   >
-                    <option value="">Sem alteração de local</option>
+                    <option value="">{hasTrackedLots ? "Selecione o armário de destino..." : "Sem alteração de local"}</option>
                     {(locations ?? []).map((l: any) => (
                       <option key={l._id} value={l._id}>
                         {l.name}
