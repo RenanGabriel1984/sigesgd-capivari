@@ -65,7 +65,7 @@ function downloadCSV(filename: string, csvContent: string) {
 }
 
 function exportStockPositionCSV(data: any[]) {
-  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade;Saldos físicos por armário;Saldos por área/lote;Alertas de Integridade;Limitações de rastreio";
+  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade;Saldos físicos por armário;Saldos por área/lote;Saldos por lote × armário;Alertas de Integridade;Limitações de rastreio";
   const rows = data.map((r) =>
     [
       r.internalCode,
@@ -81,6 +81,9 @@ function exportStockPositionCSV(data: any[]) {
       UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure,
       (r.locationBreakdown ?? []).map((location: any) => `${location.locationName}: ${location.quantity ?? "inválido"}`).join(" | "),
       (r.areaBreakdown ?? []).map((area: any) => `${area.areaName}: ${area.quantity} [${(area.lots ?? []).map((lot: any) => `${lot.lotNumber}=${lot.quantityAvailable}`).join(", ")}]`).join(" | "),
+      (r.lotLocationBreakdown ?? []).map((lot: any) =>
+        `${lot.areaName} / ${lot.lotNumber}=${lot.quantityAvailable} [${(lot.locations ?? []).map((location: any) => `${location.locationName}=${location.quantityAvailable}`).join(", ")}]`
+      ).join(" | "),
       (r.integrityIssues ?? []).join(" | "),
       (r.integrityLimitations ?? []).join(" | "),
     ].join(";")
@@ -345,8 +348,22 @@ export default function Reports() {
                                   <div key={index} className="pl-2">
                                     <div>{area.areaName}: <span className="font-mono">{area.quantity}</span></div>
                                     <div className="pl-3 text-[11px] text-muted-foreground">
-                                      {area.lots.map((lot, lotIndex) => (
-                                        <span key={lotIndex}>{lot.lotNumber}: {lot.quantityAvailable}{lotIndex < area.lots.length - 1 ? " · " : ""}</span>
+                                      {area.lots.map((lot: any, lotIndex: number) => (
+                                        <div key={lotIndex} className="py-0.5">
+                                          <span>{lot.lotNumber}: <span className="font-mono">{lot.quantityAvailable}</span></span>
+                                          {lot.locations?.length ? (
+                                            <div className="pl-3">
+                                              {lot.locations.map((location: any, locationIndex: number) => (
+                                                <span key={locationIndex}>
+                                                  {location.locationName}: <span className="font-mono">{location.quantityAvailable}</span>
+                                                  {locationIndex < lot.locations.length - 1 ? " · " : ""}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          ) : (
+                                            <div className="pl-3 text-amber-700">Sem saldo por armário mapeado</div>
+                                          )}
+                                        </div>
                                       ))}
                                     </div>
                                   </div>
