@@ -775,8 +775,9 @@ export const implementationStockStatus = query({
     const mismatches: Array<{
       productId: string;
       name: string;
-      global: number;
-      byLocation: number;
+      global: number | null;
+      byLocation: number | null;
+      issues: string[];
     }> = [];
     const initialLoadsPerProduct: Array<{
       productId: string;
@@ -788,10 +789,10 @@ export const implementationStockStatus = query({
     let byLocationTotal = 0;
 
     for (const productId of productIds) {
-      const stock = await ctx.db
+      const stockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q) => q.eq("productId", productId as any))
-        .first();
+        .collect();
       const sblRows = await ctx.db
         .query("stockByLocation")
         .withIndex("by_product", (q) => q.eq("productId", productId as any))
@@ -799,18 +800,42 @@ export const implementationStockStatus = query({
       const product = (await ctx.db.get(productId as any)) as {
         name?: string;
       } | null;
-      const physical = stock?.physicalQuantity ?? 0;
-      const byLocation = sblRows.reduce((sum, row) => sum + row.quantity, 0);
+      const name = product?.name ?? productId;
+      const issues: string[] = [];
+      let stock: ReturnType<typeof getOptionalSingleValidGlobalStock> = null;
+      try {
+        stock = getOptionalSingleValidGlobalStock(stockRows, name);
+      } catch (error) {
+        issues.push(error instanceof Error ? error.message : "Saldo global inválido.");
+      }
+      try {
+        validateUniqueScopedStockRows(sblRows, name);
+      } catch (error) {
+        issues.push(error instanceof Error ? error.message : "Saldo por armário inválido.");
+      }
 
-      globalTotal += physical;
-      byLocationTotal += byLocation;
+      const validLocationRows = sblRows.filter((row) =>
+        typeof row.quantity === "number" && Number.isFinite(row.quantity) && row.quantity >= 0
+      );
+      const byLocation = validLocationRows.reduce((sum, row) => sum + row.quantity, 0);
+      const physical = stock?.physicalQuantity ?? null;
+      if (!Number.isFinite(byLocation)) issues.push("A soma dos saldos por armário não é finita.");
+      if (physical !== null && Number.isFinite(byLocation) && Math.abs(physical - byLocation) > 1e-9) {
+        issues.push("O saldo global diverge da soma dos saldos por armário.");
+      }
+      if (physical === null && byLocation > 1e-9) {
+        issues.push("Há saldo por armário, mas não existe saldo global válido.");
+      }
 
-      if (physical !== byLocation) {
+      if (physical !== null) globalTotal += physical;
+      if (Number.isFinite(byLocation)) byLocationTotal += byLocation;
+      if (issues.length > 0) {
         mismatches.push({
           productId,
-          name: product?.name ?? productId,
+          name,
           global: physical,
-          byLocation,
+          byLocation: Number.isFinite(byLocation) ? byLocation : null,
+          issues: [...new Set(issues)],
         });
       }
 
@@ -824,12 +849,12 @@ export const implementationStockStatus = query({
       if (initialLots > 1) {
         initialLoadsPerProduct.push({
           productId,
-          name: product?.name ?? productId,
+          name,
           initialLots,
         });
       }
 
-      for (const row of sblRows) {
+      for (const row of validLocationRows) {
         const location = await ctx.db.get(row.locationId);
         const key = row.locationId as string;
         const current = locationTotals.get(key) ?? {
