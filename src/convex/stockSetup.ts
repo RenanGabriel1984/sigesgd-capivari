@@ -1228,6 +1228,68 @@ export const lotLocationReadiness = internalQuery({
         };
       });
 
+    // Eventos posteriores dos produtos cuja localização do lote ficou ambígua.
+    // A consulta permanece somente leitura; os detalhes permitem conferir
+    // saída/devolução antes de propor qualquer associação lote × armário.
+    const reviewDetails = productsResult
+      .filter((product) => product.statusCounts.ambiguous > 0)
+      .map((product) => {
+        const productLots = allLots.filter((lot) => String(lot.productId) === product.productId);
+        const earliestLotReceivedAt = Math.min(...productLots.map((lot) => lot.receivedAt));
+        const relevantMovements = allMovements
+          .filter((movement) =>
+            String(movement.productId) === product.productId &&
+            movement.timestamp > earliestLotReceivedAt &&
+            movement.type !== "entry",
+          )
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .map((movement) => {
+            const lot = movement.lotId ? lotById.get(String(movement.lotId)) : null;
+            return {
+              movementId: String(movement._id),
+              type: movement.type,
+              quantity: movement.quantity,
+              previousPhysical: movement.previousPhysical,
+              newPhysical: movement.newPhysical,
+              timestamp: movement.timestamp,
+              lotId: movement.lotId ?? null,
+              lotNumber: lot?.lotNumber ?? null,
+              entryNumber: movement.entryId ? entryNumbers.get(String(movement.entryId)) ?? null : null,
+              exitNumber: movement.exitNumber ?? null,
+              exitMovementId: movement.exitMovementId ? String(movement.exitMovementId) : null,
+              canceled: movement.canceled ?? false,
+              observation: movement.observation ?? null,
+            };
+          });
+        const relevantReturns = allReturns
+          .filter((returned) => String(returned.productId) === product.productId)
+          .sort((a, b) => a.createdAt - b.createdAt)
+          .map((returned) => {
+            const lot = returned.lotId ? lotById.get(String(returned.lotId)) : null;
+            return {
+              returnId: String(returned._id),
+              quantity: returned.quantity,
+              createdAt: returned.createdAt,
+              lotId: returned.lotId ? String(returned.lotId) : null,
+              lotNumber: lot?.lotNumber ?? null,
+              locationId: returned.locationId ? String(returned.locationId) : null,
+              locationName: returned.locationId ? locationNames.get(String(returned.locationId)) ?? "Local inexistente" : null,
+              exitMovementId: returned.exitMovementId ? String(returned.exitMovementId) : null,
+              reason: returned.reason,
+              condition: returned.condition ?? null,
+              observation: returned.observation ?? null,
+            };
+          });
+        return {
+          productId: product.productId,
+          productName: product.productName,
+          globalPhysical: product.globalPhysical,
+          localPhysicalTotal: product.localPhysicalTotal,
+          movements: relevantMovements,
+          returns: relevantReturns,
+        };
+      });
+
     const invalidGlobalStockCount = allGlobalStock.filter((row) =>
       !Number.isFinite(row.physicalQuantity) ||
       !Number.isFinite(row.reservedQuantity) ||
@@ -1315,6 +1377,7 @@ export const lotLocationReadiness = internalQuery({
         },
       },
       entryHighlights,
+      reviewDetails,
       gomaqExchanges: allGomaQExchanges
         .slice()
         .sort((a, b) => b.exchangedAt - a.exchangedAt)
