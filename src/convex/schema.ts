@@ -619,6 +619,8 @@ const schema = defineSchema(
       // ── Classificação preservada historicamente no lote ──
       materialType: v.optional(materialTypeValidator),
       areaId: v.optional(v.id("stockAreas")),
+      // Lote criado ao abrir embalagem: identifica a origem física/contábil.
+      originLotId: v.optional(v.id("lots")),
     }).index("by_product", ["productId"])
       .index("by_entry", ["entryId"])
       .index("by_number", ["lotNumber"])
