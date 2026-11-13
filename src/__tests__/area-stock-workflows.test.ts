@@ -58,6 +58,8 @@ describe("estoque por área e local físico — regressões de segurança", () =
   it("aprova com reserva FIFO restrita ao mesmo lote, área e local físicos", () => {
     const approve = mutationBlock(requests, "approve");
     expect(approve).toContain("planFifoAreaLotAllocation");
+    expect(approve).toContain("validateAreaLocationLotBalance");
+    expect(approve).toContain("O saldo físico da área/local diverge da soma dos lotes.");
     expect(approve).toContain("lot.areaId !== requestItem.areaId");
     expect(approve).toContain("lot.locationId !== requestItem.sourceLocationId");
     expect(approve).not.toMatch(/\blocation\.areaId/);
