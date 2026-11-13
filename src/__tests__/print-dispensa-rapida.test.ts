@@ -34,6 +34,7 @@ const read = (p: string) => readFileSync(resolve(ROOT, p), "utf-8");
 
 const panel = read("src/pages/GomaQ.tsx");
 const backend = read("src/convex/printSupplies.ts");
+const ledger = read("src/convex/lotLocationLedger.ts");
 
 /** Bloco do diálogo de retirada dentro de GomaQ.tsx. */
 const dialog = panel.slice(
@@ -254,14 +255,17 @@ describe("PRINT-DISP — A retirada é uma SAÍDA real, não transferência", ()
     expect(submitBody).not.toContain("delete");
     expect(submitBody).not.toContain("patch");
 
-    // O backend só DEBITO saldo: não apaga registro de estoque/local.
+    // A retirada debita o saldo global e o ledger físico lote × armário;
+    // mantém os registros de produto/área/local e nunca apaga buckets.
     expect(withdrawBlock).not.toContain("db.delete");
     expect(withdrawFamilyBlock).not.toContain("db.delete");
     expect(withdrawBlock).toContain("physicalQuantity: newPhysical");
-    // E nenhuma das duas mutations altera produtos/áreas/locais.
+    expect(withdrawBlock).toContain("consumeLotLocationStock");
+    expect(withdrawFamilyBlock).toContain("consumeLotLocationStock");
+    expect(withdrawFamilyBlock).toContain("stockByLocation");
+    expect(withdrawFamilyBlock).toContain("lotLocationBalances");
     for (const block of [withdrawBlock, withdrawFamilyBlock]) {
       expect(block).not.toContain('db.patch(product');
-      expect(block).not.toContain("stockByLocation");
     }
   });
 
@@ -289,16 +293,18 @@ describe("PRINT-DISP — A retirada é uma SAÍDA real, não transferência", ()
   });
 
   it("PRINT-DISP-04: FIFO e lotId preservados", () => {
-    // Lotes consumidos em ordem de recebimento (FIFO)…
-    expect(withdrawBlock).toContain("sort((a, b) => a.receivedAt - b.receivedAt)");
-    expect(withdrawBlock).toContain("quantityAvailable");
-    expect(withdrawBlock).toContain("lot.quantityAvailable - take");
-    // …e o lotId do 1º lote consumido vai para a movimentação.
+    // A mutation chama a rotina compartilhada; FIFO é decidido no helper puro
+    // e aplicado ao lote e ao bucket do armário selecionado.
+    expect(withdrawBlock).toContain("consumeLotLocationStock");
+    expect(withdrawBlock).toContain("resolveWithdrawalLocation");
     expect(withdrawBlock).toContain("lotId: consumedLots[0].lotId");
+    expect(ledger).toContain("planFifoLotLocationConsumption");
+    expect(ledger).toContain("quantityAvailable");
+    expect(ledger).toContain("lotLocationBalances");
 
-    // Falha de consistência ABORTA (nenhuma saída parcial registrada).
-    expect(withdrawBlock).toContain("Falha de consistência: lotes insuficientes");
-    expect(withdrawBlock).toContain("Nenhuma saída registrada");
+    // A validação bloqueia ausência de saldo rastreável no armário.
+    expect(ledger).toContain("Saldo rastreável insuficiente no armário selecionado");
+    expect(ledger).toContain("A baixa foi bloqueada");
   });
 
   it("PRINT-DISP-04b: a abertura de embalagem é um evento explícito e rastreado", () => {
