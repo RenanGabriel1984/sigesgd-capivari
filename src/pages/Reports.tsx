@@ -73,7 +73,7 @@ function exportStockPositionCSV(data: any[]) {
       r.categoryName,
       r.brand ?? "",
       r.model ?? "",
-      r.currentStock,
+      r.currentStock ?? "não confiável",
       r.minimumStock,
       r.idealStock,
       r.maximumStock,
@@ -327,7 +327,7 @@ export default function Reports() {
                           <TableCell className="text-sm font-medium">{item.name}</TableCell>
                           <TableCell className="text-xs">{item.categoryName}</TableCell>
                           <TableCell className="text-xs">{[item.brand, item.model].filter(Boolean).join(" — ") || "—"}</TableCell>
-                          <TableCell className="text-sm text-right font-mono">{item.currentStock}</TableCell>
+                          <TableCell className="text-sm text-right font-mono">{item.currentStock ?? "—"}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.minimumStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.idealStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.maximumStock}</TableCell>
