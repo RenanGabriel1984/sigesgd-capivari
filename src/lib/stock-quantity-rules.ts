@@ -63,3 +63,19 @@ export function requireSingleValidGlobalStock<T>(
   }
   return stock;
 }
+
+
+/**
+ * Valida um bucket físico de produto × área × local antes de qualquer escrita.
+ * Comparar NaN com um limite não detecta divergência; por isso a validação é
+ * explícita e anterior aos cálculos de soma/diferença.
+ */
+export function requireValidScopedStockQuantity(
+  quantity: unknown,
+  scopeLabel: string,
+): number {
+  if (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity < 0) {
+    throw new Error(`O saldo físico de ${scopeLabel} está inválido. Regularize antes de continuar.`);
+  }
+  return quantity;
+}
