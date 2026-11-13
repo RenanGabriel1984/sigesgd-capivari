@@ -171,3 +171,36 @@ export async function consumeLotLocationStock(
     })),
   };
 }
+
+
+/**
+ * Persiste a lista completa de lotes consumidos vinculada à movimentação.
+ * O campo legado stockMovements.lotId continua recebendo o primeiro lote,
+ * mas relatórios/devoluções podem consultar esta tabela sem parsear texto.
+ */
+export async function recordLotMovementAllocations(
+  ctx: any,
+  input: {
+    movementId: any;
+    productId: any;
+    locationId: any;
+    allocations: Array<{ lotId: any; quantity: number }>;
+    allocationType?: "withdrawal" | "reclassification";
+  },
+): Promise<void> {
+  const allocationType = input.allocationType ?? "withdrawal";
+  for (const allocation of input.allocations) {
+    if (!Number.isFinite(allocation.quantity) || allocation.quantity <= 0) {
+      throw new Error("Alocação de lote inválida para a movimentação.");
+    }
+    await ctx.db.insert("stockMovementLotAllocations", {
+      movementId: input.movementId,
+      productId: input.productId,
+      lotId: allocation.lotId,
+      locationId: input.locationId,
+      quantity: allocation.quantity,
+      allocationType,
+      createdAt: Date.now(),
+    });
+  }
+}
