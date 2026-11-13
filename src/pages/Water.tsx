@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
 import { getPermissions } from "@/types/constants";
 import type { UserRole } from "@/types/constants";
-import { parseWaterMoneyToCents } from "@/lib/water-control";
+import { buildWaterSupplierReturnDeltas, parseWaterMoneyToCents } from "@/lib/water-control";
 
 type Cadence = "monthly" | "bimonthly" | "custom";
 type MovementType = "consumption" | "return" | "adjustment";
@@ -71,6 +71,8 @@ export default function WaterPage() {
   const [movementType, setMovementType] = useState<MovementType>("consumption");
   const [movementDate, setMovementDate] = useState(localDateInput());
   const [movementQuantity, setMovementQuantity] = useState("1");
+  const [returnFullQuantity, setReturnFullQuantity] = useState("0");
+  const [returnEmptyQuantity, setReturnEmptyQuantity] = useState("1");
   const [adjustFull, setAdjustFull] = useState("0");
   const [adjustEmpty, setAdjustEmpty] = useState("0");
   const [movementObservation, setMovementObservation] = useState("");
@@ -149,9 +151,12 @@ export default function WaterPage() {
       fullDelta = -quantity;
       emptyDelta = quantity;
     } else if (movementType === "return") {
-      const quantity = Number(movementQuantity);
-      if (!Number.isSafeInteger(quantity) || quantity <= 0) throw new Error("Informe a quantidade de vazios devolvidos.");
-      emptyDelta = -quantity;
+      const returned = buildWaterSupplierReturnDeltas(
+        Number(returnFullQuantity),
+        Number(returnEmptyQuantity),
+      );
+      fullDelta = returned.fullDelta;
+      emptyDelta = returned.emptyDelta;
     } else {
       fullDelta = Number(adjustFull);
       emptyDelta = Number(adjustEmpty);
@@ -165,6 +170,8 @@ export default function WaterPage() {
     });
   }, () => {
     setMovementQuantity("1");
+    setReturnFullQuantity("0");
+    setReturnEmptyQuantity("1");
     setAdjustFull("0");
     setAdjustEmpty("0");
     setMovementObservation("");
@@ -325,8 +332,18 @@ export default function WaterPage() {
             <CardHeader><CardTitle className="text-base">Movimentação dos galões</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               {canManage ? <>
-                <div><Label>Tipo</Label><select className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm" value={movementType} onChange={(e) => setMovementType(e.target.value as MovementType)}><option value="consumption">Consumo (cheio vira vazio)</option><option value="return">Devolução de vazios ao fornecedor</option><option value="adjustment">Ajuste de saldo / implantação</option></select></div>
-                {movementType !== "adjustment" ? <div><Label>{movementType === "consumption" ? "Galões consumidos" : "Galões vazios devolvidos"}</Label><Input type="number" min="1" step="1" value={movementQuantity} onChange={(e) => setMovementQuantity(e.target.value)} /></div> : <div className="grid grid-cols-2 gap-3"><div><Label>Ajuste de cheios (+/-)</Label><Input type="number" step="1" value={adjustFull} onChange={(e) => setAdjustFull(e.target.value)} /></div><div><Label>Ajuste de vazios (+/-)</Label><Input type="number" step="1" value={adjustEmpty} onChange={(e) => setAdjustEmpty(e.target.value)} /></div><p className="col-span-2 text-xs text-muted-foreground">Use valores positivos para acrescentar e negativos para retirar. O sistema impede saldo negativo.</p></div>}
+                <div><Label>Tipo</Label><select className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm" value={movementType} onChange={(e) => setMovementType(e.target.value as MovementType)}><option value="consumption">Consumo (cheio vira vazio)</option><option value="return">Devolução de galões ao fornecedor</option><option value="adjustment">Ajuste de saldo / implantação</option></select></div>
+                {movementType === "consumption" ? (
+                  <div><Label>Galões consumidos</Label><Input type="number" min="1" step="1" value={movementQuantity} onChange={(e) => setMovementQuantity(e.target.value)} /></div>
+                ) : movementType === "return" ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Galões cheios devolvidos</Label><Input type="number" min="0" step="1" value={returnFullQuantity} onChange={(e) => setReturnFullQuantity(e.target.value)} /></div>
+                    <div><Label>Galões vazios devolvidos</Label><Input type="number" min="0" step="1" value={returnEmptyQuantity} onChange={(e) => setReturnEmptyQuantity(e.target.value)} /></div>
+                    <p className="col-span-2 text-xs text-muted-foreground">Informe os cheios e/ou vazios entregues ao fornecedor. O sistema valida cada saldo separadamente.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3"><div><Label>Ajuste de cheios (+/-)</Label><Input type="number" step="1" value={adjustFull} onChange={(e) => setAdjustFull(e.target.value)} /></div><div><Label>Ajuste de vazios (+/-)</Label><Input type="number" step="1" value={adjustEmpty} onChange={(e) => setAdjustEmpty(e.target.value)} /></div><p className="col-span-2 text-xs text-muted-foreground">Use valores positivos para acrescentar e negativos para retirar. O sistema impede saldo negativo.</p></div>
+                )}
                 <div><Label>Data</Label><Input type="date" value={movementDate} onChange={(e) => setMovementDate(e.target.value)} /></div>
                 <div><Label>Observação</Label><Input value={movementObservation} onChange={(e) => setMovementObservation(e.target.value)} /></div>
                 <Button className="w-full" onClick={() => void handleMovement()}><RefreshCw className="mr-2 h-4 w-4" /> Registrar movimentação</Button>
