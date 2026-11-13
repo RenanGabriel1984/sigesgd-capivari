@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { planTransfer } from "../lib/transfer-rules";
 import { requirePermission } from "./rbac";
+import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -88,6 +89,7 @@ export const create = mutation({
       .query("stockByLocation")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
+    validateUniqueScopedStockRows(fromStock, product.name);
     const sourceStock = fromStock.find((s: any) => s.locationId === args.fromLocationId);
     if (!sourceStock || sourceStock.quantity < args.quantity) {
       const available = sourceStock?.quantity ?? 0;
@@ -101,6 +103,7 @@ export const create = mutation({
       .query("stockByLocation")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
+    validateUniqueScopedStockRows(toStock, product.name);
     const destStock = toStock.find((s: any) => s.locationId === args.toLocationId);
     const destStockQuantity = destStock?.quantity ?? 0;
     const lotDoc = args.lotId ? await ctx.db.get(args.lotId) : null;
@@ -156,10 +159,11 @@ export const create = mutation({
     });
 
     // Create stock movement (transfer type — no global stock change)
-    const globalStock = await ctx.db
+    const globalStockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
+      .collect();
+    const globalStock = getOptionalSingleValidGlobalStock(globalStockRows, product.name);
     if (globalStock) {
       await ctx.db.insert("stockMovements", {
         productId: args.productId,
