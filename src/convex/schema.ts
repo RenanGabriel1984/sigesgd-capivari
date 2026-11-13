@@ -458,6 +458,21 @@ const schema = defineSchema(
       .index("by_timestamp", ["timestamp"])
       .index("by_request", ["requestId"]),
 
+    // Alocação estruturada de cada movimentação aos lotes e armários reais.
+    // Uma movimentação pode consumir diversos lotes; lotId no movimento legado
+    // continua como referência compatível ao primeiro lote.
+    stockMovementLotAllocations: defineTable({
+      movementId: v.id("stockMovements"),
+      productId: v.id("products"),
+      lotId: v.id("lots"),
+      locationId: v.id("storageLocations"),
+      quantity: v.number(),
+      allocationType: v.union(v.literal("withdrawal"), v.literal("reclassification")),
+      createdAt: v.number(),
+    }).index("by_movement", ["movementId"])
+      .index("by_lot", ["lotId"])
+      .index("by_product_location", ["productId", "locationId"]),
+
     // ── Requests (Solicitações) ──
     requests: defineTable({
       requesterId: v.id("users"),
