@@ -347,10 +347,12 @@ function EstoqueTab() {
 
 function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; open: boolean; onClose: () => void }) {
   const orgsQuery = useQuery(api.organizations.list);
+  const storageLocations = useQuery(api.stockLocations.summary);
   const withdraw = useMutation(api.printSupplies.withdraw);
   const withdrawFamily = useMutation(api.printSupplies.withdrawFamily);
 
   const [quantity, setQuantity] = useState("1");
+  const [locationId, setLocationId] = useState("");
   const [secretariaId, setSecretariaId] = useState("");
   const [departamentoId, setDepartamentoId] = useState("");
   const [unidadeId, setUnidadeId] = useState("");
@@ -422,7 +424,7 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
     osNumber,
     observation,
   });
-  const canConfirm = canConfirmWithdrawal({ quantity: qty, available: family.baseStock, reason });
+  const canConfirm = canConfirmWithdrawal({ quantity: qty, available: family.baseStock, reason }) && !!locationId;
 
   // Cancelar (em qualquer etapa) e fechar o modal são a MESMA ação: nenhum
   // estado de estoque é tocado, apenas o estado local do formulário.
@@ -437,6 +439,7 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
       return;
     }
     const destino = {
+      locationId: locationId as Id<"storageLocations">,
       secretariaId: (secretariaId || undefined) as Id<"organizations"> | undefined,
       departamentoId: (departamentoId || undefined) as Id<"organizations"> | undefined,
       unidadeId: (unidadeId || undefined) as Id<"organizations"> | undefined,
@@ -615,6 +618,18 @@ function WithdrawDialog({ family, open, onClose }: { family: SupplyFamilyView; o
             </div>
           </div>
 
+          <div>
+            <Label>Armário de origem *</Label>
+            <Select value={locationId} onValueChange={setLocationId}>
+              <SelectTrigger><SelectValue placeholder="Selecione de onde o material será retirado..." /></SelectTrigger>
+              <SelectContent>
+                {(storageLocations ?? []).map((location: any) => (
+                  <SelectItem key={location._id} value={location._id}>{location.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!locationId && <p className="mt-1 text-xs text-destructive">Selecione o armário de origem para registrar a baixa rastreável.</p>}
+          </div>
           <div>
             <Label>Motivo *</Label>
             <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ex.: Reposição de impressora" />
