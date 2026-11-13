@@ -473,6 +473,21 @@ const schema = defineSchema(
       .index("by_lot", ["lotId"])
       .index("by_product_location", ["productId", "locationId"]),
 
+    // Devolução de uma saída multi-lote: registra qual parcela voltou de
+    // cada alocação original e em qual armário foi recebida.
+    returnLotAllocations: defineTable({
+      returnId: v.id("returns"),
+      exitMovementId: v.id("stockMovements"),
+      productId: v.id("products"),
+      lotId: v.id("lots"),
+      sourceLocationId: v.optional(v.id("storageLocations")),
+      destinationLocationId: v.id("storageLocations"),
+      quantity: v.number(),
+      createdAt: v.number(),
+    }).index("by_exitMovement", ["exitMovementId"])
+      .index("by_return", ["returnId"])
+      .index("by_lot", ["lotId"]),
+
     // ── Requests (Solicitações) ──
     requests: defineTable({
       requesterId: v.id("users"),
@@ -673,7 +688,10 @@ const schema = defineSchema(
     inventoryCounts: defineTable({
       inventoryId: v.id("inventories"),
       productId: v.id("products"),
+      // Para inventários rastreados: combinação lote × armário.
+      // lotId permanece string por compatibilidade com registros legados.
       lotId: v.optional(v.string()),
+      locationId: v.optional(v.id("storageLocations")),
       systemQuantity: v.number(),
       countedQuantity: v.optional(v.number()),
       difference: v.optional(v.number()),
