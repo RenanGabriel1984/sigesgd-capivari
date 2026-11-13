@@ -99,7 +99,7 @@ jobs:
           bunx convex --version
           # Para deployment do tipo dev, o comando correto é dev --once.
           # A deploy key já foi validada como dev:first-herring-264 no passo anterior.
-          bunx convex dev --once 2>&1 | tee "${log}"
+          bunx convex dev --once --tail-logs disable 2>&1 | tee "${log}"
 
           # Tripwire: a saída não pode mencionar outro deployment conhecido.
           for host in savory-sockeye-292.convex.cloud first-starling-943.convex.cloud brilliant-bullfrog-982.convex.cloud tame-alligator-797.convex.cloud first-dinosaur-625.convex.cloud; do
