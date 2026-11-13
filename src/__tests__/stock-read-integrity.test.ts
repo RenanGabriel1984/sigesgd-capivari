@@ -45,6 +45,18 @@ describe("stock read integrity", () => {
     expect(() => validateUniqueScopedStockRows(rows, "Mouse")).toThrow(/duplicados/i);
   });
 
+  it("allows different products to occupy the same area and physical location", () => {
+    expect(() =>
+      validateUniqueScopedStockRows(
+        [
+          { productId: "mouse", areaId: "ti", locationId: "cabinet-1", quantity: 4 },
+          { productId: "keyboard", areaId: "ti", locationId: "cabinet-1", quantity: 6 },
+        ],
+        "different products",
+      ),
+    ).not.toThrow();
+  });
+
   it("rejects non-finite, negative and unlocated physical balances", () => {
     expect(() =>
       validateUniqueScopedStockRows([{ areaId: "ti", locationId: "cabinet-1", quantity: Number.NaN }], "Mouse"),
