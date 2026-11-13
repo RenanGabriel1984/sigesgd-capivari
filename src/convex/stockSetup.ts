@@ -503,6 +503,11 @@ export const lotLocationReadiness = query({
     for (const product of products) {
       const lots = allLots.filter((lot) => lot.productId === product._id);
       const balances = allBalances.filter((balance) => balance.productId === product._id);
+      const balanceScopeKeys = balances.map((balance) => `${String(balance.lotId)}::${String(balance.locationId)}`);
+      const duplicateBalanceScopeCount = balanceScopeKeys.length - new Set(balanceScopeKeys).size;
+      const invalidBalanceCount = balances.filter((balance) =>
+        !Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0,
+      ).length;
       const localRows = allLocalStock.filter((row) => row.productId === product._id);
       const globalRows = allGlobalStock.filter((row) => row.productId === product._id);
       const orphanBalanceCount = balances.filter((balance) =>
@@ -683,10 +688,14 @@ export const lotLocationReadiness = query({
           localComparison.every((row) => Math.abs(row.physicalQuantity - (row.mappedLotQuantity + row.candidateLotQuantity)) <= 1e-9) &&
           Math.abs(globalPhysical - (mappedLotTotal + candidateLotTotal)) <= 1e-9,
         invalidLotCount,
+        invalidBalanceCount,
+        duplicateBalanceScopeCount,
         orphanBalanceCount,
         readyForTrackedWithdrawal:
           !globalError &&
           invalidLotCount === 0 &&
+          invalidBalanceCount === 0 &&
+          duplicateBalanceScopeCount === 0 &&
           orphanBalanceCount === 0 &&
           statusCounts.divergent === 0 &&
           statusCounts.candidate === 0 &&
