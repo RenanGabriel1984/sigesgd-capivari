@@ -74,13 +74,38 @@ export const create = mutation({
     const product = await ctx.db.get(args.productId);
     if (!product) throw new Error("Produto não encontrado");
 
-    // Validate lot if provided
+    // A transferência rastreada exige lote e saldo atual no armário de origem.
+    // Nunca reduzir quantityAvailable do lote: transferir muda a localização,
+    // não consome material.
+    let sourceLotLocation: any = null;
+    let destinationLotLocation: any = null;
+    let lotDoc: any = null;
     if (args.lotId) {
-      const lot = await ctx.db.get(args.lotId);
-      if (!lot) throw new Error("Lote não encontrado");
-      if (lot.productId !== args.productId) throw new Error("Lote não corresponde ao produto");
-      if (lot.quantityAvailable < args.quantity) {
-        throw new Error(`Lote só possui ${lot.quantityAvailable} unidades disponíveis`);
+      lotDoc = await ctx.db.get(args.lotId);
+      if (!lotDoc) throw new Error("Lote não encontrado");
+      if (lotDoc.productId !== args.productId) throw new Error("Lote não corresponde ao produto");
+      const lotLocations = await ctx.db.query("lotLocationBalances")
+        .withIndex("by_lot", (q: any) => q.eq("lotId", args.lotId))
+        .collect();
+      const fromRows = lotLocations.filter((row: any) => row.locationId === args.fromLocationId);
+      const toRows = lotLocations.filter((row: any) => row.locationId === args.toLocationId);
+      if (fromRows.length > 1 || toRows.length > 1) {
+        throw new Error("Há saldos duplicados do lote por armário. Regularize antes de transferir.");
+      }
+      sourceLotLocation = fromRows[0] ?? null;
+      destinationLotLocation = toRows[0] ?? null;
+      if (!sourceLotLocation) {
+        throw new Error("Não há saldo rastreável deste lote no armário de origem. É necessária regularização do legado antes da transferência.");
+      }
+      if (!Number.isFinite(sourceLotLocation.quantityAvailable) || sourceLotLocation.quantityAvailable < args.quantity) {
+        throw new Error(`Saldo do lote no armário de origem insuficiente. Disponível: ${sourceLotLocation.quantityAvailable}.`);
+      }
+    } else {
+      const activeLots = await ctx.db.query("lots")
+        .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
+        .collect();
+      if (activeLots.some((lot: any) => lot.active && lot.quantityAvailable > 0)) {
+        throw new Error("Selecione o lote para transferir: o produto possui saldo rastreado por lote.");
       }
     }
 
@@ -136,12 +161,25 @@ export const create = mutation({
       });
     }
 
-    // Decrease lot availability if lot is specified
-    if (args.lotId) {
-      const lot = await ctx.db.get(args.lotId);
-      if (lot) {
-        await ctx.db.patch(lot._id, {
-          quantityAvailable: lot.quantityAvailable - args.quantity,
+    // Atualiza somente a distribuição física do lote. O total do lote
+    // permanece inalterado, pois transferência não é saída/consumo.
+    if (args.lotId && sourceLotLocation) {
+      await ctx.db.patch(sourceLotLocation._id, {
+        quantityAvailable: sourceLotLocation.quantityAvailable - args.quantity,
+        updatedAt: now,
+      });
+      if (destinationLotLocation) {
+        await ctx.db.patch(destinationLotLocation._id, {
+          quantityAvailable: destinationLotLocation.quantityAvailable + args.quantity,
+          updatedAt: now,
+        });
+      } else {
+        await ctx.db.insert("lotLocationBalances", {
+          lotId: args.lotId,
+          productId: args.productId,
+          locationId: args.toLocationId,
+          quantityAvailable: args.quantity,
+          updatedAt: now,
         });
       }
     }
