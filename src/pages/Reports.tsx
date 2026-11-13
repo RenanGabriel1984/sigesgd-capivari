@@ -65,7 +65,7 @@ function downloadCSV(filename: string, csvContent: string) {
 }
 
 function exportStockPositionCSV(data: any[]) {
-  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade;Distribuição por Área/Armário;Alertas de Integridade";
+  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade;Saldos físicos por armário;Saldos por área/lote;Alertas de Integridade;Limitações de rastreio";
   const rows = data.map((r) =>
     [
       r.internalCode,
@@ -316,7 +316,7 @@ export default function Reports() {
                         <TableHead className="text-xs text-right">Mínimo</TableHead>
                         <TableHead className="text-xs text-right">Ideal</TableHead>
                         <TableHead className="text-xs text-right">Máximo</TableHead>
-                        <TableHead className="text-xs">Armário / Área (lotes)</TableHead>
+                        <TableHead className="text-xs">Armários (físico) / Áreas e lotes</TableHead>
                         <TableHead className="text-xs">Status</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -333,16 +333,28 @@ export default function Reports() {
                           <TableCell className="text-xs text-right font-mono">{item.maximumStock}</TableCell>
                           <TableCell className="text-xs min-w-56">
                             <div className="space-y-1">
-                              {item.locationBreakdown?.length ? item.locationBreakdown.map((location, index) => (
-                                <div key={index} className="space-y-0.5">
-                                  <div>{location.locationName} — físico: <span className="font-mono">{location.quantity ?? "inválido"}</span></div>
-                                  {location.areaBreakdown?.length ? location.areaBreakdown.map((area, areaIndex) => (
-                                    <div key={areaIndex} className="pl-3 text-muted-foreground">{area.areaName}: <span className="font-mono">{area.quantity}</span> <span className="text-[10px]">(soma dos lotes)</span></div>
-                                  )) : <div className="pl-3 text-muted-foreground text-[11px]">Sem lotes classificados neste armário</div>}
-                                </div>
-                              )) : "Sem saldo por localização"}
+                              <div className="space-y-1">
+                                <div className="font-medium">Por armário (saldo físico)</div>
+                                {item.locationBreakdown?.length ? item.locationBreakdown.map((location, index) => (
+                                  <div key={index} className="pl-2">{location.locationName}: <span className="font-mono">{location.quantity ?? "inválido"}</span></div>
+                                )) : <div className="pl-2 text-muted-foreground">Sem saldo por armário</div>}
+                                <div className="font-medium pt-1">Por área/lote (saldo disponível)</div>
+                                {item.areaBreakdown?.length ? item.areaBreakdown.map((area, index) => (
+                                  <div key={index} className="pl-2">
+                                    <div>{area.areaName}: <span className="font-mono">{area.quantity}</span></div>
+                                    <div className="pl-3 text-[11px] text-muted-foreground">
+                                      {area.lots.map((lot, lotIndex) => (
+                                        <span key={lotIndex}>{lot.lotNumber}: {lot.quantityAvailable}{lotIndex < area.lots.length - 1 ? " · " : ""}</span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )) : <div className="pl-2 text-muted-foreground">Sem lotes com saldo disponível</div>}
+                              </div>
                               {item.integrityIssues?.length > 0 && (
                                 <div className="text-destructive text-[11px] whitespace-normal">{item.integrityIssues.join(" ")}</div>
+                              )}
+                              {item.integrityLimitations?.length > 0 && (
+                                <div className="text-amber-700 text-[11px] whitespace-normal">{item.integrityLimitations.join(" ")}</div>
                               )}
                             </div>
                           </TableCell>
