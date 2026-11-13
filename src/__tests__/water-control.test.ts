@@ -7,6 +7,7 @@ import {
   isValidWaterTimestamp,
   calculateWaterContainerBalance,
   buildWaterSupplierReturnDeltas,
+  summarizeWaterFinances,
 } from "../lib/water-control";
 
 describe("controle de água mineral", () => {
@@ -112,5 +113,69 @@ describe("devolução de galões ao fornecedor", () => {
     expect(() => buildWaterSupplierReturnDeltas(0, 0)).toThrow(/ao menos um galão/i);
     expect(() => buildWaterSupplierReturnDeltas(1.5, 0)).toThrow(/inteiro/i);
     expect(() => buildWaterSupplierReturnDeltas(0, -1)).toThrow(/inteiro/i);
+  });
+});
+
+
+describe("consolidação financeira acumulada da água", () => {
+  it("soma compras, rateios, pagamentos e dívidas de vários períodos", () => {
+    const summary = summarizeWaterFinances(
+      [{ totalValueCents: 10000 }, { totalValueCents: 10000 }],
+      [
+        { shareId: "s1", participantId: "p1", participantName: "Ana", amountDueCents: 5000 },
+        { shareId: "s2", participantId: "p2", participantName: "Bruno", amountDueCents: 5000 },
+        { shareId: "s3", participantId: "p1", participantName: "Ana", amountDueCents: 5000 },
+        { shareId: "s4", participantId: "p2", participantName: "Bruno", amountDueCents: 5000 },
+      ],
+      [
+        { shareId: "s1", amountCents: 5000 },
+        { shareId: "s2", amountCents: 2000 },
+        { shareId: "s3", amountCents: 1000 },
+      ],
+    );
+    expect(summary.totalPurchasedCents).toBe(20000);
+    expect(summary.totalAllocatedCents).toBe(20000);
+    expect(summary.totalPaidCents).toBe(8000);
+    expect(summary.totalOutstandingCents).toBe(12000);
+    expect(summary.pendingAllocationCents).toBe(0);
+    expect(summary.participants).toEqual([
+      { participantId: "p1", participantName: "Ana", totalDueCents: 10000, totalPaidCents: 6000, outstandingCents: 4000, overpaidCents: 0 },
+      { participantId: "p2", participantName: "Bruno", totalDueCents: 10000, totalPaidCents: 2000, outstandingCents: 8000, overpaidCents: 0 },
+    ]);
+  });
+
+  it("separa compras ainda não rateadas das dívidas já atribuídas", () => {
+    const summary = summarizeWaterFinances(
+      [{ totalValueCents: 15000 }],
+      [{ shareId: "s1", participantId: "p1", participantName: "Ana", amountDueCents: 10000 }],
+      [{ shareId: "s1", amountCents: 4000 }],
+    );
+    expect(summary.totalPurchasedCents).toBe(15000);
+    expect(summary.totalAllocatedCents).toBe(10000);
+    expect(summary.totalPaidCents).toBe(4000);
+    expect(summary.totalOutstandingCents).toBe(6000);
+    expect(summary.pendingAllocationCents).toBe(5000);
+  });
+
+  it("não usa excesso pago em uma competência para esconder dívida de outra", () => {
+    const summary = summarizeWaterFinances(
+      [{ totalValueCents: 10000 }],
+      [
+        { shareId: "s1", participantId: "p1", participantName: "Ana", amountDueCents: 4000 },
+        { shareId: "s2", participantId: "p1", participantName: "Ana", amountDueCents: 6000 },
+      ],
+      [
+        { shareId: "s1", amountCents: 5000 },
+        { shareId: "s2", amountCents: 1000 },
+      ],
+    );
+    expect(summary.totalOutstandingCents).toBe(5000);
+    expect(summary.totalOverpaidCents).toBe(1000);
+    expect(summary.participants[0]).toMatchObject({
+      totalDueCents: 10000,
+      totalPaidCents: 6000,
+      outstandingCents: 5000,
+      overpaidCents: 1000,
+    });
   });
 });
