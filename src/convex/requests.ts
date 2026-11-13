@@ -7,7 +7,7 @@ import { requirePermission, requireRequestAction } from "./rbac";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
-import { consumeLotLocationStock, resolveWithdrawalLocation } from "./lotLocationLedger";
+import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -455,7 +455,7 @@ export const deliver = mutation({
       const newReserved = freshStock.reservedQuantity - input.quantityDelivered;
       await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical, reservedQuantity: newReserved });
       const exitNumber = await generateExitNumber(ctx);
-      await ctx.db.insert("stockMovements", {
+      const movementId = await ctx.db.insert("stockMovements", {
         productId: requestItem.productId, type: "exit", quantity: input.quantityDelivered,
         previousPhysical: freshStock.physicalQuantity, newPhysical,
         previousReserved: freshStock.reservedQuantity, newReserved,
@@ -464,6 +464,10 @@ export const deliver = mutation({
         locationId: sourceLocationId,
         observation: `Entrega da solicitação — armário ${sourceLocation?.name ?? sourceLocationId}. Lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
         timestamp: now,
+      });
+      await recordLotMovementAllocations(ctx, {
+        movementId, productId: requestItem.productId, locationId: sourceLocationId,
+        allocations: lotConsumption.allocations,
       });
       await ctx.db.patch(input.itemId, {
         quantityDelivered: input.quantityDelivered,
