@@ -63,7 +63,7 @@ export interface RunEntryImportInput {
   createEntry: (
     payload: EntryImportPayload & {
       materialType: MaterialType;
-      areaId?: string;
+      areaId: string;
     },
   ) => Promise<EntryImportDraftRef>;
   confirmEntry: (entryId: string) => Promise<void>;
