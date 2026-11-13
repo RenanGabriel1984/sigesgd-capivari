@@ -1,7 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
-import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -164,7 +164,8 @@ export const create = mutation({
     ].filter(Boolean).join(", ");
 
     for (const product of products) {
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", product._id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", product._id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
       let systemQuantity = stock?.physicalQuantity ?? 0;
       if (args.locationId) {
         const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", product._id)).collect();
@@ -336,12 +337,13 @@ export const close = mutation({
         throw new Error(`A contagem de "${product.name}" mudou após o cálculo da diferença. Salve a contagem novamente antes de fechar.`);
       }
 
-      const [stock, lots, locationRows, reservations] = await Promise.all([
-        ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).first(),
+      const [stockRows, lots, locationRows, reservations] = await Promise.all([
+        ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect(),
         ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect(),
         ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect(),
         ctx.db.query("requestItemReservations").withIndex("by_product", (q: any) => q.eq("productId", count.productId)).collect(),
       ]);
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
 
       const previousPhysical = Number(stock?.physicalQuantity ?? 0);
       const previousReserved = Number(stock?.reservedQuantity ?? 0);
