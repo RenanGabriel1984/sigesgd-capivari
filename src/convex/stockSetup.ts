@@ -6,7 +6,7 @@ import {
 } from "../lib/stock-consumption";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { isDiscreteStockUnit } from "../lib/stock-quantity-rules";
+import { getOptionalSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import {
   applyImplementationStockStamp,
   generateExitNumber,
@@ -267,10 +267,12 @@ async function performInitialLoad(
       }
 
       // ── 4. stock (global) ──
-      const existingStock = await ctx.db
+      const existingStockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
-        .first();
+        .collect();
+      const productForLabel = await ctx.db.get(item.productId as any);
+      const existingStock = getOptionalSingleValidGlobalStock(existingStockRows, productForLabel?.name ?? String(item.productId));
 
       const previousGlobal = existingStock?.physicalQuantity ?? 0;
       // Em produtos existentes, somar a carga ao saldo global preserva estoque
