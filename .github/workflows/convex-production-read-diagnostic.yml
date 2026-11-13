@@ -1,4 +1,4 @@
-name: Convex — publicar apenas o diagnóstico aditivo de estoque
+name: Convex — diagnóstico somente leitura em first-herring-264
 
 on:
   push:
@@ -14,12 +14,12 @@ concurrency:
 
 jobs:
   publish:
-    name: Publicar schema + internalQuery em savory-sockeye-292
+    name: Publicar schema + internalQuery em first-herring-264
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      TARGET_DEPLOYMENT: savory-sockeye-292
-      TARGET_HOST: savory-sockeye-292.convex.cloud
+      TARGET_DEPLOYMENT: first-herring-264
+      TARGET_HOST: first-herring-264.convex.cloud
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -33,7 +33,7 @@ jobs:
 
       - name: Validar branch, schema e query; confirmar segredo e destino
         env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_PROD }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
         run: |
           set -euo pipefail
 
@@ -42,8 +42,13 @@ jobs:
             exit 1
           fi
 
+          if [ -n "${CONVEX_DEPLOYMENT:-}" ]; then
+            echo "::error::CONVEX_DEPLOYMENT está definida e pode desviar o alvo da deploy key. Nada foi publicado."
+            exit 1
+          fi
+
           if [ -z "${CONVEX_DEPLOY_KEY:-}" ]; then
-            echo "::error::Secret CONVEX_DEPLOY_KEY_PROD ausente. Nada foi publicado."
+            echo "::error::Secret CONVEX_DEPLOY_KEY_FIRST_HERRING ausente. Nada foi publicado."
             exit 1
           fi
 
@@ -59,8 +64,8 @@ jobs:
           tipo="${prefixo%%:*}"
           ref="${prefixo##*:}"
 
-          if [ "${tipo}" != "prod" ] || [ "${ref}" != "${TARGET_DEPLOYMENT}" ]; then
-            echo "::error::A chave não corresponde a prod:${TARGET_DEPLOYMENT}. Nada foi publicado."
+          if [ "${tipo}" != "dev" ] || [ "${ref}" != "${TARGET_DEPLOYMENT}" ]; then
+            echo "::error::A chave não corresponde a dev:${TARGET_DEPLOYMENT}. Nada foi publicado."
             exit 1
           fi
 
@@ -79,7 +84,7 @@ jobs:
             exit 1
           fi
 
-          echo "Alvo validado: prod:${TARGET_DEPLOYMENT}."
+          echo "Alvo validado: dev:${TARGET_DEPLOYMENT}."
           echo "A consulta é interna e somente leitura; este workflow não executa consultas nem migrações."
 
       - name: Instalar dependências
@@ -87,7 +92,7 @@ jobs:
 
       - name: Publicar backend aditivo no deployment confirmado
         env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_PROD }}
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
         run: |
           set -euo pipefail
           log="${RUNNER_TEMP}/convex-deploy.log"
@@ -99,7 +104,7 @@ jobs:
           set -euo pipefail
           log="${RUNNER_TEMP}/convex-deploy.log"
 
-          for host in first-herring-264.convex.cloud first-starling-943.convex.cloud brilliant-bullfrog-982.convex.cloud tame-alligator-797.convex.cloud first-dinosaur-625.convex.cloud; do
+          for host in savory-sockeye-292.convex.cloud first-starling-943.convex.cloud brilliant-bullfrog-982.convex.cloud tame-alligator-797.convex.cloud first-dinosaur-625.convex.cloud; do
             if grep -qF "${host}" "${log}"; then
               echo "::error::O log citou deployment não autorizado (${host})."
               exit 1
@@ -119,7 +124,7 @@ jobs:
           {
             echo "### Convex — publicação aditiva confirmada"
             echo ""
-            echo "- deployment: `prod:${TARGET_DEPLOYMENT}`"
+            echo "- deployment: `dev:${TARGET_DEPLOYMENT}`"
             echo "- host: `https://${TARGET_HOST}`"
             echo "- conteúdo: schema aditivo + internalQuery de diagnóstico"
             echo "- migração e consulta dos dados: não executadas neste workflow"
