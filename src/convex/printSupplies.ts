@@ -17,7 +17,7 @@ import { query, mutation, internalMutation, internalQuery } from "./_generated/s
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
-import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 import { consumeLotLocationStock, resolveWithdrawalLocation } from "./lotLocationLedger";
 import {
   buildSupplyRow,
@@ -752,7 +752,7 @@ export const withdrawFamily = mutation({
           invoiceNumber: firstClosedLot.invoiceNumber,
           active: true,
           materialType: firstClosedLot.materialType,
-          areaId: firstClosedLot.areaId ?? PRINT_AREA_ID as never,
+          areaId: (firstClosedLot.areaId ?? PRINT_AREA_ID) as never,
           originLotId: firstClosedLot._id,
           observation: `Reclassificação de ${openPacks} ${conv.packagingUnit}(s) aberta(s) de "${closedMember.name}". Origem: ${firstClosedLot.lotNumber}.`,
         } as never);
