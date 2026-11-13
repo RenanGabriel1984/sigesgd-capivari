@@ -56,6 +56,17 @@ export function getOptionalSingleValidGlobalStock<T extends GlobalStockBalance>(
   return stock;
 }
 
+export function requireSingleValidGlobalStock<T extends GlobalStockBalance>(
+  rows: readonly T[],
+  productLabel: string,
+): T {
+  const stock = getOptionalSingleValidGlobalStock(rows, productLabel);
+  if (!stock) {
+    throw new Error(`Registro de estoque não encontrado para "${productLabel}".`);
+  }
+  return stock;
+}
+
 /**
  * Detecta linhas locais duplicadas ou quantidades impossíveis sem somá-las
  * silenciosamente. A chave representa produto × área × local físico.
