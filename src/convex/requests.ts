@@ -623,7 +623,6 @@ export const deliver = mutation({
             ? "Saldo físico insuficiente no local de origem para concluir a entrega."
             : "Há saldos duplicados no local de origem. Regularize antes de concluir a entrega.");
         }
-        const source = matchingSourceRows[0];
         const sourceLots = await ctx.db.query("lots")
           .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
           .collect();
