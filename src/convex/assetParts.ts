@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -57,11 +58,11 @@ export const installPart = mutation({
     if (!product) throw new Error("Produto não encontrado");
 
     // Validate stock (check available = physical - reserved)
-    const stock = await ctx.db
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
+      .collect();
+    const stock = requireSingleValidGlobalStock(stockRows, product.name);
     if (stock.physicalQuantity - stock.reservedQuantity < args.quantity) {
       throw new Error(`Estoque insuficiente. Disponível: ${stock.physicalQuantity - stock.reservedQuantity}. Necessário: ${args.quantity}`);
     }
@@ -93,11 +94,11 @@ export const installPart = mutation({
     }
 
     // Re-read stock for concurrency safety (double-check pattern)
-    const freshStock = await ctx.db
+    const freshStockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!freshStock) throw new Error("Registro de estoque desapareceu durante a instalação");
+      .collect();
+    const freshStock = requireSingleValidGlobalStock(freshStockRows, product.name);
     if (freshStock.physicalQuantity - freshStock.reservedQuantity < args.quantity) {
       throw new Error(`Estoque insuficiente (concorrência). Disponível: ${freshStock.physicalQuantity - freshStock.reservedQuantity}. Necessário: ${args.quantity}.`);
     }
