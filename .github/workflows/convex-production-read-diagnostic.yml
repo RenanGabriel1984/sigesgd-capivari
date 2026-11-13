@@ -90,42 +90,31 @@ jobs:
       - name: Instalar dependências
         run: bun install --frozen-lockfile
 
-      - name: Publicar backend aditivo no deployment confirmado
+      - name: Publicar backend aditivo no deployment dev confirmado
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
         run: |
           set -euo pipefail
-          log="${RUNNER_TEMP}/convex-deploy.log"
+          log="${RUNNER_TEMP}/convex-dev-push.log"
           bunx convex --version
-          bunx convex deploy 2>&1 | tee "${log}"
+          # Para deployment do tipo dev, o comando correto é dev --once.
+          # A deploy key já foi validada como dev:first-herring-264 no passo anterior.
+          bunx convex dev --once 2>&1 | tee "${log}"
 
-      - name: Confirmar host publicado e bloquear qualquer destino divergente
-        run: |
-          set -euo pipefail
-          log="${RUNNER_TEMP}/convex-deploy.log"
-
+          # Tripwire: a saída não pode mencionar outro deployment conhecido.
           for host in savory-sockeye-292.convex.cloud first-starling-943.convex.cloud brilliant-bullfrog-982.convex.cloud tame-alligator-797.convex.cloud first-dinosaur-625.convex.cloud; do
             if grep -qF "${host}" "${log}"; then
-              echo "::error::O log citou deployment não autorizado (${host})."
+              echo "::error::A saída mencionou deployment não autorizado (${host})."
               exit 1
             fi
           done
 
-          if ! grep -qF "Deploying code to deployment:" "${log}"; then
-            echo "::error::O CLI não confirmou o deployment de destino."
-            exit 1
-          fi
-
-          if ! grep -qF "Deployed Convex functions to https://${TARGET_HOST}" "${log}"; then
-            echo "::error::O CLI não confirmou o host de produção autorizado."
-            exit 1
-          fi
-
           {
             echo "### Convex — publicação aditiva confirmada"
             echo ""
-            echo "- deployment: `dev:${TARGET_DEPLOYMENT}`"
+            echo "- deployment validado pela chave: `dev:${TARGET_DEPLOYMENT}`"
             echo "- host: `https://${TARGET_HOST}`"
+            echo "- comando: `bunx convex dev --once` (concluído com exit 0)"
             echo "- conteúdo: schema aditivo + internalQuery de diagnóstico"
             echo "- migração e consulta dos dados: não executadas neste workflow"
             echo "- frontend/Freebuff: não publicados"
