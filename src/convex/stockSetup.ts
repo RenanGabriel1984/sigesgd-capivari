@@ -1436,7 +1436,7 @@ export const applyLotLocationBalancesMigration = internalMutation({
   },
   handler: async (ctx) => {
     const report = await ctx.runQuery(internal.stockSetup.lotLocationReadiness, {});
-    const plan = buildLotLocationMigrationPlan(report as Parameters<typeof buildLotLocationMigrationPlan>[0]);
+    const plan = buildLotLocationMigrationPlan(report as unknown as Parameters<typeof buildLotLocationMigrationPlan>[0]);
     const now = Date.now();
     let inserted = 0;
     let skipped = 0;
