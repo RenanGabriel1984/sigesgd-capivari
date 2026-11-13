@@ -9,6 +9,7 @@ import {
   normalizeInvoiceNumber,
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -455,7 +456,8 @@ export const confirm = mutation({
       await ctx.db.patch(item._id, { lotId: lotId as string });
 
       // Update stock (increase physicalQuantity)
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
       const prevPhysical = stock?.physicalQuantity ?? 0;
       const prevReserved = stock?.reservedQuantity ?? 0;
       const newPhysical = prevPhysical + item.quantity;
@@ -469,6 +471,7 @@ export const confirm = mutation({
       // Update stock by location (saldo por localização) — keeps global × location consistent
       if (item.locationId) {
         const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        validateUniqueScopedStockRows(sblList, product.name);
         const sbl = sblList.find((s: any) => s.locationId === item.locationId);
         if (sbl) {
           await ctx.db.patch(sbl._id, { quantity: sbl.quantity + item.quantity });
@@ -764,8 +767,8 @@ export const reverse = mutation({
       const product = await ctx.db.get(item.productId);
 
       // Check stock — cannot reverse if consumed
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
-      if (!stock) throw new Error(`Registro de estoque não encontrado para "${product?.name ?? "item"}"`);
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+      const stock = requireSingleValidGlobalStock(stockRows, product?.name ?? String(item.productId));
 
       if (stock.physicalQuantity < item.quantity) {
         throw new Error(
@@ -788,6 +791,7 @@ export const reverse = mutation({
       // Reverse stock by location (same location used at confirmation)
       if (item.locationId) {
         const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        validateUniqueScopedStockRows(sblList, product?.name ?? String(item.productId));
         const sbl = sblList.find((s: any) => s.locationId === item.locationId);
         if (sbl && sbl.quantity < item.quantity) {
           throw new Error(
