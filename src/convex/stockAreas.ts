@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { BASELINE_STOCK_AREAS, NO_AREA_LABEL } from "../lib/stock-areas";
 import { requirePermission } from "./rbac";
 import { requireSingleValidGlobalStock } from "../lib/stock-quantity-rules";
+import { setLotLocationBalanceLocation } from "../lib/lot-location-balance";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -219,7 +220,23 @@ export const classifyLot = mutation({
     const linkedEntryItem = entryItems.find((item: any) =>
       item.lotId === lot._id || item.lotId === lot.lotNumber
     );
-    const sourceLocationId = lot.locationId ?? linkedEntryItem?.locationId ?? args.locationId;
+    const existingLotBalances = await ctx.db.query("lotLocationBalances")
+      .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+    if (existingLotBalances.length > 1) {
+      throw new Error("Há saldos lote × armário duplicados. Classificação bloqueada.");
+    }
+    const existingLotBalance = existingLotBalances[0] ?? null;
+    if (existingLotBalance && (
+      existingLotBalance.productId !== lot.productId ||
+      !Number.isFinite(existingLotBalance.quantityAvailable) ||
+      Math.abs(existingLotBalance.quantityAvailable - lot.quantityAvailable) > 1e-9
+    )) {
+      throw new Error("O saldo lote × armário diverge do lote. Classificação bloqueada.");
+    }
+    if (lot.locationId && existingLotBalance && lot.locationId !== existingLotBalance.locationId) {
+      throw new Error("A localização do lote diverge do vínculo lote × armário. Regularize antes de classificar.");
+    }
+    const sourceLocationId = lot.locationId ?? existingLotBalance?.locationId ?? linkedEntryItem?.locationId ?? args.locationId;
     if (sourceLocationId !== args.locationId) {
       throw new Error("O local registrado para este lote difere do local selecionado. Faça uma transferência física auditável antes da classificação.");
     }
@@ -312,6 +329,10 @@ export const classifyLot = mutation({
     }
 
     await ctx.db.patch(lot._id, { areaId: args.areaId, locationId: args.locationId });
+    await setLotLocationBalanceLocation(ctx, {
+      lotId: lot._id, productId: lot.productId, locationId: args.locationId,
+      quantityAvailable: lot.quantityAvailable, allowCreate: true,
+    });
     if (linkedEntryItem && linkedEntryItem.areaId !== args.areaId) {
       await ctx.db.patch(linkedEntryItem._id, { areaId: args.areaId });
     }
