@@ -1,4 +1,6 @@
 import { requirePermission } from "./rbac";
+import { INITIAL_STOCK_MANIFEST } from "../lib/stock-regularization-manifest";
+import { LEGACY_GENERAL_AREA_CLASSIFICATION_TARGETS } from "../lib/legacy-general-area-classification";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import {
   resolveConsumedLotId,
@@ -1010,6 +1012,326 @@ export const applyLegacyPrinterAreaClassification = internalMutation({
       physicalQuantitiesChanged: false,
       lotsChanged: false,
       movementsChanged: false,
+      auditLogged: true,
+    };
+  },
+});
+
+/**
+ * Classifica exclusivamente os 36 saldos históricos documentados como TI Geral.
+ * Revalida lote, item, saldo local, vínculo de lote/localização e movimento
+ * original antes de qualquer escrita. Não altera quantidades nem saldos físicos.
+ */
+export const applyLegacyGeneralAreaClassification = internalMutation({
+  args: {
+    confirmation: v.literal("CONFIRMAR_CLASSIFICACAO_36_SALDOS_TI_GERAL_FIRST_HERRING"),
+  },
+  handler: async (ctx) => {
+    const targets = LEGACY_GENERAL_AREA_CLASSIFICATION_TARGETS;
+    const manifestRows = INITIAL_STOCK_MANIFEST.filter((row) => row.areaName === "TI Geral");
+    const expectedQuantity = targets.reduce((sum, row) => sum + row.quantity, 0);
+    const unique = (values: readonly string[]) => new Set(values).size === values.length;
+
+    if (
+      targets.length !== 36 ||
+      manifestRows.length !== 36 ||
+      expectedQuantity !== 1919 ||
+      !unique(targets.map((row) => row.rowId)) ||
+      !unique(targets.map((row) => row.productId)) ||
+      !unique(targets.map((row) => row.lotId))
+    ) {
+      throw new Error("Manifesto fechado de TI Geral inválido; nenhuma alteração realizada.");
+    }
+
+    const areas: any[] = await ctx.db.query("stockAreas").collect();
+    const matchingAreas = areas.filter((area) => area.name === "TI Geral" && area.active);
+    if (matchingAreas.length !== 1) {
+      throw new Error('Deve existir exatamente uma área ativa chamada "TI Geral".');
+    }
+    const area = matchingAreas[0];
+    const areaId = String(area._id);
+
+    const entry: any = await ctx.db
+      .query("entries")
+      .withIndex("by_number", (q: any) => q.eq("entryNumber", "ENT-2026-000001"))
+      .first();
+    if (
+      !entry ||
+      entry.status !== "confirmed" ||
+      entry.originType !== "initial_inventory" ||
+      entry.areaId != null
+    ) {
+      throw new Error("A entrada inicial ENT-2026-000001 não corresponde ao registro histórico esperado.");
+    }
+
+    const [
+      initialItems,
+      initialLots,
+      allLots,
+      allBalances,
+      allLocalRows,
+      allMovements,
+      allMovementLotLinks,
+      allReservations,
+    ]: any[][] = await Promise.all([
+      ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", entry._id)).collect(),
+      ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", entry._id)).collect(),
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("stockMovements").collect(),
+      ctx.db.query("stockMovementLots").collect(),
+      ctx.db.query("requestItemReservations").collect(),
+    ]);
+
+    const initialMovements = allMovements.filter((movement: any) => String(movement.entryId) === String(entry._id));
+    if (initialItems.length !== 53 || initialLots.length !== 53 || initialMovements.length !== 53) {
+      throw new Error(
+        "Entrada inicial fora do manifesto: itens=" + initialItems.length +
+        ", lotes=" + initialLots.length + ", movimentos=" + initialMovements.length +
+        "; esperado 53/53/53."
+      );
+    }
+
+    const manifestByName = new Map(INITIAL_STOCK_MANIFEST.map((row) => [row.productName, row]));
+    const balancesByLot = new Map<string, any[]>();
+    for (const balance of allBalances) {
+      const key = String(balance.lotId);
+      const list = balancesByLot.get(key) ?? [];
+      list.push(balance);
+      balancesByLot.set(key, list);
+    }
+    const linksByMovement = new Map<string, any[]>();
+    for (const link of allMovementLotLinks) {
+      const key = String(link.movementId);
+      const list = linksByMovement.get(key) ?? [];
+      list.push(link);
+      linksByMovement.set(key, list);
+    }
+    const reservationsByLot = new Map<string, any[]>();
+    for (const reservation of allReservations) {
+      const key = String(reservation.lotId);
+      const list = reservationsByLot.get(key) ?? [];
+      list.push(reservation);
+      reservationsByLot.set(key, list);
+    }
+
+    const patches: Array<{
+      target: (typeof targets)[number];
+      itemId: string;
+      movementId: string;
+      linkIds: string[];
+    }> = [];
+    let alreadyClassified = 0;
+
+    for (const target of targets) {
+      const manifest = manifestByName.get(target.productName);
+      if (
+        !manifest ||
+        manifest.areaName !== "TI Geral" ||
+        manifest.brand !== target.brand ||
+        manifest.quantity !== target.quantity ||
+        manifest.locationName !== target.locationName
+      ) {
+        throw new Error('O item "' + target.productName + '" não confere com a planilha oficial; operação abortada.');
+      }
+
+      const [product, location, lot, localRow]: any[] = await Promise.all([
+        ctx.db.get(target.productId as any),
+        ctx.db.get(target.locationId as any),
+        ctx.db.get(target.lotId as any),
+        ctx.db.get(target.rowId as any),
+      ]);
+      if (!product || product.name !== target.productName) {
+        throw new Error('Produto de "' + target.productName + '" não corresponde ao ID da auditoria.');
+      }
+      if (!location || !location.active || location.name !== target.locationName) {
+        throw new Error('Local físico de "' + target.productName + '" não corresponde à planilha.');
+      }
+      if (!lot || !lot.active ||
+          String(lot.productId) !== target.productId ||
+          String(lot.entryId) !== String(entry._id) ||
+          String(lot.locationId) !== target.locationId ||
+          !Number.isFinite(lot.quantityAvailable) ||
+          !Number.isFinite(lot.quantityReceived) ||
+          Math.abs(lot.quantityAvailable - target.quantity) > 1e-9 ||
+          Math.abs(lot.quantityReceived - target.quantity) > 1e-9) {
+        throw new Error('Lote de "' + target.productName + '" não corresponde à entrada, localização ou quantidade da planilha.');
+      }
+      if (lot.brand && lot.brand.trim().toLocaleLowerCase("pt-BR") !== target.brand.toLocaleLowerCase("pt-BR")) {
+        throw new Error('Marca do lote de "' + target.productName + '" diverge da planilha.');
+      }
+      if (!localRow ||
+          String(localRow.productId) !== target.productId ||
+          String(localRow.locationId) !== target.locationId ||
+          !Number.isFinite(localRow.quantity) ||
+          Math.abs(localRow.quantity - target.quantity) > 1e-9) {
+        throw new Error('Saldo por localização de "' + target.productName + '" mudou desde a auditoria.');
+      }
+
+      const localScopeRows = allLocalRows.filter((row: any) =>
+        String(row.productId) === target.productId &&
+        String(row.locationId) === target.locationId &&
+        (row.areaId == null || String(row.areaId) === areaId)
+      );
+      if (localScopeRows.length !== 1 || String(localScopeRows[0]._id) !== target.rowId) {
+        throw new Error('Escopo produto/local de "' + target.productName + '" possui saldos adicionais ou duplicados.');
+      }
+
+      const areaLessLots = allLots.filter((candidate: any) =>
+        String(candidate.productId) === target.productId &&
+        String(candidate.locationId) === target.locationId &&
+        (candidate.areaId == null || String(candidate.areaId) === areaId) &&
+        Number(candidate.quantityAvailable) > 0
+      );
+      if (areaLessLots.length !== 1 || String(areaLessLots[0]._id) !== target.lotId) {
+        throw new Error('Conjunto de lotes positivos de "' + target.productName + '" mudou desde a auditoria.');
+      }
+
+      const lotBalances = balancesByLot.get(target.lotId) ?? [];
+      if (
+        lotBalances.length !== 1 ||
+        String(lotBalances[0].productId) !== target.productId ||
+        String(lotBalances[0].locationId) !== target.locationId ||
+        !Number.isFinite(lotBalances[0].quantityAvailable) ||
+        Math.abs(lotBalances[0].quantityAvailable - target.quantity) > 1e-9
+      ) {
+        throw new Error('Saldo lote/localização de "' + target.productName + '" não fecha com a quantidade documental.');
+      }
+
+      const entryItemMatches = initialItems.filter((item: any) =>
+        String(item.productId) === target.productId &&
+        (String(item.lotId) === target.lotId || String(item.lotId) === String(lot.lotNumber)) &&
+        String(item.locationId) === target.locationId &&
+        Number(item.quantity) === target.quantity
+      );
+      if (entryItemMatches.length !== 1) {
+        throw new Error('Item da entrada inicial de "' + target.productName + '" não pôde ser identificado de forma única.');
+      }
+      const entryItem = entryItemMatches[0];
+      if (
+        entryItem.brand &&
+        entryItem.brand.trim().toLocaleLowerCase("pt-BR") !== target.brand.toLocaleLowerCase("pt-BR")
+      ) {
+        throw new Error('Marca do item da entrada de "' + target.productName + '" diverge da planilha.');
+      }
+
+      const reservations = reservationsByLot.get(target.lotId) ?? [];
+      for (const reservation of reservations) {
+        if (String(reservation.areaId) !== areaId ||
+            String(reservation.productId) !== target.productId ||
+            String(reservation.locationId) !== target.locationId) {
+          throw new Error('Há reserva vinculada a "' + target.productName + '" com área/local divergente; operação abortada.');
+        }
+      }
+
+      const movementMatches = initialMovements.filter((movement: any) =>
+        String(movement.productId) === target.productId &&
+        String(movement.lotId) === target.lotId
+      );
+      if (movementMatches.length !== 1) {
+        throw new Error('Movimentação original de "' + target.productName + '" não pôde ser identificada de forma única.');
+      }
+      const movement = movementMatches[0];
+      if (
+        movement.type !== "adjustment" ||
+        Math.abs(Number(movement.quantity) - target.quantity) > 1e-9 ||
+        String(movement.locationId) !== target.locationId
+      ) {
+        throw new Error('Movimentação original de "' + target.productName + '" não confere com a carga inicial.');
+      }
+
+      const movementLinks = linksByMovement.get(String(movement._id)) ?? [];
+      if (movementLinks.length > 0) {
+        const linkedQuantity = movementLinks.reduce((sum: number, link: any) => sum + Number(link.quantity), 0);
+        if (
+          movementLinks.length !== 1 ||
+          String(movementLinks[0].lotId) !== target.lotId ||
+          Math.abs(linkedQuantity - target.quantity) > 1e-9 ||
+          String(movementLinks[0].locationId) !== target.locationId
+        ) {
+          throw new Error('Vínculos de lote da movimentação de "' + target.productName + '" divergem da origem documental.');
+        }
+      }
+
+      const metadataStates = [
+        lot.areaId,
+        entryItem.areaId,
+        localRow.areaId,
+        movement.areaId,
+        ...movementLinks.map((link: any) => link.areaId),
+      ].map((value) => value == null ? "unset" : String(value));
+      if (metadataStates.some((value) => value !== "unset" && value !== areaId)) {
+        throw new Error('"' + target.productName + '" já possui metadado de área conflitante; operação abortada.');
+      }
+      const uniqueStates = new Set(metadataStates);
+      if (uniqueStates.size !== 1) {
+        throw new Error('"' + target.productName + '" tem metadados parcialmente classificados; operação abortada.');
+      }
+
+      if (metadataStates[0] === areaId) {
+        alreadyClassified++;
+      } else {
+        patches.push({
+          target,
+          itemId: String(entryItem._id),
+          movementId: String(movement._id),
+          linkIds: movementLinks.map((link: any) => String(link._id)),
+        });
+      }
+    }
+
+    if (alreadyClassified === targets.length) {
+      return {
+        applied: false,
+        idempotentNoOp: true,
+        area: "TI Geral",
+        updatedLots: 0,
+        updatedEntryItems: 0,
+        updatedRows: 0,
+        updatedInitialMovements: 0,
+        totalQuantityClassified: expectedQuantity,
+        physicalQuantitiesChanged: false,
+        movementQuantitiesChanged: false,
+        auditLogged: false,
+      };
+    }
+    if (alreadyClassified !== 0 || patches.length !== targets.length) {
+      throw new Error("Classificação parcial detectada. Nenhuma alteração foi aplicada.");
+    }
+
+    // Todas as 36 linhas e seus vínculos históricos foram validados antes da primeira escrita.
+    for (const patch of patches) {
+      await ctx.db.patch(patch.target.lotId as any, { areaId: area._id });
+      await ctx.db.patch(patch.itemId as any, { areaId: area._id });
+      await ctx.db.patch(patch.target.rowId as any, { areaId: area._id });
+      await ctx.db.patch(patch.movementId as any, { areaId: area._id });
+      for (const linkId of patch.linkIds) {
+        await ctx.db.patch(linkId as any, { areaId: area._id });
+      }
+    }
+
+    await ctx.db.insert("auditLogs", {
+      action: "update",
+      entity: "stock",
+      entityId: String(entry._id),
+      details:
+        "Classificação documental dos 36 itens da carga inicial como TI Geral, conforme docs/planilha-carga-inicial.csv. " +
+        "Metadados atualizados em lotes, itens da entrada, saldos por localização e movimentos originais. " +
+        "Quantidade total classificada: 1.919. Nenhuma quantidade física, reserva ou saldo global foi alterado.",
+      timestamp: Date.now(),
+    });
+
+    return {
+      applied: true,
+      area: "TI Geral",
+      updatedLots: patches.length,
+      updatedEntryItems: patches.length,
+      updatedRows: patches.length,
+      updatedInitialMovements: patches.length,
+      totalQuantityClassified: patches.reduce((sum, patch) => sum + patch.target.quantity, 0),
+      physicalQuantitiesChanged: false,
+      movementQuantitiesChanged: false,
       auditLogged: true,
     };
   },
