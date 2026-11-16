@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { isValidStockQuantity } from "../lib/stock-quantity-rules";
 import { groupAssetPartConsumptionByLocation, planAssetPartFifoConsumption } from "../lib/asset-part-consumption";
+import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -166,6 +167,10 @@ export const installPart = mutation({
       const lot = lotById.get(allocation.lotId)!;
       await ctx.db.patch(lot._id, {
         quantityAvailable: lot.quantityAvailable - allocation.quantity,
+      });
+      await adjustLotLocationBalance(ctx, {
+        lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
+        delta: -allocation.quantity,
       });
     }
     for (const update of locationUpdates) {
