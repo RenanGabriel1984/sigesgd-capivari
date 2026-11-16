@@ -10,7 +10,7 @@ import {
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: entradas exigem sessão com visão de estoque.
@@ -405,6 +405,7 @@ export const confirm = mutation({
           quantity: item.quantity,
           units: itemUnits,
           productName: product?.name,
+          requireSerial: product?.hasSerial === true,
         });
         if (unitError) throw new Error(unitError);
       }
