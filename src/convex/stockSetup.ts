@@ -577,7 +577,7 @@ export const lotLocationBalanceIntegrity = query({
       ctx.db.query("stockByLocation").collect(),
       ctx.db.query("stock").collect(),
     ]);
-    const lotsById = new Map(lots.map((lot: any) => [String(lot._id), lot]));
+    const lotsById = new Map<string, any>(lots.map((lot: any) => [String(lot._id), lot] as const));
     const balancesByLot = new Map<string, any[]>();
     for (const row of balances as any[]) {
       const key = String(row.lotId);
@@ -589,7 +589,11 @@ export const lotLocationBalanceIntegrity = query({
     let orphanBalances = 0;
     let duplicateLotBalances = 0;
     let invalidBalances = 0;
+    let invalidLotQuantities = 0;
     let mismatchedLotBalances = 0;
+    for (const lot of lots as any[]) {
+      if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0) invalidLotQuantities++;
+    }
     for (const row of balances as any[]) {
       const lot = lotsById.get(String(row.lotId));
       if (!lot) orphanBalances++;
@@ -676,12 +680,13 @@ export const lotLocationBalanceIntegrity = query({
       orphanBalances,
       duplicateLotBalances,
       invalidBalances,
+      invalidLotQuantities,
       mismatchedLotBalances,
       duplicateLocalScopes,
       scopeMismatches,
       globalMismatches,
       consistent: missingLotBalances === 0 && lotsMissingLocationMetadata === 0 && orphanBalances === 0 &&
-        duplicateLotBalances === 0 && invalidBalances === 0 &&
+        duplicateLotBalances === 0 && invalidBalances === 0 && invalidLotQuantities === 0 &&
         mismatchedLotBalances === 0 && duplicateLocalScopes === 0 &&
         scopeMismatches === 0 && globalMismatches === 0,
     };
