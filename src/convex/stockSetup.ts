@@ -844,6 +844,13 @@ export const cleanupTestData = internalMutation({
     }
     deleted.stockByLocation_deleted = sbl.length;
 
+    // Remove os saldos derivados junto com os lotes zerados no ambiente de testes.
+    const lotLocationBalances = await ctx.db.query("lotLocationBalances").collect();
+    for (const balance of lotLocationBalances) {
+      await ctx.db.delete(balance._id);
+    }
+    deleted.lotLocationBalances_deleted = lotLocationBalances.length;
+
     // Audit
     await ctx.db.insert("auditLogs", {
       userId,
