@@ -703,6 +703,89 @@ export const lotLocationBalanceIntegrity = internalQuery({
       }
     }
 
+    // Classificação legada: identifica saldos stockByLocation sem área que
+    // podem ser associados sem ambiguidade à área já registrada nos lotes.
+    // Esta etapa é estritamente read-only; não corrige nem altera quantidades.
+    const lotAreaTotalsByProductLocation = new Map<string, Map<string, number>>();
+    const lotAreaIdsByProductLocation = new Map<string, Set<string>>();
+    for (const lot of lots as any[]) {
+      const locationId = lot.locationId ?? resolvedLocationByLot.get(String(lot._id));
+      if (!locationId || !lot.areaId || !Number.isFinite(lot.quantityAvailable)) continue;
+      const key = `${String(lot.productId)}::${String(locationId)}`;
+      const areaId = String(lot.areaId);
+      const byArea = lotAreaTotalsByProductLocation.get(key) ?? new Map<string, number>();
+      byArea.set(areaId, (byArea.get(areaId) ?? 0) + Number(lot.quantityAvailable));
+      lotAreaTotalsByProductLocation.set(key, byArea);
+      const areaIds = lotAreaIdsByProductLocation.get(key) ?? new Set<string>();
+      areaIds.add(areaId);
+      lotAreaIdsByProductLocation.set(key, areaIds);
+    }
+    const localRowsByProductLocation = new Map<string, any[]>();
+    for (const row of localRows as any[]) {
+      const key = `${String(row.productId)}::${String(row.locationId)}`;
+      const rows = localRowsByProductLocation.get(key) ?? [];
+      rows.push(row);
+      localRowsByProductLocation.set(key, rows);
+    }
+    const areaClassificationCandidates: Array<{
+      productId: string;
+      productName: string;
+      locationId: string;
+      locationName: string;
+      rowId: string;
+      currentAreaId: null;
+      proposedAreaId: string;
+      proposedAreaName: string;
+      stockByLocationQuantity: number;
+      lotsQuantity: number;
+      lotIds: string[];
+    }> = [];
+    let areaClassificationBlocked = 0;
+    for (const [key, rows] of localRowsByProductLocation) {
+      const unclassifiedRows = rows.filter((row: any) => !row.areaId);
+      if (unclassifiedRows.length === 0) continue;
+      const [productId, locationId] = key.split("::");
+      const areaIds = lotAreaIdsByProductLocation.get(key) ?? new Set<string>();
+      const byArea = lotAreaTotalsByProductLocation.get(key) ?? new Map<string, number>();
+      const allLotsForScope = (lots as any[]).filter((lot: any) =>
+        String(lot.productId) === productId &&
+        String(lot.locationId ?? resolvedLocationByLot.get(String(lot._id)) ?? "") === locationId &&
+        Number(lot.quantityAvailable) > 0
+      );
+      const onlyAreaId = areaIds.size === 1 ? Array.from(areaIds)[0] : null;
+      const safe =
+        unclassifiedRows.length === 1 &&
+        rows.length === 1 &&
+        !!onlyAreaId &&
+        allLotsForScope.length > 0 &&
+        allLotsForScope.every((lot: any) => !!lot.areaId && String(lot.areaId) === onlyAreaId) &&
+        Math.abs(Number(unclassifiedRows[0].quantity) - (byArea.get(onlyAreaId) ?? 0)) <= 1e-9 &&
+        Number.isFinite(unclassifiedRows[0].quantity) &&
+        unclassifiedRows[0].quantity >= 0;
+      if (!safe) {
+        areaClassificationBlocked++;
+        continue;
+      }
+      const [product, location, area]: any[] = await Promise.all([
+        ctx.db.get(productId as any),
+        ctx.db.get(locationId as any),
+        ctx.db.get(onlyAreaId as any),
+      ]);
+      areaClassificationCandidates.push({
+        productId,
+        productName: product?.name ?? productId,
+        locationId,
+        locationName: location?.name ?? locationId,
+        rowId: String(unclassifiedRows[0]._id),
+        currentAreaId: null,
+        proposedAreaId: onlyAreaId,
+        proposedAreaName: area?.name ?? onlyAreaId,
+        stockByLocationQuantity: Number(unclassifiedRows[0].quantity),
+        lotsQuantity: byArea.get(onlyAreaId) ?? 0,
+        lotIds: allLotsForScope.map((lot: any) => String(lot._id)),
+      });
+    }
+
     const lotTotalsByProduct = new Map<string, number>();
     for (const lot of lots as any[]) {
       lotTotalsByProduct.set(String(lot.productId),
@@ -742,6 +825,9 @@ export const lotLocationBalanceIntegrity = internalQuery({
       duplicateLocalScopes,
       scopeMismatches,
       scopeMismatchDetails,
+      areaClassificationCandidateCount: areaClassificationCandidates.length,
+      areaClassificationBlocked,
+      areaClassificationCandidates,
       globalMismatches,
       consistent: missingLotBalances === 0 && lotsMissingLocationMetadata === 0 && unmappedPositiveLots === 0 && orphanBalances === 0 &&
         duplicateLotBalances === 0 && invalidBalances === 0 && invalidLotQuantities === 0 &&
