@@ -12,6 +12,8 @@ const users = read("src/convex/users.ts");
 const permissionGuard = read("src/components/RequirePermission.tsx");
 const route = read("src/main.tsx");
 const menu = read("src/components/AppShell.tsx");
+const unitsEditor = read("src/components/PatrimonyUnitsEditor.tsx");
+const entryDialog = read("src/components/EntryPatrimonyDialog.tsx");
 
 describe("recebimento de bens permanentes com tombamento posterior", () => {
   it("aceita receber cada unidade sem número oficial de patrimônio", () => {
@@ -106,6 +108,9 @@ describe("recebimento de bens permanentes com tombamento posterior", () => {
     expect(menu).toContain('permission: "canViewPatrimony"');
     expect(permissionGuard).toContain('user.role === "patrimony_manager"');
     expect(permissionGuard).toContain('<Navigate to="/patrimony" replace />');
+    expect(unitsEditor).toContain("Patrimônio (posterior)");
+    expect(unitsEditor).toContain("Atribuído pelo setor de Patrimônio");
+    expect(entryDialog).toContain("O número oficial de patrimônio será atribuído posteriormente");
   });
 
   it("não altera saldo, lotes ou movimentações no tombamento posterior", () => {
