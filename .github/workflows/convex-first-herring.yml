@@ -7,7 +7,6 @@ on:
     paths:
       - ".github/workflows/convex-first-herring.yml"
       - "src/convex/stockSetup.ts"
-      - "ops/one-time/execute-ti-geral-classification-20261116.trigger"
   workflow_dispatch:
 
 permissions:
@@ -96,55 +95,3 @@ jobs:
             exit 1
           fi
           echo "Backend publicado e confirmado exclusivamente em ${ALVO_REF}." >> "${GITHUB_STEP_SUMMARY}"
-      - name: Executar classificação TI Geral autorizada (operação única)
-        if: "github.event.head_commit.message == 'ops: execute one-time TI Geral classification in first-herring-264'"
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
-        run: |
-          set -euo pipefail
-          case "${CONVEX_DEPLOY_KEY:-}" in
-            dev:first-herring-264\|*) ;;
-            *)
-              echo "::error::A chave não pertence a dev:first-herring-264. Nenhuma classificação executada."
-              exit 1
-              ;;
-          esac
-          if [ -n "${CONVEX_DEPLOYMENT:-}" ]; then
-            echo "::error::CONVEX_DEPLOYMENT poderia sobrepor o destino."
-            exit 1
-          fi
-
-          set +e
-          result="$(bunx convex run stockSetup:applyLegacyGeneralAreaClassification '{"confirmation":"CONFIRMAR_CLASSIFICACAO_36_SALDOS_TI_GERAL_FIRST_HERRING"}' 2>&1)"
-          run_status=$?
-          set -e
-          printf '%s\n' "$result"
-          if [ "$run_status" -ne 0 ]; then
-            echo "::error::O CLI do Convex falhou ao chamar a mutation (código $run_status)."
-            exit "$run_status"
-          fi
-          if ! grep -Eq '"applied"[[:space:]]*:[[:space:]]*true|"idempotentNoOp"[[:space:]]*:[[:space:]]*true' <<< "$result"; then
-            echo "::error::A função não confirmou aplicação ou no-op idempotente."
-            exit 1
-          fi
-          if ! grep -Eq '"totalQuantityClassified"[[:space:]]*:[[:space:]]*1919' <<< "$result"; then
-            echo "::error::O retorno não confirmou as 1.919 unidades previstas."
-            exit 1
-          fi
-          if ! grep -Eq '"updatedRows"[[:space:]]*:[[:space:]]*36|"updatedLots"[[:space:]]*:[[:space:]]*36' <<< "$result" && ! grep -q '"idempotentNoOp"[[:space:]]*:[[:space:]]*true' <<< "$result"; then
-            echo "::error::A função não confirmou os 36 registros previstos."
-            exit 1
-          fi
-
-          audit="$(bunx convex run stockSetup:lotLocationBalanceIntegrity '{}')"
-          printf '%s\n' "$audit"
-          if ! grep -Eq '"areaClassificationBlocked"[[:space:]]*:[[:space:]]*0' <<< "$audit"; then
-            echo "::error::A auditoria não confirmou zero registros bloqueados em classificação de área."
-            exit 1
-          fi
-          if ! grep -Eq '"lotsMissingLocationMetadata"[[:space:]]*:[[:space:]]*61' <<< "$audit"; then
-            echo "::error::A contagem dos 61 lotes sem metadata de localização mudou; revisar antes de qualquer outra ação."
-            exit 1
-          fi
-          echo "Classificação TI Geral: 36 registros / 1.919 unidades. Auditoria pós-operação concluída." >> "${GITHUB_STEP_SUMMARY}"
-
