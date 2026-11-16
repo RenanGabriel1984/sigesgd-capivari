@@ -25,6 +25,7 @@
 
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { internalMutation } from "./_generated/server";
+import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import { v } from "convex/values";
 import {
   decideAreaRepair,
@@ -192,6 +193,10 @@ export const repairCoolerLotAvailability = internalMutation({
     }
 
     await ctx.db.patch(lot._id, { quantityAvailable: COOLER_LOT_EXPECTED_AVAILABLE });
+    await adjustLotLocationBalance(ctx, {
+      lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
+      delta: COOLER_LOT_EXPECTED_AVAILABLE - Number(lot.quantityAvailable),
+    });
 
     // Auditoria uma única vez (idempotente no histórico também).
     const alreadyLogged = await hasAuditMarker(
