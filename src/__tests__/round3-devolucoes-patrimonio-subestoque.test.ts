@@ -247,24 +247,39 @@ describe("Tipo de material e patrimônio", () => {
     expect(error).toContain("não possui unidades patrimoniais");
   });
 
-  it("material permanente exige uma unidade por unidade recebida", () => {
+  it("material permanente exige uma identificação por unidade recebida", () => {
     expect(isPermanent("permanent")).toBe(true);
     expect(
       validateEntryUnits({
         materialType: "permanent",
         quantity: 2,
-        units: [{ patrimonyNumber: "000001" }],
+        units: [{ serialNumber: "SN-1" }],
       })
-    ).toContain("uma unidade patrimonial por unidade recebida");
+    ).toContain("uma identificação provisória por unidade recebida");
   });
 
-  it("material permanente exige número de patrimônio em cada unidade", () => {
-    const error = validateEntryUnits({
+  it("material permanente pode ser recebido antes do número oficial de patrimônio", () => {
+    expect(validateEntryUnits({
       materialType: "permanent",
       quantity: 2,
-      units: [{ patrimonyNumber: "000001" }, { serialNumber: "SN-9" }],
-    });
-    expect(error).toContain("precisa do número de patrimônio");
+      units: [{ serialNumber: "SN-8" }, { serialNumber: "SN-9" }],
+    })).toBeNull();
+  });
+
+  it("exige série no recebimento somente quando o produto possui controle por série", () => {
+    expect(validateEntryUnits({
+      materialType: "permanent",
+      quantity: 1,
+      units: [{}],
+      requireSerial: false,
+    })).toBeNull();
+
+    expect(validateEntryUnits({
+      materialType: "permanent",
+      quantity: 1,
+      units: [{}],
+      requireSerial: true,
+    })).toContain("exige número de série");
   });
 
   it("aceita o mesmo produto com vários patrimônios/terminais diferentes", () => {
