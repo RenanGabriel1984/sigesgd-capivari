@@ -671,7 +671,7 @@ export const lotLocationBalanceIntegrity = internalQuery({
         const productId = String(sample.productId);
         const areaId = sample.areaId ? String(sample.areaId) : null;
         const locationId = String(sample.locationId ?? resolvedLocationByLot.get(String(sample._id)) ?? sample.locationId);
-        const [product, area, location] = await Promise.all([
+        const [product, area, location]: any[] = await Promise.all([
           ctx.db.get(productId as any),
           areaId ? ctx.db.get(areaId as any) : Promise.resolve(null),
           locationId && locationId !== "undefined" ? ctx.db.get(locationId as any) : Promise.resolve(null),
