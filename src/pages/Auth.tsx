@@ -19,6 +19,7 @@ import { useNavigate, useSearchParams, Link } from "react-router";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
+import { getLoginErrorMessage } from "@/lib/auth-error";
 
 interface AuthProps {
   redirectAfterAuth?: string;
@@ -87,16 +88,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       await signIn("credentials", formData);
       navigate(redirect);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "Erro ao entrar";
-      if (msg.includes("inativo") || msg.includes("desativado")) {
-        setError("Seu acesso está desativado. Procure o administrador do sistema.");
-      } else if (msg.includes("bloqueado")) {
-        setError(msg);
-      } else if (msg.includes("não encontrado") || msg.includes("incorretos") || msg.includes("não configurada") || msg.includes("inválidos")) {
-        setError("E-mail ou senha inválidos.");
-      } else {
-        setError("E-mail ou senha inválidos.");
-      }
+      setError(
+        getLoginErrorMessage(
+          error,
+          import.meta.env.VITE_APP_ENV,
+        ),
+      );
       setIsLoading(false);
     }
   };
