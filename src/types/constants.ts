@@ -157,6 +157,7 @@ import {
 const PERMISSION_FLAGS = {
   canViewDashboard: "dashboard.view",
   canViewStock: "stock.view",
+  canViewProducts: "products.view",
   canViewMovements: "movements.view",
   canViewAuditLogs: "audit.view",
   canViewRequests: "requests.view",
