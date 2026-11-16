@@ -1,4 +1,5 @@
 import { requirePermission } from "./rbac";
+import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import {
   resolveConsumedLotId,
   formatConsumedLots,
@@ -224,6 +225,10 @@ async function performInitialLoad(
         model: item.model?.trim() || undefined,
         specification: item.specification?.trim() || undefined,
         observation: item.observation?.trim() || `Carga inicial — ${item.quantity} unidades`,
+      });
+      await adjustLotLocationBalance(ctx, {
+        lotId, productId: item.productId, locationId: item.locationId,
+        delta: item.quantity, allowCreate: true,
       });
 
       // ── 2. Create entry item ──
@@ -559,6 +564,231 @@ export const productLocationSummary = query({
 });
 
 /**
+ * Auditoria somente leitura dos saldos lote × armário.
+ * A área é obtida do lote; o armário não classifica o subestoque.
+ */
+export const lotLocationBalanceIntegrity = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const [lots, balances, localRows, globalRows] = await Promise.all([
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("stock").collect(),
+    ]);
+    const lotsById = new Map<string, any>(lots.map((lot: any) => [String(lot._id), lot] as const));
+    const balancesByLot = new Map<string, any[]>();
+    for (const row of balances as any[]) {
+      const key = String(row.lotId);
+      const list = balancesByLot.get(key) ?? [];
+      list.push(row);
+      balancesByLot.set(key, list);
+    }
+
+    let orphanBalances = 0;
+    let duplicateLotBalances = 0;
+    let invalidBalances = 0;
+    let invalidLotQuantities = 0;
+    let mismatchedLotBalances = 0;
+    for (const lot of lots as any[]) {
+      if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0) invalidLotQuantities++;
+    }
+    for (const row of balances as any[]) {
+      const lot = lotsById.get(String(row.lotId));
+      if (!lot) orphanBalances++;
+      if (!Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0) invalidBalances++;
+      if (lot && (
+        row.productId !== lot.productId ||
+        (lot.locationId && row.locationId !== lot.locationId) ||
+        !Number.isFinite(lot.quantityAvailable) ||
+        Math.abs(row.quantityAvailable - lot.quantityAvailable) > 1e-9
+      )) mismatchedLotBalances++;
+    }
+    for (const rows of balancesByLot.values()) {
+      if (rows.length > 1) duplicateLotBalances++;
+    }
+
+    const missingLotBalances = lots.filter((lot: any) =>
+      !!lot.locationId && lot.quantityAvailable > 0 && !(balancesByLot.get(String(lot._id))?.length)
+    ).length;
+    const lotsMissingLocationMetadata = lots.filter((lot: any) =>
+      !lot.locationId && (balancesByLot.get(String(lot._id))?.length ?? 0) === 1
+    ).length;
+    const unmappedPositiveLots = lots.filter((lot: any) =>
+      Number(lot.quantityAvailable) > 0 && !(balancesByLot.get(String(lot._id))?.length)
+    ).length;
+    const resolvedLocationByLot = new Map<string, string>();
+    for (const [lotId, rows] of balancesByLot) {
+      if (rows.length === 1) resolvedLocationByLot.set(lotId, String(rows[0].locationId));
+    }
+
+    const scopeKey = (productId: string, areaId: string | undefined, locationId: string) =>
+      `${productId}::${areaId ?? ""}::${locationId}`;
+    const lotTotalsByScope = new Map<string, number>();
+    for (const lot of lots as any[]) {
+      const resolvedLocationId = lot.locationId ?? resolvedLocationByLot.get(String(lot._id));
+      if (!resolvedLocationId || !Number.isFinite(lot.quantityAvailable)) continue;
+      const key = scopeKey(String(lot.productId), lot.areaId ? String(lot.areaId) : undefined, String(resolvedLocationId));
+      lotTotalsByScope.set(key, (lotTotalsByScope.get(key) ?? 0) + lot.quantityAvailable);
+    }
+    const localRowsByScope = new Map<string, any[]>();
+    for (const row of localRows as any[]) {
+      const key = scopeKey(String(row.productId), row.areaId ? String(row.areaId) : undefined, String(row.locationId));
+      const list = localRowsByScope.get(key) ?? [];
+      list.push(row);
+      localRowsByScope.set(key, list);
+    }
+    const scopeKeys = new Set([...lotTotalsByScope.keys(), ...localRowsByScope.keys()]);
+    let scopeMismatches = 0;
+    let duplicateLocalScopes = 0;
+    for (const key of scopeKeys) {
+      const rows = localRowsByScope.get(key) ?? [];
+      if (rows.length > 1) duplicateLocalScopes++;
+      const localQuantity = rows.reduce((sum: number, row: any) => sum + Number(row.quantity), 0);
+      if (rows.some((row: any) => !Number.isFinite(row.quantity) || row.quantity < 0) ||
+          Math.abs(localQuantity - (lotTotalsByScope.get(key) ?? 0)) > 1e-9) scopeMismatches++;
+    }
+
+    const lotTotalsByProduct = new Map<string, number>();
+    for (const lot of lots as any[]) {
+      lotTotalsByProduct.set(String(lot.productId),
+        (lotTotalsByProduct.get(String(lot.productId)) ?? 0) + Number(lot.quantityAvailable));
+    }
+    const globalsByProduct = new Map<string, any[]>();
+    for (const row of globalRows as any[]) {
+      const key = String(row.productId);
+      const list = globalsByProduct.get(key) ?? [];
+      list.push(row);
+      globalsByProduct.set(key, list);
+    }
+    let globalMismatches = 0;
+    const productIds = new Set([...lotTotalsByProduct.keys(), ...globalsByProduct.keys()]);
+    for (const productId of productIds) {
+      const rows = globalsByProduct.get(productId) ?? [];
+      if (rows.length !== 1 || !Number.isFinite(rows[0]?.physicalQuantity) ||
+          Math.abs(Number(rows[0]?.physicalQuantity ?? 0) - (lotTotalsByProduct.get(productId) ?? 0)) > 1e-9) {
+        globalMismatches++;
+      }
+    }
+
+    return {
+      readOnly: true,
+      generatedAt: Date.now(),
+      lotsWithLocation: lots.filter((lot: any) => !!lot.locationId).length,
+      lotLocationBalanceRecords: balances.length,
+      lotLocationBalanceQuantity: balances.reduce((sum: number, row: any) => sum + Number(row.quantityAvailable), 0),
+      missingLotBalances,
+      lotsMissingLocationMetadata,
+      unmappedPositiveLots,
+      orphanBalances,
+      duplicateLotBalances,
+      invalidBalances,
+      invalidLotQuantities,
+      mismatchedLotBalances,
+      duplicateLocalScopes,
+      scopeMismatches,
+      globalMismatches,
+      consistent: missingLotBalances === 0 && lotsMissingLocationMetadata === 0 && unmappedPositiveLots === 0 && orphanBalances === 0 &&
+        duplicateLotBalances === 0 && invalidBalances === 0 && invalidLotQuantities === 0 &&
+        mismatchedLotBalances === 0 && duplicateLocalScopes === 0 &&
+        scopeMismatches === 0 && globalMismatches === 0,
+    };
+  },
+});
+
+/**
+ * Backfill controlado de lots.locationId usando exclusivamente os vínculos
+ * já conciliados em lotLocationBalances. Não altera quantidades, áreas,
+ * estoque global, saldos por área/local, entradas ou movimentações.
+ */
+export const applyLotLocationMetadataBackfill = internalMutation({
+  args: {
+    confirmation: v.literal("CONFIRMAR_ATUALIZACAO_LOCALIZACAO_LOTES_FIRST_HERRING"),
+  },
+  handler: async (ctx) => {
+    const [lots, balances, locations] = await Promise.all([
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("storageLocations").collect(),
+    ]);
+    const lotById = new Map<string, any>(lots.map((lot: any) => [String(lot._id), lot] as const));
+    const locationById = new Map<string, any>(locations.map((location: any) => [String(location._id), location] as const));
+    const rowsByLot = new Map<string, any[]>();
+    for (const row of balances as any[]) {
+      const key = String(row.lotId);
+      const current = rowsByLot.get(key) ?? [];
+      current.push(row);
+      rowsByLot.set(key, current);
+    }
+
+    const problems: string[] = [];
+    for (const [lotId, rows] of rowsByLot) {
+      const lot: any = lotById.get(lotId);
+      if (!lot) {
+        problems.push(`saldo sem lote correspondente: ${lotId}`);
+        continue;
+      }
+      if (rows.length !== 1) {
+        problems.push(`lote ${lot.lotNumber}: ${rows.length} saldos lote × armário`);
+        continue;
+      }
+      const row = rows[0];
+      if (row.productId !== lot.productId ||
+          !Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0 ||
+          !Number.isFinite(lot.quantityAvailable) ||
+          Math.abs(row.quantityAvailable - lot.quantityAvailable) > 1e-9 ||
+          !locationById.get(String(row.locationId))?.active) {
+        problems.push(`lote ${lot.lotNumber}: saldo, produto ou armário divergente`);
+        continue;
+      }
+      if (lot.locationId && lot.locationId !== row.locationId) {
+        problems.push(`lote ${lot.lotNumber}: localização já preenchida diverge do saldo conciliado`);
+      }
+    }
+    for (const lot of lots as any[]) {
+      if (Number(lot.quantityAvailable) > 0 && !rowsByLot.has(String(lot._id))) {
+        problems.push(`lote ${lot.lotNumber}: saldo positivo sem vínculo lote × armário`);
+      }
+    }
+    if (problems.length > 0) {
+      throw new Error(
+        `Atualização de localização dos lotes abortada sem gravações: ${problems.slice(0, 10).join("; ")}`
+      );
+    }
+
+    let patched = 0;
+    let skipped = 0;
+    const now = Date.now();
+    for (const [lotId, rows] of rowsByLot) {
+      const lot: any = lotById.get(lotId);
+      const row = rows[0];
+      if (lot.locationId === row.locationId) {
+        skipped++;
+        continue;
+      }
+      await ctx.db.patch(lot._id, { locationId: row.locationId });
+      patched++;
+    }
+    await ctx.db.insert("auditLogs", {
+      action: "update",
+      entity: "lots",
+      details:
+        `Backfill controlado de localização física dos lotes a partir de ${balances.length} vínculos conciliados: ${patched} lote(s) atualizado(s), ${skipped} já corretos. Nenhuma quantidade ou saldo físico foi alterado.`,
+      timestamp: now,
+    });
+    return {
+      metadataBackfillApplied: true,
+      patched,
+      skipped,
+      mappedLots: balances.length,
+      totalLots: lots.length,
+      physicalQuantitiesChanged: false,
+    };
+  },
+});
+
+/**
  * Quick stock exit (saída simples).
  * Simplified exit without the full request/approval flow.
  * Uses FIFO lot consumption. Reduces both global and location stock.
@@ -711,6 +941,10 @@ export const quickExit = mutation({
       if (consume <= 0) continue;
       const nextQuantity = lot.quantityAvailable - consume;
       await ctx.db.patch(lot._id, { quantityAvailable: nextQuantity, active: nextQuantity > 0 });
+      await adjustLotLocationBalance(ctx, {
+        lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
+        delta: -consume,
+      });
       consumedLots.push({ lotId: lot._id as string, quantity: consume });
       remaining -= consume;
     }
@@ -834,6 +1068,13 @@ export const cleanupTestData = internalMutation({
       await ctx.db.delete(s._id);
     }
     deleted.stockByLocation_deleted = sbl.length;
+
+    // Remove os saldos derivados junto com os lotes zerados no ambiente de testes.
+    const lotLocationBalances = await ctx.db.query("lotLocationBalances").collect();
+    for (const balance of lotLocationBalances) {
+      await ctx.db.delete(balance._id);
+    }
+    deleted.lotLocationBalances_deleted = lotLocationBalances.length;
 
     // Audit
     await ctx.db.insert("auditLogs", {

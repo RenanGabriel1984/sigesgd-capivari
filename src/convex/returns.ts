@@ -16,6 +16,7 @@ import {
   applyReturnToLot,
   type ReturnCondition,
 } from "../lib/returns-rules";
+import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -420,6 +421,10 @@ export const create = mutation({
           Number(part.lot.quantityAvailable),
           part.quantity,
         ));
+        await adjustLotLocationBalance(ctx, {
+          lotId: part.lot._id, productId: part.lot.productId,
+          locationId: targetLocationId, delta: part.quantity,
+        });
       }
       const returnId = await ctx.db.insert("returns", {
         exitMovementId: exit._id,

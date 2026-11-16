@@ -9,6 +9,7 @@ import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib
 import { planFifoAreaLotAllocation, validateAreaLocationLotBalance } from "../lib/area-stock";
 import { isDiscreteStockUnit, requireSingleValidGlobalStock } from "../lib/stock-quantity-rules";
 import { validateRequestItemReservationLedger } from "../lib/request-reservation-ledger";
+import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -725,6 +726,10 @@ export const deliver = mutation({
           await ctx.db.patch(lot._id, {
             quantityAvailable: nextLotQuantity,
             active: nextLotQuantity > 0,
+          });
+          await adjustLotLocationBalance(ctx, {
+            lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
+            delta: -consume,
           });
           await ctx.db.patch(reservation._id, {
             quantityRemaining: reservation.quantityRemaining - consume,

@@ -12,6 +12,7 @@ import {
 import { requirePermission } from "./rbac";
 import { attachStorageFile } from "./storage";
 import type { Id } from "./_generated/dataModel";
+import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -561,6 +562,10 @@ export const confirm = mutation({
         areaId: itemAreaId as any,
         locationId: item.locationId,
       });
+      await adjustLotLocationBalance(ctx, {
+        lotId, productId: item.productId, locationId: item.locationId,
+        delta: item.quantity, allowCreate: true,
+      });
       if (item.photoStorageId) {
         await attachStorageFile(ctx, item.photoStorageId, "lot", String(lotId), String(userId));
       }
@@ -999,6 +1004,10 @@ export const reverse = mutation({
       await ctx.db.patch(lot._id, {
         quantityAvailable: lotAfter,
         active: lotAfter > 0,
+      });
+      await adjustLotLocationBalance(ctx, {
+        lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
+        delta: -Number(item.quantity),
       });
       if (locationStock) {
         await ctx.db.patch(locationStock._id, { quantity: locationStock.quantity - item.quantity });

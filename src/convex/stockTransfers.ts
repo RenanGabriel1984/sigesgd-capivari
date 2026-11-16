@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import type { Id } from "./_generated/dataModel";
 import { isDiscreteStockUnit, requireValidScopedStockQuantity } from "../lib/stock-quantity-rules";
+import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -263,6 +264,14 @@ export const create = mutation({
         active: true,
         observation: `Transferido de ${sourceLot.lotNumber} — ${fromArea.name}/${fromLocation.name} → ${toArea.name}/${toLocation.name}`,
         materialType: sourceLot.materialType, areaId: toAreaId as any, locationId: toLocation._id,
+      });
+      await adjustLotLocationBalance(ctx, {
+        lotId: sourceLot._id, productId: sourceLot.productId,
+        locationId: sourceLot.locationId, delta: -part.quantity,
+      });
+      await adjustLotLocationBalance(ctx, {
+        lotId: destinationLotId, productId: sourceLot.productId,
+        locationId: toLocation._id, delta: part.quantity, allowCreate: true,
       });
       await ctx.db.patch(sourceLot._id, { quantityAvailable: sourceLot.quantityAvailable - part.quantity });
       await ctx.db.insert("stockTransferLots", { transferId, sourceLotId: sourceLot._id, destinationLotId, quantity: part.quantity });
