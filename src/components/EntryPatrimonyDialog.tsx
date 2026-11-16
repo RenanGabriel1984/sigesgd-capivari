@@ -27,7 +27,7 @@ export interface EntryPatrimonyDialogProps {
   open: boolean;
   entryId: string | null;
   entryNumber?: string;
-  products: Array<{ _id: string; name: string }>;
+  products: Array<{ _id: string; name: string; hasSerial?: boolean }>;
   locations: Array<{ _id: string; name: string }>;
   organizations: Array<{ _id: string; name: string; type?: string; active?: boolean }>;
   onClose: () => void;
@@ -81,6 +81,7 @@ export function EntryPatrimonyDialog({
         quantity: Number(item.quantity) || 0,
         units,
         productName: product?.name,
+        requireSerial: product?.hasSerial === true,
       });
       if (error) return error;
     }
@@ -91,7 +92,6 @@ export function EntryPatrimonyDialog({
     items.flatMap((item) =>
       (unitsByItem[item._id] ?? []).map((unit) => ({
         entryItemId: item._id as never,
-        patrimonyNumber: unit.patrimonyNumber || undefined,
         serialNumber: unit.serialNumber || undefined,
         manufacturer: unit.manufacturer || undefined,
         model: unit.model || undefined,
@@ -128,7 +128,7 @@ export function EntryPatrimonyDialog({
       }
       try {
         await confirmEntry({ entryId: entryId as never });
-        toast.success("Entrada confirmada com unidades patrimoniais registradas.");
+        toast.success("Entrada confirmada. O tombamento oficial ficará pendente para o setor de Patrimônio.");
         onConfirmed(entry?.entryNumber ?? entryNumber ?? "");
       } catch (confirmError) {
         toast.error(
@@ -154,9 +154,9 @@ export function EntryPatrimonyDialog({
             Unidades patrimoniais{entry?.entryNumber ? ` — ${entry.entryNumber}` : ""}
           </DialogTitle>
           <DialogDescription>
-            Esta entrada foi classificada como material permanente. Informe uma unidade
-            patrimonial por quantidade recebida para confirmar. Nada foi somado ao estoque
-            enquanto esta etapa não for concluída.
+            Esta entrada foi classificada como material permanente. Informe uma identificação
+            por unidade recebida. O número oficial de patrimônio será atribuído posteriormente
+            pelo setor de Patrimônio. Nada foi somado ao estoque enquanto esta etapa não for concluída.
           </DialogDescription>
         </DialogHeader>
 
@@ -182,7 +182,7 @@ export function EntryPatrimonyDialog({
 
         {quantityMismatch && entry ? (
           <p className="text-xs text-amber-700">
-            Cada item precisa de exatamente uma unidade patrimonial por unidade recebida.
+            Cada item precisa de exatamente uma identificação provisória por unidade recebida.
           </p>
         ) : null}
 
