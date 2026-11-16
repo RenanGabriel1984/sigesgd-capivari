@@ -680,6 +680,92 @@ export const lotLocationBalanceIntegrity = query({
 });
 
 /**
+ * Backfill controlado de lots.locationId usando exclusivamente os vínculos
+ * já conciliados em lotLocationBalances. Não altera quantidades, áreas,
+ * estoque global, saldos por área/local, entradas ou movimentações.
+ */
+export const applyLotLocationMetadataBackfill = internalMutation({
+  args: {
+    confirmation: v.literal("CONFIRMAR_ATUALIZACAO_LOCALIZACAO_LOTES_FIRST_HERRING"),
+  },
+  handler: async (ctx) => {
+    const [lots, balances, locations] = await Promise.all([
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("storageLocations").collect(),
+    ]);
+    const lotById = new Map(lots.map((lot: any) => [String(lot._id), lot]));
+    const locationIds = new Set(locations.map((location: any) => String(location._id)));
+    const rowsByLot = new Map<string, any[]>();
+    for (const row of balances as any[]) {
+      const key = String(row.lotId);
+      const current = rowsByLot.get(key) ?? [];
+      current.push(row);
+      rowsByLot.set(key, current);
+    }
+
+    const problems: string[] = [];
+    for (const [lotId, rows] of rowsByLot) {
+      const lot: any = lotById.get(lotId);
+      if (!lot) {
+        problems.push(`saldo sem lote correspondente: ${lotId}`);
+        continue;
+      }
+      if (rows.length !== 1) {
+        problems.push(`lote ${lot.lotNumber}: ${rows.length} saldos lote × armário`);
+        continue;
+      }
+      const row = rows[0];
+      if (row.productId !== lot.productId ||
+          !Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0 ||
+          !Number.isFinite(lot.quantityAvailable) ||
+          Math.abs(row.quantityAvailable - lot.quantityAvailable) > 1e-9 ||
+          !locationIds.has(String(row.locationId))) {
+        problems.push(`lote ${lot.lotNumber}: saldo, produto ou armário divergente`);
+        continue;
+      }
+      if (lot.locationId && lot.locationId !== row.locationId) {
+        problems.push(`lote ${lot.lotNumber}: localização já preenchida diverge do saldo conciliado`);
+      }
+    }
+    if (problems.length > 0) {
+      throw new Error(
+        `Atualização de localização dos lotes abortada sem gravações: ${problems.slice(0, 10).join("; ")}`
+      );
+    }
+
+    let patched = 0;
+    let skipped = 0;
+    const now = Date.now();
+    for (const [lotId, rows] of rowsByLot) {
+      const lot: any = lotById.get(lotId);
+      const row = rows[0];
+      if (lot.locationId === row.locationId) {
+        skipped++;
+        continue;
+      }
+      await ctx.db.patch(lot._id, { locationId: row.locationId });
+      patched++;
+    }
+    await ctx.db.insert("auditLogs", {
+      action: "update",
+      entity: "lots",
+      details:
+        `Backfill controlado de localização física dos lotes a partir de ${balances.length} vínculos conciliados: ${patched} lote(s) atualizado(s), ${skipped} já corretos. Nenhuma quantidade ou saldo físico foi alterado.`,
+      timestamp: now,
+    });
+    return {
+      metadataBackfillApplied: true,
+      patched,
+      skipped,
+      mappedLots: balances.length,
+      totalLots: lots.length,
+      physicalQuantitiesChanged: false,
+    };
+  },
+});
+
+/**
  * Quick stock exit (saída simples).
  * Simplified exit without the full request/approval flow.
  * Uses FIFO lot consumption. Reduces both global and location stock.
