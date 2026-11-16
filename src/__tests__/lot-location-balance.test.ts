@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { planLotLocationBalanceChange } from "../lib/lot-location-balance";
+import { planLotLocationBalanceChange, planLotLocationBalanceLocationChange } from "../lib/lot-location-balance";
 
 const base = {
   lotId: "lot_1",
@@ -68,5 +68,32 @@ describe("planLotLocationBalanceChange", () => {
       rows: [{ ...base, quantityAvailable: Number.NaN }],
       lotId: "lot_1", productId: "product_1", locationId: "location_1", delta: 1,
     })).toThrow(/inválido/);
+  });
+});
+
+describe("planLotLocationBalanceLocationChange", () => {
+  it("move apenas a localização do vínculo, preservando a quantidade", () => {
+    expect(planLotLocationBalanceLocationChange({
+      rows: [base], lotId: "lot_1", productId: "product_1",
+      locationId: "location_2", quantityAvailable: 10,
+    })).toEqual({
+      kind: "patch", rowId: "balance_1",
+      locationId: "location_2", quantityAvailable: 10,
+    });
+  });
+
+  it("cria o vínculo somente em classificação explícita e bloqueia divergências", () => {
+    expect(planLotLocationBalanceLocationChange({
+      rows: [], lotId: "lot_1", productId: "product_1",
+      locationId: "location_1", quantityAvailable: 4, allowCreate: true,
+    })).toEqual({ kind: "insert", locationId: "location_1", quantityAvailable: 4 });
+    expect(() => planLotLocationBalanceLocationChange({
+      rows: [], lotId: "lot_1", productId: "product_1",
+      locationId: "location_1", quantityAvailable: 4,
+    })).toThrow(/não existe/);
+    expect(() => planLotLocationBalanceLocationChange({
+      rows: [base], lotId: "lot_1", productId: "product_1",
+      locationId: "location_2", quantityAvailable: 9,
+    })).toThrow(/diverge/);
   });
 });
