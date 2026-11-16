@@ -114,8 +114,15 @@ jobs:
             exit 1
           fi
 
+          set +e
           result="$(bunx convex run stockSetup:applyLegacyGeneralAreaClassification '{"confirmation":"CONFIRMAR_CLASSIFICACAO_36_SALDOS_TI_GERAL_FIRST_HERRING"}' 2>&1)"
+          run_status=$?
+          set -e
           printf '%s\n' "$result"
+          if [ "$run_status" -ne 0 ]; then
+            echo "::error::O CLI do Convex falhou ao chamar a mutation (código $run_status)."
+            exit "$run_status"
+          fi
           if ! grep -Eq '"applied"[[:space:]]*:[[:space:]]*true|"idempotentNoOp"[[:space:]]*:[[:space:]]*true' <<< "$result"; then
             echo "::error::A função não confirmou aplicação ou no-op idempotente."
             exit 1
