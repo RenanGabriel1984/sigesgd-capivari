@@ -21,6 +21,7 @@
  */
 import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import {
   applyImplementationStockStamp,
   IMPLEMENTATION_STOCK_DATE,
@@ -173,6 +174,16 @@ export const registerGomaqNfe372043 = internalMutation({
     const category = (await ctx.db.query("categories").collect())
       .find((c: any) => c.name === CATEGORY_SUPRIMENTOS);
     if (!category) throw new Error("Categoria \"Suprimentos de Impressão\" não encontrada");
+    const printAreas = (await ctx.db.query("stockAreas").collect())
+      .filter((area: any) => area.active && String(area.name).trim().toLowerCase() === "impressoras");
+    if (printAreas.length !== 1) {
+      throw new Error("A área ativa \"Impressoras\" deve existir uma única vez para registrar a NF-e 372043.");
+    }
+    const printArea = printAreas[0];
+    const ti02: any = await ctx.db.get(LOCATION_ARMARIO_TI_02 as any);
+    if (!ti02 || !ti02.active) {
+      throw new Error("Armário TI 02 não encontrado ou inativo. Entrada Gomaq bloqueada.");
+    }
 
     const products = await ctx.db.query("products").collect();
     const allLots = await ctx.db.query("lots").collect();
@@ -230,6 +241,7 @@ export const registerGomaqNfe372043 = internalMutation({
       supplierId,
       invoiceNumber: "372043",
       invoiceDate: "2026-09-01",
+      areaId: printArea._id,
       contractNumber: "00826309",
       responsibleUserId: admin._id,
       observation: "Importação NF-e 372043 — Gomaq. Natureza: VENDA. Pedido/contrato: 00826309. Destinatário: Prefeitura Municipal de Capivari (44.723.674/0001-90). Total R$ 20.822,22.",
@@ -258,7 +270,7 @@ export const registerGomaqNfe372043 = internalMutation({
       const prevPhysical = prevStock?.physicalQuantity ?? 0;
       const prevReserved = prevStock?.reservedQuantity ?? 0;
 
-      await ctx.db.insert("lots", {
+      const lotId = await ctx.db.insert("lots", {
         lotNumber,
         productId: r.productId,
         entryId,
@@ -271,6 +283,12 @@ export const registerGomaqNfe372043 = internalMutation({
         supplierId,
         invoiceNumber: "372043",
         active: true,
+        areaId: printArea._id,
+        locationId: LOCATION_ARMARIO_TI_02,
+      });
+      await adjustLotLocationBalance(ctx, {
+        lotId, productId: r.productId, locationId: LOCATION_ARMARIO_TI_02,
+        delta: r.qty, allowCreate: true,
       });
 
       await ctx.db.insert("entryItems", {
@@ -278,17 +296,24 @@ export const registerGomaqNfe372043 = internalMutation({
         productId: r.productId,
         quantity: r.qty,
         unitOfMeasure: r.unit,
+        lotId: lotId as any,
+        areaId: printArea._id,
         locationId: LOCATION_ARMARIO_TI_02,
         supplierCode: r.code,
         observation: "NF-e 372043 — quantidade conforme NF (sem conversão de embalagem)",
       });
 
       const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", r.productId)).collect();
-      const sbl = sblList.find((s: any) => s.locationId === LOCATION_ARMARIO_TI_02);
+      const sbl = sblList.find((s: any) =>
+        s.locationId === LOCATION_ARMARIO_TI_02 && s.areaId === printArea._id
+      );
       if (sbl) {
         await ctx.db.patch(sbl._id, { quantity: sbl.quantity + r.qty });
       } else {
-        await ctx.db.insert("stockByLocation", { productId: r.productId, locationId: LOCATION_ARMARIO_TI_02, quantity: r.qty });
+        await ctx.db.insert("stockByLocation", {
+          productId: r.productId, locationId: LOCATION_ARMARIO_TI_02,
+          areaId: printArea._id, quantity: r.qty,
+        });
       }
 
       const sblAfter = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", r.productId)).collect();
@@ -310,6 +335,8 @@ export const registerGomaqNfe372043 = internalMutation({
         userId: admin._id,
         entryId,
         lotId: lotNumber,
+        areaId: printArea._id,
+        locationId: LOCATION_ARMARIO_TI_02,
         documentNumber: "372043",
         observation: "Entrada " + entryNumber + " — Lote " + lotNumber,
         timestamp: now,
