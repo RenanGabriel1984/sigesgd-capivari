@@ -1080,7 +1080,7 @@ export const assignPatrimony = mutation({
     }
 
     const item = await ctx.db.get(unit.entryItemId);
-    const product = await ctx.db.get(unit.productId);
+    const product: any = await ctx.db.get(unit.productId);
     if (!item || !product) throw new Error("Produto ou item da entrada não encontrado.");
     const now = Date.now();
     const organizationId = unit.unidadeId ?? unit.departamentoId ?? unit.secretariaId;
