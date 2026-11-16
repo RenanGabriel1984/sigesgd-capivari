@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/convex-first-herring.yml"
       - "src/convex/stockSetup.ts"
+      - "src/convex/stockSetupDiagnostics.ts"
   workflow_dispatch:
 
 permissions:
