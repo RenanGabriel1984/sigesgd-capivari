@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { INITIAL_STOCK_MANIFEST } from "../lib/stock-regularization-manifest";
 import { LEGACY_GENERAL_AREA_CLASSIFICATION_TARGETS as targets } from "../lib/legacy-general-area-classification";
+import { isLegacyMovementLocationCompatible } from "../lib/legacy-movement-location";
 
 const stockSetup = readFileSync(
   resolve(__dirname, "../convex/stockSetup.ts"),
@@ -74,6 +75,18 @@ describe("classificação documental dos 36 itens de TI Geral", () => {
       expect(mutation.indexOf(evidence)).toBeGreaterThan(-1);
       expect(mutation.indexOf(evidence)).toBeLessThan(firstWrite);
     }
+  });
+
+
+  it("aceita locationId ausente apenas como metadado legado, mas rejeita local conflitante", () => {
+    const expectedLocationId = targets[0].locationId;
+    expect(isLegacyMovementLocationCompatible(null, expectedLocationId)).toBe(true);
+    expect(isLegacyMovementLocationCompatible(undefined, expectedLocationId)).toBe(true);
+    expect(isLegacyMovementLocationCompatible(expectedLocationId, expectedLocationId)).toBe(true);
+    expect(isLegacyMovementLocationCompatible("local-fisico-diferente", expectedLocationId)).toBe(false);
+    expect(mutation).toContain(
+      "!isLegacyMovementLocationCompatible(movement.locationId, target.locationId)",
+    );
   });
 
   it("altera somente metadados de área e registra auditoria, sem tocar em quantidades globais", () => {

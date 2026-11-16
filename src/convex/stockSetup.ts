@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { INITIAL_STOCK_MANIFEST } from "../lib/stock-regularization-manifest";
 import { LEGACY_GENERAL_AREA_CLASSIFICATION_TARGETS } from "../lib/legacy-general-area-classification";
+import { isLegacyMovementLocationCompatible } from "../lib/legacy-movement-location";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import {
   resolveConsumedLotId,
@@ -1233,10 +1234,14 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
         throw new Error('Movimentação original de "' + target.productName + '" não pôde ser identificada de forma única.');
       }
       const movement = movementMatches[0];
+      // Movimentos iniciais históricos podem não ter locationId. Nessa situação,
+      // lote, item da entrada e saldo por localização já foram conferidos acima
+      // contra a mesma localização documental. Um locationId preenchido e
+      // divergente continua bloqueando a operação.
       if (
         movement.type !== "adjustment" ||
         Math.abs(Number(movement.quantity) - target.quantity) > 1e-9 ||
-        String(movement.locationId) !== target.locationId
+        !isLegacyMovementLocationCompatible(movement.locationId, target.locationId)
       ) {
         throw new Error('Movimentação original de "' + target.productName + '" não confere com a carga inicial.');
       }
