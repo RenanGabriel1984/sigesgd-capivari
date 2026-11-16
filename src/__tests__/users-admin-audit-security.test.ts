@@ -106,7 +106,6 @@ function usersContext(seedUsers: any[]) {
 describe("gestão de usuários — autorização e último administrador ativo", () => {
   beforeEach(() => {
     h.currentUserId = null;
-    h.handlers.clear();
   });
 
   it("permite à secretaria criar usuários porque users.manage é a regra central", async () => {
@@ -195,7 +194,6 @@ describe("gestão de usuários — autorização e último administrador ativo",
 describe("auditoria — aplicação simultânea de filtros", () => {
   beforeEach(() => {
     h.currentUserId = null;
-    h.handlers.clear();
   });
 
   it("combina ação, entidade, usuário e intervalo de datas sem retornar falsos positivos", async () => {
@@ -218,7 +216,19 @@ describe("auditoria — aplicação simultânea de filtros", () => {
       }),
     } as any;
 
-    const result = await listFiltered(ctx, {
+    const combined = await listFiltered(ctx, {
+      action: "create",
+      entity: "entries",
+      startDate: 150,
+      endDate: 300,
+      limit: 50,
+    });
+
+    // Sem userId, o índice inicial é by_action; entity ainda precisa ser
+    // aplicado para remover o registro de users.
+    expect(combined.map((row: any) => row._id)).toEqual(["log-1", "log-3"]);
+
+    const narrowed = await listFiltered(ctx, {
       action: "create",
       entity: "entries",
       userId: "actor-1",
@@ -226,7 +236,6 @@ describe("auditoria — aplicação simultânea de filtros", () => {
       endDate: 300,
       limit: 50,
     });
-
-    expect(result.map((row: any) => row._id)).toEqual(["log-1"]);
+    expect(narrowed.map((row: any) => row._id)).toEqual(["log-1"]);
   });
 });
