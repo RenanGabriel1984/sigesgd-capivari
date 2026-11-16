@@ -9,7 +9,7 @@ describe("hardening de operações destrutivas", () => {
     const end = source.indexOf("\n/**", start);
     const cleanup = source.slice(start, end < 0 ? undefined : end);
 
-    expect(source).toContain('import { internalMutation, mutation, query } from "./_generated/server";');
+    expect(source).toContain('import { internalMutation, internalQuery, mutation, query } from "./_generated/server";');
     expect(cleanup).toContain("export const cleanupTestData = internalMutation({");
     expect(cleanup).not.toContain("cleanupTestData = mutation({");
     expect(cleanup).toContain('ctx.db.patch(s._id, { physicalQuantity: 0, reservedQuantity: 0 })');
