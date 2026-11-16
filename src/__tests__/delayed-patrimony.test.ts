@@ -12,6 +12,7 @@ const users = read("src/convex/users.ts");
 const permissionGuard = read("src/components/RequirePermission.tsx");
 const route = read("src/main.tsx");
 const menu = read("src/components/AppShell.tsx");
+const shell = menu;
 const unitsEditor = read("src/components/PatrimonyUnitsEditor.tsx");
 const entryDialog = read("src/components/EntryPatrimonyDialog.tsx");
 
@@ -100,6 +101,11 @@ describe("recebimento de bens permanentes com tombamento posterior", () => {
     ] as const) {
       expect(roleHasPermission("patrimony_manager", denied), denied).toBe(false);
     }
+  });
+
+  it("não consulta contagens de requisições ou estoque sem permissão", () => {
+    expect(shell).toContain('permissions.canViewRequests ? {} : "skip"');
+    expect(shell).toContain('permissions.canViewProducts ? {} : "skip"');
   });
 
   it("registra rota e menu exclusivos, com encaminhamento após login", () => {
