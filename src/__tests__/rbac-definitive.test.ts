@@ -34,6 +34,7 @@ const PERMS = {
   stock_manager: PERMISSIONS.stock_manager,
   director: PERMISSIONS.director,
   technician: PERMISSIONS.technician,
+  patrimony_manager: PERMISSIONS.patrimony_manager,
 };
 
 /* ═══ RBAC-01..05 — matriz por perfil ═══════════════════════════════════════ */
@@ -131,6 +132,25 @@ describe("RBAC-04 director — decisão/aprovação, sem mutação de estoque", 
   });
 });
 
+describe("RBAC-05A patrimony_manager — tombamento sem acesso ao estoque", () => {
+  it("pode consultar pendências, atribuir patrimônio e acessar configurações pessoais", () => {
+    expect(roleHasPermission("patrimony_manager", "patrimony.view")).toBe(true);
+    expect(roleHasPermission("patrimony_manager", "patrimony.assign")).toBe(true);
+    expect(roleHasPermission("patrimony_manager", "settings.view")).toBe(true);
+    expect(PERMS.patrimony_manager.canViewPatrimony).toBe(true);
+  });
+
+  it("não recebe dashboard, estoque, equipamentos, usuários ou auditoria", () => {
+    for (const permission of [
+      "dashboard.view", "stock.view", "stock.mutate", "entries.view",
+      "entries.create", "equipment.view", "equipment.manage",
+      "users.view", "users.manage", "roles.manage", "audit.view",
+    ] as const) {
+      expect(roleHasPermission("patrimony_manager", permission), permission).toBe(false);
+    }
+  });
+});
+
 describe("RBAC-05 technician — interface simplificada", () => {
   it("pode consultar estoque/produtos e criar as PRÓPRIAS requisições", () => {
     expect(roleHasPermission("technician", "dashboard.view")).toBe(true);
@@ -167,9 +187,9 @@ describe("RBAC-05 technician — interface simplificada", () => {
 /* ═══ RBAC-18/19 — consolidação de papéis ═══════════════════════════════════ */
 
 describe("RBAC-18/19 — papéis existentes cobertos pela matriz", () => {
-  it("os 5 papéis esperados existem e nenhum papel antigo fica sem permissões", () => {
+  it("os 6 papéis esperados existem e nenhum papel fica sem permissões", () => {
     expect(APP_ROLES).toEqual([
-      "admin", "stock_manager", "director", "secretary", "technician",
+      "admin", "stock_manager", "director", "secretary", "technician", "patrimony_manager",
     ]);
     for (const r of APP_ROLES) {
       expect(ROLE_PERMISSIONS[r].length).toBeGreaterThan(0);
@@ -307,6 +327,7 @@ describe("RBAC-20 — rotas protegidas por permissão", () => {
     expect(permissionForRoute("/organization")).toBe("organizations.view");
     expect(permissionForRoute("/audit")).toBe("audit.view");
     expect(permissionForRoute("/settings")).toBe("settings.view");
+    expect(permissionForRoute("/patrimony")).toBe("patrimony.view");
     expect(permissionForRoute("/entries")).toBe("entries.view");
     expect(permissionForRoute("/suppliers")).toBe("suppliers.view");
   });
