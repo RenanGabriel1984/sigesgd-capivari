@@ -886,6 +886,135 @@ export const lotLocationBalanceIntegrity = internalQuery({
   },
 });
 
+
+/**
+ * Corrige somente os 22 saldos locais sem área identificados pela auditoria
+ * de 2026-11-16. A operação revalida o conjunto completo dentro de uma única
+ * mutation/transação e não altera quantidades, lotes ou movimentações.
+ */
+export const applyLegacyPrinterAreaClassification = internalMutation({
+  args: {
+    confirmation: v.literal("CONFIRMAR_CLASSIFICACAO_22_SALDOS_IMPRESSORAS_FIRST_HERRING"),
+  },
+  handler: async (ctx) => {
+    const areaId = "q97b7737gv98ajm8qqpmjmzjs18ezb58";
+    const expected = [
+      { rowId: "nh70zfec9nvemxf5270pkef8b70btjts", productId: "kd79tf11zqbdtvg8sr8cq86zbtcbvs3f", locationId: "n5711zfag2vgm24hm5qd9yn42s8e54ej", quantity: 700, lotIds: ["n175qg8kj7kkzz3y4mn32zme1sb1ysaa"] },
+      { rowId: "nh79vsy23rdr5mb09pvqxq6g69xa19hr", productId: "kd75me863v1ym08hdmrpw7h76eazwxg0", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 13, lotIds: ["n173x352z38x8rrf5fjemc60x8y6ht3h"] },
+      { rowId: "nh77v543h6x08pxgnck27dmn3mnh2y2q", productId: "kd7dqfja6nxhcr33qmjw2mg85e76jx65", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 18, lotIds: ["n172yjsdrwrdyd3byt1vweygye6bq3jg"] },
+      { rowId: "nh732phxvj02xm19057pg13nt74tddpx", productId: "kd76bdg20hy36kpcebnx7qjeftdaswve", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 1, lotIds: ["n17aye5q776nb2rxc6zdayvypmyeys7g"] },
+      { rowId: "nh72chw6gkr08wmvk7q7zny3zxjggzkw", productId: "kd7bb198gaf6w02w2d3z57dwc6082f1h", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 1, lotIds: ["n17e51hsphchkb2p2ecz21hbxqmnhetz"] },
+      { rowId: "nh7cstyjzrwc2m8bz0wpwxnm9g3zdt4e", productId: "kd7b3m5evq8cn91djtqj2rnkcnjh3dkv", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 1, lotIds: ["n17ccp2cbjm5angph5enpmxy529fwbs9"] },
+      { rowId: "nh720fgr2tmay13zkp3g8d45nhv8kv4w", productId: "kd79s0w1swbe5nsc806f1kfarkec9ah7", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 1, lotIds: ["n176bz9cen8wes6cm17mb7zwcrakvj2j"] },
+      { rowId: "nh71n0kg3vv91ha0j4wd0strkt60jeh2", productId: "kd7c9nh07rcqy6ep21553jjbdyzfpm1k", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 2, lotIds: ["n17295wb2tya3vtpgbp0p0cyp5qmwyk8"] },
+      { rowId: "nh75hs0wedjq0hs1bba9xb0zyye36qvm", productId: "kd73hh4taw6qmfkefmdn9aw2x2d4dths", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 2, lotIds: ["n17bc8v58sqbcmt6hsr95f3axetegx3y", "n17d8s4n6ct1e20gjjnagct7jx8f34eb"] },
+      { rowId: "nh7eyybbvsr8k5tw7vp64nxfxx1f0jgj", productId: "kd77q3s07rwr3tb5vannbh7y0xp6sn49", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 2, lotIds: ["n17etzdakgv8aj2nypq5qra3xm6xkwrw"] },
+      { rowId: "nh70h4x4x9vbk8r09zm3tvkv23t3n45r", productId: "kd7cm0h4dy5c04kxzt6tqnpnkc7ny2yv", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 4, lotIds: ["n174fc7029m6xtnjwadhe2qyvetgx2zj"] },
+      { rowId: "nh78nvbahyxnt0mqbcyv9ekhe30pmbav", productId: "kd74zphr0t1ettp589avsqdmabafkw83", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 1, lotIds: ["n17d9cp1derj7688q0nf0tsve90x66zc"] },
+      { rowId: "nh7b5y7eqn6q10n9pn8ez5sqr8hdkdn0", productId: "kd7a1824vydkd3jrpqz2vy3q6tga9k4v", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 2, lotIds: ["n17bdgdky96v84j42egsz3dyxmqs7djv", "n1707jnyahtmc1vrgv9pbm8g1n8f3z08"] },
+      { rowId: "nh73qcngzzm57s9cqbah6mgzz60kka1q", productId: "kd7ekp0q766xv75xtakn0ewvjrcfr1pd", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 23, lotIds: ["n176f3shs4d5zscb7e5q7m16wgsydyyb"] },
+      { rowId: "nh7c3jx1nxph4fa54q821zem1p5cc6kq", productId: "kd77k3sc9cgvrf2svjdmms95ht2b9ts1", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 24, lotIds: ["n177722mn5cyrxe2rcx4b5zxrs27nh4e"] },
+      { rowId: "nh75wt4trnvkkkv91j1v9ns3cw4b0rtt", productId: "kd75k6hz4gj7szvar4d44nxnwp9a52qa", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 180, lotIds: ["n175veer6ay3p3zqpbbegnwfswe3s427", "n176cm1d59ehjgabncnmveryd98f3b43"] },
+      { rowId: "nh7cyxppzhen3mdd7egv93cj5jd4vzsv", productId: "kd73jm219xh8099kywwtvhc4rca38v8x", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 1, lotIds: ["n1702b889rb4hpcb25v7jwqm45ngwf3x"] },
+      { rowId: "nh72rc9acgqwnf59m17rrk286n8f3j5d", productId: "kd7fjr7m20vp7p285vn02nqv9h8f3xs4", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 1, lotIds: ["n172h5nab411khjjch5mdbxdy18f2v1k"] },
+      { rowId: "nh7efd71zbh9xk4mw57t1g85wx8f23q0", productId: "kd70ck3e4c396bnsy529k04wkx8f25qh", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 1, lotIds: ["n17drm4hmjjgjg2t6d5s7kmbfx8f3jeg"] },
+      { rowId: "nh7epqvxcybwefde7gx2avcj8s8f34ps", productId: "kd75fnwnxdcwyvjejt14wkae718f3xah", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 1, lotIds: ["n179gyd557t976j2a3nf1y0jn98f2nzw"] },
+      { rowId: "nh76288mp9a1t0yfe28gdd0qxd8f30y8", productId: "kd79tf11zqbdtvg8sr8cq86zbtcbvs3f", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 400, lotIds: ["n178nsmp5pjbwn52e8jqq42vn18f2sx3"] },
+      { rowId: "nh7dncv3jax17yf87wdajkcfxh8f2dar", productId: "kd7dd58stasmw3rvrsz3c0cn6h8f3vza", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 40, lotIds: ["n17a09daac7max0egvda6sq82h8f2d60"] },
+    ];
+    if (expected.length !== 22) throw new Error("Lista autorizada inválida; nenhuma gravação realizada.");
+
+    const area: any = await ctx.db.get(areaId as any);
+    if (!area || !area.active || area.name !== "Impressoras") {
+      throw new Error("Área Impressoras ausente, inativa ou alterada; operação abortada.");
+    }
+    const [allLots, allBalances, allLocalRows] = await Promise.all([
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("stockByLocation").collect(),
+    ]);
+    const balancesByLot = new Map<string, any[]>();
+    for (const balance of allBalances as any[]) {
+      const key = String(balance.lotId);
+      const list = balancesByLot.get(key) ?? [];
+      list.push(balance);
+      balancesByLot.set(key, list);
+    }
+
+    const patches: Array<{ rowId: string; productId: string; quantity: number; lotIds: string[] }> = [];
+    for (const item of expected) {
+      const row: any = await ctx.db.get(item.rowId as any);
+      if (!row || String(row.productId) !== item.productId ||
+          String(row.locationId) !== item.locationId ||
+          row.areaId != null || !Number.isFinite(row.quantity) ||
+          Math.abs(Number(row.quantity) - item.quantity) > 1e-9) {
+        throw new Error(`Saldo local ${item.rowId} mudou desde a auditoria; nenhuma classificação foi aplicada.`);
+      }
+
+      const productRows = (allLocalRows as any[]).filter((candidate: any) =>
+        String(candidate.productId) === item.productId &&
+        String(candidate.locationId) === item.locationId
+      );
+      if (productRows.length !== 1 || String(productRows[0]._id) !== item.rowId) {
+        throw new Error(`Escopo produto/local possui registros adicionais: ${item.productId}; operação abortada.`);
+      }
+
+      const positiveLots = (allLots as any[]).filter((lot: any) => {
+        if (String(lot.productId) !== item.productId || !(Number(lot.quantityAvailable) > 0)) return false;
+        const lotBalances = balancesByLot.get(String(lot._id)) ?? [];
+        const resolvedLocation = lot.locationId ?? (lotBalances.length === 1 ? lotBalances[0].locationId : null);
+        return String(resolvedLocation ?? "") === item.locationId;
+      });
+      const actualLotIds = positiveLots.map((lot: any) => String(lot._id)).sort();
+      const expectedLotIds = [...item.lotIds].sort();
+      if (JSON.stringify(actualLotIds) !== JSON.stringify(expectedLotIds)) {
+        throw new Error(`Conjunto de lotes do produto ${item.productId} mudou; operação abortada.`);
+      }
+      let lotsQuantity = 0;
+      for (const lot of positiveLots as any[]) {
+        const lotBalances = balancesByLot.get(String(lot._id)) ?? [];
+        if (!lot.areaId || String(lot.areaId) !== areaId ||
+            lotBalances.length !== 1 ||
+            String(lotBalances[0].productId) !== item.productId ||
+            String(lotBalances[0].locationId) !== item.locationId ||
+            !Number.isFinite(lot.quantityAvailable) ||
+            !Number.isFinite(lotBalances[0].quantityAvailable) ||
+            Math.abs(Number(lotBalances[0].quantityAvailable) - Number(lot.quantityAvailable)) > 1e-9) {
+          throw new Error(`Lote ${lot.lotNumber} não confirma área/local/quantidade; operação abortada.`);
+        }
+        lotsQuantity += Number(lot.quantityAvailable);
+      }
+      if (Math.abs(lotsQuantity - Number(row.quantity)) > 1e-9) {
+        throw new Error(`Quantidade dos lotes diverge do saldo de ${item.productId}; operação abortada.`);
+      }
+      patches.push({ rowId: item.rowId, productId: item.productId, quantity: Number(row.quantity), lotIds: actualLotIds });
+    }
+
+    // Todas as 22 condições foram verificadas antes da primeira gravação.
+    for (const item of patches) {
+      await ctx.db.patch(item.rowId as any, { areaId: areaId as any });
+    }
+    const now = Date.now();
+    await ctx.db.insert("auditLogs", {
+      action: "update",
+      entity: "stockByLocation",
+      details: "Classificação histórica controlada: 22 saldos locais sem área foram associados à área Impressoras após revalidação transacional. Quantidades, estoque global, lotes, entradas e movimentações não foram alterados. Registros: " +
+        patches.map((item) => item.rowId).join(", "),
+      timestamp: now,
+    });
+    return {
+      applied: true,
+      updatedRows: patches.length,
+      area: "Impressoras",
+      totalQuantityClassified: patches.reduce((sum, item) => sum + item.quantity, 0),
+      physicalQuantitiesChanged: false,
+      lotsChanged: false,
+      movementsChanged: false,
+      auditLogged: true,
+    };
+  },
+});
+
 /**
  * Backfill controlado de lots.locationId usando exclusivamente os vínculos
  * já conciliados em lotLocationBalances. Não altera quantidades, áreas,
