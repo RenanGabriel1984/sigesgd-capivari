@@ -25,8 +25,8 @@ export function planLotLocationBalanceChange(input: {
   allowCreate?: boolean;
 }): LotLocationBalancePlan {
   const { rows, lotId, productId, locationId, delta } = input;
-  if (!locationId || delta === 0) return { kind: "skip" };
   if (!Number.isFinite(delta)) throw new Error("A variação do saldo lote × armário deve ser finita.");
+  if (delta === 0 || !locationId) return { kind: "skip" };
 
   const matching = rows.filter((row) => String(row.lotId) === lotId);
   if (matching.length > 1) {
@@ -67,6 +67,7 @@ export async function adjustLotLocationBalance(
     allowCreate?: boolean;
   },
 ): Promise<void> {
+  if (!Number.isFinite(input.delta)) throw new Error("A variação do saldo lote × armário deve ser finita.");
   if (!input.locationId || input.delta === 0) return;
   const rows = await ctx.db
     .query("lotLocationBalances")
