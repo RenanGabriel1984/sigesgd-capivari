@@ -123,7 +123,7 @@ describe("gestão de usuários — autorização e último administrador ativo",
       organizationId: undefined,
     });
 
-    expect(userId).toBe("users_1");
+    expect(userId).toBe("users_2");
     expect(ctx.db._tables.users).toHaveLength(2);
     expect(ctx.db._tables.users[1]).toMatchObject({
       name: "Novo técnico",
