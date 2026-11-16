@@ -29,7 +29,7 @@ export const legacyGeneralAreaClassificationDiagnostic = internalQuery({
       };
     }
 
-    const [product, location, lot, localRow, entryItems, productMovements, allMovementLinks] =
+    const [product, location, lot, localRow, entryItems, productMovements, allMovementLinks]: any[] =
       await Promise.all([
         ctx.db.get(target.productId as any),
         ctx.db.get(target.locationId as any),
