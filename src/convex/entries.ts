@@ -1053,6 +1053,13 @@ export const assignPatrimony = mutation({
 
     const normalizedSerial = unit.serialNumber?.trim().toLocaleUpperCase("pt-BR");
     if (normalizedSerial) {
+      const duplicateUnitSerial = units.find((row: any) =>
+        row._id !== args.entryItemUnitId &&
+        row.serialNumber?.trim().toLocaleUpperCase("pt-BR") === normalizedSerial
+      );
+      if (duplicateUnitSerial) {
+        throw new Error("Este número de série já está associado a outra unidade recebida.");
+      }
       if (
         existingAsset?.serialNumber &&
         existingAsset.serialNumber.trim().toLocaleUpperCase("pt-BR") !== normalizedSerial
