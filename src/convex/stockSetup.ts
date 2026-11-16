@@ -5,7 +5,7 @@ import {
   formatConsumedLots,
   type LotConsumption,
 } from "../lib/stock-consumption";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getOptionalSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import {
@@ -567,10 +567,9 @@ export const productLocationSummary = query({
  * Auditoria somente leitura dos saldos lote × armário.
  * A área é obtida do lote; o armário não classifica o subestoque.
  */
-export const lotLocationBalanceIntegrity = query({
+export const lotLocationBalanceIntegrity = internalQuery({
   args: {},
   handler: async (ctx) => {
-    await requireUser(ctx);
     const [lots, balances, localRows, globalRows] = await Promise.all([
       ctx.db.query("lots").collect(),
       ctx.db.query("lotLocationBalances").collect(),
