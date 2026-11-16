@@ -59,6 +59,47 @@ describe("MATERIAL-01..08", () => {
     expect(stock.physicalQuantity - stock.reservedQuantity).toBe(8);
   });
 
+  it("MATERIAL-09: recebe material permanente sem tombamento oficial", () => {
+    expect(validateEntryUnits({
+      materialType: "permanent",
+      quantity: 2,
+      units: [
+        { serialNumber: "SER-A", manufacturer: "Dell", model: "OptiPlex" },
+        { serialNumber: "SER-B", manufacturer: "Dell", model: "OptiPlex" },
+      ],
+    })).toBeNull();
+  });
+
+  it("MATERIAL-10: exige série no recebimento somente quando o produto assim determina", () => {
+    expect(validateEntryUnits({
+      materialType: "permanent",
+      quantity: 1,
+      units: [{}],
+      requireSerial: false,
+    })).toBeNull();
+
+    expect(validateEntryUnits({
+      materialType: "permanent",
+      quantity: 1,
+      units: [{}],
+      requireSerial: true,
+    })).toMatch(/exige número de série/);
+  });
+
+  it("MATERIAL-11: não aceita quantidade fracionada nem ausência de unidade individual", () => {
+    expect(validateEntryUnits({
+      materialType: "permanent",
+      quantity: 1.5,
+      units: [{}, {}],
+    })).toMatch(/inteiro positivo/);
+
+    expect(validateEntryUnits({
+      materialType: "permanent",
+      quantity: 2,
+      units: [{}],
+    })).toMatch(/identificação provisória/);
+  });
+
   it("MATERIAL-08: campos contábeis são apenas registrados e nenhuma depreciação é calculada", () => {
     const unit: PatrimonyUnitDraft = {
       patrimonyNumber: "100001",
