@@ -97,7 +97,7 @@ jobs:
           fi
           echo "Backend publicado e confirmado exclusivamente em ${ALVO_REF}." >> "${GITHUB_STEP_SUMMARY}"
       - name: Executar classificação TI Geral autorizada (operação única)
-        if: github.event.head_commit.message == 'ops: execute one-time TI Geral classification in first-herring-264'
+        if: "github.event.head_commit.message == 'ops: execute one-time TI Geral classification in first-herring-264'"
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
         run: |
