@@ -97,6 +97,9 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests", permission2: "canApproveRequests" },
     { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
   ]},
+  { title: "Patrimônio", items: [
+    { label: "Pendências de tombamento", href: "/patrimony", icon: ClipboardCheck, permission: "canViewPatrimony" },
+  ]},
   // ── Equipamentos ──────────────────────────────────────────────────────────
   // Estrutura por CATEGORIA de equipamento. O fornecedor NUNCA faz parte do
   // nome estrutural: uma nova licitação troca a empresa sem alterar o menu.
