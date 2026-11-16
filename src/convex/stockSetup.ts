@@ -596,7 +596,7 @@ export const lotLocationBalanceIntegrity = query({
       if (!Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0) invalidBalances++;
       if (lot && (
         row.productId !== lot.productId ||
-        row.locationId !== lot.locationId ||
+        (lot.locationId && row.locationId !== lot.locationId) ||
         !Number.isFinite(lot.quantityAvailable) ||
         Math.abs(row.quantityAvailable - lot.quantityAvailable) > 1e-9
       )) mismatchedLotBalances++;
@@ -608,13 +608,21 @@ export const lotLocationBalanceIntegrity = query({
     const missingLotBalances = lots.filter((lot: any) =>
       !!lot.locationId && lot.quantityAvailable > 0 && !(balancesByLot.get(String(lot._id))?.length)
     ).length;
+    const lotsMissingLocationMetadata = lots.filter((lot: any) =>
+      !lot.locationId && (balancesByLot.get(String(lot._id))?.length ?? 0) === 1
+    ).length;
+    const resolvedLocationByLot = new Map<string, string>();
+    for (const [lotId, rows] of balancesByLot) {
+      if (rows.length === 1) resolvedLocationByLot.set(lotId, String(rows[0].locationId));
+    }
 
     const scopeKey = (productId: string, areaId: string | undefined, locationId: string) =>
       `${productId}::${areaId ?? ""}::${locationId}`;
     const lotTotalsByScope = new Map<string, number>();
     for (const lot of lots as any[]) {
-      if (!lot.locationId || !Number.isFinite(lot.quantityAvailable)) continue;
-      const key = scopeKey(String(lot.productId), lot.areaId ? String(lot.areaId) : undefined, String(lot.locationId));
+      const resolvedLocationId = lot.locationId ?? resolvedLocationByLot.get(String(lot._id));
+      if (!resolvedLocationId || !Number.isFinite(lot.quantityAvailable)) continue;
+      const key = scopeKey(String(lot.productId), lot.areaId ? String(lot.areaId) : undefined, String(resolvedLocationId));
       lotTotalsByScope.set(key, (lotTotalsByScope.get(key) ?? 0) + lot.quantityAvailable);
     }
     const localRowsByScope = new Map<string, any[]>();
@@ -664,6 +672,7 @@ export const lotLocationBalanceIntegrity = query({
       lotLocationBalanceRecords: balances.length,
       lotLocationBalanceQuantity: balances.reduce((sum: number, row: any) => sum + Number(row.quantityAvailable), 0),
       missingLotBalances,
+      lotsMissingLocationMetadata,
       orphanBalances,
       duplicateLotBalances,
       invalidBalances,
@@ -671,7 +680,7 @@ export const lotLocationBalanceIntegrity = query({
       duplicateLocalScopes,
       scopeMismatches,
       globalMismatches,
-      consistent: missingLotBalances === 0 && orphanBalances === 0 &&
+      consistent: missingLotBalances === 0 && lotsMissingLocationMetadata === 0 && orphanBalances === 0 &&
         duplicateLotBalances === 0 && invalidBalances === 0 &&
         mismatchedLotBalances === 0 && duplicateLocalScopes === 0 &&
         scopeMismatches === 0 && globalMismatches === 0,
