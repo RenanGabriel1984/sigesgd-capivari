@@ -68,16 +68,23 @@ export async function adjustLotLocationBalance(
   },
 ): Promise<void> {
   if (!Number.isFinite(input.delta)) throw new Error("A variação do saldo lote × armário deve ser finita.");
-  if (!input.locationId || input.delta === 0) return;
+  if (input.delta === 0) return;
   const rows = await ctx.db
     .query("lotLocationBalances")
     .withIndex("by_lot", (q: any) => q.eq("lotId", input.lotId))
     .collect();
+  if (rows.length > 1) {
+    throw new Error("Há saldos lote × armário duplicados para este lote. Operação bloqueada.");
+  }
+  // Lotes legados podem ainda não ter locationId no documento, embora já
+  // possuam o vínculo conciliado na tabela nova. Nesse caso, usa-se o vínculo.
+  const locationId = input.locationId ?? rows[0]?.locationId;
+  if (!locationId) return;
   const plan = planLotLocationBalanceChange({
     rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
     lotId: String(input.lotId),
     productId: String(input.productId),
-    locationId: String(input.locationId),
+    locationId: String(locationId),
     delta: input.delta,
     allowCreate: input.allowCreate,
   });
