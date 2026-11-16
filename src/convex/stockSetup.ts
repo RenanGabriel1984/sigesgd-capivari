@@ -564,6 +564,122 @@ export const productLocationSummary = query({
 });
 
 /**
+ * Auditoria somente leitura dos saldos lote × armário.
+ * A área é obtida do lote; o armário não classifica o subestoque.
+ */
+export const lotLocationBalanceIntegrity = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const [lots, balances, localRows, globalRows] = await Promise.all([
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("stock").collect(),
+    ]);
+    const lotsById = new Map(lots.map((lot: any) => [String(lot._id), lot]));
+    const balancesByLot = new Map<string, any[]>();
+    for (const row of balances as any[]) {
+      const key = String(row.lotId);
+      const list = balancesByLot.get(key) ?? [];
+      list.push(row);
+      balancesByLot.set(key, list);
+    }
+
+    let orphanBalances = 0;
+    let duplicateLotBalances = 0;
+    let invalidBalances = 0;
+    let mismatchedLotBalances = 0;
+    for (const row of balances as any[]) {
+      const lot = lotsById.get(String(row.lotId));
+      if (!lot) orphanBalances++;
+      if (!Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0) invalidBalances++;
+      if (lot && (
+        row.productId !== lot.productId ||
+        row.locationId !== lot.locationId ||
+        !Number.isFinite(lot.quantityAvailable) ||
+        Math.abs(row.quantityAvailable - lot.quantityAvailable) > 1e-9
+      )) mismatchedLotBalances++;
+    }
+    for (const rows of balancesByLot.values()) {
+      if (rows.length > 1) duplicateLotBalances++;
+    }
+
+    const missingLotBalances = lots.filter((lot: any) =>
+      !!lot.locationId && lot.quantityAvailable > 0 && !(balancesByLot.get(String(lot._id))?.length)
+    ).length;
+
+    const scopeKey = (productId: string, areaId: string | undefined, locationId: string) =>
+      `${productId}::${areaId ?? ""}::${locationId}`;
+    const lotTotalsByScope = new Map<string, number>();
+    for (const lot of lots as any[]) {
+      if (!lot.locationId || !Number.isFinite(lot.quantityAvailable)) continue;
+      const key = scopeKey(String(lot.productId), lot.areaId ? String(lot.areaId) : undefined, String(lot.locationId));
+      lotTotalsByScope.set(key, (lotTotalsByScope.get(key) ?? 0) + lot.quantityAvailable);
+    }
+    const localRowsByScope = new Map<string, any[]>();
+    for (const row of localRows as any[]) {
+      const key = scopeKey(String(row.productId), row.areaId ? String(row.areaId) : undefined, String(row.locationId));
+      const list = localRowsByScope.get(key) ?? [];
+      list.push(row);
+      localRowsByScope.set(key, list);
+    }
+    const scopeKeys = new Set([...lotTotalsByScope.keys(), ...localRowsByScope.keys()]);
+    let scopeMismatches = 0;
+    let duplicateLocalScopes = 0;
+    for (const key of scopeKeys) {
+      const rows = localRowsByScope.get(key) ?? [];
+      if (rows.length > 1) duplicateLocalScopes++;
+      const localQuantity = rows.reduce((sum: number, row: any) => sum + Number(row.quantity), 0);
+      if (rows.some((row: any) => !Number.isFinite(row.quantity) || row.quantity < 0) ||
+          Math.abs(localQuantity - (lotTotalsByScope.get(key) ?? 0)) > 1e-9) scopeMismatches++;
+    }
+
+    const lotTotalsByProduct = new Map<string, number>();
+    for (const lot of lots as any[]) {
+      lotTotalsByProduct.set(String(lot.productId),
+        (lotTotalsByProduct.get(String(lot.productId)) ?? 0) + Number(lot.quantityAvailable));
+    }
+    const globalsByProduct = new Map<string, any[]>();
+    for (const row of globalRows as any[]) {
+      const key = String(row.productId);
+      const list = globalsByProduct.get(key) ?? [];
+      list.push(row);
+      globalsByProduct.set(key, list);
+    }
+    let globalMismatches = 0;
+    const productIds = new Set([...lotTotalsByProduct.keys(), ...globalsByProduct.keys()]);
+    for (const productId of productIds) {
+      const rows = globalsByProduct.get(productId) ?? [];
+      if (rows.length !== 1 || !Number.isFinite(rows[0]?.physicalQuantity) ||
+          Math.abs(Number(rows[0]?.physicalQuantity ?? 0) - (lotTotalsByProduct.get(productId) ?? 0)) > 1e-9) {
+        globalMismatches++;
+      }
+    }
+
+    return {
+      readOnly: true,
+      generatedAt: Date.now(),
+      lotsWithLocation: lots.filter((lot: any) => !!lot.locationId).length,
+      lotLocationBalanceRecords: balances.length,
+      lotLocationBalanceQuantity: balances.reduce((sum: number, row: any) => sum + Number(row.quantityAvailable), 0),
+      missingLotBalances,
+      orphanBalances,
+      duplicateLotBalances,
+      invalidBalances,
+      mismatchedLotBalances,
+      duplicateLocalScopes,
+      scopeMismatches,
+      globalMismatches,
+      consistent: missingLotBalances === 0 && orphanBalances === 0 &&
+        duplicateLotBalances === 0 && invalidBalances === 0 &&
+        mismatchedLotBalances === 0 && duplicateLocalScopes === 0 &&
+        scopeMismatches === 0 && globalMismatches === 0,
+    };
+  },
+});
+
+/**
  * Quick stock exit (saída simples).
  * Simplified exit without the full request/approval flow.
  * Uses FIFO lot consumption. Reduces both global and location stock.
