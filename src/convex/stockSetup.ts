@@ -741,6 +741,18 @@ export const lotLocationBalanceIntegrity = internalQuery({
       lotIds: string[];
     }> = [];
     let areaClassificationBlocked = 0;
+    const areaClassificationBlockedDetails: Array<{
+      productId: string;
+      productName: string;
+      locationId: string;
+      locationName: string;
+      rowIds: string[];
+      stockByLocationQuantities: number[];
+      lotIds: string[];
+      lotAreas: Array<{ areaId: string | null; quantity: number }>;
+      candidateAreaIds: string[];
+      reasons: string[];
+    }> = [];
     for (const [key, rows] of localRowsByProductLocation) {
       const unclassifiedRows = rows.filter((row: any) => !row.areaId);
       if (unclassifiedRows.length === 0) continue;
@@ -764,6 +776,42 @@ export const lotLocationBalanceIntegrity = internalQuery({
         unclassifiedRows[0].quantity >= 0;
       if (!safe) {
         areaClassificationBlocked++;
+        const reasons: string[] = [];
+        if (unclassifiedRows.length !== 1) reasons.push("mais_de_uma_linha_sem_area");
+        if (rows.length !== 1) reasons.push("mais_de_uma_linha_no_produto_local");
+        if (areaIds.size === 0) reasons.push("nenhum_lote_com_area_identificada");
+        if (areaIds.size > 1) reasons.push("lotes_em_areas_diferentes");
+        if (allLotsForScope.length === 0) reasons.push("nenhum_lote_positivo_no_produto_local");
+        if (allLotsForScope.some((lot: any) => !lot.areaId)) reasons.push("existe_lote_sem_area");
+        if (onlyAreaId && allLotsForScope.some((lot: any) => String(lot.areaId ?? "") !== onlyAreaId)) {
+          reasons.push("lotes_nao_convergem_para_uma_unica_area");
+        }
+        if (unclassifiedRows.length === 1 && onlyAreaId &&
+            Math.abs(Number(unclassifiedRows[0].quantity) - (byArea.get(onlyAreaId) ?? 0)) > 1e-9) {
+          reasons.push("quantidade_do_saldo_diverge_dos_lotes_da_area");
+        }
+        if (unclassifiedRows.some((row: any) => !Number.isFinite(row.quantity) || row.quantity < 0)) {
+          reasons.push("quantidade_do_saldo_invalida");
+        }
+        const [product, location]: any[] = await Promise.all([
+          ctx.db.get(productId as any),
+          ctx.db.get(locationId as any),
+        ]);
+        areaClassificationBlockedDetails.push({
+          productId,
+          productName: product?.name ?? productId,
+          locationId,
+          locationName: location?.name ?? locationId,
+          rowIds: unclassifiedRows.map((row: any) => String(row._id)),
+          stockByLocationQuantities: unclassifiedRows.map((row: any) => Number(row.quantity)),
+          lotIds: allLotsForScope.map((lot: any) => String(lot._id)),
+          lotAreas: allLotsForScope.map((lot: any) => ({
+            areaId: lot.areaId ? String(lot.areaId) : null,
+            quantity: Number(lot.quantityAvailable),
+          })),
+          candidateAreaIds: Array.from(areaIds),
+          reasons: reasons.length ? reasons : ["criterios_de_seguranca_nao_atendidos"],
+        });
         continue;
       }
       const [product, location, area]: any[] = await Promise.all([
@@ -828,6 +876,7 @@ export const lotLocationBalanceIntegrity = internalQuery({
       areaClassificationCandidateCount: areaClassificationCandidates.length,
       areaClassificationBlocked,
       areaClassificationCandidates,
+      areaClassificationBlockedDetails,
       globalMismatches,
       consistent: missingLotBalances === 0 && lotsMissingLocationMetadata === 0 && unmappedPositiveLots === 0 && orphanBalances === 0 &&
         duplicateLotBalances === 0 && invalidBalances === 0 && invalidLotQuantities === 0 &&
