@@ -1192,7 +1192,7 @@ function EntriesPage() {
                           })
                         }
                       >
-                        Informar patrimônios
+                        Identificar unidades
                       </Button>
                     ) : (
                       <Button
