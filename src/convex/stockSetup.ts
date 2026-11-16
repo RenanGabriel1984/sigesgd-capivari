@@ -1,4 +1,5 @@
 import { requirePermission } from "./rbac";
+import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import {
   resolveConsumedLotId,
   formatConsumedLots,
@@ -224,6 +225,10 @@ async function performInitialLoad(
         model: item.model?.trim() || undefined,
         specification: item.specification?.trim() || undefined,
         observation: item.observation?.trim() || `Carga inicial — ${item.quantity} unidades`,
+      });
+      await adjustLotLocationBalance(ctx, {
+        lotId, productId: item.productId, locationId: item.locationId,
+        delta: item.quantity, allowCreate: true,
       });
 
       // ── 2. Create entry item ──
@@ -711,6 +716,10 @@ export const quickExit = mutation({
       if (consume <= 0) continue;
       const nextQuantity = lot.quantityAvailable - consume;
       await ctx.db.patch(lot._id, { quantityAvailable: nextQuantity, active: nextQuantity > 0 });
+      await adjustLotLocationBalance(ctx, {
+        lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
+        delta: -consume,
+      });
       consumedLots.push({ lotId: lot._id as string, quantity: consume });
       remaining -= consume;
     }
