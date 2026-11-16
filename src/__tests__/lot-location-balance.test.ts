@@ -10,10 +10,13 @@ const base = {
 };
 
 describe("planLotLocationBalanceChange", () => {
-  it("ignora lotes legados sem localização física", () => {
+  it("ignora lotes legados sem localização física, mas ainda valida a variação", () => {
     expect(planLotLocationBalanceChange({
       rows: [], lotId: "lot_1", productId: "product_1", delta: -2,
     })).toEqual({ kind: "skip" });
+    expect(() => planLotLocationBalanceChange({
+      rows: [], lotId: "lot_1", productId: "product_1", delta: Number.NaN,
+    })).toThrow(/finita/);
   });
 
   it("cria saldo somente quando a operação declara que o lote é novo", () => {
