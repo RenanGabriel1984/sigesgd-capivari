@@ -17,6 +17,7 @@ import { query, mutation, internalMutation, internalQuery } from "./_generated/s
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import { generateExitNumber } from "./stockHelpers";
 import {
   buildSupplyRow,
@@ -517,6 +518,9 @@ async function consumeSupplyLotsInArea(
     if (!lot.locationId) throw new Error(`Lote ${lot.lotNumber} sem local físico.`);
     const take = Math.min(free, remaining);
     await ctx.db.patch(lot._id, { quantityAvailable: Number(lot.quantityAvailable) - take });
+    await adjustLotLocationBalance(ctx, {
+      lotId: lot._id, productId: lot.productId, locationId: lot.locationId, delta: -take,
+    });
     await changeSupplyLocationQuantity(ctx, productId, String(lot.locationId), -take);
     consumed.push({
       lotId: String(lot._id), lotNumber: lot.lotNumber, qty: take,
@@ -929,6 +933,10 @@ export const withdrawFamily = mutation({
           reclassifiedFromLotId: source.lotId as any,
           observation:
             `Reclassificação de ${source.qty} ${conversion.packagingUnit}(s) em ${reclassifiedQuantity} ${conversion.baseUnit}(s). Origem: lote ${source.lotNumber}.`,
+        });
+        await adjustLotLocationBalance(ctx, {
+          lotId: reclassifiedLotId, productId: looseMember._id,
+          locationId: source.locationId, delta: reclassifiedQuantity, allowCreate: true,
         });
         await changeSupplyLocationQuantity(
           ctx, String(looseMember._id), source.locationId, reclassifiedQuantity,
