@@ -4,7 +4,7 @@ import { requirePermission } from "./rbac";
 import { findEquipmentCategory, buildRelatedStockProducts } from "../lib/equipment-categories";
 import type { RelatedStockProduct } from "../lib/equipment-categories";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: equipamentos visíveis a quem consulta (incl. gestor/diretor).
