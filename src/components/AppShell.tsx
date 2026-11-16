@@ -249,10 +249,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     localStorage.setItem("estoque-sggd-pwa-dismissed", "1");
   };
 
-  const pendingCount = useQuery(api.requests.pendingCount);
-  const belowMinItems = useQuery(api.products.belowMinimum);
   const role = (user?.role ?? "technician") as UserRole;
   const permissions = getPermissions(role);
+  // Hooks continuam incondicionais, mas consultas de áreas sem permissão são
+  // explicitamente ignoradas pelo Convex. Isso é importante para perfis
+  // restritos (ex.: Patrimônio), que não devem acionar endpoints de estoque.
+  const pendingCount = useQuery(
+    api.requests.pendingCount,
+    permissions.canViewRequests ? {} : "skip",
+  );
+  const belowMinItems = useQuery(
+    api.products.belowMinimum,
+    permissions.canViewProducts ? {} : "skip",
+  );
   const alertCount = belowMinItems?.length ?? 0;
 
   // ── Mobile menu ────────────────────────────────────────────────────────────
