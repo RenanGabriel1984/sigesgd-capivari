@@ -6,6 +6,7 @@ on:
       - codex/stabilizacao-seguranca
     paths:
       - ".github/workflows/convex-first-herring.yml"
+      - "src/convex/stockSetup.ts"
   workflow_dispatch:
 
 permissions:
