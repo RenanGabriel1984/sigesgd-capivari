@@ -625,11 +625,15 @@ export const lotLocationBalanceIntegrity = internalQuery({
     const scopeKey = (productId: string, areaId: string | undefined, locationId: string) =>
       `${productId}::${areaId ?? ""}::${locationId}`;
     const lotTotalsByScope = new Map<string, number>();
+    const lotsByScope = new Map<string, any[]>();
     for (const lot of lots as any[]) {
       const resolvedLocationId = lot.locationId ?? resolvedLocationByLot.get(String(lot._id));
       if (!resolvedLocationId || !Number.isFinite(lot.quantityAvailable)) continue;
       const key = scopeKey(String(lot.productId), lot.areaId ? String(lot.areaId) : undefined, String(resolvedLocationId));
       lotTotalsByScope.set(key, (lotTotalsByScope.get(key) ?? 0) + lot.quantityAvailable);
+      const scopedLots = lotsByScope.get(key) ?? [];
+      scopedLots.push(lot);
+      lotsByScope.set(key, scopedLots);
     }
     const localRowsByScope = new Map<string, any[]>();
     for (const row of localRows as any[]) {
@@ -641,12 +645,62 @@ export const lotLocationBalanceIntegrity = internalQuery({
     const scopeKeys = new Set([...lotTotalsByScope.keys(), ...localRowsByScope.keys()]);
     let scopeMismatches = 0;
     let duplicateLocalScopes = 0;
+    const scopeMismatchDetails: Array<{
+      productId: string;
+      productName: string;
+      areaId: string | null;
+      areaName: string;
+      locationId: string;
+      locationName: string;
+      lotsQuantity: number;
+      stockByLocationQuantity: number;
+      difference: number;
+      lots: Array<{ lotId: string; lotNumber: string; quantityAvailable: number; locationId: string | null; areaId: string | null }>;
+      localRows: Array<{ rowId: string; quantity: number; locationId: string; areaId: string | null }>;
+    }> = [];
     for (const key of scopeKeys) {
       const rows = localRowsByScope.get(key) ?? [];
       if (rows.length > 1) duplicateLocalScopes++;
       const localQuantity = rows.reduce((sum: number, row: any) => sum + Number(row.quantity), 0);
-      if (rows.some((row: any) => !Number.isFinite(row.quantity) || row.quantity < 0) ||
-          Math.abs(localQuantity - (lotTotalsByScope.get(key) ?? 0)) > 1e-9) scopeMismatches++;
+      const lotsQuantity = lotTotalsByScope.get(key) ?? 0;
+      const hasInvalidLocalQuantity = rows.some((row: any) => !Number.isFinite(row.quantity) || row.quantity < 0);
+      if (hasInvalidLocalQuantity || Math.abs(localQuantity - lotsQuantity) > 1e-9) {
+        scopeMismatches++;
+        const scopedLots = lotsByScope.get(key) ?? [];
+        const sample = scopedLots[0] ?? rows[0];
+        const productId = String(sample.productId);
+        const areaId = sample.areaId ? String(sample.areaId) : null;
+        const locationId = String(sample.locationId ?? resolvedLocationByLot.get(String(sample._id)) ?? sample.locationId);
+        const [product, area, location] = await Promise.all([
+          ctx.db.get(productId as any),
+          areaId ? ctx.db.get(areaId as any) : Promise.resolve(null),
+          locationId && locationId !== "undefined" ? ctx.db.get(locationId as any) : Promise.resolve(null),
+        ]);
+        scopeMismatchDetails.push({
+          productId,
+          productName: product?.name ?? productId,
+          areaId,
+          areaName: area?.name ?? (areaId ? "Área não encontrada" : "Sem área"),
+          locationId,
+          locationName: location?.name ?? "Local não encontrado",
+          lotsQuantity,
+          stockByLocationQuantity: localQuantity,
+          difference: lotsQuantity - localQuantity,
+          lots: scopedLots.map((lot: any) => ({
+            lotId: String(lot._id),
+            lotNumber: String(lot.lotNumber ?? lot._id),
+            quantityAvailable: Number(lot.quantityAvailable),
+            locationId: lot.locationId ? String(lot.locationId) : null,
+            areaId: lot.areaId ? String(lot.areaId) : null,
+          })),
+          localRows: rows.map((row: any) => ({
+            rowId: String(row._id),
+            quantity: Number(row.quantity),
+            locationId: String(row.locationId),
+            areaId: row.areaId ? String(row.areaId) : null,
+          })),
+        });
+      }
     }
 
     const lotTotalsByProduct = new Map<string, number>();
@@ -687,6 +741,7 @@ export const lotLocationBalanceIntegrity = internalQuery({
       mismatchedLotBalances,
       duplicateLocalScopes,
       scopeMismatches,
+      scopeMismatchDetails,
       globalMismatches,
       consistent: missingLotBalances === 0 && lotsMissingLocationMetadata === 0 && unmappedPositiveLots === 0 && orphanBalances === 0 &&
         duplicateLotBalances === 0 && invalidBalances === 0 && invalidLotQuantities === 0 &&
