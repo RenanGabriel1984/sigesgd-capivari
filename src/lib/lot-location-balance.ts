@@ -103,3 +103,86 @@ export async function adjustLotLocationBalance(
     });
   }
 }
+
+
+export type LotLocationBalanceLocationPlan =
+  | { kind: "insert"; quantityAvailable: number; locationId: string }
+  | { kind: "patch"; rowId: string; quantityAvailable: number; locationId: string };
+
+export function planLotLocationBalanceLocationChange(input: {
+  rows: Array<LotLocationBalanceRow & { _id: string }>;
+  lotId: string;
+  productId: string;
+  locationId: string;
+  quantityAvailable: number;
+  allowCreate?: boolean;
+}): LotLocationBalanceLocationPlan {
+  if (!Number.isFinite(input.quantityAvailable) || input.quantityAvailable < 0) {
+    throw new Error("A quantidade do lote para classificar o armário é inválida.");
+  }
+  const matching = input.rows.filter((row) => String(row.lotId) === input.lotId);
+  if (matching.length > 1) {
+    throw new Error("Há saldos lote × armário duplicados para este lote. Classificação bloqueada.");
+  }
+  const current = matching[0];
+  if (!current) {
+    if (!input.allowCreate) {
+      throw new Error("O saldo lote × armário não existe; classificação bloqueada.");
+    }
+    return {
+      kind: "insert",
+      quantityAvailable: input.quantityAvailable,
+      locationId: input.locationId,
+    };
+  }
+  if (String(current.productId) !== input.productId ||
+      !Number.isFinite(current.quantityAvailable) ||
+      Math.abs(current.quantityAvailable - input.quantityAvailable) > 1e-9) {
+    throw new Error("O saldo lote × armário diverge do produto ou da quantidade do lote.");
+  }
+  return {
+    kind: "patch",
+    rowId: current._id,
+    quantityAvailable: input.quantityAvailable,
+    locationId: input.locationId,
+  };
+}
+
+export async function setLotLocationBalanceLocation(
+  ctx: any,
+  input: {
+    lotId: any;
+    productId: any;
+    locationId: any;
+    quantityAvailable: number;
+    allowCreate?: boolean;
+  },
+): Promise<void> {
+  const rows = await ctx.db
+    .query("lotLocationBalances")
+    .withIndex("by_lot", (q: any) => q.eq("lotId", input.lotId))
+    .collect();
+  const plan = planLotLocationBalanceLocationChange({
+    rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
+    lotId: String(input.lotId),
+    productId: String(input.productId),
+    locationId: String(input.locationId),
+    quantityAvailable: input.quantityAvailable,
+    allowCreate: input.allowCreate,
+  });
+  if (plan.kind === "insert") {
+    await ctx.db.insert("lotLocationBalances", {
+      lotId: input.lotId,
+      productId: input.productId,
+      locationId: input.locationId,
+      quantityAvailable: plan.quantityAvailable,
+      updatedAt: Date.now(),
+    });
+  } else {
+    await ctx.db.patch(plan.rowId as any, {
+      locationId: input.locationId,
+      quantityAvailable: plan.quantityAvailable,
+      updatedAt: Date.now(),
+    });
+  }
+}
