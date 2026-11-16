@@ -703,8 +703,8 @@ export const applyLotLocationMetadataBackfill = internalMutation({
       ctx.db.query("lotLocationBalances").collect(),
       ctx.db.query("storageLocations").collect(),
     ]);
-    const lotById = new Map(lots.map((lot: any) => [String(lot._id), lot]));
-    const locationIds = new Set(locations.map((location: any) => String(location._id)));
+    const lotById = new Map<string, any>(lots.map((lot: any) => [String(lot._id), lot] as const));
+    const locationById = new Map<string, any>(locations.map((location: any) => [String(location._id), location] as const));
     const rowsByLot = new Map<string, any[]>();
     for (const row of balances as any[]) {
       const key = String(row.lotId);
@@ -729,12 +729,17 @@ export const applyLotLocationMetadataBackfill = internalMutation({
           !Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0 ||
           !Number.isFinite(lot.quantityAvailable) ||
           Math.abs(row.quantityAvailable - lot.quantityAvailable) > 1e-9 ||
-          !locationIds.has(String(row.locationId))) {
+          !locationById.get(String(row.locationId))?.active) {
         problems.push(`lote ${lot.lotNumber}: saldo, produto ou armário divergente`);
         continue;
       }
       if (lot.locationId && lot.locationId !== row.locationId) {
         problems.push(`lote ${lot.lotNumber}: localização já preenchida diverge do saldo conciliado`);
+      }
+    }
+    for (const lot of lots as any[]) {
+      if (Number(lot.quantityAvailable) > 0 && !rowsByLot.has(String(lot._id))) {
+        problems.push(`lote ${lot.lotNumber}: saldo positivo sem vínculo lote × armário`);
       }
     }
     if (problems.length > 0) {
