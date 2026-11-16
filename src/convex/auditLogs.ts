@@ -93,21 +93,23 @@ export const listFiltered = query({
         .take(limit * 3);
     }
 
-    // Apply remaining filters
+    // Apply every supplied filter independently. The index chosen above is
+    // only an optimization for the initial query; it does not replace the
+    // remaining filters (notably action + entity combinations).
     let filtered = logs;
-    if (args.userId) {
+    if (args.userId !== undefined) {
       filtered = filtered.filter((l) => l.userId === args.userId);
     }
-    if (args.action && logs !== filtered) {
+    if (args.action !== undefined) {
       filtered = filtered.filter((l) => l.action === args.action);
     }
-    if (args.entity && logs !== filtered) {
+    if (args.entity !== undefined) {
       filtered = filtered.filter((l) => l.entity === args.entity);
     }
-    if (args.startDate) {
+    if (args.startDate !== undefined) {
       filtered = filtered.filter((l) => l.timestamp >= args.startDate!);
     }
-    if (args.endDate) {
+    if (args.endDate !== undefined) {
       filtered = filtered.filter((l) => l.timestamp <= args.endDate!);
     }
 
