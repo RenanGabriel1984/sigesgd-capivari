@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
+import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -521,6 +522,10 @@ export const close = mutation({
           locationId: inv.locationId ?? undefined,
           observation: `Ajuste positivo do inventário ${inv.inventoryNumber}. ${justification}`,
         });
+        await adjustLotLocationBalance(ctx, {
+          lotId: adjustmentLotId, productId: count.productId,
+          locationId: inv.locationId, delta, allowCreate: true,
+        });
         const itemId = await ctx.db.insert("entryItems", {
           entryId: adjustmentEntryId,
           productId: count.productId,
@@ -548,6 +553,10 @@ export const close = mutation({
           await ctx.db.patch(reduction.lot._id, {
             quantityAvailable: nextQuantity,
             active: nextQuantity > 0,
+          });
+          await adjustLotLocationBalance(ctx, {
+            lotId: reduction.lot._id, productId: reduction.lot.productId,
+            locationId: reduction.lot.locationId, delta: -reduction.quantity,
           });
         }
       }
