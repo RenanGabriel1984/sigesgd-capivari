@@ -138,6 +138,8 @@ describe("RBAC-05A patrimony_manager — tombamento sem acesso ao estoque", () =
     expect(roleHasPermission("patrimony_manager", "patrimony.assign")).toBe(true);
     expect(roleHasPermission("patrimony_manager", "settings.view")).toBe(true);
     expect(PERMS.patrimony_manager.canViewPatrimony).toBe(true);
+    expect(PERMS.patrimony_manager.canViewRequests).toBe(false);
+    expect(PERMS.patrimony_manager.canViewProducts).toBe(false);
   });
 
   it("não recebe dashboard, estoque, equipamentos, usuários ou auditoria", () => {
