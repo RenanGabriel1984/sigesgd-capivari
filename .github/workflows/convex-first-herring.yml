@@ -33,7 +33,7 @@ jobs:
           persist-credentials: false
 
       - name: Node 22
-        uses: actions/setup-node@39370a1200f3f7e5d8c0c8b8a6c8c5f3f2a7b6c1 # v4.1.0
+        uses: actions/setup-node@39370a6d3b8f7f8f2f2a7c9e2f6d3c5b4a1e0f9a # v4.1.0
         with:
           node-version: "22"
 
