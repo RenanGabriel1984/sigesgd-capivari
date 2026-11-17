@@ -60,20 +60,43 @@ export const classifyHistoricalTestMovementsInternal = internalMutation({
         if (movement.lotId !== "n179kw2gk7p08rw1qjh0tygzmm4k480k") {
           throw new Error(`Lote divergente no movimento ${expected.id}`);
         }
-        if (movement.entryId !== "ENT-2026-000001" && movement.entryId) {
-          throw new Error(`Entrada divergente no movimento ${expected.id}`);
-        }
         const product = await ctx.db.get(movement.productId);
         if (!product?.name?.toLowerCase().includes("cooler")) {
           throw new Error(`Produto não corresponde ao cooler: ${expected.id}`);
         }
-        return { expected, movement };
+        const lot = await ctx.db.get(movement.lotId as any);
+        if (!lot || String(lot._id) !== "n179kw2gk7p08rw1qjh0tygzmm4k480k") {
+          throw new Error(`Lote não corresponde ao cooler: ${expected.id}`);
+        }
+        if (String(lot.productId) !== String(movement.productId)) {
+          throw new Error(`Produto do lote diverge: ${expected.id}`);
+        }
+        if (movement.entryId && String(movement.entryId) !== String(lot.entryId)) {
+          throw new Error(`Entrada vinculada diverge do lote: ${expected.id}`);
+        }
+        const entry = lot.entryId ? await ctx.db.get(lot.entryId) : null;
+        if (entry?.entryNumber !== "ENT-2026-000001") {
+          throw new Error(`Entrada documental não é ENT-2026-000001: ${expected.id}`);
+        }
+        return { expected, movement, lot };
       }),
     );
 
     const locations = await ctx.db.query("storageLocations").collect();
     const location = locations.find((row) => row.name === "Armário TI 01");
     if (!location) throw new Error("Armário TI 01 não encontrado.");
+    const balances = await ctx.db.query("lotLocationBalances").collect();
+    for (const { movement, lot } of movements) {
+      const lotBalances = balances.filter((row) => String(row.lotId) === String(lot._id));
+      if (
+        lotBalances.length !== 1 ||
+        String(lotBalances[0].locationId) !== String(location._id)
+      ) {
+        throw new Error(
+          `A posição atual do lote não confirma Armário TI 01 para ${String(movement._id)}.`,
+        );
+      }
+    }
 
     const now = Date.now();
     for (const { expected, movement } of movements) {
