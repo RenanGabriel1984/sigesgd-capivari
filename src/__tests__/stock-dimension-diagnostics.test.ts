@@ -6,7 +6,8 @@ const backend = readFileSync(resolve(__dirname, "../convex/stockSetup.ts"), "utf
 
 describe("diagnóstico dimensional do estoque", () => {
   const start = backend.indexOf("export const stockDimensionDiagnostics = query({");
-  const block = backend.slice(start);
+  const end = backend.indexOf("\nexport const lotLocationReadiness", start);
+  const block = backend.slice(start, end < 0 ? undefined : end);
 
   it("expõe uma consulta autenticada e somente leitura", () => {
     expect(start).toBeGreaterThanOrEqual(0);
