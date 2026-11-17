@@ -27,7 +27,7 @@ async function requireUser(ctx: any) {
 }
 
 async function requireAdmin(ctx: any) {
-  // RBAC central: carga inicial, importação de planilha e saída rápida.
+  // RBAC central: carga inicial e importação de planilha (ações administrativas).
   return requirePermission(ctx, "stock.mutate", { entity: "stockSetup" });
 }
 
