@@ -92,6 +92,7 @@ export function EntryPatrimonyDialog({
     items.flatMap((item) =>
       (unitsByItem[item._id] ?? []).map((unit) => ({
         entryItemId: item._id as never,
+        patrimonyNumber: unit.patrimonyNumber?.trim() || undefined,
         serialNumber: unit.serialNumber || undefined,
         manufacturer: unit.manufacturer || undefined,
         model: unit.model || undefined,
