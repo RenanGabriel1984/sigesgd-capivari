@@ -39,7 +39,7 @@ const ASSET_TYPE_LABELS: Record<string, string> = {
 const HISTORY_LABELS: Record<string, string> = {
   created: "Criado", assigned: "Atribuído", relocated: "Transferido",
   maintenance: "Manutenção", returned: "Retornado", status_changed: "Status Alterado",
-  part_installed: "Peça Instalada", part_removed: "Peça Removida", disposed: "Descartado",
+  part_installed: "Peça Instalada", part_removed: "Peça Removida", disposed: "Descartado", linked_from_entry: "Vinculado ao recebimento",
 };
 
 export default function AssetDetailPage() {
@@ -128,6 +128,16 @@ export default function AssetDetailPage() {
                   <div><p className="text-xs text-muted-foreground">Responsável</p><p className="text-sm">{asset.responsible?.name ?? "—"}</p></div>
                   <div><p className="text-xs text-muted-foreground">Secretaria</p><p className="text-sm">{asset.organization?.name ?? "—"}</p></div>
                   <div><p className="text-xs text-muted-foreground">Localização</p><p className="text-sm">{asset.location?.name ?? "—"}</p></div>
+                  {asset.sourceEntry && <div className="md:col-span-3 rounded-md border bg-muted/20 p-3">
+                    <p className="text-xs font-medium text-muted-foreground">Origem do recebimento</p>
+                    <p className="text-sm font-medium">Entrada {asset.sourceEntry.entryNumber}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {asset.sourceEntry.invoiceNumber ? `NF ${asset.sourceEntry.invoiceNumber}` : "Sem número de NF"}
+                      {asset.sourceEntry.invoiceDate ? ` · Emissão ${asset.sourceEntry.invoiceDate}` : ""}
+                      {asset.sourceEntry.receivedAt ? ` · Recebimento ${new Date(asset.sourceEntry.receivedAt).toLocaleDateString("pt-BR")}` : ""}
+                    </p>
+                    <p className="text-xs text-muted-foreground">O vínculo identifica a origem do equipamento e não representa tombamento oficial.</p>
+                  </div>}
                   {asset.observation && <div className="md:col-span-3"><p className="text-xs text-muted-foreground">Observação</p><p className="text-sm">{asset.observation}</p></div>}
                 </div>
               </CardContent>
