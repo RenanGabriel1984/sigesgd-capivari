@@ -897,19 +897,32 @@ export const setUnits = mutation({
       }
     }
 
-    // O número oficial de patrimônio é atribuído pelo setor de Patrimônio,
-    // depois que a entrada estiver confirmada e a unidade recebida registrada.
-    if (args.units.some((unit) => !!unit.patrimonyNumber?.trim())) {
-      throw new Error("O número oficial de patrimônio só pode ser atribuído pelo setor de Patrimônio após a confirmação da entrada.");
-    }
-
-    // Patrimônio não pode se repetir dentro da mesma entrada
+    // O número patrimonial é apenas um identificador opcional informado
+    // quando já consta no documento/equipamento. A TI não atribui tombamento.
     const seen = new Set<string>();
     for (const u of args.units) {
-      const p = (u.patrimonyNumber ?? "").trim();
-      if (!p) continue;
-      if (seen.has(p)) throw new Error(`Patrimônio duplicado na entrada: ${p}`);
-      seen.add(p);
+      const number = (u.patrimonyNumber ?? "").trim().toLocaleUpperCase("pt-BR");
+      if (!number) continue;
+      if (seen.has(number)) throw new Error(`Número patrimonial duplicado na entrada: ${u.patrimonyNumber}`);
+      seen.add(number);
+    }
+
+    // Evita cadastrar um identificador já associado a outro bem. Unidades da
+    // própria entrada são excluídas porque setUnits substitui esse conjunto.
+    const [knownUnits, knownAssets] = await Promise.all([
+      ctx.db.query("entryItemUnits").collect(),
+      ctx.db.query("assets").collect(),
+    ]);
+    for (const number of seen) {
+      const unitOwner = knownUnits.find((row: any) =>
+        row.entryId !== args.entryId &&
+        row.patrimonyNumber?.trim().toLocaleUpperCase("pt-BR") === number
+      );
+      if (unitOwner) throw new Error(`O número patrimonial ${number} já está associado a outra unidade recebida.`);
+      const assetOwner = knownAssets.find((row: any) =>
+        row.patrimonyNumber?.trim().toLocaleUpperCase("pt-BR") === number
+      );
+      if (assetOwner) throw new Error(`O número patrimonial ${number} já consta no cadastro de equipamentos.`);
     }
 
     // Substitui as unidades da entrada (rascunho)
@@ -928,9 +941,6 @@ export const setUnits = mutation({
         entryItemId: u.entryItemId,
         productId: item.productId,
         patrimonyNumber: u.patrimonyNumber?.trim() || undefined,
-        patrimonyRegistrationStatus: "pending",
-        patrimonyAssignedAt: undefined,
-        patrimonyAssignedByUserId: undefined,
         serialNumber: u.serialNumber?.trim() || undefined,
         manufacturer: u.manufacturer?.trim() || undefined,
         model: u.model?.trim() || undefined,
