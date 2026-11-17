@@ -33,13 +33,13 @@ function dateLabel(value?: string | number): string {
 }
 
 function equipmentLabel(asset: any): string {
-  if (!asset) return "Equipamento não encontrado";
+  if (!asset) return "";
   return [
     asset.patrimonyNumber ? `Patrimônio ${asset.patrimonyNumber}` : null,
     asset.serialNumber ? `Série ${asset.serialNumber}` : null,
     [asset.manufacturer, asset.model].filter(Boolean).join(" "),
     asset.assetType,
-  ].filter(Boolean).join(" · ");
+  ].filter(Boolean).join(" · ") || "Equipamento sem identificação";
 }
 
 export default function PatrimonyPage() {
