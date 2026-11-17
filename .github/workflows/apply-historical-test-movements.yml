@@ -1,13 +1,7 @@
 name: Classificação controlada — movimentos históricos de teste
 
 on:
-  push:
-    branches:
-      - codex/historical-stock-location-maintenance
-    paths:
-      - ".github/workflows/apply-historical-test-movements.yml"
-      - "src/convex/historicalTestMovementMaintenance.ts"
-      - "src/convex/schema.ts"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -140,7 +134,7 @@ jobs:
           {
             echo "### Classificação histórica concluída e verificada"
             echo ""
-            echo "- Deployment: `dev:first-herring-264`"
+            echo "- Deployment: dev:first-herring-264"
             echo "- Movimentos classificados como teste: **2 (1 saída + 1 devolução)**"
             echo "- Local confirmado: **Armário TI 01**"
             echo "- Logs individuais de auditoria: **2**"
