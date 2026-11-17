@@ -376,6 +376,168 @@ export const markSentToWarehouse = mutation({
   },
 });
 
+/**
+ * Unidades permanentes recebidas que ainda não estão vinculadas ao parque de
+ * equipamentos. A consulta não cria nem altera registros.
+ */
+export const listUnlinkedEntryUnits = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const units = await ctx.db.query("entryItemUnits").order("desc").take(500);
+    const pending = units.filter((unit: any) => !unit.assetId);
+    const rows = await Promise.all(pending.map(async (unit: any) => {
+      const entry: any = await ctx.db.get(unit.entryId);
+      if (!entry || entry.status !== "confirmed" || entry.materialType !== "permanent") return null;
+      const item: any = await ctx.db.get(unit.entryItemId);
+      const product: any = item ? await ctx.db.get(item.productId) : null;
+      const location: any = unit.locationId ? await ctx.db.get(unit.locationId) : null;
+      return {
+        ...unit,
+        entryNumber: entry.entryNumber,
+        invoiceNumber: entry.invoiceNumber ?? null,
+        invoiceDate: entry.invoiceDate ?? null,
+        receivedAt: entry.receivedAt,
+        productName: product?.name ?? "Produto não encontrado",
+        productManufacturer: product?.manufacturer ?? null,
+        productModel: product?.model ?? null,
+        locationName: location?.name ?? null,
+      };
+    }));
+    return rows.filter(Boolean).slice(0, 300);
+  },
+});
+
+/**
+ * Cria o cadastro individual do equipamento a partir de uma unidade recebida,
+ * ou associa a unidade a um equipamento que já exista com o mesmo patrimônio
+ * ou número de série. A operação é idempotente e não toca no estoque.
+ */
+export const createFromEntryUnit = mutation({
+  args: {
+    entryItemUnitId: v.id("entryItemUnits"),
+    assetType: v.union(
+      v.literal("desktop"), v.literal("notebook"), v.literal("monitor"),
+      v.literal("server"), v.literal("printer"), v.literal("switch"),
+      v.literal("router"), v.literal("access_point"), v.literal("ups"),
+      v.literal("storage"), v.literal("phone"), v.literal("other")
+    ),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireManagerOrAdmin(ctx);
+    const unit: any = await ctx.db.get(args.entryItemUnitId);
+    if (!unit) throw new Error("Unidade recebida não encontrada.");
+    const entry: any = await ctx.db.get(unit.entryId);
+    if (!entry || entry.status !== "confirmed" || entry.materialType !== "permanent") {
+      throw new Error("Somente unidades de entradas confirmadas de material permanente podem ser cadastradas como equipamento.");
+    }
+
+    if (unit.assetId) {
+      const linked: any = await ctx.db.get(unit.assetId);
+      if (!linked) throw new Error("A unidade possui vínculo inválido com um equipamento. Solicite revisão técnica.");
+      if (linked.entryItemUnitId && linked.entryItemUnitId !== unit._id) {
+        throw new Error("O equipamento já está vinculado a outra unidade recebida.");
+      }
+      return linked._id;
+    }
+
+    const patrimonyNumber = unit.patrimonyNumber?.trim() || undefined;
+    const serialNumber = unit.serialNumber?.trim() || undefined;
+    const [byPatrimony, bySerial] = await Promise.all([
+      patrimonyNumber
+        ? ctx.db.query("assets").withIndex("by_patrimony", (q: any) => q.eq("patrimonyNumber", patrimonyNumber)).first()
+        : null,
+      serialNumber
+        ? ctx.db.query("assets").withIndex("by_serial", (q: any) => q.eq("serialNumber", serialNumber)).first()
+        : null,
+    ]);
+    if (byPatrimony && bySerial && byPatrimony._id !== bySerial._id) {
+      throw new Error("Patrimônio e número de série apontam para equipamentos diferentes. Revise os cadastros antes de associar.");
+    }
+
+    const existing: any = byPatrimony ?? bySerial ?? null;
+    if (existing?.entryItemUnitId && existing.entryItemUnitId !== unit._id) {
+      throw new Error("O equipamento identificado já está vinculado a outra unidade recebida.");
+    }
+
+    const item: any = await ctx.db.get(unit.entryItemId);
+    const product: any = item ? await ctx.db.get(item.productId) : null;
+    const now = Date.now();
+    const organizationId = unit.unidadeId ?? unit.departamentoId ?? unit.secretariaId;
+    const manufacturer = unit.manufacturer?.trim() || product?.manufacturer || undefined;
+    const model = unit.model?.trim() || item?.model || product?.model || undefined;
+    const sourceNote = `Origem: entrada ${entry.entryNumber}${entry.invoiceNumber ? ` · NF ${entry.invoiceNumber}` : ""}.`;
+    const observation = [unit.observation?.trim(), sourceNote].filter(Boolean).join("\n");
+
+    let assetId: any;
+    if (existing) {
+      const patch: Record<string, any> = {
+        entryId: entry._id,
+        entryItemId: unit.entryItemId,
+        entryItemUnitId: unit._id,
+        updatedAt: now,
+      };
+      if (!existing.patrimonyNumber && patrimonyNumber) patch.patrimonyNumber = patrimonyNumber;
+      if (!existing.serialNumber && serialNumber) patch.serialNumber = serialNumber;
+      if (!existing.manufacturer && manufacturer) patch.manufacturer = manufacturer;
+      if (!existing.model && model) patch.model = model;
+      if (!existing.acquisitionDate && unit.acquisitionDate) patch.acquisitionDate = unit.acquisitionDate;
+      if (!existing.storageLocationId && unit.locationId) patch.storageLocationId = unit.locationId;
+      if (!existing.organizationId && organizationId) patch.organizationId = organizationId;
+      if (!existing.observation) patch.observation = observation;
+      await ctx.db.patch(existing._id, patch);
+      assetId = existing._id;
+      await ctx.db.insert("assetHistory", {
+        assetId,
+        eventType: "linked_from_entry",
+        userId,
+        observation: `Cadastro existente associado à unidade da entrada ${entry.entryNumber}.`,
+        timestamp: now,
+      });
+      await ctx.db.insert("auditLogs", {
+        userId, action: "asset_update", entity: "assets", entityId: assetId,
+        details: `Equipamento existente associado à unidade da entrada ${entry.entryNumber}`,
+        timestamp: now,
+      });
+    } else {
+      assetId = await ctx.db.insert("assets", {
+        patrimonyNumber,
+        serialNumber,
+        entryId: entry._id,
+        entryItemId: unit.entryItemId,
+        entryItemUnitId: unit._id,
+        assetType: args.assetType,
+        manufacturer,
+        model,
+        organizationId,
+        storageLocationId: unit.locationId,
+        acquisitionDate: unit.acquisitionDate,
+        status: "active",
+        observation,
+        active: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.insert("assetHistory", {
+        assetId,
+        eventType: "created",
+        userId,
+        newStatus: "active",
+        observation: `Equipamento cadastrado a partir da entrada ${entry.entryNumber}. O vínculo não representa tombamento oficial.`,
+        timestamp: now,
+      });
+      await ctx.db.insert("auditLogs", {
+        userId, action: "asset_create", entity: "assets", entityId: assetId,
+        details: `Equipamento cadastrado a partir da entrada ${entry.entryNumber}: ${patrimonyNumber ?? serialNumber ?? product?.name ?? "sem identificador"}`,
+        timestamp: now,
+      });
+    }
+
+    await ctx.db.patch(unit._id, { assetId });
+    return assetId;
+  },
+});
+
 export const create = mutation({
   args: {
     patrimonyNumber: v.optional(v.string()),
