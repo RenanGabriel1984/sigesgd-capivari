@@ -26,6 +26,8 @@ const reqSrc = readFileSync(resolve(ROOT, "src/convex/requests.ts"), "utf-8");
 const movSrc = readFileSync(resolve(ROOT, "src/convex/stockMovements.ts"), "utf-8");
 const rbacSrc = readFileSync(resolve(ROOT, "src/convex/rbac.ts"), "utf-8");
 const repSrc = readFileSync(resolve(ROOT, "src/convex/dataRepairs.ts"), "utf-8");
+const stockSetupSrc = readFileSync(resolve(ROOT, "src/convex/stockSetup.ts"), "utf-8");
+const transferUiSrc = readFileSync(resolve(ROOT, "src/pages/StockTransfers.tsx"), "utf-8");
 
 describe("etapa 1 — técnico consulta estoque e cria requisição", () => {
   it("técnico tem stock.view/products.view mas não pode mutar estoque", () => {
@@ -110,6 +112,31 @@ describe("etapa 4 — autoaprovação bloqueada em qualquer papel", () => {
         role,
       ).toBe(roleHasPermission(role, "requests.approve"));
     }
+  });
+});
+
+describe("saída rápida e transferência rastreada por lote", () => {
+  it("saída rápida exige a permissão operacional exits.create, não admin fixo", () => {
+    const quickExit = stockSetupSrc.slice(
+      stockSetupSrc.indexOf("export const quickExit"),
+      stockSetupSrc.indexOf("export const cleanupTestData"),
+    );
+    expect(quickExit).toContain('requirePermission(ctx, "exits.create"');
+    expect(quickExit).not.toContain("requireAdmin(ctx)");
+    expect(roleHasPermission("stock_manager", "exits.create")).toBe(true);
+    expect(roleHasPermission("technician", "exits.create")).toBe(false);
+  });
+
+  it("transferência apresenta lotes ativos e envia lotId quando há rastreabilidade", () => {
+    expect(transferUiSrc).toContain("api.lots.listActiveByProduct");
+    expect(transferUiSrc).toContain('Selecione o lote que será transferido.');
+    expect(transferUiSrc).toContain("lotId: lotId ? (lotId as any) : undefined");
+  });
+
+  it("backend bloqueia transferência sem lote quando há lotes ativos com saldo", () => {
+    const transferSrc = readFileSync(resolve(ROOT, "src/convex/stockTransfers.ts"), "utf-8");
+    expect(transferSrc).toContain("Selecione o lote para transferir: o produto possui saldo rastreado por lote.");
+    expect(transferSrc).toContain("planLotLocationTransfer");
   });
 });
 
