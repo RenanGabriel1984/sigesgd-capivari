@@ -362,6 +362,7 @@ export const deliver = mutation({
       quantityDelivered: v.number(),
       serialNumbers: v.optional(v.array(v.string())),
       locationId: v.optional(v.id("storageLocations")),
+      areaId: v.optional(v.id("stockAreas")),
     }))),
     receivedByUserId: v.optional(v.id("users")),
     confirmationPassword: v.string(),
@@ -451,6 +452,7 @@ export const deliver = mutation({
       const lotConsumption = await consumeLotLocationStock(ctx, {
         productId: requestItem.productId,
         locationId: sourceLocationId,
+        areaId: input.areaId,
         quantity: input.quantityDelivered,
       });
       const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
