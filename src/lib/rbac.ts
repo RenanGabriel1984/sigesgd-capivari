@@ -206,7 +206,6 @@ const DIRECTOR_ACCESS: readonly AppPermission[] = [
 ];
 
 const PATRIMONY_MANAGER_ACCESS: readonly AppPermission[] = [
-  "equipment.view",
   "patrimony.view",
   "patrimony.assign",
   // Permite apenas acesso às configurações pessoais, como troca de senha.
