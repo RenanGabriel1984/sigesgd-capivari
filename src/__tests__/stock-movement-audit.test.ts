@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 const backend = readFileSync(resolve(__dirname, "../convex/diagnostics.ts"), "utf8");
 const start = backend.indexOf("export const stockMovementTraceabilityAuditInternal = internalQuery({");
-const block = backend.slice(start);
+const end = backend.indexOf("export const applyStockMovementLocationCorrectionsInternal =", start);\nconst block = backend.slice(start, end > start ? end : undefined);\nconst correctionStart = backend.indexOf("export const applyStockMovementLocationCorrectionsInternal = internalMutation({");\nconst correctionBlock = backend.slice(correctionStart);
 
 describe("auditoria histórica de rastreabilidade das movimentações", () => {
   it("é uma consulta interna e somente leitura", () => {
@@ -48,5 +48,40 @@ describe("auditoria histórica de rastreabilidade das movimentações", () => {
     expect(block).toContain("missingProductReference");
     expect(block).toContain("invalidEntryReference");
     expect(block).toContain("não grava dados");
+  });
+});
+
+
+describe("correção controlada de localização histórica", () => {
+  it("é uma mutação interna separada da consulta somente leitura", () => {
+    expect(correctionStart).toBeGreaterThanOrEqual(0);
+    expect(correctionBlock).toContain("internalMutation({");
+  });
+
+  it("exige confirmação explícita e exatamente 61 identificadores únicos", () => {
+    expect(correctionBlock).toContain("APLICAR-61-CORRECOES-LOCALIZACAO");
+    expect(correctionBlock).toContain("EXPECTED_COUNT = 61");
+    expect(correctionBlock).toContain("new Set(expectedIds).size !== EXPECTED_COUNT");
+  });
+
+  it("revalida todos os candidatos antes do primeiro patch e aborta se a lista mudar", () => {
+    const validation = correctionBlock.indexOf("const actualIds =");
+    const firstPatch = correctionBlock.indexOf("ctx.db.patch(");
+    expect(validation).toBeGreaterThanOrEqual(0);
+    expect(firstPatch).toBeGreaterThan(validation);
+    expect(correctionBlock).toContain("Nenhuma alteração foi aplicada");
+  });
+
+  it("altera somente a localização do movimento e grava auditoria individual", () => {
+    expect(correctionBlock).toContain("ctx.db.patch(candidate.movement._id, { locationId: candidate.locationId })");
+    expect(correctionBlock).toContain('ctx.db.insert("auditLogs"');
+    expect(correctionBlock).toContain('entity: "stockMovement"');
+    expect(correctionBlock).toContain('operation: "historical_location_backfill"');
+    expect(correctionBlock).toContain("userId deliberadamente");
+  });
+
+  it("mantém saídas, devoluções e transferências fora da correção automática", () => {
+    expect(correctionBlock).toContain('movement.type !== "entry" && movement.type !== "adjustment"');
+    expect(correctionBlock).toContain('["exit", "return", "transfer"]');
   });
 });
