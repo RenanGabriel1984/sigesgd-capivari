@@ -933,7 +933,7 @@ export const stockDimensionDiagnostics = query({
   handler: async (ctx) => {
     await requireUser(ctx);
 
-    const [products, stocks, locations, areas, lots, entryItems, transfers, movements, returns, inventories, inventoryCounts] =
+    const [products, stocks, locations, areas, lots, entryItems, transfers, movements, returns, inventories, inventoryCounts, locationBalances] =
       await Promise.all([
         ctx.db.query("products").collect(),
         ctx.db.query("stock").collect(),
@@ -946,6 +946,7 @@ export const stockDimensionDiagnostics = query({
         ctx.db.query("returns").collect(),
         ctx.db.query("inventories").collect(),
         ctx.db.query("inventoryCounts").collect(),
+        ctx.db.query("stockByLocation").collect(),
       ]);
 
     const productById = new Map(products.map((p: any) => [String(p._id), p]));
@@ -971,8 +972,6 @@ export const stockDimensionDiagnostics = query({
       const productLots = (lots as any[]).filter((lot) => String(lot.productId) === productId);
       const activeLots = productLots.filter((lot) => lot.active);
       const productStock = stockByProduct.get(productId) as any;
-      const locationRows = (stocks.length >= 0 ? (ctx as any) : null); // keeps this query independent of write helpers
-      void locationRows;
       const productTransfers = (transfers as any[]).filter((t) => String(t.productId) === productId);
       const productMovements = (movements as any[]).filter((m) => String(m.productId) === productId);
       const productReturns = (returns as any[]).filter((r) => String(r.productId) === productId);
@@ -1009,15 +1008,12 @@ export const stockDimensionDiagnostics = query({
       const postEntryMovements = productMovements.filter((movement: any) => movement.type !== "entry");
       const hasUnscopedOperations = productTransfers.length > 0 || productReturns.length > 0 ||
         postEntryMovements.length > 0 || productInventoryCount > 0;
-      const locationTotals = (ctx as any);
-      void locationTotals;
-      const physicalByLocation = (globalThis as any).__unused;
-      void physicalByLocation;
       return {
         productId,
         productName: product.name,
         globalPhysical: productStock?.physicalQuantity ?? 0,
         globalReserved: productStock?.reservedQuantity ?? 0,
+        byLocationPhysical: (locationBalances as any[]).filter((balance) => String(balance.productId) === productId).reduce((sum, balance) => sum + balance.quantity, 0),
         activeLotCount: activeLots.length,
         activeLotsAvailable: activeLots.reduce((sum: number, lot: any) => sum + lot.quantityAvailable, 0),
         activeLotsWithoutArea: activeLots.filter((lot: any) => !lot.areaId || !areaById.has(String(lot.areaId))).length,
@@ -1039,7 +1035,6 @@ export const stockDimensionDiagnostics = query({
       row.transferCount > 0 || row.returnCount > 0 || row.nonEntryMovementCount > 0
     ).sort((a: any, b: any) => a.productName.localeCompare(b.productName, "pt-BR"));
 
-    const locationBalances = await ctx.db.query("stockByLocation").collect();
     const byLocation = new Map<string, { locationId: string; locationName: string; quantity: number; productCount: number }>();
     for (const balance of locationBalances as any[]) {
       const key = String(balance.locationId);
