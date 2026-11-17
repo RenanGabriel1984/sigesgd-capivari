@@ -1852,8 +1852,8 @@ export const applyStockMovementLocationCorrectionsInternal = internalMutation({
         ctx.db.query("stockMovementLotAllocations").collect(),
       ]);
 
-    const byId = (rows: Array<{ _id: unknown }>) =>
-      new Map(rows.map((row) => [String(row._id), row]));
+    const byId = <T extends { _id: unknown }>(rows: T[]) =>
+      new Map<string, T>(rows.map((row) => [String(row._id), row]));
     const productById = byId(products);
     const entryById = byId(entries);
     const locationById = byId(locations);
