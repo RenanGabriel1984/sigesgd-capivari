@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useAuth } from "@/hooks/use-auth";
+import { roleHasPermission, type AppRole } from "@/lib/rbac";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -185,6 +187,7 @@ export default function AssetsPage() {
   // mesmo quando não existe nenhum asset cadastrado.
   const category = resolveEquipmentCategory(searchParams);
   const [tab, setTab] = useState("list");
+  const [assetTypesByUnit, setAssetTypesByUnit] = useState<Record<string, string>>({});
   const [showNew, setShowNew] = useState(false);
   const [filters, setFilters] = useState({ status: "", assetType: "", search: "" });
   const [form, setForm] = useState({
@@ -192,6 +195,12 @@ export default function AssetsPage() {
     manufacturer: "", model: "", hostname: "", macAddress: "",
     organizationId: "", responsibleUserId: "", observation: "",
   });
+
+  const { user } = useAuth();
+  const canManageEquipment = roleHasPermission(user?.role as AppRole | undefined, "equipment.manage");
+  const pendingEntryUnits = useQuery(api.assets.listUnlinkedEntryUnits, {}) as any[] | undefined;
+  const createFromEntryUnit = useMutation(api.assets.createFromEntryUnit);
+  const [linkingUnitId, setLinkingUnitId] = useState<string | null>(null);
 
   const assets = useQuery(api.assets.list, {
     status: filters.status || undefined,
@@ -245,6 +254,22 @@ export default function AssetsPage() {
     a.model?.toLowerCase().includes(filters.search.toLowerCase())
   );
 
+  const handleRegisterReceivedUnit = async (unit: any) => {
+    const unitId = String(unit._id);
+    setLinkingUnitId(unitId);
+    try {
+      await createFromEntryUnit({
+        entryItemUnitId: unit._id,
+        assetType: (assetTypesByUnit[unitId] ?? "other") as any,
+      });
+      toast.success("Equipamento associado ao recebimento. Nenhum saldo de estoque foi alterado.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível associar o equipamento.");
+    } finally {
+      setLinkingUnitId(null);
+    }
+  };
+
   const orgsList = organizations?.orgs ?? [];
 
   const handleCreate = async () => {
@@ -288,6 +313,56 @@ export default function AssetsPage() {
             <Plus className="h-4 w-4" /> Novo Equipamento
           </Button>
         </div>
+
+        {pendingEntryUnits && pendingEntryUnits.length > 0 && (
+          <Card className="border-border/50">
+            <CardContent className="p-4 space-y-3">
+              <div>
+                <h2 className="font-semibold text-sm">Equipamentos recebidos ainda não vinculados</h2>
+                <p className="text-xs text-muted-foreground">
+                  Unidades de entradas confirmadas de material permanente. Ao cadastrar, o sistema procura patrimônio ou série já existente e associa o registro quando encontra correspondência, evitando duplicidade.
+                </p>
+              </div>
+              <div className="divide-y">
+                {pendingEntryUnits.map((unit: any) => {
+                  const unitId = String(unit._id);
+                  return (
+                    <div key={unitId} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-3">
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm">{unit.productName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Entrada {unit.entryNumber}{unit.invoiceNumber ? ` · NF ${unit.invoiceNumber}` : ""}
+                          {unit.patrimonyNumber ? ` · Patrimônio ${unit.patrimonyNumber}` : ""}
+                          {unit.serialNumber ? ` · Série ${unit.serialNumber}` : ""}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {[unit.manufacturer || unit.productManufacturer, unit.model || unit.productModel, unit.locationName].filter(Boolean).join(" · ") || "Identificação complementar pendente"}
+                        </p>
+                      </div>
+                      {canManageEquipment && (
+                        <div className="flex shrink-0 items-center gap-2">
+                          <select
+                            className="h-9 rounded-md border bg-background px-2 text-xs"
+                            value={assetTypesByUnit[unitId] ?? "other"}
+                            onChange={(event) => setAssetTypesByUnit((current) => ({ ...current, [unitId]: event.target.value }))}
+                            aria-label={`Tipo do equipamento ${unit.productName}`}
+                          >
+                            {Object.entries(ASSET_TYPE_LABELS).map(([key, label]) => (
+                              <option key={key} value={key}>{label}</option>
+                            ))}
+                          </select>
+                          <Button size="sm" onClick={() => void handleRegisterReceivedUnit(unit)} disabled={linkingUnitId === unitId}>
+                            {linkingUnitId === unitId ? "Associando..." : "Cadastrar / associar"}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Categorias de equipamento — recorte da mesma lista, sem duplicar telas.
             Cada categoria tem o próprio estado na URL (?categoria=<slug>). */}
