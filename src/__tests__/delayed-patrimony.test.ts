@@ -79,7 +79,7 @@ describe("identificação de equipamentos e solicitação de baixa patrimonial",
 
   it("apresenta a tela como solicitação de baixa e não como fila de tombamento", () => {
     expect(page).toContain("Solicitações de baixa patrimonial");
-    expect(page).toContain("a TI identifica o equipamento e encaminha a solicitação");
+    expect(page).toContain("A TI identifica o equipamento e encaminha a solicitação");
     expect(page).toContain("Registrar confirmação do Patrimônio");
     expect(menu).toContain('label: "Solicitações de baixa"');
     expect(route).toContain('"/patrimony": "equipment.view"');
