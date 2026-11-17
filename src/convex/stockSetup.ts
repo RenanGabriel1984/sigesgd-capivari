@@ -1788,7 +1788,13 @@ export const stockDimensionOverview = query({
       const globalPhysical = global.length === 1 ? global[0].physicalQuantity : 0;
       const areasMap = new Map<string, { areaId: string | null; areaName: string; quantityAvailable: number; locations: Map<string, number> }>();
       const keys = new Set<string>();
-      let invalidBalanceCount = 0;
+      let invalidBalanceCount = global.length !== 1 && (productLots.length > 0 || productLocations.length > 0) ? 1 : 0;
+      const locationKeys = new Set<string>();
+      for (const row of productLocations) {
+        const key = String(row.locationId);
+        if (locationKeys.has(key)) invalidBalanceCount++;
+        locationKeys.add(key);
+      }
       for (const balance of productBalances) {
         const lot = productLots.find((candidate) => String(candidate._id) === String(balance.lotId));
         if (!lot || !Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0) {
@@ -1839,6 +1845,7 @@ export const stockDimensionOverview = query({
         productId: String(product._id),
         productName: product.name,
         globalPhysical,
+        globalStockRowCount: global.length,
         globalVsLocationDifference: global.length === 1 ? globalPhysical - locationTotal : null,
         globalVsLotsDifference: productLots.length > 0 ? globalPhysical - lotTotal : null,
         unmappedLotQuantity: Math.abs(lotTotal - locatedLotTotal),
