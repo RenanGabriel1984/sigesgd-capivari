@@ -1656,3 +1656,90 @@ export const applyLotLocationBalancesMigration = internalMutation({
     };
   },
 });
+
+
+/**
+ * Resumo operacional por produto × área × armário.
+ * A área vem do lote; não é copiada para uma segunda fonte de saldo.
+ */
+export const productDimensionSummary = query({
+  args: { productId: v.id("products") },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    const [lots, balances, areas, locations, stockRows] = await Promise.all([
+      ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
+      ctx.db.query("lotLocationBalances").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
+      ctx.db.query("stockAreas").collect(),
+      ctx.db.query("storageLocations").collect(),
+      ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
+    ]);
+    const product = await ctx.db.get(args.productId);
+    if (!product) throw new Error("Produto não encontrado.");
+    const globalStock = getOptionalSingleValidGlobalStock(stockRows, product.name);
+    const areaById = new Map(areas.map((area: any) => [String(area._id), area]));
+    const locationById = new Map(locations.map((location: any) => [String(location._id), location]));
+    const lotById = new Map(lots.map((lot: any) => [String(lot._id), lot]));
+    const balanceKeys = new Set<string>();
+    const grouped = new Map<string, { areaId: string | null; areaName: string; quantity: number; locations: Map<string, number> }>();
+    let unmappedLotQuantity = 0;
+    const invalidBalances: string[] = [];
+
+    for (const balance of balances as any[]) {
+      const lot = lotById.get(String(balance.lotId));
+      if (!lot) {
+        invalidBalances.push("Saldo vinculado a lote inexistente.");
+        continue;
+      }
+      const key = String(balance.lotId) + "::" + String(balance.locationId);
+      if (balanceKeys.has(key)) {
+        invalidBalances.push(`Saldo duplicado do lote ${lot.lotNumber} no mesmo armário.`);
+        continue;
+      }
+      balanceKeys.add(key);
+      if (!Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0) {
+        invalidBalances.push(`Quantidade inválida no lote ${lot.lotNumber}.`);
+        continue;
+      }
+      const areaId = lot.areaId ? String(lot.areaId) : null;
+      const areaName = areaId ? ((areaById.get(areaId) as any)?.name ?? "Área não encontrada") : "Sem área";
+      const areaKey = areaId ?? "unclassified";
+      const group = grouped.get(areaKey) ?? { areaId, areaName, quantity: 0, locations: new Map<string, number>() };
+      group.quantity += balance.quantityAvailable;
+      group.locations.set(String(balance.locationId), (group.locations.get(String(balance.locationId)) ?? 0) + balance.quantityAvailable);
+      grouped.set(areaKey, group);
+    }
+
+    for (const lot of lots as any[]) {
+      if (lot.active === false || lot.quantityAvailable <= 0) continue;
+      const located = (balances as any[])
+        .filter((balance) => String(balance.lotId) === String(lot._id))
+        .reduce((sum, balance) => sum + (Number.isFinite(balance.quantityAvailable) ? balance.quantityAvailable : 0), 0);
+      if (Math.abs(located - lot.quantityAvailable) > 1e-9) {
+        unmappedLotQuantity += Math.max(0, lot.quantityAvailable - located);
+      }
+    }
+
+    const areaRows = Array.from(grouped.values()).map((group) => ({
+      areaId: group.areaId,
+      areaName: group.areaName,
+      quantityAvailable: group.quantity,
+      locations: Array.from(group.locations.entries()).map(([locationId, quantity]) => ({
+        locationId,
+        locationName: (locationById.get(locationId) as any)?.name ?? "Armário não encontrado",
+        quantityAvailable: quantity,
+      })).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR")),
+    })).sort((a, b) => a.areaName.localeCompare(b.areaName, "pt-BR"));
+
+    return {
+      productId: args.productId,
+      productName: product.name,
+      globalPhysical: globalStock?.physicalQuantity ?? 0,
+      globalReserved: globalStock?.reservedQuantity ?? 0,
+      totalLocated: areaRows.reduce((sum, area) => sum + area.quantityAvailable, 0),
+      unmappedLotQuantity,
+      invalidBalances,
+      areas: areaRows,
+      readOnly: true,
+    };
+  },
+});
