@@ -22,7 +22,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 
 const ASSET_STATUS_LABELS: Record<string, string> = {
   active: "Ativo", maintenance: "Manutenção", inactive: "Inativo",
-  disposal_pending: "Descarte Pendente", disposed: "Descartado", lost: "Perdido",
+  disposal_pending: "Solicitação enviada ao Patrimônio", disposal_authorized: "Baixa oficial confirmada", sent_to_warehouse: "Encaminhado ao barracão", disposed: "Baixado (legado)", lost: "Perdido",
 };
 const ASSET_STATUS_COLORS: Record<string, string> = {
   active: "text-emerald-600 bg-emerald-50", maintenance: "text-amber-600 bg-amber-50",
@@ -237,7 +237,7 @@ export default function AssetDetailPage() {
                 <Label>Novo Status</Label>
                 <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={newStatus} onChange={(e) => setNewStatus(e.target.value)}>
                   <option value="">Selecione...</option>
-                  {Object.entries(ASSET_STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  {Object.entries(ASSET_STATUS_LABELS).filter(([key]) => ["active", "maintenance", "inactive", "lost"].includes(key)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </div>
               <div><Label>Observação</Label><Textarea className="mt-1" value={statusObs} onChange={(e) => setStatusObs(e.target.value)} /></div>
