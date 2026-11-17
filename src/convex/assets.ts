@@ -438,6 +438,12 @@ export const createFromEntryUnit = mutation({
       if (linked.entryItemUnitId && linked.entryItemUnitId !== unit._id) {
         throw new Error("O equipamento já está vinculado a outra unidade recebida.");
       }
+      if (!linked.entryItemUnitId) {
+        await ctx.db.patch(linked._id, {
+          entryId: entry._id, entryItemId: unit.entryItemId,
+          entryItemUnitId: unit._id, updatedAt: Date.now(),
+        });
+      }
       return linked._id;
     }
 
@@ -458,6 +464,14 @@ export const createFromEntryUnit = mutation({
     const existing: any = byPatrimony ?? bySerial ?? null;
     if (existing?.entryItemUnitId && existing.entryItemUnitId !== unit._id) {
       throw new Error("O equipamento identificado já está vinculado a outra unidade recebida.");
+    }
+    if (existing?.patrimonyNumber && patrimonyNumber &&
+        existing.patrimonyNumber.trim().toLocaleUpperCase("pt-BR") !== patrimonyNumber.toLocaleUpperCase("pt-BR")) {
+      throw new Error("O número patrimonial informado diverge do equipamento já cadastrado.");
+    }
+    if (existing?.serialNumber && serialNumber &&
+        existing.serialNumber.trim().toLocaleUpperCase("pt-BR") !== serialNumber.toLocaleUpperCase("pt-BR")) {
+      throw new Error("O número de série informado diverge do equipamento já cadastrado.");
     }
 
     const item: any = await ctx.db.get(unit.entryItemId);
