@@ -2,7 +2,7 @@
  * Gestão de Estoque SGGD — RBAC DEFINITIVO (testes da matriz e do enforcement).
  *
  * Cobertura RBAC-01..20 do prompt de produção:
- *  • RBAC-01..05 / 18 / 19 → comportamento da MATRIZ CENTRAL (5 papéis);
+ *  • RBAC-01..05 / 18 / 19 → comportamento da MATRIZ CENTRAL (6 papéis);
  *  • RBAC-06..17           → contratos de ENFORCEMENT no backend (fonte real):
  *    cada arquivo sensível precisa chamar requirePermission com a permissão
  *    correta, e approve/reject precisam do bloqueio incondicional de
@@ -224,6 +224,12 @@ describe("RBAC-06 — técnico bloqueado em users (backend)", () => {
 });
 
 describe("RBAC-07 — técnico bloqueado em entries (backend)", () => {
+  it("consultas de entradas exigem entries.view, não apenas stock.view", () => {
+    expect(backendRequires("src/convex/entries.ts", "entries.view")).toBe(true);
+    expect(roleHasPermission("technician", "entries.view")).toBe(false);
+    expect(roleHasPermission("director", "entries.view")).toBe(false);
+    expect(roleHasPermission("stock_manager", "entries.view")).toBe(true);
+  });
   it("entries.ts (criar/confirmar/estornar) exige entries.create", () => {
     expect(backendRequires("src/convex/entries.ts", "entries.create")).toBe(true);
   });
