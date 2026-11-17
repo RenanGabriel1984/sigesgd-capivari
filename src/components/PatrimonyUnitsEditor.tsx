@@ -19,10 +19,10 @@ export function PatrimonyUnitsEditor({ items, itemIds, unitsByItem, products, lo
 }) {
   return <div className="border-t pt-3 space-y-3">
     <div className="flex items-center justify-between gap-2">
-      <Label className="text-sm font-medium">Unidades patrimoniais</Label>
+      <Label className="text-sm font-medium">Identificação dos equipamentos</Label>
       <Button size="sm" variant="outline" onClick={onSave} disabled={saving}>{saving ? "Salvando..." : "Salvar Unidades"}</Button>
     </div>
-    <p className="text-xs text-muted-foreground">Uma identificação provisória por unidade recebida. O número oficial de patrimônio será atribuído depois pelo setor responsável. Valores contábeis são apenas registrados, nunca calculados.</p>
+    <p className="text-xs text-muted-foreground">Registre uma identificação por equipamento. Informe o número patrimonial somente se ele já for conhecido; a TI não realiza tombamento oficial.</p>
     {items.map((item, idx) => {
       const itemId = itemIds[idx];
       if (!itemId || itemId.startsWith("temp_")) return null;
@@ -39,12 +39,12 @@ export function PatrimonyUnitsEditor({ items, itemIds, unitsByItem, products, lo
         {unitError && <p className="text-[11px] text-amber-700">{unitError}</p>}
         {units.map((unit, unitIndex) => <div key={unitIndex} className="rounded-md border p-2 space-y-2">
           <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
-            <div><Label className="text-[10px]">Patrimônio (posterior)</Label><Input value="" disabled placeholder="Atribuído pelo setor de Patrimônio" className="h-7 text-xs" /></div>
+            <div><Label className="text-[10px]">Patrimônio (se conhecido)</Label><Input value={unit.patrimonyNumber ?? ""} onChange={(e) => update(unitIndex, { patrimonyNumber: e.target.value })} placeholder="Opcional" className="h-7 text-xs" /></div>
             <div><Label className="text-[10px]">Série</Label><Input value={unit.serialNumber ?? ""} onChange={(e) => update(unitIndex, { serialNumber: e.target.value })} className="h-7 text-xs" /></div>
             <div><Label className="text-[10px]">Fabricante</Label><Input value={unit.manufacturer ?? ""} onChange={(e) => update(unitIndex, { manufacturer: e.target.value })} className="h-7 text-xs" /></div>
             <div><Label className="text-[10px]">Modelo</Label><Input value={unit.model ?? ""} onChange={(e) => update(unitIndex, { model: e.target.value })} className="h-7 text-xs" /></div>
             <div><Label className="text-[10px]">Aquisição</Label><Input type="date" value={unit.acquisitionDate ?? ""} onChange={(e) => update(unitIndex, { acquisitionDate: e.target.value })} className="h-7 text-xs" /></div>
-            <div><Label className="text-[10px]">Tombamento</Label><Input type="date" value={unit.incorporationDate ?? ""} onChange={(e) => update(unitIndex, { incorporationDate: e.target.value })} className="h-7 text-xs" /></div>
+            <div><Label className="text-[10px]">Data de incorporação</Label><Input type="date" value={unit.incorporationDate ?? ""} onChange={(e) => update(unitIndex, { incorporationDate: e.target.value })} className="h-7 text-xs" /></div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             {([['acquisitionValue', 'Valor aquisição'], ['accountingValue', 'Valor contábil'], ['residualValue', 'Valor residual'], ['accumulatedDepreciation', 'Depreciação acumulada'], ['netBookValue', 'Valor líquido']] as const).map(([field, label]) => <div key={field}><Label className="text-[10px]">{label}</Label><Input inputMode="decimal" value={maskCurrency(unit[field] ?? "")} onChange={(e) => update(unitIndex, { [field]: e.target.value })} placeholder="R$ 0,00" className="h-7 text-xs" /></div>)}
