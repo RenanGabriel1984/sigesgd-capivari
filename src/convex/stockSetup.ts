@@ -1666,16 +1666,19 @@ export const productDimensionSummary = query({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    const [lots, balances, areas, locations, stockRows] = await Promise.all([
+    const [lots, balances, areas, locations, stockRows, locationRows] = await Promise.all([
       ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
       ctx.db.query("lotLocationBalances").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
       ctx.db.query("stockAreas").collect(),
       ctx.db.query("storageLocations").collect(),
       ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
+      ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
     ]);
     const product = await ctx.db.get(args.productId);
     if (!product) throw new Error("Produto não encontrado.");
     const globalStock = getOptionalSingleValidGlobalStock(stockRows, product.name);
+    validateUniqueScopedStockRows(locationRows, product.name);
+    const totalByLocation = (locationRows as any[]).reduce((sum, row) => sum + row.quantity, 0);
     const areaById = new Map(areas.map((area: any) => [String(area._id), area]));
     const locationById = new Map(locations.map((location: any) => [String(location._id), location]));
     const lotById = new Map(lots.map((lot: any) => [String(lot._id), lot]));
@@ -1736,6 +1739,8 @@ export const productDimensionSummary = query({
       globalPhysical: globalStock?.physicalQuantity ?? 0,
       globalReserved: globalStock?.reservedQuantity ?? 0,
       totalLocated: areaRows.reduce((sum, area) => sum + area.quantityAvailable, 0),
+      totalByLocation,
+      globalVsLocationDifference: (globalStock?.physicalQuantity ?? 0) - totalByLocation,
       unmappedLotQuantity,
       invalidBalances,
       areas: areaRows,
