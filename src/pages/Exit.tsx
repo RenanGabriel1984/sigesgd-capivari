@@ -93,7 +93,7 @@ export default function Exit() {
   const selectedLocation = locationOptions.find((location: any) => String(location.locationId) === locationId);
 
   const available = selectedProduct
-    ? Math.max(0, selectedLocation?.quantityAvailable ?? selectedLocation?.quantity ?? 0)
+    ? Math.max(0, (selectedLocation as any)?.quantityAvailable ?? (selectedLocation as any)?.quantity ?? 0)
     : 0;
   const qty = Math.max(0, Number(quantity) || 0);
   const afterExit = Math.max(0, available - qty);
@@ -302,6 +302,34 @@ export default function Exit() {
                           {(productDimensions?.areas ?? []).some((area: any) => !area.areaId) && (
                             <p className="mt-1 text-xs text-amber-700">Há saldo legado sem área classificada; ele não será misturado a outra área.</p>
                           )}
+                        </div>
+                      )}
+                      <div>
+                        <Label className="text-sm font-medium">Armário de origem</Label>
+                        <Select value={locationId} onValueChange={setLocationId}>
+                          <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione o armário de origem" /></SelectTrigger>
+                          <SelectContent>
+                            {locationOptions.map((location: any) => (
+                              <SelectItem key={location.locationId} value={String(location.locationId)}>
+                                {location.locationName} · {location.quantityAvailable ?? location.quantity} disponível
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {(Math.abs(productDimensions?.globalVsLocationDifference ?? 0) > 1e-9 ||
+                        Math.abs(productDimensions?.globalVsLotsDifference ?? 0) > 1e-9 ||
+                        (productDimensions?.unmappedLotQuantity ?? 0) > 1e-9) && (
+                        <p className="text-xs text-destructive">
+                          Há divergência entre saldo global, armários e/ou lotes
+                          ({productDimensions?.globalVsLocationDifference} global × armários;
+                          {productDimensions?.globalVsLotsDifference} global × lotes;
+                          {productDimensions?.unmappedLotQuantity} sem alocação).
+                          A retirada ficará bloqueada até a conciliação.
+                        </p>
+                      )}
+                    </div>
+                  )}
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="border rounded-lg p-3">
                       <p className="text-lg font-bold">{available}</p>
