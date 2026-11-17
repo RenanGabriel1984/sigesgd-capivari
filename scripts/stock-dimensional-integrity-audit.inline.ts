@@ -98,6 +98,56 @@ for (const row of lots) {
   }
 }
 
+const areaDistribution = [];
+for (const area of areas) {
+  let lotCount = 0;
+  let lotUnits = 0;
+  let balanceRows = 0;
+  let balanceUnits = 0;
+  for (const lot of activeLots) {
+    if (String(lot.areaId || "") === String(area._id)) {
+      lotCount += 1;
+      lotUnits += Number(lot.quantityAvailable || 0);
+    }
+  }
+  for (const balance of balances) {
+    const lot = lots.find((item) => String(item._id) === String(balance.lotId));
+    if (lot && String(lot.areaId || "") === String(area._id)) {
+      balanceRows += 1;
+      balanceUnits += Number(balance.quantityAvailable || 0);
+    }
+  }
+  areaDistribution.push({areaId:String(area._id),areaName:area.name,active:area.active,activeLotCount:lotCount,lotUnits:lotUnits,balanceRows:balanceRows,balanceUnits:balanceUnits});
+}
+let unclassifiedActiveLotCount = 0;
+let unclassifiedActiveLotUnits = 0;
+for (const lot of activeLots) {
+  if (!lot.areaId) {
+    unclassifiedActiveLotCount += 1;
+    unclassifiedActiveLotUnits += Number(lot.quantityAvailable || 0);
+  }
+}
+const locationDistribution = [];
+for (const location of locations) {
+  let balanceRows = 0;
+  let units = 0;
+  for (const balance of balances) {
+    if (String(balance.locationId) === String(location._id)) {
+      balanceRows += 1;
+      units += Number(balance.quantityAvailable || 0);
+    }
+  }
+  locationDistribution.push({locationId:String(location._id),locationName:location.name,active:location.active,balanceRows:balanceRows,units:units});
+}
+let totalPhysicalUnits = 0;
+let totalLocationUnits = 0;
+let totalActiveLotUnits = 0;
+let totalLotLocationUnits = 0;
+for (const row of stock) totalPhysicalUnits += Number(row.physicalQuantity || 0);
+for (const row of stockByLocation) totalLocationUnits += Number(row.quantity || 0);
+for (const row of activeLots) totalActiveLotUnits += Number(row.quantityAvailable || 0);
+for (const row of balances) totalLotLocationUnits += Number(row.quantityAvailable || 0);
+
 return {
   readOnly:true,
   deploymentRequested:"first-herring-264",
