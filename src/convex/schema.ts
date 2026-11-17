@@ -685,6 +685,7 @@ const schema = defineSchema(
       inventoryId: v.id("inventories"),
       productId: v.id("products"),
       lotId: v.optional(v.string()),
+      locationId: v.optional(v.id("storageLocations")),
       systemQuantity: v.number(),
       countedQuantity: v.optional(v.number()),
       difference: v.optional(v.number()),
