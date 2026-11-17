@@ -42,3 +42,27 @@ describe("diagnóstico dimensional do estoque", () => {
     expect(block).toContain("ainda exige conferência antes de qualquer migração");
   });
 });
+
+
+describe("visão dimensional consolidada do estoque", () => {
+  const start = backend.indexOf("export const stockDimensionOverview = query({");
+  const block = backend.slice(start);
+
+  it("é uma consulta autenticada e somente leitura", () => {
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(block).toContain("await requireUser(ctx)");
+    expect(block).not.toMatch(/ctx\.db\.(insert|patch|replace|delete)\s*\(/);
+  });
+
+  it("retorna a distribuição por área, armário e lote", () => {
+    expect(block).toContain('ctx.db.query("lotLocationBalances")');
+    expect(block).toContain('ctx.db.query("lots")');
+    expect(block).toContain('ctx.db.query("stockAreas")');
+    expect(block).toContain('ctx.db.query("storageLocations")');
+    expect(block).toContain("lotNumber");
+    expect(block).toContain("areaName");
+    expect(block).toContain("locationName");
+    expect(block).toContain("unmappedLotQuantity");
+    expect(block).toContain("globalVsLocationDifference");
+  });
+});
