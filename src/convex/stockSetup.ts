@@ -480,7 +480,7 @@ export const quickExit = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireAdmin(ctx);
+    const { userId } = await requirePermission(ctx, "exits.create", { entity: "stockMovements" });
 
     // Defesa numérica: normaliza Int64 → number (v.number() aceita Int64 via CLI)
     args = { ...args, quantity: Number(args.quantity) };
