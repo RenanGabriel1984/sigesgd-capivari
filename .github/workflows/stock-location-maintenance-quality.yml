@@ -6,6 +6,8 @@ on:
       - codex/historical-stock-location-maintenance
     paths:
       - "src/convex/stockMovementLocationMaintenance.ts"
+      - "src/convex/historicalTestMovementMaintenance.ts"
+      - "src/convex/schema.ts"
       - "src/__tests__/stock-movement-location-maintenance.test.ts"
       - ".github/workflows/stock-location-maintenance-quality.yml"
   pull_request:
