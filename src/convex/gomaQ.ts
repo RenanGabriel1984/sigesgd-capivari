@@ -198,8 +198,12 @@ export const createExchange = mutation({
   handler: async (ctx, args) => {
     const { userId, user } = await requireManagerOrAdmin(ctx);
 
-    if (args.quantityDelivered <= 0) throw new Error("Quantidade entregue deve ser maior que zero");
-    if (args.quantityEmptyReceived < 0) throw new Error("Quantidade de carcaças não pode ser negativa");
+    if (!Number.isFinite(args.quantityDelivered) || args.quantityDelivered <= 0) {
+      throw new Error("Quantidade entregue deve ser um número finito maior que zero");
+    }
+    if (!Number.isFinite(args.quantityEmptyReceived) || args.quantityEmptyReceived < 0) {
+      throw new Error("Quantidade de carcaças deve ser um número finito não negativo");
+    }
 
     // Validate product
     const product = await ctx.db.get(args.productId);
