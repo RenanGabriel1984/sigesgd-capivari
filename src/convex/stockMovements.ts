@@ -1,6 +1,9 @@
 import { query, mutation } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
+import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -53,7 +56,8 @@ export const createEntry = mutation({
     if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
     const product = await ctx.db.get(args.productId);
     if (!product) throw new Error("Produto não encontrado");
-    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
+    const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).collect();
+    const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
     const prevPhysical = stock?.physicalQuantity ?? 0;
     const prevReserved = stock?.reservedQuantity ?? 0;
     const newPhysical = prevPhysical + args.quantity;
@@ -75,18 +79,26 @@ export const createEntry = mutation({
 export const createExit = mutation({
   args: {
     productId: v.id("products"), quantity: v.number(),
+    locationId: v.optional(v.id("storageLocations")),
     requestId: v.optional(v.id("requests")), observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
     if (args.quantity <= 0) throw new Error("A quantidade deve ser positiva");
     if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
-    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
-    if (!stock) throw new Error("Produto não possui registro de estoque");
+    const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).collect();
+    const stock = requireSingleValidGlobalStock(stockRows, String(args.productId));
     const available = stock.physicalQuantity - stock.reservedQuantity;
     if (available < args.quantity) {
       throw new Error(`Estoque insuficiente. Disponível: ${available}. Solicitado: ${args.quantity}.`);
     }
+    const sourceLocationId = await resolveWithdrawalLocation(ctx, args.productId, args.locationId);
+    const lotConsumption = await consumeLotLocationStock(ctx, {
+      productId: args.productId,
+      locationId: sourceLocationId,
+      quantity: args.quantity,
+    });
+    const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
     const prevPhysical = stock.physicalQuantity;
     const prevReserved = stock.reservedQuantity;
     const newPhysical = prevPhysical - args.quantity;
@@ -94,7 +106,15 @@ export const createExit = mutation({
     const movementId = await ctx.db.insert("stockMovements", {
       productId: args.productId, type: "exit", quantity: args.quantity,
       previousPhysical: prevPhysical, newPhysical, previousReserved: prevReserved, newReserved: prevReserved,
-      userId, requestId: args.requestId, observation: args.observation, timestamp: Date.now(),
+      userId, requestId: args.requestId,
+      lotId: lotConsumption.allocations[0]?.lotId as any,
+      locationId: sourceLocationId,
+      observation: `${args.observation ?? "Saída direta"} — armário ${sourceLocation?.name ?? sourceLocationId}; lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
+      timestamp: Date.now(),
+    });
+    await recordLotMovementAllocations(ctx, {
+      movementId, productId: args.productId, locationId: sourceLocationId,
+      allocations: lotConsumption.allocations,
     });
     await ctx.db.insert("auditLogs", {
       userId, action: "move_stock", entity: "stockMovements", entityId: movementId,
@@ -108,8 +128,8 @@ export const reserveStock = mutation({
   args: { productId: v.id("products"), quantity: v.number(), requestId: v.id("requests") },
   handler: async (ctx, args) => {
     const { userId } = await requireUser(ctx);
-    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
+    const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).collect();
+    const stock = requireSingleValidGlobalStock(stockRows, String(args.productId));
     const available = stock.physicalQuantity - stock.reservedQuantity;
     if (available < args.quantity) {
       throw new Error(`Estoque insuficiente. Disponível: ${available}. Solicitado: ${args.quantity}.`);
@@ -141,8 +161,8 @@ export const editEntry = mutation({
     if (!movement) throw new Error("Movimentação não encontrada");
     if (movement.type !== "entry") throw new Error("Apenas entradas podem ser editadas");
     if (movement.canceled) throw new Error("Entrada cancelada não pode ser editada");
-    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", movement.productId)).first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
+    const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", movement.productId)).collect();
+    const stock = requireSingleValidGlobalStock(stockRows, String(movement.productId));
     const diff = args.quantity - movement.quantity;
     if (diff < 0 && stock.physicalQuantity + diff < 0) {
       throw new Error(
@@ -187,8 +207,8 @@ export const reverseEntry = mutation({
     if (movement.type !== "entry") throw new Error("Apenas entradas podem ser estornadas");
     if (movement.canceled) throw new Error("Esta entrada já foi estornada");
 
-    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", movement.productId)).first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
+    const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", movement.productId)).collect();
+    const stock = requireSingleValidGlobalStock(stockRows, String(movement.productId));
 
     // Check if reversal would produce negative stock
     if (stock.physicalQuantity < movement.quantity) {
@@ -225,8 +245,8 @@ export const createAdjustment = mutation({
     const { userId } = await requireStockManagerOrAdmin(ctx);
     if (args.newQuantity < 0) throw new Error("A quantidade não pode ser negativa");
     if (!isFinite(args.newQuantity)) throw new Error("Quantidade inválida");
-    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
+    const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).collect();
+    const stock = requireSingleValidGlobalStock(stockRows, String(args.productId));
     const prevPhysical = stock.physicalQuantity;
     const diff = args.newQuantity - prevPhysical;
     await ctx.db.patch(stock._id, { physicalQuantity: args.newQuantity });

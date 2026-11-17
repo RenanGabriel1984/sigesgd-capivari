@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 
 async function requireUser(ctx: any) {
   // RBAC central: posição por local exige visão de estoque.
@@ -16,6 +17,7 @@ export const listByProduct = query({
       .query("stockByLocation")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
+    validateUniqueScopedStockRows(entries, String(args.productId));
     return Promise.all(entries.map(async (e: any) => {
       const location = await ctx.db.get(e.locationId);
       return { ...e, location };
@@ -38,6 +40,7 @@ export const summary = query({
         .query("stockByLocation")
         .withIndex("by_location", (q) => q.eq("locationId", loc._id))
         .collect();
+      validateUniqueScopedStockRows(entries, `local ${loc.name}`);
       const totalItems = entries.length;
       const totalQuantity = entries.reduce((sum: number, e: any) => sum + e.quantity, 0);
       return { ...loc, totalItems, totalQuantity };
@@ -54,6 +57,7 @@ export const listByLocation = query({
       .query("stockByLocation")
       .withIndex("by_location", (q) => q.eq("locationId", args.locationId))
       .collect();
+    validateUniqueScopedStockRows(entries, `local ${args.locationId}`);
     return Promise.all(entries.map(async (e: any) => {
       const product = await ctx.db.get(e.productId);
       return { ...e, product };

@@ -181,7 +181,7 @@ export default function Stock() {
               >
                 {implementation.integrityOk
                   ? "Saldo global × localização conferido"
-                  : `${implementation.stock.mismatches.length} divergência(s) de saldo`}
+                  : `${implementation.stock.mismatches.length} divergência(s) de integridade`}
               </Badge>
             </div>
             {implementation.locations.length > 0 && (
@@ -191,6 +191,18 @@ export default function Stock() {
                   .map((l) => `${l.name} (${l.quantity})`)
                   .join(" · ")}
               </p>
+            )}
+            {implementation.stock.mismatches.length > 0 && (
+              <div className="mt-2 space-y-1 text-xs text-amber-800">
+                {implementation.stock.mismatches.slice(0, 8).map((mismatch) => (
+                  <div key={mismatch.productId}>
+                    <span className="font-semibold">{mismatch.name}:</span> {mismatch.issues.join(" ")}
+                  </div>
+                ))}
+                {implementation.stock.mismatches.length > 8 && (
+                  <div>Mais {implementation.stock.mismatches.length - 8} produto(s) com divergência.</div>
+                )}
+              </div>
             )}
           </div>
         )}

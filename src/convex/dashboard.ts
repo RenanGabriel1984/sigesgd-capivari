@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { inspectProductStockIntegrity } from "../lib/stock-read-integrity";
 
 async function requireUser(ctx: any) {
   // RBAC central: dashboard exige permissão de visualização.
@@ -31,19 +32,63 @@ export const stats = query({
       .query("products")
       .withIndex("by_active", (q) => q.eq("active", true))
       .collect();
+    const [stockRows, locationRows, lots] = await Promise.all([
+      ctx.db.query("stock").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("lots").collect(),
+    ]);
+    const stockRowsByProduct = new Map<string, typeof stockRows>();
+    const locationRowsByProduct = new Map<string, typeof locationRows>();
+    const lotsByProduct = new Map<string, typeof lots>();
+    for (const row of stockRows) {
+      const key = String(row.productId);
+      const rows = stockRowsByProduct.get(key) ?? [];
+      rows.push(row);
+      stockRowsByProduct.set(key, rows);
+    }
+    for (const row of locationRows) {
+      const key = String(row.productId);
+      const rows = locationRowsByProduct.get(key) ?? [];
+      rows.push(row);
+      locationRowsByProduct.set(key, rows);
+    }
+    for (const lot of lots) {
+      const key = String(lot.productId);
+      const rows = lotsByProduct.get(key) ?? [];
+      rows.push(lot);
+      lotsByProduct.set(key, rows);
+    }
+    const stockIntegrityByProduct = new Map<string, ReturnType<typeof inspectProductStockIntegrity>>();
+    for (const product of products) {
+      stockIntegrityByProduct.set(
+        String(product._id),
+        inspectProductStockIntegrity(
+          stockRowsByProduct.get(String(product._id)) ?? [],
+          locationRowsByProduct.get(String(product._id)) ?? [],
+          lotsByProduct.get(String(product._id)) ?? [],
+          product.name,
+        ),
+      );
+    }
+    const integrityAlerts = products.flatMap((product) => {
+      const integrity = stockIntegrityByProduct.get(String(product._id))!;
+      return integrity.consistent ? [] : [{
+        productId: product._id,
+        productName: product.name,
+        issues: integrity.issues,
+      }];
+    });
+    const stockForProduct = (product: (typeof products)[number]) =>
+      stockIntegrityByProduct.get(String(product._id))!;
 
-    // Critical stock count
+    // Critical stock count: divergências ficam em alerta próprio.
     let criticalStock = 0;
     for (const p of products) {
-      const stock = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
-      const qty = stock?.physicalQuantity ?? 0;
-      // `?? 0` preserva exatamente o comportamento anterior (o campo passou a
-      // ser anulável; produto sem mínimo configurado continua com mínimo 0).
-      if (qty <= (p.minimumStock ?? 0)) criticalStock++;
+      const integrity = stockForProduct(p);
+      const qty = integrity.globalStock?.physicalQuantity ?? 0;
+      if (integrity.consistent && qty <= (p.minimumStock ?? 0)) criticalStock++;
     }
+    const divergentStock = integrityAlerts.length;
 
     // Pending requests this month
     const allPending = await ctx.db
@@ -96,15 +141,12 @@ export const stats = query({
       .sort((a, b) => b.items - a.items)
       .slice(0, 5);
 
-    // Urgent alerts (items at or below minimum)
+    // Urgent alerts: somente saldos conciliados; divergências aparecem separadas.
     const urgentAlerts = [];
     for (const p of products) {
-      const stock = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
-      const qty = stock?.physicalQuantity ?? 0;
-      if (qty <= (p.minimumStock ?? 0)) {
+      const integrity = stockForProduct(p);
+      const qty = integrity.globalStock?.physicalQuantity ?? 0;
+      if (integrity.consistent && qty <= (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
         urgentAlerts.push({
           _id: p._id,
@@ -162,6 +204,8 @@ export const stats = query({
     return {
       totalProducts: products.length,
       criticalStock,
+      divergentStock,
+      integrityAlerts,
       pendingThisMonth,
       entriesThisMonth,
       exitsThisMonth,
@@ -181,38 +225,150 @@ export const stats = query({
 export const stockPosition = query({
   args: {},
   handler: async (ctx) => {
-    await requireUser(ctx);
-    const products = await ctx.db.query("products").collect();
-    return Promise.all(
-      products.map(async (p) => {
-        const category = await ctx.db.get(p.categoryId);
-        const stock = await ctx.db
-          .query("stock")
-          .withIndex("by_product", (q) => q.eq("productId", p._id))
-          .first();
-        const qty = stock?.physicalQuantity ?? 0;
-        let status: string = "Normal";
-        if (qty === 0) status = "Zerado";
-        else if (qty <= (p.minimumStock ?? 0)) status = "Crítico";
-        else if (qty <= (p.idealStock ?? 0)) status = "Baixo";
-        return {
-          _id: p._id,
-          name: p.name,
-          internalCode: p.internalCode ?? "",
-          categoryName: category?.name ?? "",
-          unitOfMeasure: p.unitOfMeasure,
-          currentStock: qty,
-          reservedQuantity: stock?.reservedQuantity ?? 0,
-          minimumStock: p.minimumStock ?? 0,
-          idealStock: p.idealStock ?? 0,
-          maximumStock: p.maximumStock,
-          status,
-          brand: p.brand,
-          model: p.model,
-          active: p.active,
+    await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "stockPosition" });
+    const [products, stockRows, locationRows, lots, lotLocationRows, categories, areas, storageLocations] = await Promise.all([
+      ctx.db.query("products").collect(),
+      ctx.db.query("stock").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("categories").collect(),
+      ctx.db.query("stockAreas").collect(),
+      ctx.db.query("storageLocations").collect(),
+    ]);
+
+    const stockByProduct = new Map<string, typeof stockRows>();
+    const locationsByProduct = new Map<string, typeof locationRows>();
+    const lotsByProduct = new Map<string, typeof lots>();
+    const lotLocationsByLot = new Map<string, typeof lotLocationRows>();
+    for (const row of stockRows) {
+      const key = String(row.productId);
+      const group = stockByProduct.get(key) ?? [];
+      group.push(row);
+      stockByProduct.set(key, group);
+    }
+    for (const row of locationRows) {
+      const key = String(row.productId);
+      const group = locationsByProduct.get(key) ?? [];
+      group.push(row);
+      locationsByProduct.set(key, group);
+    }
+    for (const lot of lots) {
+      const key = String(lot.productId);
+      const group = lotsByProduct.get(key) ?? [];
+      group.push(lot);
+      lotsByProduct.set(key, group);
+    }
+    for (const row of lotLocationRows) {
+      const key = String(row.lotId);
+      const group = lotLocationsByLot.get(key) ?? [];
+      group.push(row);
+      lotLocationsByLot.set(key, group);
+    }
+
+    const categoryById = new Map(categories.map((category) => [String(category._id), category.name]));
+    const areaById = new Map(areas.map((area) => [String(area._id), area.name]));
+    const locationById = new Map(storageLocations.map((location) => [String(location._id), location.name]));
+
+    return products.map((product) => {
+      const productStocks = stockByProduct.get(String(product._id)) ?? [];
+      const productLocations = locationsByProduct.get(String(product._id)) ?? [];
+      const productLots = lotsByProduct.get(String(product._id)) ?? [];
+      const integrity = inspectProductStockIntegrity(
+        productStocks,
+        productLocations,
+        productLots,
+        product.name,
+      );
+      const stock = integrity.globalStock;
+      const quantity = stock
+        ? stock.physicalQuantity
+        : integrity.issues.length === 0 ? 0 : null;
+      let status: string = "Normal";
+      if (!integrity.consistent) status = "Divergente";
+      else if (quantity === null || quantity === 0) status = "Zerado";
+      else if (quantity <= (product.minimumStock ?? 0)) status = "Crítico";
+      else if (quantity <= (product.idealStock ?? 0)) status = "Baixo";
+
+      const locationBreakdown = productLocations.map((row) => ({
+        locationName: locationById.get(String(row.locationId)) ?? "Local não encontrado",
+        quantity: typeof row.quantity === "number" && Number.isFinite(row.quantity) && row.quantity >= 0
+          ? row.quantity
+          : null,
+      })).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR"));
+
+      const areaTotals = new Map<string, {
+        areaName: string;
+        quantity: number;
+        lots: Array<{
+          lotNumber: string;
+          quantityAvailable: number;
+          active: boolean;
+          locations: Array<{ locationName: string; quantityAvailable: number }>;
+        }>;
+      }>();
+      for (const lot of productLots.filter((candidate) =>
+        typeof candidate.quantityAvailable === "number" &&
+        Number.isFinite(candidate.quantityAvailable) &&
+        candidate.quantityAvailable > 0
+      )) {
+        const areaKey = lot.areaId ? String(lot.areaId) : "__NO_AREA__";
+        const existing = areaTotals.get(areaKey) ?? {
+          areaName: lot.areaId ? areaById.get(String(lot.areaId)) ?? "Área não encontrada" : "Sem área",
+          quantity: 0,
+          lots: [],
         };
-      })
-    );
+        existing.quantity += lot.quantityAvailable;
+        const lotLocations = (lotLocationsByLot.get(String(lot._id)) ?? [])
+          .map((balance) => ({
+            locationName: locationById.get(String(balance.locationId)) ?? "Local não encontrado",
+            quantityAvailable: balance.quantityAvailable,
+          }))
+          .sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR"));
+        existing.lots.push({
+          lotNumber: lot.lotNumber,
+          quantityAvailable: lot.quantityAvailable,
+          active: lot.active,
+          locations: lotLocations,
+        });
+        areaTotals.set(areaKey, existing);
+      }
+      const areaBreakdown = [...areaTotals.values()]
+        .map((area) => ({ ...area, lots: area.lots.sort((a, b) => a.lotNumber.localeCompare(b.lotNumber)) }))
+        .sort((a, b) => a.areaName.localeCompare(b.areaName, "pt-BR"));
+
+      return {
+        _id: product._id,
+        name: product.name,
+        internalCode: product.internalCode ?? "",
+        categoryName: categoryById.get(String(product.categoryId)) ?? "",
+        unitOfMeasure: product.unitOfMeasure,
+        currentStock: quantity,
+        reservedQuantity: stock?.reservedQuantity ?? 0,
+        minimumStock: product.minimumStock ?? 0,
+        idealStock: product.idealStock ?? 0,
+        maximumStock: product.maximumStock,
+        status,
+        brand: product.brand,
+        model: product.model,
+        active: product.active,
+        locationBreakdown,
+        areaBreakdown,
+        lotLocationBreakdown: productLots.map((lot) => ({
+          lotNumber: lot.lotNumber,
+          areaName: lot.areaId ? areaById.get(String(lot.areaId)) ?? "Área não encontrada" : "Sem área",
+          quantityAvailable: lot.quantityAvailable,
+          locations: (lotLocationsByLot.get(String(lot._id)) ?? [])
+            .map((balance) => ({
+              locationName: locationById.get(String(balance.locationId)) ?? "Local não encontrado",
+              quantityAvailable: balance.quantityAvailable,
+            }))
+            .sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR")),
+        })).sort((a, b) => a.lotNumber.localeCompare(b.lotNumber, "pt-BR")),
+        integrityIssues: integrity.issues,
+        integrityLimitations: integrity.limitations,
+      };
+    });
   },
 });
 
@@ -242,6 +398,21 @@ export const movementReport = query({
         const product = await ctx.db.get(m.productId);
         const user = await ctx.db.get(m.userId);
         const supplier = m.supplierId ? await ctx.db.get(m.supplierId) : null;
+        const allocations = await ctx.db.query("stockMovementLotAllocations")
+          .withIndex("by_movement", (q: any) => q.eq("movementId", m._id))
+          .collect();
+        const lotAllocations = await Promise.all(allocations.map(async (allocation: any) => {
+          const [lot, location] = await Promise.all([
+            ctx.db.get(allocation.lotId as any) as Promise<any>,
+            ctx.db.get(allocation.locationId as any) as Promise<any>,
+          ]);
+          return {
+            lotNumber: lot?.lotNumber ?? "Lote não encontrado",
+            locationName: location?.name ?? "Armário não encontrado",
+            quantity: allocation.quantity,
+            allocationType: allocation.allocationType,
+          };
+        }));
         return {
           _id: m._id,
           type: m.type,
@@ -257,6 +428,7 @@ export const movementReport = query({
           userName: user?.name ?? "",
           supplierName: supplier?.legalName ?? "",
           supplierTrade: supplier?.tradeName ?? "",
+          lotAllocations,
         };
       })
     );
