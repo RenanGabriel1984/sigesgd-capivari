@@ -69,7 +69,7 @@ describe("visão dimensional consolidada do estoque", () => {
 
   it("mantém saldos legados sem lote visíveis por armário sem inventar área", () => {
     expect(block).toContain("untrackedLocations");
-    expect(block).toContain('"Sem classificação por lote"');
+    expect(reportsPage).toContain('"Sem classificação por lote"');
   });
 
   it("relatório filtra e exporta área, armário e lote em consulta somente leitura", () => {
