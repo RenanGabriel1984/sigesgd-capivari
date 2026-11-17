@@ -157,7 +157,11 @@ export const get = query({
       const product = await ctx.db.get(item.productId);
       const location = item.locationId ? await ctx.db.get(item.locationId) : null;
       const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
-      return { ...item, product, location, units };
+      const unitsWithAssets = await Promise.all(units.map(async (unit: any) => ({
+        ...unit,
+        asset: unit.assetId ? await ctx.db.get(unit.assetId) : null,
+      })));
+      return { ...item, product, location, units: unitsWithAssets };
     }));
     const lots = await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", entry._id)).collect();
     const area = entry.areaId ? await ctx.db.get(entry.areaId) : null;
