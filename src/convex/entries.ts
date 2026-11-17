@@ -9,7 +9,7 @@ import {
   normalizeInvoiceNumber,
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
-import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -885,6 +885,7 @@ export const reverse = mutation({
       await ctx.db.patch(stock._id, { physicalQuantity: stock.physicalQuantity - item.quantity });
       for (const decrement of decrements) {
         const local = locationRows.find((row: any) => String(row.locationId) === String(decrement.locationId));
+        if (!local) throw new Error("O saldo por armário desapareceu durante o estorno.");
         await ctx.db.patch(local._id, { quantity: local.quantity - decrement.quantity });
       }
       if (lot) {
