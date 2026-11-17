@@ -4,7 +4,10 @@ import { resolve } from "node:path";
 
 const backend = readFileSync(resolve(__dirname, "../convex/diagnostics.ts"), "utf8");
 const start = backend.indexOf("export const stockMovementTraceabilityAuditInternal = internalQuery({");
-const end = backend.indexOf("export const applyStockMovementLocationCorrectionsInternal =", start);\nconst block = backend.slice(start, end > start ? end : undefined);\nconst correctionStart = backend.indexOf("export const applyStockMovementLocationCorrectionsInternal = internalMutation({");\nconst correctionBlock = backend.slice(correctionStart);
+const end = backend.indexOf("export const applyStockMovementLocationCorrectionsInternal =", start);
+const block = backend.slice(start, end > start ? end : undefined);
+const correctionStart = backend.indexOf("export const applyStockMovementLocationCorrectionsInternal = internalMutation({");
+const correctionBlock = backend.slice(correctionStart);
 
 describe("auditoria histórica de rastreabilidade das movimentações", () => {
   it("é uma consulta interna e somente leitura", () => {
