@@ -444,6 +444,7 @@ const schema = defineSchema(
       requestId: v.optional(v.id("requests")),
       entryId: v.optional(v.id("entries")),
       lotId: v.optional(v.string()),
+      locationId: v.optional(v.id("storageLocations")),
       documentNumber: v.optional(v.string()),
       observation: v.optional(v.string()),
       // ── Número sequencial da saída (SAI-ANO-SEQ) — novas saídas ──
@@ -696,6 +697,7 @@ const schema = defineSchema(
       requestItemId: v.id("requestItems"),
       lotId: v.id("lots"),
       quantity: v.number(),
+      locationId: v.optional(v.id("storageLocations")),
     }).index("by_requestItem", ["requestItemId"])
       .index("by_lot", ["lotId"]),
 
