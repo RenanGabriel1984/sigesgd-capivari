@@ -43,7 +43,7 @@ export const classifyHistoricalTestMovementsInternal = internalMutation({
 
     const movements = await Promise.all(
       APPROVED.map(async (expected) => {
-        const movement = await ctx.db.get(expected.id as any);
+        const movement: any = await ctx.db.get(expected.id as any);
         if (!movement) throw new Error(`Movimento ausente: ${expected.id}`);
         if (movement.type !== expected.type) {
           throw new Error(`Tipo divergente no movimento ${expected.id}`);
