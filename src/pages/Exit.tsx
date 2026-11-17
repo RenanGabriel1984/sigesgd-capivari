@@ -384,7 +384,7 @@ export default function Exit() {
                 </div>
               )}
 
-              /* PASSO 4 — motivo */}
+              {/* PASSO 4 — motivo */}
               {step === 3 && (
                 <div className="space-y-4">
                   <Label className="text-base font-semibold">Por que está retirando?</Label>
