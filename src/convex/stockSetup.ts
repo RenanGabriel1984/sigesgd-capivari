@@ -228,6 +228,7 @@ async function performInitialLoad(
         userId,
         entryId,
         lotId: lotId as string,
+        locationId: item.locationId,
         observation: `Carga inicial — lote ${lotNumber} — ${item.quantity} unidades`,
         timestamp: now,
       });
