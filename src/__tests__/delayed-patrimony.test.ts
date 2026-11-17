@@ -14,6 +14,46 @@ const page = read("src/pages/Patrimony.tsx");
 const editor = read("src/components/PatrimonyUnitsEditor.tsx");
 const dialog = read("src/components/EntryPatrimonyDialog.tsx");
 
+describe("integração entre recebimento e cadastro de equipamentos", () => {
+  it("lista somente unidades de entradas confirmadas de material permanente", () => {
+    expect(assets).toContain("export const listUnlinkedEntryUnits = query");
+    expect(assets).toContain('entry.status !== "confirmed" || entry.materialType !== "permanent"');
+    expect(assets).toContain("!unit.assetId");
+  });
+
+  it("cria ou associa o equipamento usando vínculo reverso e identificadores existentes", () => {
+    expect(assets).toContain("export const createFromEntryUnit = mutation");
+    expect(assets).toContain('withIndex("by_patrimony"');
+    expect(assets).toContain('withIndex("by_serial"');
+    expect(assets).toContain("entryItemUnitId: unit._id");
+    expect(assets).toContain("await ctx.db.patch(unit._id, { assetId })");
+    expect(schema).toContain('.index("by_serial", ["serialNumber"])');
+  });
+
+  it("não duplica equipamento já vinculado nem associa identificadores conflitantes", () => {
+    expect(assets).toContain("if (unit.assetId)");
+    expect(assets).toContain("Patrimônio e número de série apontam para equipamentos diferentes");
+    expect(assets).toContain("O equipamento identificado já está vinculado a outra unidade recebida");
+  });
+
+  it("não movimenta estoque ao criar ou associar equipamento", () => {
+    const block = assets.slice(assets.indexOf("export const createFromEntryUnit"), assets.indexOf("export const create = mutation"));
+    expect(block).not.toContain('ctx.db.insert("stockMovements"');
+    expect(block).not.toContain('ctx.db.patch("stock"');
+    expect(block).not.toContain('ctx.db.insert("lots"');
+  });
+
+  it("oferece a associação na tela de equipamentos e mostra a origem da entrada", () => {
+    const page = read("src/pages/Assets.tsx");
+    const detail = read("src/components/EntryDetailsDialog.tsx");
+    expect(page).toContain("Equipamentos recebidos ainda não vinculados");
+    expect(page).toContain("Cadastrar / associar");
+    expect(page).toContain("api.assets.createFromEntryUnit");
+    expect(detail).toContain("Abrir cadastro do equipamento");
+    expect(detail).toContain("Data de incorporação:");
+  });
+});
+
 describe("identificação de equipamentos e solicitação de baixa patrimonial", () => {
   it("permite receber material permanente sem número patrimonial", () => {
     expect(validateEntryUnits({
