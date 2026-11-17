@@ -250,6 +250,7 @@ export const applyHistoricalLocationCorrectionsInternal = internalMutation({
       corrected: candidates.length,
       auditLogsCreated: candidates.length,
       movementsPatched: candidates.length,
+      correctedMovementIds: actualIds,
       fieldsChanged: ["stockMovements.locationId"],
       otherMovementFieldsChanged: 0,
       actorAttribution:
