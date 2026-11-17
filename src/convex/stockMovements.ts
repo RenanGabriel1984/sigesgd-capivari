@@ -7,6 +7,18 @@ import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawa
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
+async function assertLegacyMovementIsUntracked(ctx: any, productId: any, productName: string) {
+  const [lots, balances, locations] = await Promise.all([
+    ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
+    ctx.db.query("lotLocationBalances").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
+    ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
+  ]);
+  if (lots.some((lot: any) => lot.active && lot.quantityAvailable > 0) || balances.length > 0 || locations.some((row: any) => row.quantity > 0)) {
+    throw new Error(`A operação direta sem lote/armário não é permitida para "${productName}". Use Entrada, Saída ou Inventário com rastreabilidade por área e armário.`);
+  }
+}
+
+
 async function requireUser(ctx: any) {
   // RBAC central: histórico/movimentações visíveis a quem consulta estoque.
   return requirePermission(ctx, "movements.view");
