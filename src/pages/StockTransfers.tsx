@@ -27,6 +27,7 @@ import { ArrowRightLeft, Plus, Loader2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 function LoadingSkeleton() {
   return (
@@ -46,12 +47,14 @@ export default function StockTransfersPage() {
   const transfers = useQuery(api.stockTransfers.list);
   const products = useQuery(api.products.listActive);
   const locations = useQuery(api.storageLocations.listActive);
+  const lots = useQuery(api.lots.listActiveByProduct, productId ? { productId: productId as any } : "skip");
   const createTransfer = useMutation(api.stockTransfers.create);
 
   const [showNew, setShowNew] = useState(false);
   const [productId, setProductId] = useState("");
   const [fromLocationId, setFromLocationId] = useState("");
   const [toLocationId, setToLocationId] = useState("");
+  const [lotId, setLotId] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [observation, setObservation] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -65,8 +68,16 @@ export default function StockTransfersPage() {
       toast.error("Origem e destino não podem ser o mesmo local");
       return;
     }
-    if (quantity <= 0) {
-      toast.error("Quantidade deve ser maior que zero");
+    if (quantity <= 0 || !Number.isFinite(quantity)) {
+      toast.error("Quantidade deve ser um número válido maior que zero");
+      return;
+    }
+    if (lots === undefined) {
+      toast.error("Aguarde o carregamento dos lotes do produto.");
+      return;
+    }
+    if (lots.length > 0 && !lotId) {
+      toast.error("Selecione o lote que será transferido.");
       return;
     }
 
@@ -74,6 +85,7 @@ export default function StockTransfersPage() {
     try {
       await createTransfer({
         productId: productId as any,
+        lotId: lotId ? (lotId as any) : undefined,
         fromLocationId: fromLocationId as any,
         toLocationId: toLocationId as any,
         quantity,
@@ -93,6 +105,7 @@ export default function StockTransfersPage() {
     setProductId("");
     setFromLocationId("");
     setToLocationId("");
+    setLotId("");
     setQuantity(1);
     setObservation("");
   };
@@ -188,7 +201,7 @@ export default function StockTransfersPage() {
                 <select
                   className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                   value={productId}
-                  onChange={(e) => setProductId(e.target.value)}
+                  onChange={(e) => { setProductId(e.target.value); setLotId(""); }}
                 >
                   <option value="">Selecione o produto...</option>
                   {(products ?? []).map((p: any) => (
@@ -198,6 +211,32 @@ export default function StockTransfersPage() {
                   ))}
                 </select>
               </div>
+
+              {productId && lots && lots.length > 0 && (
+                <div>
+                  <Label>Lote de origem</Label>
+                  <Select value={lotId} onValueChange={setLotId}>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue placeholder="Selecione o lote..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lots.map((lot: any) => (
+                        <SelectItem key={lot._id} value={lot._id}>
+                          {lot.lotNumber} · disponível no lote: {lot.quantityAvailable}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    A transferência preserva a área do lote e exige saldo rastreável no armário de origem.
+                  </p>
+                </div>
+              )}
+              {productId && lots && lots.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Produto sem saldo ativo em lotes; a transferência será validada pelo saldo físico do armário.
+                </p>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
