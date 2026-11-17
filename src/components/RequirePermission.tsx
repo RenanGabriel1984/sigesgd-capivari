@@ -8,7 +8,7 @@
  */
 import { useMemo } from "react";
 import { Loader2, ShieldAlert, Home } from "lucide-react";
-import { Link, Navigate, useLocation } from "react-router";
+import { Link, useLocation } from "react-router";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { permissionForRoute, roleHasPermission, type AppRole } from "@/lib/rbac";
@@ -57,18 +57,6 @@ export function RequirePermission({ children }: { children: React.ReactNode }) {
   if (!isAuthenticated || !user) {
     // Sem sessão: deixa o RequireAuth (wrapper externo) tratar o redirect.
     return children;
-  }
-
-  // O responsável pelo Patrimônio não possui dashboard de estoque.
-  // Ao entrar por um link padrão (/dashboard ou outra área sem permissão),
-  // deve ser encaminhado à fila de tombamento em vez de ficar preso em
-  // uma tela de acesso negado. A autorização do backend continua obrigatória.
-  if (
-    user.role === "patrimony_manager" &&
-    location.pathname !== "/patrimony" &&
-    location.pathname !== "/settings"
-  ) {
-    return <Navigate to="/patrimony" replace />;
   }
 
   if (required && !roleHasPermission(user.role as AppRole, required)) {
