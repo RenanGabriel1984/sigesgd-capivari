@@ -61,6 +61,7 @@ const FILTER_LABELS: Record<StockFilter, string> = {
 export default function Stock() {
   const products = useQuery(api.products.list) as ProductView[] | undefined;
   const implementation = useQuery(api.stockSetup.implementationStockStatus);
+  const dimensionOverview = useQuery(api.stockSetup.stockDimensionOverview);
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<StockFilter>("all");
@@ -71,6 +72,7 @@ export default function Stock() {
   const equipmentCategory = findEquipmentCategory(searchParams.get(EQUIPMENT_STOCK_PARAM));
 
   if (products === undefined) return <StockSkeleton />;
+  const dimensionByProduct = new Map((dimensionOverview?.products ?? []).map((row: any) => [row.productId, row]));
 
   const situationOf = (p: ProductView) =>
     getStockSituation(p.stock?.physicalQuantity ?? 0, p.minimumStock ?? 0, p.idealStock ?? 0);
@@ -222,6 +224,730 @@ export default function Stock() {
                   <TableRow>
                     <TableHead>Produto</TableHead>
                     <TableHead>Categoria</TableHead>
+                    <TableHead>Área / armário / lote</TableHead>
+                    <TableHead className="text-center">Estoque Físico</TableHead>
+                    <TableHead className="text-center">Reservado</TableHead>
+                    <TableHead className="text-center">Disponível</TableHead>
+                    <TableHead className="text-center">Mínimo</TableHead>
+                    <TableHead className="text-center">Ideal</TableHead>
+                    <TableHead className="w-[170px]">Situação</TableHead>
+                    <TableHead className="w-[90px] text-right">Ação</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered?.map((p) => {
+                    const physical = p.stock?.physicalQuantity ?? 0;
+                    const reserved = p.stock?.reservedQuantity ?? 0;
+                    const available = Math.max(physical - reserved, 0);
+import { useState } from "react";
+import { Link, useSearchParams } from "react-router";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { AppShell } from "@/components/AppShell";
+import { SearchInput } from "@/components/SearchInput";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Warehouse, ClipboardList } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { UNIT_LABELS } from "@/types/constants";
+import { getStockSituation, STOCK_SITUATION_LABELS, STOCK_SITUATION_BADGE_CLASSES } from "@/lib/stock-status";
+import { matchesStockSearch } from "@/convex/stockHelpers";
+import type { ProductView } from "@/lib/product-types";
+import {
+  EQUIPMENT_STOCK_PARAM,
+  findEquipmentCategory,
+  matchesEquipmentStockProduct,
+} from "@/lib/equipment-categories";
+
+function StockSkeleton() {
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
+        <div>
+          <Skeleton className="h-8 w-32 mb-2" />
+          <Skeleton className="h-4 w-48" />
+        </div>
+        <Skeleton className="h-10 max-w-md" />
+        <Card className="border-border/50">
+          <CardContent className="p-0">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 p-4 border-b border-border/30 last:border-b-0">
+                <Skeleton className="h-10 w-10 rounded-lg" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+                <Skeleton className="h-6 w-16" />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </AppShell>
+  );
+}
+
+type StockFilter = "all" | "available" | "below_min" | "out";
+
+const FILTER_LABELS: Record<StockFilter, string> = {
+  all: "Todos",
+  available: "Disponível",
+  below_min: "Abaixo do mínimo",
+  out: "Sem estoque",
+};
+
+export default function Stock() {
+  const products = useQuery(api.products.list) as ProductView[] | undefined;
+  const implementation = useQuery(api.stockSetup.implementationStockStatus);
+  const dimensionOverview = useQuery(api.stockSetup.stockDimensionOverview);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<StockFilter>("all");
+
+  // Atalho "Ver estoque" vindo de /assets?categoria=<slug>: a tela de EQUIPAMENTO
+  // aponta para cá e o MESMO filtro puro é aplicado sobre os produtos.
+  // Nenhum produto é duplicado — continua sendo a lista real de `products`.
+  const equipmentCategory = findEquipmentCategory(searchParams.get(EQUIPMENT_STOCK_PARAM));
+
+  if (products === undefined) return <StockSkeleton />;
+  const dimensionByProduct = new Map((dimensionOverview?.products ?? []).map((row: any) => [row.productId, row]));
+
+  const situationOf = (p: ProductView) =>
+    getStockSituation(p.stock?.physicalQuantity ?? 0, p.minimumStock ?? 0, p.idealStock ?? 0);
+
+  const filtered = products?.filter(
+    (p) => {
+      if (equipmentCategory && !matchesEquipmentStockProduct(p, equipmentCategory)) return false;
+      const matchesSearch = matchesStockSearch(p, search);
+      if (!matchesSearch) return false;
+      const physical = p.stock?.physicalQuantity ?? 0;
+      const available = Math.max(0, physical - (p.stock?.reservedQuantity ?? 0));
+      if (filter === "available") return available > 0;
+      if (filter === "below_min") {
+        const s = situationOf(p);
+        return s === "critical" || s === "below_min";
+      }
+      if (filter === "out") return physical === 0;
+      return true;
+    }
+  );
+
+  const criticalCount = filtered?.filter((p) => {
+    const physical = p.stock?.physicalQuantity ?? 0;
+    return getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0) === "critical";
+  }).length ?? 0;
+
+  const belowMinCount = filtered?.filter((p) => {
+    const physical = p.stock?.physicalQuantity ?? 0;
+    const s = getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0);
+    return s === "critical" || s === "below_min";
+  }).length ?? 0;
+
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Estoque</h1>
+            <p className="text-sm text-muted-foreground">
+              Saldo atual por produto — calculado pelas movimentações
+              {criticalCount > 0 && (
+                <Badge variant="destructive" className="ml-2 text-xs">
+                  {criticalCount} crítico{criticalCount !== 1 ? "s" : ""}
+                </Badge>
+              )}
+              {belowMinCount > 0 && (
+                <Badge variant="outline" className="ml-2 text-xs border-amber-200 bg-amber-50 text-amber-700">
+                  {belowMinCount} abaixo do mínimo
+                </Badge>
+              )}
+            </p>
+          </div>
+          <div className="relative">
+            <SearchInput
+              placeholder="O que você está procurando?"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-sm"
+            />
+          </div>
+        </div>
+
+        {/* Filtro herdado: atalho "Ver estoque" da tela de Equipamentos */}
+        {equipmentCategory && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--capivari-green)]/20 bg-[var(--capivari-green)]/5 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--capivari-green)]">
+                Equipamentos
+              </span>
+              <span className="text-sm font-semibold">{equipmentCategory.label}</span>
+              <span className="text-xs text-muted-foreground">
+                {filtered?.length ?? 0} produto(s) de estoque relacionado(s) — produtos de estoque, não equipamentos
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSearchParams({})}
+            >
+              Limpar filtro
+            </Button>
+          </div>
+        )}
+
+        {/* Estoque de implantação (carga inicial conferida fisicamente) */}
+        {implementation && implementation.entries.length > 0 && (
+          <div className="rounded-xl border border-[var(--capivari-green)]/20 bg-[var(--capivari-green)]/5 px-4 py-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--capivari-green)]">
+                  Estoque de implantação
+                </span>
+                <span className="text-sm font-semibold">{implementation.implementationDate}</span>
+                <span className="text-xs text-muted-foreground">
+                  Carga inicial {implementation.entries.map((e) => e.entryNumber).join(", ")} —{" "}
+                  {implementation.totals.items} itens · {implementation.totals.units} unidades ·{" "}
+                  {implementation.totals.lots} lotes · {implementation.totals.movements} movimentações
+                </span>
+              </div>
+              <Badge
+                variant="outline"
+                className={
+                  implementation.integrityOk
+                    ? "border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 shrink-0"
+                    : "border-amber-300 bg-amber-50 text-[10px] text-amber-700 shrink-0"
+                }
+              >
+                {implementation.integrityOk
+                  ? "Saldo global × localização conferido"
+                  : `${implementation.stock.mismatches.length} divergência(s) de saldo`}
+              </Badge>
+            </div>
+            {implementation.locations.length > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Locais de implantação:{" "}
+                {implementation.locations
+                  .map((l) => `${l.name} (${l.quantity})`)
+                  .join(" · ")}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Filtros simples */}
+        <div className="flex flex-wrap gap-2">
+          {(Object.keys(FILTER_LABELS) as StockFilter[]).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              className={
+                filter === f
+                  ? "px-3 py-1.5 rounded-full text-xs font-semibold bg-[var(--capivari-green)] text-white"
+                  : "px-3 py-1.5 rounded-full text-xs font-medium border text-muted-foreground hover:bg-muted/50"
+              }
+            >
+              {FILTER_LABELS[f]}
+            </button>
+          ))}
+        </div>
+
+        {/* Desktop Table */}
+        <Card className="border-border/50 hidden sm:block">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Produto</TableHead>
+                    <TableHead>Categoria</TableHead>
+                    <TableHead>Área / armário / lote</TableHead>
+                    <TableHead className="text-center">Estoque Físico</TableHead>
+                    <TableHead className="text-center">Reservado</TableHead>
+                    <TableHead className="text-center">Disponível</TableHead>
+                    <TableHead className="text-center">Mínimo</TableHead>
+                    <TableHead className="text-center">Ideal</TableHead>
+                    <TableHead className="w-[170px]">Situação</TableHead>
+                    <TableHead className="w-[90px] text-right">Ação</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered?.map((p) => {
+                    const physical = p.stock?.physicalQuantity ?? 0;
+                    const reserved = p.stock?.reservedQuantity ?? 0;
+                    const available = Math.max(physical - reserved, 0);
+import { useState } from "react";
+import { Link, useSearchParams } from "react-router";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { AppShell } from "@/components/AppShell";
+import { SearchInput } from "@/components/SearchInput";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Warehouse, ClipboardList } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { UNIT_LABELS } from "@/types/constants";
+import { getStockSituation, STOCK_SITUATION_LABELS, STOCK_SITUATION_BADGE_CLASSES } from "@/lib/stock-status";
+import { matchesStockSearch } from "@/convex/stockHelpers";
+import type { ProductView } from "@/lib/product-types";
+import {
+  EQUIPMENT_STOCK_PARAM,
+  findEquipmentCategory,
+  matchesEquipmentStockProduct,
+} from "@/lib/equipment-categories";
+
+function StockSkeleton() {
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
+        <div>
+          <Skeleton className="h-8 w-32 mb-2" />
+          <Skeleton className="h-4 w-48" />
+        </div>
+        <Skeleton className="h-10 max-w-md" />
+        <Card className="border-border/50">
+          <CardContent className="p-0">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 p-4 border-b border-border/30 last:border-b-0">
+                <Skeleton className="h-10 w-10 rounded-lg" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+                <Skeleton className="h-6 w-16" />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </AppShell>
+  );
+}
+
+type StockFilter = "all" | "available" | "below_min" | "out";
+
+const FILTER_LABELS: Record<StockFilter, string> = {
+  all: "Todos",
+  available: "Disponível",
+  below_min: "Abaixo do mínimo",
+  out: "Sem estoque",
+};
+
+export default function Stock() {
+  const products = useQuery(api.products.list) as ProductView[] | undefined;
+  const implementation = useQuery(api.stockSetup.implementationStockStatus);
+  const dimensionOverview = useQuery(api.stockSetup.stockDimensionOverview);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<StockFilter>("all");
+
+  // Atalho "Ver estoque" vindo de /assets?categoria=<slug>: a tela de EQUIPAMENTO
+  // aponta para cá e o MESMO filtro puro é aplicado sobre os produtos.
+  // Nenhum produto é duplicado — continua sendo a lista real de `products`.
+  const equipmentCategory = findEquipmentCategory(searchParams.get(EQUIPMENT_STOCK_PARAM));
+
+  if (products === undefined) return <StockSkeleton />;
+  const dimensionByProduct = new Map((dimensionOverview?.products ?? []).map((row: any) => [row.productId, row]));
+
+  const situationOf = (p: ProductView) =>
+    getStockSituation(p.stock?.physicalQuantity ?? 0, p.minimumStock ?? 0, p.idealStock ?? 0);
+
+  const filtered = products?.filter(
+    (p) => {
+      if (equipmentCategory && !matchesEquipmentStockProduct(p, equipmentCategory)) return false;
+      const matchesSearch = matchesStockSearch(p, search);
+      if (!matchesSearch) return false;
+      const physical = p.stock?.physicalQuantity ?? 0;
+      const available = Math.max(0, physical - (p.stock?.reservedQuantity ?? 0));
+      if (filter === "available") return available > 0;
+      if (filter === "below_min") {
+        const s = situationOf(p);
+        return s === "critical" || s === "below_min";
+      }
+      if (filter === "out") return physical === 0;
+      return true;
+    }
+  );
+
+  const criticalCount = filtered?.filter((p) => {
+    const physical = p.stock?.physicalQuantity ?? 0;
+    return getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0) === "critical";
+  }).length ?? 0;
+
+  const belowMinCount = filtered?.filter((p) => {
+    const physical = p.stock?.physicalQuantity ?? 0;
+    const s = getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0);
+    return s === "critical" || s === "below_min";
+  }).length ?? 0;
+
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Estoque</h1>
+            <p className="text-sm text-muted-foreground">
+              Saldo atual por produto — calculado pelas movimentações
+              {criticalCount > 0 && (
+                <Badge variant="destructive" className="ml-2 text-xs">
+                  {criticalCount} crítico{criticalCount !== 1 ? "s" : ""}
+                </Badge>
+              )}
+              {belowMinCount > 0 && (
+                <Badge variant="outline" className="ml-2 text-xs border-amber-200 bg-amber-50 text-amber-700">
+                  {belowMinCount} abaixo do mínimo
+                </Badge>
+              )}
+            </p>
+          </div>
+          <div className="relative">
+            <SearchInput
+              placeholder="O que você está procurando?"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-sm"
+            />
+          </div>
+        </div>
+
+        {/* Filtro herdado: atalho "Ver estoque" da tela de Equipamentos */}
+        {equipmentCategory && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--capivari-green)]/20 bg-[var(--capivari-green)]/5 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--capivari-green)]">
+                Equipamentos
+              </span>
+              <span className="text-sm font-semibold">{equipmentCategory.label}</span>
+              <span className="text-xs text-muted-foreground">
+                {filtered?.length ?? 0} produto(s) de estoque relacionado(s) — produtos de estoque, não equipamentos
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSearchParams({})}
+            >
+              Limpar filtro
+            </Button>
+          </div>
+        )}
+
+        {/* Estoque de implantação (carga inicial conferida fisicamente) */}
+        {implementation && implementation.entries.length > 0 && (
+          <div className="rounded-xl border border-[var(--capivari-green)]/20 bg-[var(--capivari-green)]/5 px-4 py-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--capivari-green)]">
+                  Estoque de implantação
+                </span>
+                <span className="text-sm font-semibold">{implementation.implementationDate}</span>
+                <span className="text-xs text-muted-foreground">
+                  Carga inicial {implementation.entries.map((e) => e.entryNumber).join(", ")} —{" "}
+                  {implementation.totals.items} itens · {implementation.totals.units} unidades ·{" "}
+                  {implementation.totals.lots} lotes · {implementation.totals.movements} movimentações
+                </span>
+              </div>
+              <Badge
+                variant="outline"
+                className={
+                  implementation.integrityOk
+                    ? "border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 shrink-0"
+                    : "border-amber-300 bg-amber-50 text-[10px] text-amber-700 shrink-0"
+                }
+              >
+                {implementation.integrityOk
+                  ? "Saldo global × localização conferido"
+                  : `${implementation.stock.mismatches.length} divergência(s) de saldo`}
+              </Badge>
+            </div>
+            {implementation.locations.length > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Locais de implantação:{" "}
+                {implementation.locations
+                  .map((l) => `${l.name} (${l.quantity})`)
+                  .join(" · ")}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Filtros simples */}
+        <div className="flex flex-wrap gap-2">
+          {(Object.keys(FILTER_LABELS) as StockFilter[]).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              className={
+                filter === f
+                  ? "px-3 py-1.5 rounded-full text-xs font-semibold bg-[var(--capivari-green)] text-white"
+                  : "px-3 py-1.5 rounded-full text-xs font-medium border text-muted-foreground hover:bg-muted/50"
+              }
+            >
+              {FILTER_LABELS[f]}
+            </button>
+          ))}
+        </div>
+
+        {/* Desktop Table */}
+        <Card className="border-border/50 hidden sm:block">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Produto</TableHead>
+                    <TableHead>Categoria</TableHead>
+                    <TableHead>Área / armário / lote</TableHead>
+                    <TableHead className="text-center">Estoque Físico</TableHead>
+                    <TableHead className="text-center">Reservado</TableHead>
+                    <TableHead className="text-center">Disponível</TableHead>
+                    <TableHead className="text-center">Mínimo</TableHead>
+                    <TableHead className="text-center">Ideal</TableHead>
+                    <TableHead className="w-[170px]">Situação</TableHead>
+                    <TableHead className="w-[90px] text-right">Ação</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered?.map((p) => {
+                    const physical = p.stock?.physicalQuantity ?? 0;
+                    const reserved = p.stock?.reservedQuantity ?? 0;
+                    const available = Math.max(physical - reserved, 0);
+import { useState } from "react";
+import { Link, useSearchParams } from "react-router";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { AppShell } from "@/components/AppShell";
+import { SearchInput } from "@/components/SearchInput";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Warehouse, ClipboardList } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { UNIT_LABELS } from "@/types/constants";
+import { getStockSituation, STOCK_SITUATION_LABELS, STOCK_SITUATION_BADGE_CLASSES } from "@/lib/stock-status";
+import { matchesStockSearch } from "@/convex/stockHelpers";
+import type { ProductView } from "@/lib/product-types";
+import {
+  EQUIPMENT_STOCK_PARAM,
+  findEquipmentCategory,
+  matchesEquipmentStockProduct,
+} from "@/lib/equipment-categories";
+
+function StockSkeleton() {
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
+        <div>
+          <Skeleton className="h-8 w-32 mb-2" />
+          <Skeleton className="h-4 w-48" />
+        </div>
+        <Skeleton className="h-10 max-w-md" />
+        <Card className="border-border/50">
+          <CardContent className="p-0">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 p-4 border-b border-border/30 last:border-b-0">
+                <Skeleton className="h-10 w-10 rounded-lg" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-40" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+                <Skeleton className="h-6 w-16" />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    </AppShell>
+  );
+}
+
+type StockFilter = "all" | "available" | "below_min" | "out";
+
+const FILTER_LABELS: Record<StockFilter, string> = {
+  all: "Todos",
+  available: "Disponível",
+  below_min: "Abaixo do mínimo",
+  out: "Sem estoque",
+};
+
+export default function Stock() {
+  const products = useQuery(api.products.list) as ProductView[] | undefined;
+  const implementation = useQuery(api.stockSetup.implementationStockStatus);
+  const dimensionOverview = useQuery(api.stockSetup.stockDimensionOverview);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<StockFilter>("all");
+
+  // Atalho "Ver estoque" vindo de /assets?categoria=<slug>: a tela de EQUIPAMENTO
+  // aponta para cá e o MESMO filtro puro é aplicado sobre os produtos.
+  // Nenhum produto é duplicado — continua sendo a lista real de `products`.
+  const equipmentCategory = findEquipmentCategory(searchParams.get(EQUIPMENT_STOCK_PARAM));
+
+  if (products === undefined) return <StockSkeleton />;
+  const dimensionByProduct = new Map((dimensionOverview?.products ?? []).map((row: any) => [row.productId, row]));
+
+  const situationOf = (p: ProductView) =>
+    getStockSituation(p.stock?.physicalQuantity ?? 0, p.minimumStock ?? 0, p.idealStock ?? 0);
+
+  const filtered = products?.filter(
+    (p) => {
+      if (equipmentCategory && !matchesEquipmentStockProduct(p, equipmentCategory)) return false;
+      const matchesSearch = matchesStockSearch(p, search);
+      if (!matchesSearch) return false;
+      const physical = p.stock?.physicalQuantity ?? 0;
+      const available = Math.max(0, physical - (p.stock?.reservedQuantity ?? 0));
+      if (filter === "available") return available > 0;
+      if (filter === "below_min") {
+        const s = situationOf(p);
+        return s === "critical" || s === "below_min";
+      }
+      if (filter === "out") return physical === 0;
+      return true;
+    }
+  );
+
+  const criticalCount = filtered?.filter((p) => {
+    const physical = p.stock?.physicalQuantity ?? 0;
+    return getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0) === "critical";
+  }).length ?? 0;
+
+  const belowMinCount = filtered?.filter((p) => {
+    const physical = p.stock?.physicalQuantity ?? 0;
+    const s = getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0);
+    return s === "critical" || s === "below_min";
+  }).length ?? 0;
+
+  return (
+    <AppShell>
+      <div className="space-y-6 max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Estoque</h1>
+            <p className="text-sm text-muted-foreground">
+              Saldo atual por produto — calculado pelas movimentações
+              {criticalCount > 0 && (
+                <Badge variant="destructive" className="ml-2 text-xs">
+                  {criticalCount} crítico{criticalCount !== 1 ? "s" : ""}
+                </Badge>
+              )}
+              {belowMinCount > 0 && (
+                <Badge variant="outline" className="ml-2 text-xs border-amber-200 bg-amber-50 text-amber-700">
+                  {belowMinCount} abaixo do mínimo
+                </Badge>
+              )}
+            </p>
+          </div>
+          <div className="relative">
+            <SearchInput
+              placeholder="O que você está procurando?"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-sm"
+            />
+          </div>
+        </div>
+
+        {/* Filtro herdado: atalho "Ver estoque" da tela de Equipamentos */}
+        {equipmentCategory && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--capivari-green)]/20 bg-[var(--capivari-green)]/5 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-[var(--capivari-green)]">
+                Equipamentos
+              </span>
+              <span className="text-sm font-semibold">{equipmentCategory.label}</span>
+              <span className="text-xs text-muted-foreground">
+                {filtered?.length ?? 0} produto(s) de estoque relacionado(s) — produtos de estoque, não equipamentos
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSearchParams({})}
+            >
+              Limpar filtro
+            </Button>
+          </div>
+        )}
+
+        {/* Estoque de implantação (carga inicial conferida fisicamente) */}
+        {implementation && implementation.entries.length > 0 && (
+          <div className="rounded-xl border border-[var(--capivari-green)]/20 bg-[var(--capivari-green)]/5 px-4 py-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-[var(--capivari-green)]">
+                  Estoque de implantação
+                </span>
+                <span className="text-sm font-semibold">{implementation.implementationDate}</span>
+                <span className="text-xs text-muted-foreground">
+                  Carga inicial {implementation.entries.map((e) => e.entryNumber).join(", ")} —{" "}
+                  {implementation.totals.items} itens · {implementation.totals.units} unidades ·{" "}
+                  {implementation.totals.lots} lotes · {implementation.totals.movements} movimentações
+                </span>
+              </div>
+              <Badge
+                variant="outline"
+                className={
+                  implementation.integrityOk
+                    ? "border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700 shrink-0"
+                    : "border-amber-300 bg-amber-50 text-[10px] text-amber-700 shrink-0"
+                }
+              >
+                {implementation.integrityOk
+                  ? "Saldo global × localização conferido"
+                  : `${implementation.stock.mismatches.length} divergência(s) de saldo`}
+              </Badge>
+            </div>
+            {implementation.locations.length > 0 && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Locais de implantação:{" "}
+                {implementation.locations
+                  .map((l) => `${l.name} (${l.quantity})`)
+                  .join(" · ")}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Filtros simples */}
+        <div className="flex flex-wrap gap-2">
+          {(Object.keys(FILTER_LABELS) as StockFilter[]).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setFilter(f)}
+              className={
+                filter === f
+                  ? "px-3 py-1.5 rounded-full text-xs font-semibold bg-[var(--capivari-green)] text-white"
+                  : "px-3 py-1.5 rounded-full text-xs font-medium border text-muted-foreground hover:bg-muted/50"
+              }
+            >
+              {FILTER_LABELS[f]}
+            </button>
+          ))}
+        </div>
+
+        {/* Desktop Table */}
+        <Card className="border-border/50 hidden sm:block">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Produto</TableHead>
+                    <TableHead>Categoria</TableHead>
+                    <TableHead>Área / armário / lote</TableHead>
                     <TableHead className="text-center">Estoque Físico</TableHead>
                     <TableHead className="text-center">Reservado</TableHead>
                     <TableHead className="text-center">Disponível</TableHead>
@@ -237,6 +963,8 @@ export default function Stock() {
                     const reserved = p.stock?.reservedQuantity ?? 0;
                     const available = Math.max(physical - reserved, 0);
                     const situation = getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0);
+                    const dimension: any = dimensionByProduct.get(String(p._id));
+                    const dimension: any = dimensionByProduct.get(String(p._id));
                     const isLow = situation === "critical" || situation === "below_min";
                     return (
                       <TableRow key={p._id} className={isLow ? "bg-rose-50/30" : ""}>
@@ -251,6 +979,22 @@ export default function Stock() {
                         </TableCell>
                         <TableCell>
                           <Badge variant="secondary" className="text-xs">{p.category?.name ?? "—"}</Badge>
+                        </TableCell>
+                        <TableCell className="min-w-[260px] max-w-[340px]">
+                          {dimension?.lots?.length ? (
+                            <div className="space-y-1 text-xs">
+                              {dimension.lots.slice(0, 4).map((lot: any) => (
+                                <div key={lot.lotId}>
+                                  <span className="font-medium">{lot.areaName}</span> · Lote {lot.lotNumber} ({lot.quantityAvailable})
+                                  <div className="text-muted-foreground">{lot.locations.map((location: any) => `${location.locationName}: ${location.quantityAvailable}`).join(" · ") || "Sem armário alocado"}</div>
+                                </div>
+                              ))}
+                              {dimension.lots.length > 4 && <p className="text-muted-foreground">+ {dimension.lots.length - 4} lote(s)</p>}
+                            </div>
+                          ) : <span className="text-xs text-muted-foreground">Sem saldo por lote/local</span>}
+                          {(dimension?.unmappedLotQuantity > 1e-9 || dimension?.invalidBalanceCount > 0 || Math.abs(dimension?.globalVsLocationDifference ?? 0) > 1e-9 || Math.abs(dimension?.globalVsLotsDifference ?? 0) > 1e-9) && (
+                            <Badge variant="destructive" className="mt-1 text-[10px]">Conciliação pendente</Badge>
+                          )}
                         </TableCell>
                         <TableCell className="text-center font-mono font-semibold">{physical}</TableCell>
                         <TableCell className="text-center font-mono text-amber-600">
@@ -285,7 +1029,7 @@ export default function Stock() {
                   })}
                   {filtered?.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={9}>
+                      <TableCell colSpan={10}>
                         <div className="empty-state py-12">
                           <Warehouse className="empty-state-icon" />
                           <p className="empty-state-title">
@@ -325,6 +1069,19 @@ export default function Stock() {
                       {STOCK_SITUATION_LABELS[situation]}
                     </Badge>
                   </div>
+                  {dimension?.lots?.length ? (
+                    <div className="mb-3 rounded-md bg-muted/40 p-2 text-xs space-y-1">
+                      {dimension.lots.slice(0, 3).map((lot: any) => (
+                        <div key={lot.lotId}>
+                          <span className="font-medium">{lot.areaName}</span> · {lot.lotNumber} ({lot.quantityAvailable}) · {lot.locations.map((location: any) => `${location.locationName}: ${location.quantityAvailable}`).join(" · ") || "Sem armário alocado"}
+                        </div>
+                      ))}
+                      {dimension.lots.length > 3 && <p className="text-muted-foreground">+ {dimension.lots.length - 3} lote(s)</p>}
+                    </div>
+                  ) : null}
+                  {(dimension?.unmappedLotQuantity > 1e-9 || dimension?.invalidBalanceCount > 0 || Math.abs(dimension?.globalVsLocationDifference ?? 0) > 1e-9 || Math.abs(dimension?.globalVsLotsDifference ?? 0) > 1e-9) && (
+                    <Badge variant="destructive" className="mb-3 text-[10px]">Conciliação pendente</Badge>
+                  )}
                   <div className="grid grid-cols-3 gap-3 text-center">
                     <div>
                       <p className="text-lg font-bold font-mono">{physical}</p>
