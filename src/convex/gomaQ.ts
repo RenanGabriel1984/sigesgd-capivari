@@ -2,7 +2,7 @@ import { query, mutation } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
-import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
 import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
@@ -57,6 +57,57 @@ export const listExchanges = query({
       const receivedBy = await ctx.db.get(e.receivedByUserId);
       return { ...e, product, printer, lot, deliveredBy, receivedBy };
     }));
+  },
+});
+
+
+export const exchangeOptions = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireManagerOrAdmin(ctx);
+    const [printers, compatibilities, locations] = await Promise.all([
+      ctx.db.query("printers").withIndex("by_active", (q: any) => q.eq("active", true)).collect(),
+      ctx.db.query("printerCompatibility").collect(),
+      ctx.db.query("storageLocations").withIndex("by_active", (q: any) => q.eq("active", true)).collect(),
+    ]);
+
+    const productIds = [...new Set(compatibilities.map((row: any) => String(row.productId)))];
+    const products = await Promise.all(productIds.map(async (productId) => {
+      const product: any = await ctx.db.get(productId as any);
+      if (!product || !product.active) return null;
+      const stockRows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", product._id))
+        .collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
+      const compatibleModels = compatibilities
+        .filter((row: any) => String(row.productId) === String(product._id))
+        .map((row: any) => row.printerModel);
+      return {
+        _id: product._id,
+        name: product.name,
+        brand: product.brand,
+        model: product.model,
+        compatibleModels,
+        physicalQuantity: stock?.physicalQuantity ?? 0,
+        reservedQuantity: stock?.reservedQuantity ?? 0,
+        availableQuantity: (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0),
+      };
+    }));
+
+    return {
+      printers: printers.map((printer: any) => ({
+        _id: printer._id,
+        name: printer.name,
+        brand: printer.brand,
+        model: printer.model,
+        organizationId: printer.organizationId,
+      })),
+      products: products.filter(Boolean),
+      locations: locations.map((location: any) => ({
+        _id: location._id,
+        name: location.name,
+      })),
+    };
   },
 });
 
