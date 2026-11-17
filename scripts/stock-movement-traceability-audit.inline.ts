@@ -22,6 +22,25 @@ try {
   allocationsAvailable = false;
 }
 
+const historicalBackfillAuditLogs = await ctx.db
+  .query("auditLogs")
+  .withIndex("by_entity", (q) => q.eq("entity", "stockMovement"))
+  .collect();
+const historicalBackfillAudit = historicalBackfillAuditLogs
+  .filter((row) => {
+    try {
+      return JSON.parse(row.details ?? "{}").operation === "historical_location_backfill";
+    } catch {
+      return false;
+    }
+  })
+  .map((row) => ({
+    movementId: String(row.entityId ?? ""),
+    timestamp: row.timestamp,
+    userIdPresent: Boolean(row.userId),
+  }))
+  .sort((a, b) => a.movementId.localeCompare(b.movementId));
+
 const productById = new Map(products.map((row) => [String(row._id), row]));
 const userById = new Map(users.map((row) => [String(row._id), row]));
 const entryById = new Map(entries.map((row) => [String(row._id), row]));
