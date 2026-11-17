@@ -28,6 +28,7 @@ const rbacSrc = readFileSync(resolve(ROOT, "src/convex/rbac.ts"), "utf-8");
 const repSrc = readFileSync(resolve(ROOT, "src/convex/dataRepairs.ts"), "utf-8");
 const stockSetupSrc = readFileSync(resolve(ROOT, "src/convex/stockSetup.ts"), "utf-8");
 const transferUiSrc = readFileSync(resolve(ROOT, "src/pages/StockTransfers.tsx"), "utf-8");
+const printSuppliesSrc = readFileSync(resolve(ROOT, "src/convex/printSupplies.ts"), "utf-8");
 
 describe("etapa 1 — técnico consulta estoque e cria requisição", () => {
   it("técnico tem stock.view/products.view mas não pode mutar estoque", () => {
@@ -137,6 +138,14 @@ describe("saída rápida e transferência rastreada por lote", () => {
     const transferSrc = readFileSync(resolve(ROOT, "src/convex/stockTransfers.ts"), "utf-8");
     expect(transferSrc).toContain("Selecione o lote para transferir: o produto possui saldo rastreado por lote.");
     expect(transferSrc).toContain("planLotLocationTransfer");
+  });
+
+  it("retirada simples GomaQ consome exclusivamente lotes da área Impressoras", () => {
+    const withdraw = printSuppliesSrc.slice(
+      printSuppliesSrc.indexOf("export const withdraw = mutation"),
+      printSuppliesSrc.indexOf("export const configurePackaging"),
+    );
+    expect(withdraw).toContain("areaId: PRINT_AREA_ID as Id<\"stockAreas\">");
   });
 });
 
