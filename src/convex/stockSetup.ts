@@ -1852,6 +1852,12 @@ export const stockDimensionOverview = query({
         invalidBalanceCount,
         areas: areaRows,
         lots: lotRows,
+        // Produtos legados sem lotes continuam visíveis por armário, sem inventar área/lote.
+        untrackedLocations: productLots.length === 0 ? productLocations.map((row: any) => ({
+          locationId: String(row.locationId),
+          locationName: (locationById.get(String(row.locationId)) as any)?.name ?? "Armário não encontrado",
+          quantityAvailable: row.quantity,
+        })) : [],
         locationPhysical: physical,
       };
     }).filter((row: any) =>
