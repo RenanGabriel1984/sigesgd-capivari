@@ -964,7 +964,6 @@ export default function Stock() {
                     const available = Math.max(physical - reserved, 0);
                     const situation = getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0);
                     const dimension: any = dimensionByProduct.get(String(p._id));
-                    const dimension: any = dimensionByProduct.get(String(p._id));
                     const isLow = situation === "critical" || situation === "below_min";
                     return (
                       <TableRow key={p._id} className={isLow ? "bg-rose-50/30" : ""}>
@@ -1054,6 +1053,7 @@ export default function Stock() {
                     const reserved = p.stock?.reservedQuantity ?? 0;
                     const available = Math.max(physical - reserved, 0);
                     const situation = getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0);
+                    const dimension: any = dimensionByProduct.get(String(p._id));
                     const isLow = situation === "critical" || situation === "below_min";
                     return (
                       <Card key={p._id} className={`border-border/50 ${isLow ? "border-rose-200 bg-rose-50/20" : ""}`}>
