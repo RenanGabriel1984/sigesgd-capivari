@@ -34,6 +34,8 @@ describe("identificação de equipamentos e solicitação de baixa patrimonial",
     expect(setUnits).toContain("patrimonyNumber: u.patrimonyNumber?.trim() || undefined");
     expect(setUnits).not.toContain("patrimonyRegistrationStatus");
     expect(setUnits).not.toContain("patrimonyAssignedByUserId");
+    expect(setUnits).not.toContain('v.literal("disposed")');
+    expect(editor).toContain("UNIT_OPERATIONAL_STATUSES");
     expect(entries).not.toContain("export const assignPatrimony");
     expect(entries).not.toContain("export const listPendingPatrimony");
     expect(dialog).toContain("patrimonyNumber: unit.patrimonyNumber?.trim() || undefined");
@@ -75,6 +77,7 @@ describe("identificação de equipamentos e solicitação de baixa patrimonial",
   it("impede que a alteração genérica de status simule baixa oficial", () => {
     expect(assets).toContain('["disposal_pending", "disposal_authorized", "sent_to_warehouse", "disposed"]');
     expect(assets).toContain("As etapas de baixa devem ser registradas pelo fluxo de Solicitação de baixa patrimonial");
+    expect(assets).toContain('["disposal_pending", "disposal_authorized", "sent_to_warehouse", "disposed"].includes(asset.status)');
   });
 
   it("apresenta a tela como solicitação de baixa e não como fila de tombamento", () => {
