@@ -4,7 +4,9 @@ import {
   formatConsumedLots,
   type LotConsumption,
 } from "../lib/stock-consumption";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { buildLotLocationMigrationPlan } from "../lib/lot-location-migration";
 import { v } from "convex/values";
 import {
   applyImplementationStockStamp,
@@ -13,6 +15,7 @@ import {
   IMPLEMENTATION_STOCK_DATE,
   isImplementationStockStamped,
   tonerKitObservation,
+  isClosedUnusedReturnAtSource,
 } from "./stockHelpers";
 
 async function requireUser(ctx: any) {
@@ -1115,6 +1118,581 @@ export const stockDimensionDiagnostics = query({
         "A classificação evidence_complete_candidate é conservadora e ainda exige conferência antes de qualquer migração.",
         "O histórico de movimentos não contém localização de origem/destino de forma estruturada em todas as operações.",
       ],
+    };
+  },
+});
+
+
+export const lotLocationReadiness = internalQuery({
+  args: {},
+  handler: async (ctx, args) => {
+    const [
+      allProducts, allLots, allBalances, allLocations, allGlobalStock,
+      allLocalStock, allEntryItems, allEntries, allMovements, allTransfers,
+      allReturns, allSuppliers, allGomaQExchanges, allGomaQEmptyCartridges,
+      allGomaQCollections,
+    ] = await Promise.all([
+      ctx.db.query("products").collect(),
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("storageLocations").collect(),
+      ctx.db.query("stock").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("entryItems").collect(),
+      ctx.db.query("entries").collect(),
+      ctx.db.query("stockMovements").collect(),
+      ctx.db.query("stockTransfers").collect(),
+      ctx.db.query("returns").collect(),
+      ctx.db.query("suppliers").collect(),
+      ctx.db.query("gomaQExchanges").collect(),
+      ctx.db.query("gomaQEmptyCartridges").collect(),
+      ctx.db.query("gomaQCollections").collect(),
+    ]);
+
+    // Escopo intencionalmente global: não aceita productId para evitar
+    // que uma leitura parcial seja confundida com auditoria da produção.
+    const products = allProducts;
+    const locationNames = new Map(allLocations.map((location) => [String(location._id), location.name]));
+    const entryNumbers = new Map(allEntries.map((entry) => [String(entry._id), entry.entryNumber]));
+    const productsResult: Array<Record<string, any>> = [];
+
+    for (const product of products) {
+      const lots = allLots.filter((lot) => lot.productId === product._id);
+      const balances = allBalances.filter((balance) => balance.productId === product._id);
+      const balanceScopeKeys = balances.map((balance) => `${String(balance.lotId)}::${String(balance.locationId)}`);
+      const duplicateBalanceScopeCount = balanceScopeKeys.length - new Set(balanceScopeKeys).size;
+      const invalidBalanceCount = balances.filter((balance) =>
+        !Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0,
+      ).length;
+      const localRows = allLocalStock.filter((row) => row.productId === product._id);
+      const globalRows = allGlobalStock.filter((row) => row.productId === product._id);
+      const orphanBalanceCount = balances.filter((balance) =>
+        !lots.some((lot) => lot._id === balance.lotId),
+      ).length;
+      const invalidLotCount = lots.filter((lot) =>
+        !Number.isFinite(lot.quantityAvailable) ||
+        lot.quantityAvailable < 0 ||
+        !Number.isFinite(lot.receivedAt),
+      ).length;
+
+      let global: (typeof globalRows)[number] | null = null;
+      let globalError: string | null = null;
+      if (globalRows.length > 1) {
+        globalError = `Existem ${globalRows.length} registros globais de estoque para o produto.`;
+      } else if (globalRows.length === 0 && (localRows.some((row) => row.quantity > 0) || lots.some((lot) => lot.quantityAvailable > 0))) {
+        globalError = "Há saldo físico ou lote disponível sem registro global de estoque.";
+      } else if (globalRows.length === 1) {
+        global = globalRows[0];
+        if (
+          !Number.isFinite(global.physicalQuantity) ||
+          !Number.isFinite(global.reservedQuantity) ||
+          global.physicalQuantity < 0 ||
+          global.reservedQuantity < 0 ||
+          global.reservedQuantity > global.physicalQuantity
+        ) {
+          globalError = "O registro global possui quantidades inválidas.";
+        }
+      }
+
+      const balancesByLot = new Map<string, typeof balances>();
+      for (const balance of balances) {
+        const key = String(balance.lotId);
+        const rows = balancesByLot.get(key) ?? [];
+        rows.push(balance);
+        balancesByLot.set(key, rows);
+      }
+
+      const lotDetails = lots.filter((lot) => lot.quantityAvailable > 0).map((lot) => {
+        const lotBalances = balancesByLot.get(String(lot._id)) ?? [];
+        const mappedQuantity = lotBalances.reduce((sum, balance) => sum + balance.quantityAvailable, 0);
+        const entryItems = allEntryItems.filter((item) => item.lotId === String(lot._id));
+        const candidateLocationIds = [...new Set(entryItems.map((item) => item.locationId ? String(item.locationId) : "").filter(Boolean))];
+        const laterExitsOrAdjustments = allMovements.filter((movement) =>
+          movement.productId === product._id &&
+          movement.timestamp > lot.receivedAt &&
+          movement.type !== "entry",
+        );
+        const laterTransfers = allTransfers.filter((transfer) =>
+          transfer.productId === product._id && transfer.createdAt > lot.receivedAt,
+        );
+        const laterReturns = allReturns.filter((returned) =>
+          returned.productId === product._id && returned.createdAt > lot.receivedAt,
+        );
+        const duplicateLocationRows = lotBalances.length !== new Set(lotBalances.map((balance) => String(balance.locationId))).size;
+        const invalidBalance = lotBalances.some((balance) =>
+          !Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0,
+        );
+
+        let status: "mapped" | "divergent" | "candidate" | "ambiguous" | "unmapped";
+        let reason: string;
+        let candidateLocationId: string | null = null;
+
+        if (lotBalances.length > 0) {
+          if (duplicateLocationRows || invalidBalance || Math.abs(mappedQuantity - lot.quantityAvailable) > 1e-9) {
+            status = "divergent";
+            reason = duplicateLocationRows
+              ? "Há mais de um saldo do mesmo lote no mesmo armário."
+              : invalidBalance
+                ? "Há quantidade negativa ou não finita em um saldo lote × armário."
+                : `Soma por armário (${mappedQuantity}) difere do saldo atual do lote (${lot.quantityAvailable}).`;
+          } else {
+            status = "mapped";
+            reason = "Saldo por armário confere com o saldo atual do lote.";
+          }
+        } else if (
+          candidateLocationIds.length === 1 &&
+          laterTransfers.length === 0 &&
+          (
+            (laterExitsOrAdjustments.length === 0 && laterReturns.length === 0) ||
+            isClosedUnusedReturnAtSource({
+              lotId: String(lot._id),
+              sourceLocationId: candidateLocationIds[0],
+              movements: laterExitsOrAdjustments.map((movement) => ({
+                id: String(movement._id),
+                type: movement.type,
+                lotId: movement.lotId ? String(movement.lotId) : null,
+                quantity: movement.quantity,
+                exitMovementId: movement.exitMovementId ? String(movement.exitMovementId) : null,
+                canceled: movement.canceled === true,
+              })),
+              returns: laterReturns.map((returned) => ({
+                exitMovementId: returned.exitMovementId ? String(returned.exitMovementId) : null,
+                quantity: returned.quantity,
+                locationId: returned.locationId ? String(returned.locationId) : null,
+                condition: returned.condition ?? null,
+              })),
+            })
+          )
+        ) {
+          status = "candidate";
+          candidateLocationId = candidateLocationIds[0];
+          reason = laterExitsOrAdjustments.length > 0
+            ? "A saída foi integralmente devolvida sem uso ao mesmo armário, vinculada ao lote e à saída original; a localização de origem permanece sustentada pelo histórico."
+            : "A entrada aponta um único armário e não há saída, ajuste, transferência ou devolução posterior identificada; exige conferência humana antes de qualquer migração.";
+        } else if (candidateLocationIds.length > 0 || laterExitsOrAdjustments.length > 0 || laterTransfers.length > 0 || laterReturns.length > 0) {
+          status = "ambiguous";
+          reason = "Há histórico posterior ou mais de um local de entrada; não é seguro inferir a localização atual.";
+        } else {
+          status = "unmapped";
+          reason = "Não há saldo por armário nem local de entrada suficiente para propor uma associação.";
+        }
+
+        return {
+          lotId: String(lot._id),
+          lotNumber: lot.lotNumber,
+          quantityAvailable: lot.quantityAvailable,
+          receivedAt: lot.receivedAt,
+          entryNumber: entryNumbers.get(String(lot.entryId)) ?? null,
+          sourceEntryLocations: candidateLocationIds.map((locationId) => ({
+            locationId,
+            locationName: locationNames.get(locationId) ?? "Local inexistente",
+          })),
+          mappedQuantity,
+          mappedLocations: lotBalances.map((balance) => ({
+            locationId: String(balance.locationId),
+            locationName: locationNames.get(String(balance.locationId)) ?? "Local inexistente",
+            quantity: balance.quantityAvailable,
+          })),
+          candidateLocationId,
+          candidateLocationName: candidateLocationId ? locationNames.get(candidateLocationId) ?? "Local inexistente" : null,
+          laterMovementCount: laterExitsOrAdjustments.length,
+          laterTransferCount: laterTransfers.length,
+          laterReturnCount: laterReturns.length,
+          status,
+          reason,
+        };
+      });
+
+      const physicalByLocation = new Map<string, number>();
+      const localDuplicateCounts = new Map<string, number>();
+      for (const row of localRows) {
+        const key = String(row.locationId);
+        physicalByLocation.set(key, (physicalByLocation.get(key) ?? 0) + row.quantity);
+        localDuplicateCounts.set(key, (localDuplicateCounts.get(key) ?? 0) + 1);
+      }
+      const mappedByLocation = new Map<string, number>();
+      for (const balance of balances) {
+        const key = String(balance.locationId);
+        mappedByLocation.set(key, (mappedByLocation.get(key) ?? 0) + balance.quantityAvailable);
+      }
+      const candidateByLocation = new Map<string, number>();
+      for (const lot of lotDetails) {
+        if (lot.status === "candidate" && lot.candidateLocationId) {
+          candidateByLocation.set(
+            lot.candidateLocationId,
+            (candidateByLocation.get(lot.candidateLocationId) ?? 0) + lot.quantityAvailable,
+          );
+        }
+      }
+      const locationIds = [...new Set([...physicalByLocation.keys(), ...mappedByLocation.keys(), ...candidateByLocation.keys()])];
+      const localComparison = locationIds.map((locationId) => ({
+        locationId,
+        locationName: locationNames.get(locationId) ?? "Local inexistente",
+        physicalQuantity: physicalByLocation.get(locationId) ?? 0,
+        mappedLotQuantity: mappedByLocation.get(locationId) ?? 0,
+        candidateLotQuantity: candidateByLocation.get(locationId) ?? 0,
+        difference: (physicalByLocation.get(locationId) ?? 0) - (mappedByLocation.get(locationId) ?? 0),
+        duplicatePhysicalRows: Math.max(0, (localDuplicateCounts.get(locationId) ?? 0) - 1),
+      }));
+
+      const statusCounts = {
+        mapped: lotDetails.filter((lot) => lot.status === "mapped").length,
+        divergent: lotDetails.filter((lot) => lot.status === "divergent").length,
+        candidate: lotDetails.filter((lot) => lot.status === "candidate").length,
+        ambiguous: lotDetails.filter((lot) => lot.status === "ambiguous").length,
+        unmapped: lotDetails.filter((lot) => lot.status === "unmapped").length,
+      };
+      const globalPhysical = global?.physicalQuantity ?? 0;
+      const localPhysicalTotal = localRows.reduce((sum, row) => sum + row.quantity, 0);
+      const lotsAvailableTotal = lots.reduce((sum, lot) => sum + lot.quantityAvailable, 0);
+      const mappedLotTotal = balances.reduce((sum, balance) => sum + balance.quantityAvailable, 0);
+      const candidateLotTotal = lotDetails.filter((lot) => lot.status === "candidate").reduce((sum, lot) => sum + lot.quantityAvailable, 0);
+
+      productsResult.push({
+        productId: String(product._id),
+        productName: product.name,
+        globalPhysical,
+        globalReserved: global?.reservedQuantity ?? 0,
+        globalError,
+        localPhysicalTotal,
+        lotsAvailableTotal,
+        mappedLotTotal,
+        candidateLotTotal,
+        localComparison,
+        statusCounts,
+        lots: lotDetails,
+        candidateTotalsAlign:
+          localComparison.every((row) => Math.abs(row.physicalQuantity - (row.mappedLotQuantity + row.candidateLotQuantity)) <= 1e-9) &&
+          Math.abs(globalPhysical - (mappedLotTotal + candidateLotTotal)) <= 1e-9,
+        invalidLotCount,
+        invalidBalanceCount,
+        duplicateBalanceScopeCount,
+        orphanBalanceCount,
+        readyForTrackedWithdrawal:
+          !globalError &&
+          invalidLotCount === 0 &&
+          invalidBalanceCount === 0 &&
+          duplicateBalanceScopeCount === 0 &&
+          orphanBalanceCount === 0 &&
+          statusCounts.divergent === 0 &&
+          statusCounts.candidate === 0 &&
+          statusCounts.ambiguous === 0 &&
+          statusCounts.unmapped === 0 &&
+          localRows.every((row) => Number.isFinite(row.quantity) && row.quantity >= 0) &&
+          localComparison.every((row) => row.duplicatePhysicalRows === 0 && Math.abs(row.difference) <= 1e-9) &&
+          Math.abs(globalPhysical - localPhysicalTotal) <= 1e-9 &&
+          Math.abs(globalPhysical - lotsAvailableTotal) <= 1e-9,
+      });
+    }
+
+    const countBy = (rows: any[], field: string): Record<string, number> =>
+      rows.reduce((counts: Record<string, number>, row: any) => {
+        const key = String(row[field] ?? "unknown");
+        counts[key] = (counts[key] ?? 0) + 1;
+        return counts;
+      }, {});
+    const sumField = (rows: any[], field: string): number =>
+      rows.reduce((sum: number, row: any) => sum + (Number.isFinite(row[field]) ? row[field] : 0), 0);
+    const supplierNames = new Map(
+      allSuppliers.map((supplier) => [
+        String(supplier._id),
+        supplier.tradeName ?? supplier.legalName ?? "Fornecedor sem nome",
+      ]),
+    );
+    const productById = new Map(allProducts.map((product) => [String(product._id), product]));
+    const lotById = new Map(allLots.map((lot) => [String(lot._id), lot]));
+    const entryHighlights = allEntries
+      .filter((entry) => {
+        const invoiceDigits = String(entry.invoiceNumber ?? "").replace(/\D/g, "");
+        const supplierName = entry.supplierId ? supplierNames.get(String(entry.supplierId)) ?? "" : "";
+        return (
+          entry.entryNumber === "ENT-2026-000001" ||
+          invoiceDigits === "372043" ||
+          invoiceDigits === "2967" ||
+          entry.originType === "gomaq" ||
+          supplierName.toLowerCase().includes("gomaq")
+        );
+      })
+      .sort((a, b) => b.receivedAt - a.receivedAt)
+      .map((entry) => {
+        const items = allEntryItems
+          .filter((item) => item.entryId === entry._id)
+          .map((item) => {
+            const product = productById.get(String(item.productId));
+            const lot = item.lotId ? lotById.get(String(item.lotId)) : null;
+            const locationId = item.locationId ? String(item.locationId) : null;
+            return {
+              productId: String(item.productId),
+              productName: product?.name ?? "Produto inexistente",
+              quantity: item.quantity,
+              unitOfMeasure: item.unitOfMeasure,
+              lotNumber: lot?.lotNumber ?? null,
+              locationId,
+              locationName: locationId ? locationNames.get(locationId) ?? "Local inexistente" : null,
+            };
+          });
+        return {
+          entryId: String(entry._id),
+          entryNumber: entry.entryNumber,
+          originType: entry.originType,
+          status: entry.status,
+          receivedAt: entry.receivedAt,
+          invoiceNumber: entry.invoiceNumber ?? null,
+          invoiceDate: entry.invoiceDate ?? null,
+          supplierName: entry.supplierId ? supplierNames.get(String(entry.supplierId)) ?? "Fornecedor inexistente" : null,
+          itemCount: items.length,
+          totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
+          items,
+        };
+      });
+
+    // Eventos posteriores dos produtos cuja localização do lote ficou ambígua.
+    // A consulta permanece somente leitura; os detalhes permitem conferir
+    // saída/devolução antes de propor qualquer associação lote × armário.
+    const reviewDetails = productsResult
+      .filter((product) => product.statusCounts.ambiguous > 0)
+      .map((product) => {
+        const productLots = allLots.filter((lot) => String(lot.productId) === product.productId);
+        const earliestLotReceivedAt = Math.min(...productLots.map((lot) => lot.receivedAt));
+        const relevantMovements = allMovements
+          .filter((movement) =>
+            String(movement.productId) === product.productId &&
+            movement.timestamp > earliestLotReceivedAt &&
+            movement.type !== "entry",
+          )
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .map((movement) => {
+            const lot = movement.lotId ? lotById.get(String(movement.lotId)) : null;
+            return {
+              movementId: String(movement._id),
+              type: movement.type,
+              quantity: movement.quantity,
+              previousPhysical: movement.previousPhysical,
+              newPhysical: movement.newPhysical,
+              timestamp: movement.timestamp,
+              lotId: movement.lotId ?? null,
+              lotNumber: lot?.lotNumber ?? null,
+              entryNumber: movement.entryId ? entryNumbers.get(String(movement.entryId)) ?? null : null,
+              exitNumber: movement.exitNumber ?? null,
+              exitMovementId: movement.exitMovementId ? String(movement.exitMovementId) : null,
+              canceled: movement.canceled ?? false,
+              observation: movement.observation ?? null,
+            };
+          });
+        const relevantReturns = allReturns
+          .filter((returned) => String(returned.productId) === product.productId)
+          .sort((a, b) => a.createdAt - b.createdAt)
+          .map((returned) => {
+            const lot = returned.lotId ? lotById.get(String(returned.lotId)) : null;
+            return {
+              returnId: String(returned._id),
+              quantity: returned.quantity,
+              createdAt: returned.createdAt,
+              lotId: returned.lotId ? String(returned.lotId) : null,
+              lotNumber: lot?.lotNumber ?? null,
+              locationId: returned.locationId ? String(returned.locationId) : null,
+              locationName: returned.locationId ? locationNames.get(String(returned.locationId)) ?? "Local inexistente" : null,
+              exitMovementId: returned.exitMovementId ? String(returned.exitMovementId) : null,
+              reason: returned.reason,
+              condition: returned.condition ?? null,
+              observation: returned.observation ?? null,
+            };
+          });
+        return {
+          productId: product.productId,
+          productName: product.productName,
+          globalPhysical: product.globalPhysical,
+          localPhysicalTotal: product.localPhysicalTotal,
+          movements: relevantMovements,
+          returns: relevantReturns,
+        };
+      });
+
+    const invalidGlobalStockCount = allGlobalStock.filter((row) =>
+      !Number.isFinite(row.physicalQuantity) ||
+      !Number.isFinite(row.reservedQuantity) ||
+      row.physicalQuantity < 0 ||
+      row.reservedQuantity < 0 ||
+      row.reservedQuantity > row.physicalQuantity,
+    ).length;
+    const invalidLocalStockCount = allLocalStock.filter((row) =>
+      !Number.isFinite(row.quantity) || row.quantity < 0,
+    ).length;
+    const invalidLotBalanceCount = allBalances.filter((row) =>
+      !Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0,
+    ).length;
+    const productsWithoutGlobalStock = allProducts.filter((product) =>
+      !allGlobalStock.some((row) => row.productId === product._id),
+    ).length;
+    const productsWithLotOrLocationStock = allProducts.filter((product) =>
+      allLots.some((lot) => lot.productId === product._id && lot.quantityAvailable > 0) ||
+      allLocalStock.some((row) => row.productId === product._id && row.quantity > 0),
+    ).length;
+
+    return {
+      generatedAt: Date.now(),
+      readOnly: true,
+      migrationApplied: false,
+      scope: "all_products_and_stock_records",
+      summary: {
+        products: {
+          total: allProducts.length,
+          active: allProducts.filter((product) => product.active).length,
+          inactive: allProducts.filter((product) => !product.active).length,
+          withoutGlobalStockRecord: productsWithoutGlobalStock,
+          withLotOrLocationStock: productsWithLotOrLocationStock,
+        },
+        entries: {
+          total: allEntries.length,
+          byOriginType: countBy(allEntries, "originType"),
+          byStatus: countBy(allEntries, "status"),
+        },
+        entryItems: { total: allEntryItems.length, totalQuantity: sumField(allEntryItems, "quantity") },
+        lots: {
+          total: allLots.length,
+          active: allLots.filter((lot) => lot.active).length,
+          withAvailableQuantity: allLots.filter((lot) => lot.quantityAvailable > 0).length,
+          quantityReceivedTotal: sumField(allLots, "quantityReceived"),
+          quantityAvailableTotal: sumField(allLots, "quantityAvailable"),
+        },
+        globalStock: {
+          records: allGlobalStock.length,
+          physicalQuantityTotal: sumField(allGlobalStock, "physicalQuantity"),
+          reservedQuantityTotal: sumField(allGlobalStock, "reservedQuantity"),
+          invalidRecords: invalidGlobalStockCount,
+        },
+        stockByLocation: {
+          records: allLocalStock.length,
+          physicalQuantityTotal: sumField(allLocalStock, "quantity"),
+          invalidRecords: invalidLocalStockCount,
+        },
+        lotLocationBalances: {
+          records: allBalances.length,
+          quantityAvailableTotal: sumField(allBalances, "quantityAvailable"),
+          invalidRecords: invalidLotBalanceCount,
+        },
+        movements: {
+          total: allMovements.length,
+          byType: countBy(allMovements, "type"),
+          canceled: allMovements.filter((movement) => movement.canceled === true).length,
+        },
+        transfers: { total: allTransfers.length },
+        returns: { total: allReturns.length },
+        storageLocations: {
+          total: allLocations.length,
+          active: allLocations.filter((location) => location.active).length,
+          locations: allLocations.map((location) => ({
+            locationId: String(location._id), name: location.name, active: location.active,
+          })),
+        },
+        gomaq: {
+          exchanges: allGomaQExchanges.length,
+          emptyCartridgeRecords: allGomaQEmptyCartridges.length,
+          emptyCartridgeQuantity: sumField(allGomaQEmptyCartridges, "quantity"),
+          pendingEmptyCartridges: allGomaQEmptyCartridges.filter((item) => item.status === "awaiting_collection").length,
+          collections: allGomaQCollections.length,
+          collectedCartridgeTotal: sumField(allGomaQCollections, "totalCartridges"),
+        },
+      },
+      entryHighlights,
+      reviewDetails,
+      gomaqExchanges: allGomaQExchanges
+        .slice()
+        .sort((a, b) => b.exchangedAt - a.exchangedAt)
+        .slice(0, 100)
+        .map((exchange) => ({
+          exchangeNumber: exchange.exchangeNumber,
+          productName: productById.get(String(exchange.productId))?.name ?? "Produto inexistente",
+          quantityDelivered: exchange.quantityDelivered,
+          quantityEmptyReceived: exchange.quantityEmptyReceived,
+          exchangedAt: exchange.exchangedAt,
+        })),
+      totalProducts: allProducts.length,
+      productsRequiringReview: productsResult.filter((product) => !product.readyForTrackedWithdrawal).length,
+      products: productsResult,
+    };
+  },
+});
+
+
+/**
+ * Aplica a migração lote × armário após validação integral do diagnóstico.
+ *
+ * Esta mutation é INTERNAL (não integra a API pública do aplicativo). Só deve
+ * ser chamada manualmente no deployment first-herring-264, após autorização
+ * explícita do responsável. A transação é atômica: qualquer conflito aborta
+ * todas as inserções. Não altera estoque global, saldos físicos por armário,
+ * lotes, entradas, movimentações ou devoluções.
+ */
+export const applyLotLocationBalancesMigration = internalMutation({
+  args: {
+    confirmation: v.literal("CONFIRMAR_MIGRACAO_LOTES_FIRST_HERRING"),
+  },
+  handler: async (ctx) => {
+    const report = await ctx.runQuery(internal.stockSetup.lotLocationReadiness, {});
+    const plan = buildLotLocationMigrationPlan(report as unknown as Parameters<typeof buildLotLocationMigrationPlan>[0]);
+    const now = Date.now();
+    let inserted = 0;
+    let skipped = 0;
+
+    const insertableLotIds = new Set(plan.insertions.map((row) => row.lotId));
+
+    for (const row of plan.rows) {
+      const existing = await ctx.db
+        .query("lotLocationBalances")
+        .withIndex("by_lot", (q) => q.eq("lotId", row.lotId as any))
+        .collect();
+
+      if (existing.length > 0) {
+        if (
+          existing.length !== 1 ||
+          existing[0].productId !== row.productId ||
+          existing[0].locationId !== row.locationId ||
+          Math.abs(existing[0].quantityAvailable - row.quantityAvailable) > 1e-9
+        ) {
+          throw new Error(
+            `Migração lote × armário abortada: conflito no lote ${row.lotNumber}. Nenhuma gravação será confirmada.`,
+          );
+        }
+        skipped++;
+        continue;
+      }
+
+      if (!insertableLotIds.has(row.lotId)) {
+        throw new Error(
+          `Migração lote × armário abortada: diagnóstico considera ${row.lotNumber} mapeado, mas o registro não existe.`,
+        );
+      }
+
+      await ctx.db.insert("lotLocationBalances", {
+        lotId: row.lotId as any,
+        productId: row.productId as any,
+        locationId: row.locationId as any,
+        quantityAvailable: row.quantityAvailable,
+        updatedAt: now,
+      });
+      inserted++;
+    }
+
+    if (inserted + skipped !== plan.totalLots) {
+      throw new Error("Migração lote × armário abortada: contagem final de registros inesperada.");
+    }
+
+    await ctx.db.insert("auditLogs", {
+      action: "update",
+      entity: "lotLocationBalances",
+      details:
+        `Migração controlada lote × armário: ${inserted} registro(s) inserido(s), ${skipped} já existente(s) idêntico(s), ${plan.totalLots} lotes, ${plan.totalQuantity} unidades. Nenhuma quantidade física/global, lote, entrada, movimentação ou devolução foi alterada.`,
+      timestamp: now,
+    });
+
+    return {
+      migrationApplied: true,
+      inserted,
+      skipped,
+      totalLots: plan.totalLots,
+      totalQuantity: plan.totalQuantity,
+      updatedAt: now,
     };
   },
 });
