@@ -1,6 +1,8 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { planLotReturnAllocations } from "../lib/return-lot-allocation";
 import {
   validateReturnQuantity,
   returnedQuantityForExit,
@@ -133,6 +135,11 @@ export const create = mutation({
     ),
     locationId: v.optional(v.id("storageLocations")),
     lotId: v.optional(v.id("lots")),
+    lotAllocations: v.optional(v.array(v.object({
+      lotId: v.id("lots"),
+      sourceLocationId: v.optional(v.id("storageLocations")),
+      quantity: v.number(),
+    }))),
     receivedByUserId: v.optional(v.id("users")),
     observation: v.optional(v.string()),
   },
@@ -161,45 +168,114 @@ export const create = mutation({
     });
     if (error) throw new Error(error);
 
-    // ── Lote de origem da devolução (ATOMICIDADE) ─────────────────────────────
-    // A devolução DEVE devolver ao mesmo lote que a saída consumiu. Sem isso o
-    // saldo global era restaurado e o `quantityAvailable` do lote não — o estado
-    // parcial que gerou a divergência 3337 x 3338.
-    //
-    // Precedência: lote informado na devolução → `stockMovements.lotId` da
-    // saída. A validação acontece ANTES de qualquer escrita, para que uma
-    // recusa não deixe estado parcial.
-    const exitLotId = (exit as any).lotId ?? null;
-    const productLots = await ctx.db
-      .query("lots")
-      .withIndex("by_product", (q) => q.eq("productId", exit.productId))
+    // A saída recente possui alocações exatas por lote × armário. A devolução
+    // exige que o operador identifique quanto voltou de cada parcela original;
+    // não distribui quantidade por FIFO nem escolhe lote arbitrariamente.
+    const productLots = await ctx.db.query("lots")
+      .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
       .collect();
-    // Material rastreado por lote: existe lote ativo do produto. Sem lote ativo,
-    // a devolução opera apenas sobre o saldo global (comportamento histórico
-    // de itens sem rastreio, preservado deliberadamente).
-    const requiresLot =
-      args.lotId != null || exitLotId != null || productLots.some((l: any) => l.active);
+    const sourceRows = await ctx.db.query("stockMovementLotAllocations")
+      .withIndex("by_movement", (q: any) => q.eq("movementId", exit._id))
+      .collect();
+    let sourceAllocations = sourceRows
+      .filter((row: any) => row.allocationType === "withdrawal")
+      .map((row: any) => ({
+        lotId: row.lotId,
+        sourceLocationId: row.locationId,
+        quantity: row.quantity,
+      }));
 
-    let resolvedLotId = args.lotId ?? (exitLotId as any);
-    if (resolvedLotId && typeof resolvedLotId === "string" && !resolvedLotId.startsWith("LOT-")) {
-      // `stockMovements.lotId` guarda o ID do lote; se por algum motivo
-      // histórico guardou apenas o número, não é um ID utilizável.
-      resolvedLotId = null as any;
-    }
-
-    const lotGuard = resolveReturnLotGuard({ exitLotId: resolvedLotId ?? null, requiresLot });
-    if (lotGuard) {
-      const exitLabelForError = exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
-      throw new Error(
-        buildUnresolvableLotMessage({ productName: product.name, exitLabel: exitLabelForError, reason: lotGuard }),
+    // Saída antiga: resolve o lote pela ID OU pelo número legado, sem testar
+    // prefixos artificiais em IDs do Convex.
+    if (sourceAllocations.length === 0 && (args.lotId || exit.lotId)) {
+      const legacyLot = productLots.find((lot: any) =>
+        String(lot._id) === String(args.lotId ?? exit.lotId) ||
+        lot.lotNumber === String(args.lotId ?? exit.lotId),
       );
+      if (legacyLot) {
+        sourceAllocations = [{
+          lotId: legacyLot._id,
+          sourceLocationId: exit.locationId,
+          quantity: exit.quantity,
+        }];
+      }
     }
 
-    // Lote, quando identificado, precisa existir e pertencer ao produto
-    const resolvedLot: any = resolvedLotId ? await ctx.db.get(resolvedLotId) : null;
-    if (resolvedLotId && !resolvedLot) throw new Error("Lote de origem da saída não encontrado");
-    if (resolvedLot && resolvedLot.productId !== exit.productId) {
-      throw new Error("Lote não corresponde ao produto da saída");
+    const requiresLot = sourceAllocations.length > 0 || productLots.some((lot: any) => lot.active);
+    let plannedLotAllocations: Array<{ lotId: any; sourceLocationId?: any; quantity: number }> = [];
+    const destinationBalances = new Map<string, any>();
+
+    if (requiresLot) {
+      if (!args.locationId) {
+        throw new Error("Informe o armário de destino para devolver material rastreado por lote.");
+      }
+      if (sourceAllocations.length === 0) {
+        throw new Error("A saída original não possui rastreabilidade de lote suficiente. Regularize a saída antes da devolução.");
+      }
+
+      const persistedReturns = await ctx.db.query("returnLotAllocations")
+        .withIndex("by_exitMovement", (q: any) => q.eq("exitMovementId", exit._id))
+        .collect();
+      const previouslyReturned = persistedReturns.map((row: any) => ({
+        lotId: String(row.lotId),
+        sourceLocationId: row.sourceLocationId ? String(row.sourceLocationId) : undefined,
+        quantity: row.quantity,
+      }));
+
+      const childReturnIds = new Set(persistedReturns.map((row: any) => String(row.returnId)));
+      const legacyReturns = allReturns.filter((row: any) =>
+        row.exitMovementId === exit._id && row.lotId && !childReturnIds.has(String(row._id)),
+      );
+      for (const legacyReturn of legacyReturns) {
+        const matches = sourceAllocations.filter((source: any) => String(source.lotId) === String(legacyReturn.lotId));
+        if (matches.length !== 1) {
+          throw new Error("Há uma devolução legada sem alocação por armário/lote. Regularize esse histórico antes de nova devolução.");
+        }
+        previouslyReturned.push({
+          lotId: String(matches[0].lotId),
+          sourceLocationId: matches[0].sourceLocationId ? String(matches[0].sourceLocationId) : undefined,
+          quantity: legacyReturn.quantity,
+        });
+      }
+
+      const requestedAllocations = args.lotAllocations ?? (
+        args.lotId && sourceAllocations.length === 1
+          ? [{
+              lotId: args.lotId,
+              sourceLocationId: sourceAllocations[0].sourceLocationId,
+              quantity: args.quantity,
+            }]
+          : []
+      );
+      plannedLotAllocations = planLotReturnAllocations({
+        requestedQuantity: args.quantity,
+        sourceAllocations: sourceAllocations.map((row: any) => ({
+          lotId: String(row.lotId),
+          sourceLocationId: row.sourceLocationId ? String(row.sourceLocationId) : undefined,
+          quantity: row.quantity,
+        })),
+        previouslyReturned,
+        requestedAllocations: requestedAllocations.map((row: any) => ({
+          lotId: String(row.lotId),
+          sourceLocationId: row.sourceLocationId ? String(row.sourceLocationId) : undefined,
+          quantity: row.quantity,
+        })),
+      });
+
+      for (const allocation of plannedLotAllocations) {
+        const lot: any = await ctx.db.get(allocation.lotId);
+        if (!lot || lot.productId !== exit.productId) {
+          throw new Error("Um dos lotes selecionados não corresponde ao produto da saída.");
+        }
+        const rows = await ctx.db.query("lotLocationBalances")
+          .withIndex("by_lot", (q: any) => q.eq("lotId", allocation.lotId))
+          .collect();
+        const matching = rows.filter((row: any) => row.locationId === args.locationId);
+        if (matching.length > 1) {
+          throw new Error("Há saldos duplicados deste lote no armário de devolução. Regularize antes de continuar.");
+        }
+        destinationBalances.set(String(allocation.lotId), matching[0] ?? null);
+      }
     }
 
     if (args.receivedByUserId) {
@@ -215,7 +291,7 @@ export const create = mutation({
       exitMovementId: exit._id,
       requestId: exit.requestId,
       productId: exit.productId,
-      lotId: resolvedLotId ?? undefined,
+      lotId: plannedLotAllocations.length === 1 ? plannedLotAllocations[0].lotId : undefined,
       quantity: args.quantity,
       reason,
       condition,
@@ -227,11 +303,11 @@ export const create = mutation({
     });
 
     // 2) Repor estoque físico global
-    const stock = await ctx.db
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", exit.productId))
-      .first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
+      .collect();
+    const stock = requireSingleValidGlobalStock(stockRows, String(exit.productId));
 
     const newPhysical = applyReturnToStock(stock.physicalQuantity, args.quantity);
     await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
@@ -242,6 +318,7 @@ export const create = mutation({
         .query("stockByLocation")
         .withIndex("by_product", (q) => q.eq("productId", exit.productId))
         .collect();
+      validateUniqueScopedStockRows(sblList, String(exit.productId));
       const sbl = sblList.find((s: any) => s.locationId === args.locationId);
       if (sbl) {
         await ctx.db.patch(sbl._id, {
@@ -256,13 +333,36 @@ export const create = mutation({
       }
     }
 
-    // 4) Repor disponibilidade do lote (OBRIGATÓRIO quando rastreado)
-    //    A validação do passo anterior (guard) já garantiu que, quando o
-    //    material exige lote, existe um lote resolvível. Aqui o lote e o
-    //    saldo global SEMPRE sobem juntos — nunca um sem o outro.
-    if (resolvedLot) {
-      await ctx.db.patch(resolvedLot._id, {
-        quantityAvailable: resolvedLot.quantityAvailable + args.quantity,
+    // 4) Repor exatamente os lotes da saída original no armário de destino.
+    for (const allocation of plannedLotAllocations) {
+      const lot: any = await ctx.db.get(allocation.lotId);
+      const destinationBalance = destinationBalances.get(String(allocation.lotId));
+      await ctx.db.patch(lot._id, {
+        quantityAvailable: lot.quantityAvailable + allocation.quantity,
+      });
+      if (destinationBalance) {
+        await ctx.db.patch(destinationBalance._id, {
+          quantityAvailable: destinationBalance.quantityAvailable + allocation.quantity,
+          updatedAt: now,
+        });
+      } else {
+        await ctx.db.insert("lotLocationBalances", {
+          lotId: lot._id,
+          productId: exit.productId,
+          locationId: args.locationId!,
+          quantityAvailable: allocation.quantity,
+          updatedAt: now,
+        });
+      }
+      await ctx.db.insert("returnLotAllocations", {
+        returnId,
+        exitMovementId: exit._id,
+        productId: exit.productId,
+        lotId: lot._id,
+        sourceLocationId: allocation.sourceLocationId,
+        destinationLocationId: args.locationId!,
+        quantity: allocation.quantity,
+        createdAt: now,
       });
     }
 
@@ -280,9 +380,15 @@ export const create = mutation({
       userId,
       requestId: exit.requestId,
       exitMovementId: exit._id,
-      lotId: resolvedLot ? resolvedLot.lotNumber : undefined,
+      locationId: args.locationId,
+      lotId: plannedLotAllocations.length === 1
+        ? (await ctx.db.get(plannedLotAllocations[0].lotId) as any)?.lotNumber
+        : undefined,
       observation:
         `Devolução da saída ${exitLabel} — ${reason}` +
+        (plannedLotAllocations.length > 0
+          ? ` | lotes: ${plannedLotAllocations.map((a) => `${String(a.lotId)}(${a.quantity})`).join(", ")}`
+          : "") +
         (args.observation ? ` | ${args.observation}` : ""),
       timestamp: now,
     });
