@@ -28,9 +28,12 @@ describe("auditoria histórica de rastreabilidade das movimentações", () => {
     expect(block).toContain("productLotMismatchMovements");
     expect(block).toContain("entryLotMismatchMovements");
     expect(block).toContain("missingUserMovements");
+    expect(block).toContain("missingProductMovements");
+    expect(block).toContain("invalidEntryMovements");
   });
 
   it("separa evidência histórica da posição atual do lote", () => {
+    expect(block).toContain("evidenceEntryIds");
     expect(block).toContain("entryItemLocationEvidence");
     expect(block).toContain("allocationLocationEvidence");
     expect(block).toContain("currentLotLocationSnapshot");
@@ -40,6 +43,10 @@ describe("auditoria histórica de rastreabilidade das movimentações", () => {
   it("expõe divergências na soma das alocações sem corrigir registros", () => {
     expect(block).toContain("allocationQuantityMismatchMovements");
     expect(block).toContain("allocationQuantityMatchesMovement");
+    expect(block).toContain("invalidAllocationReferences");
+    expect(block).toContain("movementProductMatchesAllocation");
+    expect(block).toContain("missingProductReference");
+    expect(block).toContain("invalidEntryReference");
     expect(block).toContain("não grava dados");
   });
 });
