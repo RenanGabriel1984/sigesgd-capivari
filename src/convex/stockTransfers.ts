@@ -160,6 +160,16 @@ export const create = mutation({
       if (activeLots.some((lot: any) => lot.active && lot.quantityAvailable > 0)) {
         throw new Error("Selecione o lote para transferir: o produto possui saldo rastreado por lote.");
       }
+      const [globalRows, locationRows] = await Promise.all([
+        ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
+        ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
+      ]);
+      const globalStock = requireSingleValidGlobalStock(globalRows, product.name);
+      validateUniqueScopedStockRows(locationRows, product.name);
+      const locationTotal = locationRows.reduce((sum: number, row: any) => sum + row.quantity, 0);
+      if (Math.abs(globalStock.physicalQuantity - locationTotal) > 1e-9) {
+        throw new Error("O saldo global diverge do saldo por armário. Transferência bloqueada.");
+      }
     }
 
     // Check source location stock
