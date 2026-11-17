@@ -843,7 +843,7 @@ export const reverse = mutation({
         throw new Error(`Não é seguro estornar "${productName}": há mais de um lote possível na entrada sem vínculo inequívoco.`);
       }
       const lot = lotMatches[0] ?? (!item.lotId && productEntryLots.length === 1 ? productEntryLots[0] : null);
-      if (item.lotId && productEntryLots.length > 0 && !lot) {
+      if (item.lotId && !lot) {
         throw new Error(`Não foi possível resolver o lote de origem de "${productName}" para estorno.`);
       }
 
