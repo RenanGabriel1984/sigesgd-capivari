@@ -252,7 +252,7 @@ describe("VALIDAÇÃO — quantidades finitas em operações de estoque", () => 
 describe("SEGURANÇA — limpeza destrutiva de dados de teste", () => {
   it("não expõe cleanupTestData como mutation pública", () => {
     const src = read("src/convex/stockSetup.ts");
-    expect(src).toContain('import { internalMutation, mutation, query } from "./_generated/server";');
+    expect(src).toContain('import { internalMutation, internalQuery, mutation, query } from "./_generated/server";');
     expect(src).toContain("export const cleanupTestData = internalMutation({");
     expect(src).not.toContain("export const cleanupTestData = mutation({");
   });

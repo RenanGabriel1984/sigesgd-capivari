@@ -275,3 +275,44 @@ export async function hasInitialInventoryLot(
   }
   return false;
 }
+
+export function isClosedUnusedReturnAtSource(input: {
+  lotId: string;
+  sourceLocationId: string;
+  movements: Array<{
+    id: string;
+    type: string;
+    lotId?: string | null;
+    quantity: number;
+    exitMovementId?: string | null;
+    canceled?: boolean;
+  }>;
+  returns: Array<{
+    exitMovementId?: string | null;
+    quantity: number;
+    locationId?: string | null;
+    condition?: string | null;
+  }>;
+}): boolean {
+  if (input.movements.length !== 2 || input.returns.length !== 1) return false;
+
+  const exit = input.movements.find((movement) => movement.type === "exit");
+  const returnMovement = input.movements.find((movement) => movement.type === "return");
+  const returnRecord = input.returns[0];
+
+  if (!exit || !returnMovement || exit.id.length === 0) return false;
+  if (exit.canceled === true || returnMovement.canceled === true) return false;
+
+  return (
+    exit.lotId === input.lotId &&
+    returnMovement.lotId === input.lotId &&
+    returnMovement.exitMovementId === exit.id &&
+    returnRecord.exitMovementId === exit.id &&
+    Number.isFinite(exit.quantity) &&
+    exit.quantity > 0 &&
+    returnMovement.quantity === exit.quantity &&
+    returnRecord.quantity === exit.quantity &&
+    returnRecord.condition === "unused" &&
+    returnRecord.locationId === input.sourceLocationId
+  );
+}

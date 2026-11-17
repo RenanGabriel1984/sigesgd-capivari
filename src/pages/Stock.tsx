@@ -61,6 +61,7 @@ const FILTER_LABELS: Record<StockFilter, string> = {
 export default function Stock() {
   const products = useQuery(api.products.list) as ProductView[] | undefined;
   const implementation = useQuery(api.stockSetup.implementationStockStatus);
+  const dimensionOverview = useQuery(api.stockSetup.stockDimensionOverview);
   const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<StockFilter>("all");
@@ -71,6 +72,7 @@ export default function Stock() {
   const equipmentCategory = findEquipmentCategory(searchParams.get(EQUIPMENT_STOCK_PARAM));
 
   if (products === undefined) return <StockSkeleton />;
+  const dimensionByProduct = new Map((dimensionOverview?.products ?? []).map((row: any) => [row.productId, row]));
 
   const situationOf = (p: ProductView) =>
     getStockSituation(p.stock?.physicalQuantity ?? 0, p.minimumStock ?? 0, p.idealStock ?? 0);
@@ -222,6 +224,7 @@ export default function Stock() {
                   <TableRow>
                     <TableHead>Produto</TableHead>
                     <TableHead>Categoria</TableHead>
+                    <TableHead>Área / armário / lote</TableHead>
                     <TableHead className="text-center">Estoque Físico</TableHead>
                     <TableHead className="text-center">Reservado</TableHead>
                     <TableHead className="text-center">Disponível</TableHead>
@@ -237,6 +240,7 @@ export default function Stock() {
                     const reserved = p.stock?.reservedQuantity ?? 0;
                     const available = Math.max(physical - reserved, 0);
                     const situation = getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0);
+                    const dimension: any = dimensionByProduct.get(String(p._id));
                     const isLow = situation === "critical" || situation === "below_min";
                     return (
                       <TableRow key={p._id} className={isLow ? "bg-rose-50/30" : ""}>
@@ -251,6 +255,22 @@ export default function Stock() {
                         </TableCell>
                         <TableCell>
                           <Badge variant="secondary" className="text-xs">{p.category?.name ?? "—"}</Badge>
+                        </TableCell>
+                        <TableCell className="min-w-[260px] max-w-[340px]">
+                          {dimension?.lots?.length ? (
+                            <div className="space-y-1 text-xs">
+                              {dimension.lots.slice(0, 4).map((lot: any) => (
+                                <div key={lot.lotId}>
+                                  <span className="font-medium">{lot.areaName}</span> · Lote {lot.lotNumber} ({lot.quantityAvailable})
+                                  <div className="text-muted-foreground">{lot.locations.map((location: any) => `${location.locationName}: ${location.quantityAvailable}`).join(" · ") || "Sem armário alocado"}</div>
+                                </div>
+                              ))}
+                              {dimension.lots.length > 4 && <p className="text-muted-foreground">+ {dimension.lots.length - 4} lote(s)</p>}
+                            </div>
+                          ) : <span className="text-xs text-muted-foreground">Sem saldo por lote/local</span>}
+                          {(dimension?.unmappedLotQuantity > 1e-9 || dimension?.invalidBalanceCount > 0 || Math.abs(dimension?.globalVsLocationDifference ?? 0) > 1e-9 || Math.abs(dimension?.globalVsLotsDifference ?? 0) > 1e-9) && (
+                            <Badge variant="destructive" className="mt-1 text-[10px]">Conciliação pendente</Badge>
+                          )}
                         </TableCell>
                         <TableCell className="text-center font-mono font-semibold">{physical}</TableCell>
                         <TableCell className="text-center font-mono text-amber-600">
@@ -285,7 +305,7 @@ export default function Stock() {
                   })}
                   {filtered?.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={9}>
+                      <TableCell colSpan={10}>
                         <div className="empty-state py-12">
                           <Warehouse className="empty-state-icon" />
                           <p className="empty-state-title">
@@ -310,6 +330,7 @@ export default function Stock() {
                     const reserved = p.stock?.reservedQuantity ?? 0;
                     const available = Math.max(physical - reserved, 0);
                     const situation = getStockSituation(physical, p.minimumStock ?? 0, p.idealStock ?? 0);
+                    const dimension: any = dimensionByProduct.get(String(p._id));
                     const isLow = situation === "critical" || situation === "below_min";
                     return (
                       <Card key={p._id} className={`border-border/50 ${isLow ? "border-rose-200 bg-rose-50/20" : ""}`}>
@@ -325,6 +346,19 @@ export default function Stock() {
                       {STOCK_SITUATION_LABELS[situation]}
                     </Badge>
                   </div>
+                  {dimension?.lots?.length ? (
+                    <div className="mb-3 rounded-md bg-muted/40 p-2 text-xs space-y-1">
+                      {dimension.lots.slice(0, 3).map((lot: any) => (
+                        <div key={lot.lotId}>
+                          <span className="font-medium">{lot.areaName}</span> · {lot.lotNumber} ({lot.quantityAvailable}) · {lot.locations.map((location: any) => `${location.locationName}: ${location.quantityAvailable}`).join(" · ") || "Sem armário alocado"}
+                        </div>
+                      ))}
+                      {dimension.lots.length > 3 && <p className="text-muted-foreground">+ {dimension.lots.length - 3} lote(s)</p>}
+                    </div>
+                  ) : null}
+                  {(dimension?.unmappedLotQuantity > 1e-9 || dimension?.invalidBalanceCount > 0 || Math.abs(dimension?.globalVsLocationDifference ?? 0) > 1e-9 || Math.abs(dimension?.globalVsLotsDifference ?? 0) > 1e-9) && (
+                    <Badge variant="destructive" className="mb-3 text-[10px]">Conciliação pendente</Badge>
+                  )}
                   <div className="grid grid-cols-3 gap-3 text-center">
                     <div>
                       <p className="text-lg font-bold font-mono">{physical}</p>

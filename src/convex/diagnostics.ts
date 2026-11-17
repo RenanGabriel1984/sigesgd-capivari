@@ -1499,3 +1499,515 @@ export const structureAuditInternal = internalQuery({
     };
   },
 });
+
+
+/**
+ * Auditoria histórica de rastreabilidade das movimentações.
+ *
+ * INTERNAL QUERY / SOMENTE LEITURA:
+ * - identifica movimentos sem localização ou com referência inválida;
+ * - confere vínculos de produto, lote, entrada e usuário;
+ * - apresenta evidências da entrada, alocações históricas e posição ATUAL do lote
+ *   em blocos separados para impedir que a posição atual seja confundida com
+ *   a localização histórica do movimento.
+ *
+ * Não corrige, classifica, migra nem grava qualquer registro.
+ */
+export const stockMovementTraceabilityAuditInternal = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const [
+      movements,
+      products,
+      users,
+      entries,
+      entryItems,
+      lots,
+      locations,
+      lotLocationBalances,
+      allocations,
+    ] = await Promise.all([
+      ctx.db.query("stockMovements").collect(),
+      ctx.db.query("products").collect(),
+      ctx.db.query("users").collect(),
+      ctx.db.query("entries").collect(),
+      ctx.db.query("entryItems").collect(),
+      ctx.db.query("lots").collect(),
+      ctx.db.query("storageLocations").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("stockMovementLotAllocations").collect(),
+    ]);
+
+    const movementById = new Map<string, (typeof movements)[number]>();
+    for (const row of movements) movementById.set(String(row._id), row);
+
+    const productById = new Map<string, (typeof products)[number]>();
+    for (const row of products) productById.set(String(row._id), row);
+
+    const userById = new Map<string, (typeof users)[number]>();
+    for (const row of users) userById.set(String(row._id), row);
+
+    const entryById = new Map<string, (typeof entries)[number]>();
+    for (const row of entries) entryById.set(String(row._id), row);
+
+    const locationById = new Map<string, (typeof locations)[number]>();
+    for (const row of locations) locationById.set(String(row._id), row);
+
+    const lotById = new Map<string, (typeof lots)[number]>();
+    const lotsByNumber = new Map<string, Array<(typeof lots)[number]>>();
+    for (const lot of lots) {
+      lotById.set(String(lot._id), lot);
+      const key = lot.lotNumber;
+      const current = lotsByNumber.get(key) ?? [];
+      current.push(lot);
+      lotsByNumber.set(key, current);
+    }
+
+    const entryItemsByEntry = new Map<string, Array<(typeof entryItems)[number]>>();
+    for (const item of entryItems) {
+      const key = String(item.entryId);
+      const current = entryItemsByEntry.get(key) ?? [];
+      current.push(item);
+      entryItemsByEntry.set(key, current);
+    }
+
+    const allocationsByMovement = new Map<string, Array<(typeof allocations)[number]>>();
+    for (const allocation of allocations) {
+      const key = String(allocation.movementId);
+      const current = allocationsByMovement.get(key) ?? [];
+      current.push(allocation);
+      allocationsByMovement.set(key, current);
+    }
+
+    const resolveLot = (reference?: string) => {
+      if (!reference) return { lot: undefined, ambiguous: false };
+      const byId = lotById.get(reference);
+      if (byId) return { lot: byId, ambiguous: false };
+      const byNumber = lotsByNumber.get(reference) ?? [];
+      return {
+        lot: byNumber.length === 1 ? byNumber[0] : undefined,
+        ambiguous: byNumber.length > 1,
+      };
+    };
+
+    const summarizeMovement = (movement: (typeof movements)[number]) => {
+      const product = productById.get(String(movement.productId));
+      const user = userById.get(String(movement.userId));
+      const entry = movement.entryId ? entryById.get(String(movement.entryId)) : undefined;
+      const lotResolution = resolveLot(movement.lotId);
+      const lot = lotResolution.lot;
+      const allocationRows = allocationsByMovement.get(String(movement._id)) ?? [];
+      // Evidência da entrada indicada pelo movimento E da entrada registrada no lote.
+      // Em caso de divergência, ambas são apresentadas para revisão — não escolher silenciosamente uma.
+      const evidenceEntryIds = [...new Set(
+        [movement.entryId, lot?.entryId].filter(Boolean).map((id) => String(id))
+      )];
+      const linkedItems = evidenceEntryIds.flatMap((entryId) =>
+        (entryItemsByEntry.get(entryId) ?? [])
+          .filter((item) =>
+            item.productId === movement.productId &&
+            (!movement.lotId || item.lotId === movement.lotId || item.lotId === String(lot?._id ?? ""))
+          )
+          .map((item) => ({ item, evidenceEntryId: entryId }))
+      );
+
+      const entryItemLocations = linkedItems
+        .filter(({ item }) => item.locationId)
+        .map(({ item, evidenceEntryId }) => {
+          const locationId = String(item.locationId);
+          const location = locationById.get(locationId);
+          const sourceEntry = entryById.get(evidenceEntryId);
+          return {
+            entryId: evidenceEntryId,
+            entryNumber: sourceEntry?.entryNumber ?? null,
+            entryItemId: String(item._id),
+            lotReference: item.lotId ?? null,
+            locationId,
+            locationName: location?.name ?? null,
+            locationReferenceValid: Boolean(location),
+          };
+        });
+
+      const currentLotLocations = lot
+        ? lotLocationBalances
+            .filter((balance) => balance.lotId === lot._id)
+            .map((balance) => {
+              const location = locationById.get(String(balance.locationId));
+              return {
+                locationId: String(balance.locationId),
+                locationName: location?.name ?? null,
+                quantityAvailableNow: balance.quantityAvailable,
+                locationReferenceValid: Boolean(location),
+              };
+            })
+        : [];
+
+      const allocationEvidence = allocationRows.map((allocation) => {
+        const location = locationById.get(String(allocation.locationId));
+        return {
+          lotId: String(allocation.lotId),
+          locationId: String(allocation.locationId),
+          locationName: location?.name ?? null,
+          quantity: allocation.quantity,
+          allocationType: allocation.allocationType,
+          locationReferenceValid: Boolean(location),
+        };
+      });
+
+      return {
+        movementId: String(movement._id),
+        timestamp: movement.timestamp,
+        type: movement.type,
+        quantity: movement.quantity,
+        canceled: movement.canceled ?? false,
+        productId: String(movement.productId),
+        productName: product?.name ?? null,
+        productExists: Boolean(product),
+        userId: String(movement.userId),
+        userExists: Boolean(user),
+        entryId: movement.entryId ? String(movement.entryId) : null,
+        entryNumber: entry?.entryNumber ?? null,
+        entryReferenceValid: movement.entryId ? Boolean(entry) : null,
+        lotEntryId: lot?.entryId ? String(lot.entryId) : null,
+        lotEntryNumber: lot ? entryById.get(String(lot.entryId))?.entryNumber ?? null : null,
+        entryAreaId: entry?.areaId ? String(entry.areaId) : null,
+        lotReference: movement.lotId ?? null,
+        lotResolution: !movement.lotId
+          ? "not_provided"
+          : lotResolution.ambiguous
+            ? "ambiguous_requires_review"
+            : lot
+              ? "resolved"
+              : "unresolved",
+        resolvedLotId: lot ? String(lot._id) : null,
+        lotNumber: lot?.lotNumber ?? null,
+        lotProductMatchesMovement: lot ? lot.productId === movement.productId : null,
+        lotEntryMatchesMovement: lot && movement.entryId ? lot.entryId === movement.entryId : null,
+        lotAreaId: lot?.areaId ? String(lot.areaId) : null,
+        recordedLocationId: movement.locationId ? String(movement.locationId) : null,
+        recordedLocationName: movement.locationId
+          ? locationById.get(String(movement.locationId))?.name ?? null
+          : null,
+        recordedLocationReferenceValid: movement.locationId
+          ? locationById.has(String(movement.locationId))
+          : null,
+        entryItemLocationEvidence: entryItemLocations,
+        allocationLocationEvidence: allocationEvidence,
+        allocationQuantityTotal: allocationRows.reduce((sum, row) => sum + row.quantity, 0),
+        allocationQuantityMatchesMovement: allocationRows.length > 0
+          ? Math.abs(allocationRows.reduce((sum, row) => sum + row.quantity, 0) - movement.quantity) < 0.000001
+          : null,
+        currentLotLocationSnapshot: currentLotLocations,
+      };
+    };
+
+    const missingLocation = movements.filter((movement) => !movement.locationId);
+    const invalidLocation = movements.filter((movement) =>
+      movement.locationId && !locationById.has(String(movement.locationId))
+    );
+    const unresolvedLot = movements.filter((movement) =>
+      movement.lotId && !resolveLot(movement.lotId).lot && !resolveLot(movement.lotId).ambiguous
+    );
+    const ambiguousLot = movements.filter((movement) =>
+      movement.lotId && resolveLot(movement.lotId).ambiguous
+    );
+    const productLotMismatch = movements.filter((movement) => {
+      const lot = resolveLot(movement.lotId).lot;
+      return Boolean(lot && lot.productId !== movement.productId);
+    });
+    const entryLotMismatch = movements.filter((movement) => {
+      const lot = resolveLot(movement.lotId).lot;
+      return Boolean(lot && movement.entryId && lot.entryId !== movement.entryId);
+    });
+    const missingUser = movements.filter((movement) => !userById.has(String(movement.userId)));
+    const missingProduct = movements.filter((movement) => !productById.has(String(movement.productId)));
+    const invalidEntry = movements.filter((movement) =>
+      movement.entryId && !entryById.has(String(movement.entryId))
+    );
+    const allocationQuantityMismatch = movements.filter((movement) => {
+      const rows = allocationsByMovement.get(String(movement._id)) ?? [];
+      return rows.length > 0 &&
+        Math.abs(rows.reduce((sum, row) => sum + row.quantity, 0) - movement.quantity) >= 0.000001;
+    });
+
+    const invalidAllocationRows = allocations.filter((allocation) => {
+      const movement = movementById.get(String(allocation.movementId));
+      const product = productById.get(String(allocation.productId));
+      const lot = lotById.get(String(allocation.lotId));
+      const location = locationById.get(String(allocation.locationId));
+      return !movement || !product || !lot || !location ||
+        lot.productId !== allocation.productId ||
+        movement.productId !== allocation.productId;
+    }).map((allocation) => {
+      const movement = movementById.get(String(allocation.movementId));
+      const product = productById.get(String(allocation.productId));
+      const lot = lotById.get(String(allocation.lotId));
+      const location = locationById.get(String(allocation.locationId));
+      return {
+        allocationId: String(allocation._id),
+        movementId: String(allocation.movementId),
+        movementExists: Boolean(movement),
+        productId: String(allocation.productId),
+        productExists: Boolean(product),
+        lotId: String(allocation.lotId),
+        lotExists: Boolean(lot),
+        lotProductMatchesAllocation: lot ? lot.productId === allocation.productId : null,
+        movementProductMatchesAllocation: movement ? movement.productId === allocation.productId : null,
+        locationId: String(allocation.locationId),
+        locationExists: Boolean(location),
+        quantity: allocation.quantity,
+      };
+    });
+
+    const missingLocationByType: Record<string, number> = {};
+    for (const movement of missingLocation) {
+      const key = movement.type ?? "unknown";
+      missingLocationByType[key] = (missingLocationByType[key] ?? 0) + 1;
+    }
+
+    return {
+      generatedAt: Date.now(),
+      readOnly: true,
+      totals: {
+        movements: movements.length,
+        withRecordedLocation: movements.length - missingLocation.length - invalidLocation.length,
+        missingLocation: missingLocation.length,
+        invalidLocationReference: invalidLocation.length,
+        unresolvedLotReference: unresolvedLot.length,
+        ambiguousLotReference: ambiguousLot.length,
+        productLotMismatch: productLotMismatch.length,
+        entryLotMismatch: entryLotMismatch.length,
+        missingUserReference: missingUser.length,
+        missingProductReference: missingProduct.length,
+        invalidEntryReference: invalidEntry.length,
+        invalidAllocationReferences: invalidAllocationRows.length,
+        allocationQuantityMismatch: allocationQuantityMismatch.length,
+      },
+      missingLocationByType,
+      missingLocationMovements: missingLocation
+        .sort((a, b) => b.timestamp - a.timestamp)
+        .map(summarizeMovement),
+      invalidLocationMovements: invalidLocation.map(summarizeMovement),
+      unresolvedLotMovements: unresolvedLot.map(summarizeMovement),
+      ambiguousLotMovements: ambiguousLot.map(summarizeMovement),
+      productLotMismatchMovements: productLotMismatch.map(summarizeMovement),
+      entryLotMismatchMovements: entryLotMismatch.map(summarizeMovement),
+      missingUserMovements: missingUser.map(summarizeMovement),
+      missingProductMovements: missingProduct.map(summarizeMovement),
+      invalidEntryMovements: invalidEntry.map(summarizeMovement),
+      invalidAllocationReferences: invalidAllocationRows,
+      allocationQuantityMismatchMovements: allocationQuantityMismatch.map(summarizeMovement),
+      interpretation: {
+        entryItemLocationEvidence: "Local registrado no item da entrada; evidência documental, não correção automática.",
+        allocationLocationEvidence: "Local registrado nas alocações históricas do movimento.",
+        currentLotLocationSnapshot: "Posição atual do lote; não deve ser tratada como localização histórica do movimento.",
+        action: "Auditar as evidências e aprovar manualmente qualquer correção futura. Esta consulta não grava dados.",
+      },
+    };
+  },
+});
+
+
+/**
+ * Correção controlada de localização histórica.
+ *
+ * INTERNAL MUTATION: NÃO executar automaticamente em deploy ou workflow.
+ * Só pode ser invocada manualmente após revisão do dry-run e autorização
+ * específica. A mutação é atômica: revalida o conjunto inteiro antes do
+ * primeiro patch; qualquer divergência aborta toda a transação.
+ *
+ * A auditoria identifica o executor como manutenção técnica automatizada
+ * (sem userId), pois a chamada interna via CLI não fornece uma sessão de
+ * usuário autenticado. Não atribuir a operação a um administrador fictício.
+ */
+export const applyStockMovementLocationCorrectionsInternal = internalMutation({
+  args: {
+    expectedMovementIds: v.array(v.string()),
+    confirmation: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const EXPECTED_COUNT = 61;
+    const REQUIRED_CONFIRMATION = "APLICAR-61-CORRECOES-LOCALIZACAO";
+
+    if (args.confirmation !== REQUIRED_CONFIRMATION) {
+      throw new Error("Confirmação inválida. Nenhuma alteração foi aplicada.");
+    }
+    if (args.expectedMovementIds.length !== EXPECTED_COUNT) {
+      throw new Error(`Esperados exatamente ${EXPECTED_COUNT} IDs aprovados; recebidos ${args.expectedMovementIds.length}. Abortado.`);
+    }
+    const expectedIds = [...args.expectedMovementIds].sort();
+    if (new Set(expectedIds).size !== EXPECTED_COUNT) {
+      throw new Error("A lista contém IDs duplicados. Nenhuma alteração foi aplicada.");
+    }
+
+    const [movements, products, entries, entryItems, lots, locations, balances, allocations] =
+      await Promise.all([
+        ctx.db.query("stockMovements").collect(),
+        ctx.db.query("products").collect(),
+        ctx.db.query("entries").collect(),
+        ctx.db.query("entryItems").collect(),
+        ctx.db.query("lots").collect(),
+        ctx.db.query("storageLocations").collect(),
+        ctx.db.query("lotLocationBalances").collect(),
+        ctx.db.query("stockMovementLotAllocations").collect(),
+      ]);
+
+    const byId = <T extends { _id: unknown }>(rows: T[]) =>
+      new Map<string, T>(rows.map((row) => [String(row._id), row]));
+    const productById = byId(products);
+    const entryById = byId(entries);
+    const locationById = byId(locations);
+    const lotById = byId(lots);
+    const lotsByNumber = new Map<string, typeof lots>();
+    const itemsByEntry = new Map<string, typeof entryItems>();
+    const balancesByLot = new Map<string, typeof balances>();
+    const allocationsByMovement = new Map<string, typeof allocations>();
+
+    for (const lot of lots) {
+      const key = String(lot.lotNumber);
+      lotsByNumber.set(key, [...(lotsByNumber.get(key) ?? []), lot]);
+    }
+    for (const item of entryItems) {
+      const key = String(item.entryId);
+      itemsByEntry.set(key, [...(itemsByEntry.get(key) ?? []), item]);
+    }
+    for (const balance of balances) {
+      const key = String(balance.lotId);
+      balancesByLot.set(key, [...(balancesByLot.get(key) ?? []), balance]);
+    }
+    for (const allocation of allocations) {
+      const key = String(allocation.movementId);
+      allocationsByMovement.set(key, [...(allocationsByMovement.get(key) ?? []), allocation]);
+    }
+
+    const resolveLot = (reference?: string) => {
+      if (!reference) return undefined;
+      const direct = lotById.get(String(reference));
+      if (direct) return direct;
+      const found = lotsByNumber.get(String(reference)) ?? [];
+      return found.length === 1 ? found[0] : undefined;
+    };
+
+    const candidates: Array<{
+      movement: (typeof movements)[number];
+      locationId: (typeof locations)[number]["_id"];
+      productName: string;
+      entryNumber: string | null;
+      entryItemId: string;
+      lotId: string;
+      lotNumber: string;
+    }> = [];
+
+    for (const movement of movements) {
+      if (movement.locationId) continue;
+      if (movement.type !== "entry" && movement.type !== "adjustment") continue;
+      if (movement.canceled) continue;
+
+      const product = productById.get(String(movement.productId));
+      const lot = resolveLot(movement.lotId);
+      if (!product || !lot || String(lot.productId) !== String(movement.productId)) continue;
+
+      const sourceEntryId = movement.entryId
+        ? String(movement.entryId)
+        : lot.entryId ? String(lot.entryId) : "";
+      if (!sourceEntryId || !entryById.has(sourceEntryId)) continue;
+      if (movement.entryId && String(movement.entryId) !== String(lot.entryId)) continue;
+
+      const matches = (itemsByEntry.get(sourceEntryId) ?? []).filter((item) =>
+        String(item.productId) === String(movement.productId) &&
+        String(item.lotId) === String(lot._id)
+      );
+      if (matches.length !== 1) continue;
+      const item = matches[0];
+      if (!item.locationId || !locationById.has(String(item.locationId))) continue;
+      if (Number(item.quantity) !== Number(movement.quantity)) continue;
+
+      const currentBalances = balancesByLot.get(String(lot._id)) ?? [];
+      const currentLocationIds = [...new Set(currentBalances.map((row) => String(row.locationId)))];
+      if (currentLocationIds.length !== 1) continue;
+      if (currentLocationIds[0] !== String(item.locationId)) continue;
+      if (!locationById.has(currentLocationIds[0])) continue;
+
+      // Se houver alocação histórica, não inferir localização pelo item da entrada.
+      if ((allocationsByMovement.get(String(movement._id)) ?? []).length > 0) continue;
+
+      candidates.push({
+        movement,
+        locationId: item.locationId,
+        productName: product.name,
+        entryNumber: entryById.get(sourceEntryId)?.entryNumber ?? null,
+        entryItemId: String(item._id),
+        lotId: String(lot._id),
+        lotNumber: String(lot.lotNumber),
+      });
+    }
+
+    const actualIds = candidates.map(({ movement }) => String(movement._id)).sort();
+    if (
+      candidates.length !== EXPECTED_COUNT ||
+      actualIds.length !== expectedIds.length ||
+      actualIds.some((id, index) => id !== expectedIds[index])
+    ) {
+      throw new Error(
+        `Conjunto elegível mudou: esperado ${EXPECTED_COUNT}, atual ${candidates.length}. Nenhuma alteração foi aplicada. Gere novo dry-run e revise.`
+      );
+    }
+
+    const correctedAt = Date.now();
+    for (const candidate of candidates) {
+      const movementId = String(candidate.movement._id);
+      const location = locationById.get(String(candidate.locationId));
+      if (!location) {
+        throw new Error(`Localização deixou de existir para ${movementId}. Transação abortada.`);
+      }
+
+      // ÚNICO campo alterado no movimento:
+      await ctx.db.patch(candidate.movement._id, { locationId: candidate.locationId });
+
+      // Auditoria individual. userId omitido deliberadamente: execução interna
+      // sem sessão autenticada não pode ser atribuída falsamente a uma pessoa.
+      await ctx.db.insert("auditLogs", {
+        action: "update",
+        entity: "stockMovement",
+        entityId: movementId,
+        details: JSON.stringify({
+          operation: "historical_location_backfill",
+          actor: "automated_maintenance_internal",
+          actorUserId: null,
+          correctedAt,
+          before: { locationId: null },
+          after: { locationId: String(candidate.locationId), locationName: location.name },
+          evidence: {
+            entryNumber: candidate.entryNumber,
+            entryItemId: candidate.entryItemId,
+            lotId: candidate.lotId,
+            lotNumber: candidate.lotNumber,
+            quantity: candidate.movement.quantity,
+            type: candidate.movement.type,
+            timestamp: candidate.movement.timestamp,
+            source: "entryItems.locationId + unique current lotLocationBalances location",
+          },
+        }),
+        timestamp: correctedAt,
+      });
+    }
+
+    return {
+      applied: true,
+      mode: "CONTROLLED_ATOMIC_CORRECTION",
+      corrected: candidates.length,
+      auditLogsCreated: candidates.length,
+      movementsPatched: candidates.length,
+      fieldsChanged: ["stockMovements.locationId"],
+      otherMovementFieldsChanged: 0,
+      actorAttribution: "automated_maintenance_internal; userId deliberately omitted",
+      correctedByLocation: candidates.reduce((counts, candidate) => {
+        const name = locationById.get(String(candidate.locationId))?.name ?? "unknown";
+        counts[name] = (counts[name] ?? 0) + 1;
+        return counts;
+      }, {} as Record<string, number>),
+      excludedTypes: ["exit", "return", "transfer"],
+      note: "Transação atômica. A lista de IDs foi revalidada integralmente antes do primeiro patch.",
+    };
+  },
+});

@@ -444,6 +444,7 @@ const schema = defineSchema(
       requestId: v.optional(v.id("requests")),
       entryId: v.optional(v.id("entries")),
       lotId: v.optional(v.string()),
+      locationId: v.optional(v.id("storageLocations")),
       documentNumber: v.optional(v.string()),
       observation: v.optional(v.string()),
       // ── Número sequencial da saída (SAI-ANO-SEQ) — novas saídas ──
@@ -458,6 +459,20 @@ const schema = defineSchema(
       .index("by_user", ["userId"])
       .index("by_timestamp", ["timestamp"])
       .index("by_request", ["requestId"]),
+
+    // Cada saída registra todas as parcelas FIFO consumidas por lote/local.
+    // stockMovements.lotId permanece apenas por compatibilidade histórica.
+    stockMovementLotAllocations: defineTable({
+      movementId: v.id("stockMovements"),
+      productId: v.id("products"),
+      lotId: v.id("lots"),
+      locationId: v.id("storageLocations"),
+      quantity: v.number(),
+      allocationType: v.union(v.literal("withdrawal"), v.literal("reclassification")),
+      createdAt: v.number(),
+    }).index("by_movement", ["movementId"])
+      .index("by_lot", ["lotId"])
+      .index("by_product_location", ["productId", "locationId"]),
 
     // ── Requests (Solicitações) ──
     requests: defineTable({
@@ -620,10 +635,23 @@ const schema = defineSchema(
       // ── Classificação preservada historicamente no lote ──
       materialType: v.optional(materialTypeValidator),
       areaId: v.optional(v.id("stockAreas")),
+      originLotId: v.optional(v.id("lots")),
     }).index("by_product", ["productId"])
       .index("by_entry", ["entryId"])
       .index("by_number", ["lotNumber"])
       .index("by_active", ["active"]),
+
+    // Saldo físico disponível por lote × localização atual. A área é herdada
+    // de lots.areaId para impedir classificações duplicadas.
+    lotLocationBalances: defineTable({
+      lotId: v.id("lots"),
+      productId: v.id("products"),
+      locationId: v.id("storageLocations"),
+      quantityAvailable: v.number(),
+      updatedAt: v.number(),
+    }).index("by_lot", ["lotId"])
+      .index("by_product_location", ["productId", "locationId"])
+      .index("by_product", ["productId"]),
 
     // ── Storage Locations (Locais de Armazenamento) ──
     storageLocations: defineTable({
@@ -658,6 +686,7 @@ const schema = defineSchema(
       inventoryId: v.id("inventories"),
       productId: v.id("products"),
       lotId: v.optional(v.string()),
+      locationId: v.optional(v.id("storageLocations")),
       systemQuantity: v.number(),
       countedQuantity: v.optional(v.number()),
       difference: v.optional(v.number()),
@@ -670,6 +699,7 @@ const schema = defineSchema(
       requestItemId: v.id("requestItems"),
       lotId: v.id("lots"),
       quantity: v.number(),
+      locationId: v.optional(v.id("storageLocations")),
     }).index("by_requestItem", ["requestItemId"])
       .index("by_lot", ["lotId"]),
 
@@ -695,6 +725,21 @@ const schema = defineSchema(
     }).index("by_request", ["requestId"])
       .index("by_product", ["productId"])
       .index("by_exitMovement", ["exitMovementId"]),
+
+    // Devoluções de saídas multi-lote: identifica a parcela devolvida e o
+    // armário de destino, preservando a localização original da retirada.
+    returnLotAllocations: defineTable({
+      returnId: v.id("returns"),
+      exitMovementId: v.id("stockMovements"),
+      productId: v.id("products"),
+      lotId: v.id("lots"),
+      sourceLocationId: v.optional(v.id("storageLocations")),
+      destinationLocationId: v.id("storageLocations"),
+      quantity: v.number(),
+      createdAt: v.number(),
+    }).index("by_exitMovement", ["exitMovementId"])
+      .index("by_return", ["returnId"])
+      .index("by_lot", ["lotId"]),
 
     // ── Stock Areas (Áreas/Subestoques) ──
     // Conceito INDEPENDENTE de produto, categoria, fornecedor e local físico.
@@ -769,6 +814,7 @@ const schema = defineSchema(
       exchangeNumber: v.string(),
       productId: v.id("products"),
       lotId: v.optional(v.id("lots")),
+      locationId: v.optional(v.id("storageLocations")),
       printerId: v.id("printers"),
       quantityDelivered: v.number(),
       quantityEmptyReceived: v.number(),

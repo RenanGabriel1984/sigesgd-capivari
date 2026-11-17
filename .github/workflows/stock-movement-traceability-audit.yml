@@ -1,0 +1,105 @@
+name: Auditoria somente leitura — first-herring-264
+
+on:
+  push:
+    branches:
+      - codex/stock-ledger-integration
+    paths:
+      - scripts/stock-movement-traceability-audit.inline.ts
+      - scripts/stock-movement-location-dry-run.inline.ts
+      - .github/workflows/stock-movement-traceability-audit.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stock-movement-traceability-audit-first-herring
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Executar auditorias somente leitura no first-herring-264
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TARGET_DEPLOYMENT: first-herring-264
+      CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Bun 1.3.14
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: '1.3.14'
+      - name: Validar alvo e garantir execução sem publicação
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/codex/stock-ledger-integration" ]; then
+            echo "::error::Branch inesperada. Auditoria cancelada."; exit 1
+          fi
+          if [ -n "${CONVEX_DEPLOYMENT:-}" ]; then
+            echo "::error::CONVEX_DEPLOYMENT inesperada. Auditoria cancelada."; exit 1
+          fi
+          if [ -z "${CONVEX_DEPLOY_KEY:-}" ]; then
+            echo "::error::Secret ausente."; exit 1
+          fi
+          normalized_key="$(printf '%s' "${CONVEX_DEPLOY_KEY}" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          CONVEX_DEPLOY_KEY="${normalized_key}"
+          printf 'CONVEX_DEPLOY_KEY=%s\n' "${CONVEX_DEPLOY_KEY}" >> "${GITHUB_ENV}"
+          prefix="${CONVEX_DEPLOY_KEY%%|*}"; token="${CONVEX_DEPLOY_KEY#*|}"
+          if [ "${prefix}" != "dev:${TARGET_DEPLOYMENT}" ]; then
+            echo "::error::Deploy key não corresponde ao destino permitido."; exit 1
+          fi
+          if [[ "${token}" != eyJ* || "${token}" == *'|'* || "${token}" =~ [[:space:]] ]]; then
+            echo "::error::Deploy key em formato inválido."; exit 1
+          fi
+          for query_file in scripts/stock-movement-traceability-audit.inline.ts scripts/stock-movement-location-dry-run.inline.ts; do
+            if grep -nE 'ctx\.db\.(insert|patch|replace|delete)[[:space:]]*\(' "${query_file}"; then
+              echo "::error::Escrita encontrada em ${query_file}."; exit 1
+            fi
+          done
+          echo "Destino validado: dev:${TARGET_DEPLOYMENT}; somente consultas inline."
+      - name: Instalar dependências
+        run: bun install --frozen-lockfile
+      - name: Conferir metadados de funções do deployment selecionado pela chave (somente leitura)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "A chave validada aponta para dev:${TARGET_DEPLOYMENT}; consultando somente metadados."
+          bunx convex function-spec 2>&1 | tee "${RUNNER_TEMP}/first-herring-function-spec.txt"
+          {
+            echo "### Metadados das funções atualmente implantadas"
+            echo ""
+            echo "- Deployment selecionado pela própria deploy key: `dev:${TARGET_DEPLOYMENT}`"
+            echo "- Consulta de metadados; sem deploy e sem gravação de dados."
+            echo ""
+            echo '~~~text'
+            head -c 50000 "${RUNNER_TEMP}/first-herring-function-spec.txt"
+            echo ""
+            echo '~~~'
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Auditoria de rastreabilidade somente leitura
+        shell: bash
+        run: |
+          set -euo pipefail
+          query_source="$(cat scripts/stock-movement-traceability-audit.inline.ts)"
+          bunx convex --version
+          bunx convex run --inline-query "${query_source}" 2>&1 | tee "${RUNNER_TEMP}/stock-movement-audit.json"
+      - name: Simulação de recuperação de localização (DRY-RUN, sem gravação)
+        shell: bash
+        run: |
+          set -euo pipefail
+          query_source="$(cat scripts/stock-movement-location-dry-run.inline.ts)"
+          echo "Prévia somente leitura. Nenhum documento será alterado."
+          bunx convex run --inline-query "${query_source}" 2>&1 | tee "${RUNNER_TEMP}/stock-movement-location-dry-run.json"
+          {
+            echo "### Simulação de recuperação concluída — DRY-RUN"
+            echo ""
+            echo "- Deployment: `dev:${TARGET_DEPLOYMENT}`"
+            echo "- Escritas realizadas: **0**"
+            echo "- Saídas e devoluções: excluídas para revisão manual"
+            echo "- Nenhuma correção foi aplicada."
+          } >> "${GITHUB_STEP_SUMMARY}"
