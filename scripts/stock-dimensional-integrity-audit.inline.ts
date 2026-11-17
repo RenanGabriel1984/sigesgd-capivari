@@ -16,7 +16,8 @@ const sumBy = (rows, key, value) => {
 };
 const productById = new Map(products.map(x => [String(x._id), x]));
 const lotById = new Map(lots.map(x => [String(x._id), x]));
-const areaIds = new Set(areas.map(x => String(x._id)));\nconst entryIds = new Set(entries.map(x => String(x._id)));
+const areaIds = new Set(areas.map(x => String(x._id)));
+const entryIds = new Set(entries.map(x => String(x._id)));
 const locationIds = new Set(locations.map(x => String(x._id)));
 const stockByProduct = sumBy(stock, "productId", "physicalQuantity");
 const locationByProduct = sumBy(stockByLocation, "productId", "quantity");
