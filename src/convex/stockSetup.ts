@@ -1679,6 +1679,7 @@ export const productDimensionSummary = query({
     const globalStock = getOptionalSingleValidGlobalStock(stockRows, product.name);
     validateUniqueScopedStockRows(locationRows, product.name);
     const totalByLocation = (locationRows as any[]).reduce((sum, row) => sum + row.quantity, 0);
+    const totalLotsAvailable = (lots as any[]).reduce((sum, lot) => sum + (Number.isFinite(lot.quantityAvailable) ? lot.quantityAvailable : 0), 0);
     const areaById = new Map(areas.map((area: any) => [String(area._id), area]));
     const locationById = new Map(locations.map((location: any) => [String(location._id), location]));
     const lotById = new Map(lots.map((lot: any) => [String(lot._id), lot]));
@@ -1741,6 +1742,8 @@ export const productDimensionSummary = query({
       totalLocated: areaRows.reduce((sum, area) => sum + area.quantityAvailable, 0),
       totalByLocation,
       globalVsLocationDifference: (globalStock?.physicalQuantity ?? 0) - totalByLocation,
+      totalLotsAvailable,
+      globalVsLotsDifference: lots.length > 0 ? (globalStock?.physicalQuantity ?? 0) - totalLotsAvailable : 0,
       unmappedLotQuantity,
       invalidBalances,
       areas: areaRows,
