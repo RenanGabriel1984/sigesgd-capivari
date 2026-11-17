@@ -178,6 +178,7 @@ export const editEntry = mutation({
     if (!movement) throw new Error("Movimentação não encontrada");
     if (movement.type !== "entry") throw new Error("Apenas entradas podem ser editadas");
     if (movement.canceled) throw new Error("Entrada cancelada não pode ser editada");
+    await assertLegacyMovementIsUntracked(ctx, movement.productId, "produto");
     const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", movement.productId)).first();
     if (!stock) throw new Error("Registro de estoque não encontrado");
     const diff = args.quantity - movement.quantity;
@@ -223,6 +224,7 @@ export const reverseEntry = mutation({
     if (!movement) throw new Error("Movimentação não encontrada");
     if (movement.type !== "entry") throw new Error("Apenas entradas podem ser estornadas");
     if (movement.canceled) throw new Error("Esta entrada já foi estornada");
+    await assertLegacyMovementIsUntracked(ctx, movement.productId, "produto");
 
     const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", movement.productId)).first();
     if (!stock) throw new Error("Registro de estoque não encontrado");
@@ -261,6 +263,9 @@ export const createAdjustment = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
     if (args.newQuantity < 0) throw new Error("A quantidade não pode ser negativa");
+    const adjustmentProduct = await ctx.db.get(args.productId);
+    if (!adjustmentProduct) throw new Error("Produto não encontrado");
+    await assertLegacyMovementIsUntracked(ctx, args.productId, adjustmentProduct.name);
     if (!isFinite(args.newQuantity)) throw new Error("Quantidade inválida");
     const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
     if (!stock) throw new Error("Registro de estoque não encontrado");
