@@ -186,7 +186,9 @@ export const saveCount = mutation({
       throw new Error("Inventário deve estar em contagem ou revisão para registrar contagem");
     }
 
-    if (args.countedQuantity < 0) throw new Error("A quantidade contada não pode ser negativa");
+    if (!Number.isFinite(args.countedQuantity) || args.countedQuantity < 0) {
+      throw new Error("A quantidade contada deve ser um número finito não negativo");
+    }
 
     const difference = args.countedQuantity - count.systemQuantity;
 
