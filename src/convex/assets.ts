@@ -286,7 +286,7 @@ export const recordDisposalConfirmation = mutation({
     if (!reference || reference.length > 120) {
       throw new Error("Informe o número do documento ou protocolo da baixa oficial (até 120 caracteres).");
     }
-    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(args.confirmationDate)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(args.confirmationDate)) {
       throw new Error("Informe a data da confirmação no formato AAAA-MM-DD.");
     }
     const request: any = await ctx.db.get(args.requestId);
@@ -336,7 +336,7 @@ export const markSentToWarehouse = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(args.warehouseSentDate)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(args.warehouseSentDate)) {
       throw new Error("Informe a data de encaminhamento ao barracão no formato AAAA-MM-DD.");
     }
     const request: any = await ctx.db.get(args.requestId);
