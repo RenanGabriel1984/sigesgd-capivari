@@ -157,10 +157,20 @@ export const get = query({
       const product = await ctx.db.get(item.productId);
       const location = item.locationId ? await ctx.db.get(item.locationId) : null;
       const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
-      const unitsWithAssets = await Promise.all(units.map(async (unit: any) => ({
-        ...unit,
-        asset: unit.assetId ? await ctx.db.get(unit.assetId) : null,
-      })));
+      const unitsWithAssets = await Promise.all(units.map(async (unit: any) => {
+        const asset: any = unit.assetId ? await ctx.db.get(unit.assetId) : null;
+        return {
+          ...unit,
+          asset: asset ? {
+            _id: asset._id,
+            assetType: asset.assetType,
+            patrimonyNumber: asset.patrimonyNumber ?? null,
+            serialNumber: asset.serialNumber ?? null,
+            manufacturer: asset.manufacturer ?? null,
+            model: asset.model ?? null,
+          } : null,
+        };
+      }));
       return { ...item, product, location, units: unitsWithAssets };
     }));
     const lots = await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", entry._id)).collect();
