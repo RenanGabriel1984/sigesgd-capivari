@@ -223,6 +223,15 @@ describe("RBAC-06 — técnico bloqueado em users (backend)", () => {
   });
 });
 
+describe("SEGURANÇA — limpeza destrutiva de dados de teste", () => {
+  it("não expõe cleanupTestData como mutation pública", () => {
+    const src = read("src/convex/stockSetup.ts");
+    expect(src).toContain('import { internalMutation, mutation, query } from "./_generated/server";');
+    expect(src).toContain("export const cleanupTestData = internalMutation({");
+    expect(src).not.toContain("export const cleanupTestData = mutation({");
+  });
+});
+
 describe("RBAC-07B — reserva de estoque protegida no backend", () => {
   it("não usa movements.view para reservar e valida solicitação/quantidade", () => {
     const src = read("src/convex/stockMovements.ts");
