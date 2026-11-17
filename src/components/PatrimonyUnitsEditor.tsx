@@ -4,6 +4,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2 } from "lucide-react";
 import { PATRIMONY_STATUS_LABELS, PATRIMONY_STATUS_VALUES, validateEntryUnits, type PatrimonyUnitDraft } from "@/lib/material-types";
+
+const UNIT_OPERATIONAL_STATUSES = PATRIMONY_STATUS_VALUES.filter((status) => !["disposal_pending", "unserviceable", "disposed"].includes(status));
 import { maskCurrency } from "@/lib/br-validators";
 
 export function PatrimonyUnitsEditor({ items, itemIds, unitsByItem, products, locations, organizations, saving, onChange, onSave }: {
@@ -53,7 +55,7 @@ export function PatrimonyUnitsEditor({ items, itemIds, unitsByItem, products, lo
             <div><Label className="text-[10px]">Secretaria</Label><Select value={unit.secretariaId ?? ""} onValueChange={(value) => update(unitIndex, { secretariaId: value })}><SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{orgsOfType('secretaria').map((org) => <SelectItem key={org._id} value={org._id}>{org.name}</SelectItem>)}</SelectContent></Select></div>
             <div><Label className="text-[10px]">Departamento</Label><Select value={unit.departamentoId ?? ""} onValueChange={(value) => update(unitIndex, { departamentoId: value })}><SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{orgsOfType('departamento').map((org) => <SelectItem key={org._id} value={org._id}>{org.name}</SelectItem>)}</SelectContent></Select></div>
             <div><Label className="text-[10px]">Unidade</Label><Select value={unit.unidadeId ?? ""} onValueChange={(value) => update(unitIndex, { unidadeId: value })}><SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{orgsOfType('unidade').map((org) => <SelectItem key={org._id} value={org._id}>{org.name}</SelectItem>)}</SelectContent></Select></div>
-            <div><Label className="text-[10px]">Situação</Label><Select value={unit.patrimonyStatus ?? 'in_stock'} onValueChange={(value) => update(unitIndex, { patrimonyStatus: value as PatrimonyUnitDraft['patrimonyStatus'] })}><SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger><SelectContent>{PATRIMONY_STATUS_VALUES.map((status) => <SelectItem key={status} value={status}>{PATRIMONY_STATUS_LABELS[status]}</SelectItem>)}</SelectContent></Select></div>
+            <div><Label className="text-[10px]">Situação</Label><Select value={unit.patrimonyStatus ?? 'in_stock'} onValueChange={(value) => update(unitIndex, { patrimonyStatus: value as PatrimonyUnitDraft['patrimonyStatus'] })}><SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger><SelectContent>{UNIT_OPERATIONAL_STATUSES.map((status) => <SelectItem key={status} value={status}>{PATRIMONY_STATUS_LABELS[status]}</SelectItem>)}</SelectContent></Select></div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
             <div><Label className="text-[10px]">Localização</Label><Select value={unit.locationId ?? ""} onValueChange={(value) => update(unitIndex, { locationId: value })}><SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Opcional" /></SelectTrigger><SelectContent>{locations.map((location) => <SelectItem key={location._id} value={location._id}>{location.name}</SelectItem>)}</SelectContent></Select></div>
