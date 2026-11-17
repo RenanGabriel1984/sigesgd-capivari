@@ -62,14 +62,17 @@ const historicalBackfillAudit = historicalBackfillAuditLogs
     };
   })
   .sort((a, b) => a.movementId.localeCompare(b.movementId));
-const historicalBackfillByLocation = historicalBackfillAudit.reduce(
+const historicalBackfillLocationCounts = historicalBackfillAudit.reduce(
   (counts, row) => {
     const name = row.afterLocationName ?? "unknown";
-    counts[name] = (counts[name] ?? 0) + 1;
+    counts.set(name, (counts.get(name) ?? 0) + 1);
     return counts;
   },
-  {},
+  new Map(),
 );
+const historicalBackfillByLocation = [...historicalBackfillLocationCounts.entries()]
+  .map(([location, count]) => ({ location, count }))
+  .sort((a, b) => a.location.localeCompare(b.location));
 const historicalBackfillMismatches = historicalBackfillAudit.filter(
   (row) => !row.movementLocationMatchesAudit,
 );
