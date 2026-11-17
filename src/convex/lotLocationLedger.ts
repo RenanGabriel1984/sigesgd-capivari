@@ -98,6 +98,19 @@ export async function consumeLotLocationStock(
     );
   }
 
+  // Produtos sem histórico de lotes permanecem operáveis pelo saldo por
+  // armário. Não se inventa um lote; a movimentação fica identificada pelo
+  // local e pode ser migrada somente quando houver evidência documental.
+  if (lots.length === 0 && balances.length === 0) {
+    const sourceRow = locationRows.find((row: any) => String(row.locationId) === String(input.locationId));
+    if (!sourceRow || sourceRow.quantity + QUANTITY_EPSILON < input.quantity) {
+      throw new Error("Saldo físico insuficiente no armário de origem.");
+    }
+    const availableAtLocation = sourceRow.quantity;
+    await ctx.db.patch(sourceRow._id, { quantity: sourceRow.quantity - input.quantity });
+    return { locationId: input.locationId, availableAtLocation, allocations: [] };
+  }
+
   const areaKeys = [...new Set(lots
     .filter((lot: any) => lot.active !== false && lot.quantityAvailable > QUANTITY_EPSILON)
     .map((lot: any) => lot.areaId ? String(lot.areaId) : null))];
