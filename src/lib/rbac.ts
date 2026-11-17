@@ -298,7 +298,7 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
   "/transfers": "transfers.view",
   "/gomaq": "gomaq.view",
   "/assets": "equipment.view",
-  "/patrimony": "equipment.view",
+  "/patrimony": "equipment.manage",
   "/licenses": "licenses.view",
   "/movements": "movements.view",
   "/organization": "organizations.view",
