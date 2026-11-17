@@ -64,6 +64,12 @@ describe("correção histórica de localização de movimentos", () => {
     expect(maintenance).toContain('entity: "stockMovement"');
     expect(maintenance).toContain('operation: "historical_location_backfill"');
     expect(maintenance).toContain("actorUserId: null");
+    expect(maintenance).toContain(
+      ".map(([location, count]) => ({ location, count }))",
+    );
+    expect(maintenance).toContain(
+      "correctedByLocation: correctedByLocationSummary",
+    );
     expect(maintenance).not.toContain("ctx.db.replace(");
     expect(maintenance).not.toContain("ctx.db.delete(");
     expect(maintenance).not.toContain("physicalQuantity:");
