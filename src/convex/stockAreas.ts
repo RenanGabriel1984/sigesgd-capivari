@@ -153,12 +153,11 @@ export const createMissingBaselineAreas = mutation({
     const { userId } = await requireStockManagerOrAdmin(ctx);
     const created: string[] = [];
     const skipped: string[] = [];
+    const existingAreas = await ctx.db.query("stockAreas").collect();
+    const normalizedName = (value: string) => value.trim().toLocaleLowerCase("pt-BR");
 
     for (const area of BASELINE_STOCK_AREAS) {
-      const existing = await ctx.db
-        .query("stockAreas")
-        .withIndex("by_name", (q: any) => q.eq("name", area.name))
-        .first();
+      const existing = existingAreas.find((candidate) => normalizedName(candidate.name) === normalizedName(area.name));
       if (existing) {
         skipped.push(area.name);
         continue;
