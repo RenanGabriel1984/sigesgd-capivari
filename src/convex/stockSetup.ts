@@ -64,7 +64,7 @@ async function generateLotNumber(ctx: any, productId: string): Promise<string> {
 async function performInitialLoad(
   ctx: any,
   userId: string,
-  items: Array<{ productId: string; locationId: string; quantity: number; unitOfMeasure?: string }>,
+  items: Array<{ productId: string; locationId: string; areaId?: string; quantity: number; unitOfMeasure?: string }>,
   observation: string
 ) {
   if (!items || items.length === 0) {
@@ -79,6 +79,21 @@ async function performInitialLoad(
 
   const now = Date.now();
   const year = new Date().getFullYear();
+
+  // Área é uma classificação explícita por item/lote; nunca inferir pelo produto,
+  // categoria ou armário. Validar antes de criar qualquer registro da carga.
+  for (const item of items) {
+    if (!item.areaId || item.quantity <= 0) continue;
+    const area = await ctx.db.get(item.areaId);
+    if (!area || area.active === false) {
+      throw new Error(`A área informada para o produto ${item.productId} não existe ou está inativa.`);
+    }
+  }
+  const classifiedItems = items.filter((item) => item.quantity > 0);
+  const distinctAreas = [...new Set(classifiedItems.map((item) => item.areaId).filter(Boolean))];
+  const entryAreaId = classifiedItems.length > 0 && classifiedItems.every((item) => item.areaId) && distinctAreas.length === 1
+    ? distinctAreas[0]
+    : undefined;
 
   // ── Pre-check: block if any product already has initial_inventory lots ──
   // A carga inicial é caracterizada por um lote ativo vinculado a uma entrada
@@ -116,6 +131,7 @@ async function performInitialLoad(
     // preserva integralmente a observação original.
     observation: applyImplementationStockStamp(observation),
     status: "confirmed",
+    ...(entryAreaId ? { areaId: entryAreaId as any } : {}),
     createdAt: now,
     updatedAt: now,
   });
@@ -142,6 +158,7 @@ async function performInitialLoad(
         quantityAvailable: item.quantity,
         receivedAt: now,
         active: true,
+        ...(item.areaId ? { areaId: item.areaId as any } : {}),
         observation: `Carga inicial — ${item.quantity} unidades`,
       });
       if (!item.locationId) throw new Error("Informe o armário para cada item da carga inicial.");
@@ -270,6 +287,7 @@ export const initialStockLoad = mutation({
       v.object({
         productId: v.id("products"),
         locationId: v.id("storageLocations"),
+        areaId: v.optional(v.id("stockAreas")),
         quantity: v.number(),
         unitOfMeasure: v.optional(v.string()),
       })
@@ -300,6 +318,7 @@ export const importInitialSheet = mutation({
     rows: v.array(
       v.object({
         locationId: v.id("storageLocations"),
+        areaId: v.optional(v.id("stockAreas")),
         productName: v.string(),
         brand: v.optional(v.string()),
         quantity: v.number(),
@@ -339,8 +358,9 @@ export const importInitialSheet = mutation({
       productId: string;
       locationId: string;
       quantity: number;
+      areaId?: string;
       unitOfMeasure?: string;
-    }> = [];
+    }> = []; 
     let matched = 0;
     let created = 0;
 
@@ -401,6 +421,7 @@ export const importInitialSheet = mutation({
       items.push({
         productId,
         locationId: row.locationId,
+        areaId: row.areaId,
         quantity: row.quantity,
         // UOM original da planilha: a quantidade fica semanticamente na
         // unidade registrada (cx permanece cx, pct permanece pct).
