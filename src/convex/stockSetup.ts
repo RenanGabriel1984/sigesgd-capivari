@@ -1715,7 +1715,7 @@ export const productDimensionSummary = query({
         .filter((balance) => String(balance.lotId) === String(lot._id))
         .reduce((sum, balance) => sum + (Number.isFinite(balance.quantityAvailable) ? balance.quantityAvailable : 0), 0);
       if (Math.abs(located - lot.quantityAvailable) > 1e-9) {
-        unmappedLotQuantity += Math.max(0, lot.quantityAvailable - located);
+        unmappedLotQuantity += Math.abs(lot.quantityAvailable - located);
       }
     }
 
