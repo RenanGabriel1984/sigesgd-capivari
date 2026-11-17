@@ -449,14 +449,17 @@ export const createFromEntryUnit = mutation({
 
     const patrimonyNumber = unit.patrimonyNumber?.trim() || undefined;
     const serialNumber = unit.serialNumber?.trim() || undefined;
-    const [byPatrimony, bySerial] = await Promise.all([
-      patrimonyNumber
-        ? ctx.db.query("assets").withIndex("by_patrimony", (q: any) => q.eq("patrimonyNumber", patrimonyNumber)).first()
-        : null,
-      serialNumber
-        ? ctx.db.query("assets").withIndex("by_serial", (q: any) => q.eq("serialNumber", serialNumber)).first()
-        : null,
-    ]);
+    // O catálogo de equipamentos é pequeno em relação ao estoque. A busca
+    // normalizada evita duplicidade quando registros legados têm diferenças
+    // apenas de maiúsculas/minúsculas ou espaços.
+    const allAssets: any[] = await ctx.db.query("assets").collect();
+    const normalizeIdentifier = (value?: string) => (value ?? "").trim().toLocaleUpperCase("pt-BR");
+    const byPatrimony = patrimonyNumber
+      ? allAssets.find((asset) => normalizeIdentifier(asset.patrimonyNumber) === normalizeIdentifier(patrimonyNumber)) ?? null
+      : null;
+    const bySerial = serialNumber
+      ? allAssets.find((asset) => normalizeIdentifier(asset.serialNumber) === normalizeIdentifier(serialNumber)) ?? null
+      : null;
     if (byPatrimony && bySerial && byPatrimony._id !== bySerial._id) {
       throw new Error("Patrimônio e número de série apontam para equipamentos diferentes. Revise os cadastros antes de associar.");
     }
