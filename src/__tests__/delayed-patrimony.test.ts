@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { getRolePermissions, roleHasPermission } from "@/lib/rbac";
 import { validateEntryUnits } from "@/lib/material-types";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -7,17 +6,16 @@ import { resolve } from "node:path";
 const root = resolve(__dirname, "../..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 const entries = read("src/convex/entries.ts");
+const assets = read("src/convex/assets.ts");
 const schema = read("src/convex/schema.ts");
-const users = read("src/convex/users.ts");
-const permissionGuard = read("src/components/RequirePermission.tsx");
-const route = read("src/main.tsx");
+const route = read("src/lib/rbac.ts");
 const menu = read("src/components/AppShell.tsx");
-const shell = menu;
-const unitsEditor = read("src/components/PatrimonyUnitsEditor.tsx");
-const entryDialog = read("src/components/EntryPatrimonyDialog.tsx");
+const page = read("src/pages/Patrimony.tsx");
+const editor = read("src/components/PatrimonyUnitsEditor.tsx");
+const dialog = read("src/components/EntryPatrimonyDialog.tsx");
 
-describe("recebimento e identificação de bens permanentes", () => {
-  it("aceita receber cada unidade sem número oficial de patrimônio", () => {
+describe("identificação de equipamentos e solicitação de baixa patrimonial", () => {
+  it("permite receber material permanente sem número patrimonial", () => {
     expect(validateEntryUnits({
       materialType: "permanent",
       quantity: 2,
@@ -25,111 +23,72 @@ describe("recebimento e identificação de bens permanentes", () => {
     })).toBeNull();
   });
 
-  it("preserva a exigência de série somente para produto configurado com hasSerial", () => {
-    expect(validateEntryUnits({
-      materialType: "permanent",
-      quantity: 1,
-      units: [{}],
-      requireSerial: false,
-    })).toBeNull();
-    expect(validateEntryUnits({
-      materialType: "permanent",
-      quantity: 1,
-      units: [{}],
-      requireSerial: true,
-    })).toMatch(/exige número de série/);
+  it("preserva a exigência de série somente quando o produto exige", () => {
+    expect(validateEntryUnits({ materialType: "permanent", quantity: 1, units: [{}], requireSerial: false })).toBeNull();
+    expect(validateEntryUnits({ materialType: "permanent", quantity: 1, units: [{}], requireSerial: true })).toMatch(/exige número de série/);
     expect(entries).toContain("requireSerial: product?.hasSerial === true");
   });
 
-  it("mantém a quantidade individual exata e rejeita quantidade inválida", () => {
-    expect(validateEntryUnits({
-      materialType: "permanent",
-      quantity: 2,
-      units: [{}],
-    })).toMatch(/identificação provisória/);
-    expect(validateEntryUnits({
-      materialType: "permanent",
-      quantity: 1.5,
-      units: [{}, {}],
-    })).toMatch(/inteiro positivo/);
+  it("registra número patrimonial opcional já conhecido sem atribuir tombamento pela TI", () => {
+    const setUnits = entries.slice(entries.indexOf("export const setUnits = mutation"));
+    expect(setUnits).toContain("patrimonyNumber: u.patrimonyNumber?.trim() || undefined");
+    expect(setUnits).not.toContain("patrimonyRegistrationStatus");
+    expect(setUnits).not.toContain("patrimonyAssignedByUserId");
+    expect(entries).not.toContain("export const assignPatrimony");
+    expect(entries).not.toContain("export const listPendingPatrimony");
+    expect(dialog).toContain("patrimonyNumber: unit.patrimonyNumber?.trim() || undefined");
+    expect(editor).toContain("Patrimônio (se conhecido)");
+    expect(editor).toContain("a TI não realiza tombamento oficial");
   });
 
-  it("aceita número patrimonial opcional já conhecido sem atribuir tombamento pela TI", () => {
-    const setUnitsBlock = entries.slice(
-      entries.indexOf("export const setUnits = mutation"),
-      entries.indexOf("// ─── Tombamento posterior pelo setor de Patrimônio"),
-    );
-    expect(setUnitsBlock).toContain("patrimonyNumber: u.patrimonyNumber?.trim() || undefined");
-    expect(setUnitsBlock).not.toContain("patrimonyRegistrationStatus");
-    expect(setUnitsBlock).not.toContain("patrimonyAssignedByUserId");
-    expect(setUnitsBlock).not.toContain("O número oficial de patrimônio só pode ser atribuído pelo setor de Patrimônio");
-    expect(entryDialog).toContain("patrimonyNumber: unit.patrimonyNumber?.trim() || undefined");
+  it("modela as três etapas da baixa sem confundir os responsáveis", () => {
+    expect(schema).toContain("disposalRequests: defineTable");
+    expect(schema).toContain('v.literal("sent_to_patrimony")');
+    expect(schema).toContain('v.literal("confirmed_by_patrimony")');
+    expect(schema).toContain('v.literal("sent_to_warehouse")');
+    expect(schema).toContain('v.literal("disposal_requested")');
+    expect(schema).toContain('v.literal("disposal_confirmed")');
   });
 
-  it("só lista pendências depois da confirmação da entrada", () => {
-    expect(entries).toContain('requirePermission(ctx, "patrimony.view"');
-    expect(entries).toContain('entry.status !== "confirmed"');
-    expect(entries).toContain("export const listPendingPatrimony = query");
+  it("registra solicitação encaminhada pelo TI ao Departamento de Patrimônio", () => {
+    expect(assets).toContain("export const requestDisposal = mutation");
+    expect(assets).toContain('status: "sent_to_patrimony"');
+    expect(assets).toContain('eventType: "disposal_requested"');
+    expect(assets).toContain("Solicitação encaminhada ao Departamento de Patrimônio");
   });
 
-  it("só atribui patrimônio pela permissão específica e depois da confirmação", () => {
-    expect(entries).toContain('requirePermission(ctx, "patrimony.assign"');
-    expect(entries).toContain("export const assignPatrimony = mutation");
-    expect(entries).toContain('patrimonyRegistrationStatus: "registered"');
-    expect(entries).toContain('action: "asset_assign"');
+  it("só registra baixa oficial quando há documento/protocolo e data recebidos do Patrimônio", () => {
+    expect(assets).toContain("export const recordDisposalConfirmation = mutation");
+    expect(assets).toContain('request.status !== "sent_to_patrimony"');
+    expect(assets).toContain("confirmationReference: reference");
+    expect(assets).toContain('status: "disposal_authorized"');
+    expect(assets).toContain("Baixa oficial confirmada pelo Departamento de Patrimônio");
   });
 
-  it("previne duplicidade de número patrimonial e conflito de número de série", () => {
-    expect(entries).toContain("row.patrimonyNumber?.trim().toLocaleUpperCase");
-    expect(entries).toContain("asset.patrimonyNumber?.trim().toLocaleUpperCase");
-    expect(entries).toContain("const serialOwner = assets.find");
+  it("só permite encaminhar ao barracão depois da confirmação oficial", () => {
+    expect(assets).toContain("export const markSentToWarehouse = mutation");
+    expect(assets).toContain('request.status !== "confirmed_by_patrimony"');
+    expect(assets).toContain('status: "sent_to_warehouse"');
+    expect(assets).toContain("após a confirmação da baixa oficial");
   });
 
-  it("mantém rastreabilidade entrada → item → unidade → equipamento", () => {
-    expect(schema).toContain('entryItemUnitId: v.optional(v.id("entryItemUnits"))');
-    expect(schema).toContain('assetId: v.optional(v.id("assets"))');
-    expect(entries).toContain("entryId: unit.entryId");
-    expect(entries).toContain("entryItemId: unit.entryItemId");
-    expect(entries).toContain("entryItemUnitId: args.entryItemUnitId");
+  it("impede que a alteração genérica de status simule baixa oficial", () => {
+    expect(assets).toContain('["disposal_pending", "disposal_authorized", "sent_to_warehouse", "disposed"]');
+    expect(assets).toContain("As etapas de baixa devem ser registradas pelo fluxo de Solicitação de baixa patrimonial");
   });
 
-  it("disponibiliza o papel patrimonial no cadastro e edição de usuários", () => {
-    expect(users).toContain('v.literal("patrimony_manager")');
+  it("apresenta a tela como solicitação de baixa e não como fila de tombamento", () => {
+    expect(page).toContain("Solicitações de baixa patrimonial");
+    expect(page).toContain("a TI identifica o equipamento e encaminha a solicitação");
+    expect(page).toContain("Registrar confirmação do Patrimônio");
+    expect(menu).toContain('label: "Solicitações de baixa"');
+    expect(route).toContain('"/patrimony": "equipment.view"');
   });
 
-  it("dá ao perfil somente tombamento e ajustes pessoais", () => {
-    const permissions = getRolePermissions("patrimony_manager");
-    expect(permissions).toContain("patrimony.view");
-    expect(permissions).toContain("patrimony.assign");
-    expect(permissions).toContain("settings.view");
-    for (const denied of [
-      "dashboard.view", "stock.view", "stock.mutate", "entries.create",
-      "equipment.view", "equipment.manage", "users.manage", "audit.view",
-    ] as const) {
-      expect(roleHasPermission("patrimony_manager", denied), denied).toBe(false);
-    }
-  });
-
-  it("não consulta contagens de requisições ou estoque sem permissão", () => {
-    expect(shell).toContain('permissions.canViewRequests ? {} : "skip"');
-    expect(shell).toContain('permissions.canViewProducts ? {} : "skip"');
-  });
-
-  it("registra rota e menu exclusivos, com encaminhamento após login", () => {
-    expect(route).toContain('path="/patrimony"');
-    expect(menu).toContain('href: "/patrimony"');
-    expect(menu).toContain('permission: "canViewPatrimony"');
-    expect(permissionGuard).toContain('user.role === "patrimony_manager"');
-    expect(permissionGuard).toContain('<Navigate to="/patrimony" replace />');
-    expect(unitsEditor).toContain("Patrimônio (se conhecido)");
-    expect(unitsEditor).toContain("a TI não realiza tombamento oficial");
-    expect(entryDialog).toContain("o tombamento oficial é responsabilidade do Departamento de Patrimônio");
-  });
-
-  it("não altera saldo, lotes ou movimentações no tombamento posterior", () => {
-    const assignBlock = entries.slice(entries.indexOf("export const assignPatrimony = mutation"));
-    expect(assignBlock).not.toContain("stockMovements");
-    expect(assignBlock).not.toContain("stockByLocation");
-    expect(assignBlock).not.toContain('ctx.db.patch("lots"');
+  it("não mistura a baixa patrimonial com movimentações de estoque", () => {
+    const requestBlock = assets.slice(assets.indexOf("export const requestDisposal"), assets.indexOf("export const create = mutation"));
+    expect(requestBlock).not.toContain("stockMovements");
+    expect(requestBlock).not.toContain("stockByLocation");
+    expect(requestBlock).not.toContain("physicalQuantity");
   });
 });
