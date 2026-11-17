@@ -78,3 +78,34 @@ describe("correção histórica de localização de movimentos", () => {
     expect(maintenance).not.toContain("quantityReceived:");
   });
 });
+
+
+describe("classificação de movimentos históricos de teste", () => {
+  it("usa mutation interna, IDs fixos e confirmação explícita", async () => {
+    const source = readFileSync(
+      resolve(__dirname, "../convex/historicalTestMovementMaintenance.ts"),
+      "utf-8",
+    );
+    expect(source).toContain("internalMutation({");
+    expect(source).toContain('"CLASSIFICAR-2-MOVIMENTOS-DE-TESTE"');
+    expect(source).toContain("expectedMovementIds.length !== 2");
+    expect(source).toContain("isTest: true");
+    expect(source).toContain("testReason:");
+    expect(source).toContain('operation: "historical_test_movement_classification"');
+  });
+
+  it("restringe a operação aos dois registros de cooler e não altera quantidades", async () => {
+    const source = readFileSync(
+      resolve(__dirname, "../convex/historicalTestMovementMaintenance.ts"),
+      "utf-8",
+    );
+    expect(source).toContain('"kx70n82skp2ph9wq5d75020wp58ez5ag"');
+    expect(source).toContain('"kx758yrsbatdw2yc4m09ytfapn8en7mn"');
+    expect(source).toContain('"Armário TI 01"');
+    expect(source).toContain("movement.quantity !== 1");
+    expect(source).toContain("movement.type !== expected.type");
+    expect(source).not.toContain("ctx.db.delete(");
+    expect(source).not.toContain("physicalQuantity:");
+    expect(source).not.toContain("reservedQuantity:");
+  });
+});
