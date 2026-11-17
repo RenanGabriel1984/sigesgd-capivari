@@ -212,7 +212,6 @@ export const applyHistoricalLocationCorrectionsInternal = internalMutation({
           operation: "historical_location_backfill",
           actor: "automated_maintenance_internal",
           actorUserId: null,
-          userId: "deliberately_omitted_no_authenticated_session",
           correctedAt,
           before: { locationId: null },
           after: {
