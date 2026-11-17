@@ -64,7 +64,7 @@ export const classifyHistoricalTestMovementsInternal = internalMutation({
         if (!product?.name?.toLowerCase().includes("cooler")) {
           throw new Error(`Produto não corresponde ao cooler: ${expected.id}`);
         }
-        const lot = await ctx.db.get(movement.lotId as any);
+        const lot: any = await ctx.db.get(movement.lotId as any);
         if (!lot || String(lot._id) !== "n179kw2gk7p08rw1qjh0tygzmm4k480k") {
           throw new Error(`Lote não corresponde ao cooler: ${expected.id}`);
         }
@@ -74,7 +74,7 @@ export const classifyHistoricalTestMovementsInternal = internalMutation({
         if (movement.entryId && String(movement.entryId) !== String(lot.entryId)) {
           throw new Error(`Entrada vinculada diverge do lote: ${expected.id}`);
         }
-        const entry = lot.entryId ? await ctx.db.get(lot.entryId) : null;
+        const entry: any = lot.entryId ? await ctx.db.get(lot.entryId) : null;
         if (entry?.entryNumber !== "ENT-2026-000001") {
           throw new Error(`Entrada documental não é ENT-2026-000001: ${expected.id}`);
         }
@@ -100,7 +100,7 @@ export const classifyHistoricalTestMovementsInternal = internalMutation({
 
     const now = Date.now();
     for (const { expected, movement } of movements) {
-      await ctx.db.patch(movement._id, {
+      await (ctx.db as any).patch(movement._id, {
         locationId: location._id,
         isTest: true,
         testReason: TEST_REASON,
