@@ -870,7 +870,7 @@ export const setUnits = mutation({
       responsibleDestiny: v.optional(v.string()),
       patrimonyStatus: v.optional(v.union(
         v.literal("in_stock"), v.literal("in_use"), v.literal("maintenance"), v.literal("idle"),
-        v.literal("transferred"), v.literal("disposal_pending"), v.literal("unserviceable"), v.literal("disposed")
+        v.literal("transferred")
       )),
       observation: v.optional(v.string()),
     })),
