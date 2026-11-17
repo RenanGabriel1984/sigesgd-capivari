@@ -1762,3 +1762,82 @@ export const productDimensionSummary = query({
     };
   },
 });
+
+
+/** Visão consolidada somente leitura para a tela de estoque por área e armário. */
+export const stockDimensionOverview = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const [products, lots, balances, areas, locations, stocks, locationRows] = await Promise.all([
+      ctx.db.query("products").collect(),
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("stockAreas").collect(),
+      ctx.db.query("storageLocations").collect(),
+      ctx.db.query("stock").collect(),
+      ctx.db.query("stockByLocation").collect(),
+    ]);
+    const areaById = new Map(areas.map((area: any) => [String(area._id), area]));
+    const locationById = new Map(locations.map((location: any) => [String(location._id), location]));
+    const result = products.map((product: any) => {
+      const productLots = (lots as any[]).filter((lot) => String(lot.productId) === String(product._id));
+      const productBalances = (balances as any[]).filter((balance) => String(balance.productId) === String(product._id));
+      const productLocations = (locationRows as any[]).filter((row) => String(row.productId) === String(product._id));
+      const global = (stocks as any[]).filter((row) => String(row.productId) === String(product._id));
+      const globalPhysical = global.length === 1 ? global[0].physicalQuantity : 0;
+      const areasMap = new Map<string, { areaId: string | null; areaName: string; quantityAvailable: number; locations: Map<string, number> }>();
+      const keys = new Set<string>();
+      let invalidBalanceCount = 0;
+      for (const balance of productBalances) {
+        const lot = productLots.find((candidate) => String(candidate._id) === String(balance.lotId));
+        if (!lot || !Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0) {
+          invalidBalanceCount++;
+          continue;
+        }
+        const key = `${String(balance.lotId)}::${String(balance.locationId)}`;
+        if (keys.has(key)) {
+          invalidBalanceCount++;
+          continue;
+        }
+        keys.add(key);
+        const areaId = lot.areaId ? String(lot.areaId) : null;
+        const areaName = areaId ? ((areaById.get(areaId) as any)?.name ?? "Área não encontrada") : "Sem área";
+        const areaKey = areaId ?? "unclassified";
+        const group = areasMap.get(areaKey) ?? { areaId, areaName, quantityAvailable: 0, locations: new Map<string, number>() };
+        const locationId = String(balance.locationId);
+        group.quantityAvailable += balance.quantityAvailable;
+        group.locations.set(locationId, (group.locations.get(locationId) ?? 0) + balance.quantityAvailable);
+        areasMap.set(areaKey, group);
+      }
+      const areaRows = Array.from(areasMap.values()).map((group) => ({
+        areaId: group.areaId,
+        areaName: group.areaName,
+        quantityAvailable: group.quantityAvailable,
+        locations: Array.from(group.locations.entries()).map(([locationId, quantityAvailable]) => ({
+          locationId,
+          locationName: (locationById.get(locationId) as any)?.name ?? "Armário não encontrado",
+          quantityAvailable,
+        })).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR")),
+      })).sort((a, b) => a.areaName.localeCompare(b.areaName, "pt-BR"));
+      const lotTotal = productLots.reduce((sum, lot) => sum + (Number.isFinite(lot.quantityAvailable) ? lot.quantityAvailable : 0), 0);
+      const locatedLotTotal = productBalances.reduce((sum, balance) => sum + (Number.isFinite(balance.quantityAvailable) ? balance.quantityAvailable : 0), 0);
+      const locationTotal = productLocations.reduce((sum, row) => sum + row.quantity, 0);
+      const physical = productLocations.reduce((sum, row) => sum + row.quantity, 0);
+      return {
+        productId: String(product._id),
+        productName: product.name,
+        globalPhysical,
+        globalVsLocationDifference: global.length === 1 ? globalPhysical - locationTotal : null,
+        globalVsLotsDifference: productLots.length > 0 ? globalPhysical - lotTotal : null,
+        unmappedLotQuantity: Math.abs(lotTotal - locatedLotTotal),
+        invalidBalanceCount,
+        areas: areaRows,
+        locationPhysical: physical,
+      };
+    }).filter((row: any) =>
+      row.globalPhysical !== 0 || row.locationPhysical !== 0 || row.areas.length > 0 || row.unmappedLotQuantity > 0
+    ).sort((a: any, b: any) => a.productName.localeCompare(b.productName, "pt-BR"));
+    return { generatedAt: Date.now(), readOnly: true, products: result };
+  },
+});
