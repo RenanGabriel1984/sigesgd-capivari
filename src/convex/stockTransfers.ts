@@ -60,7 +60,9 @@ export const create = mutation({
     // RBAC central: criar transferência (opera estoque).
     const { userId, user } = await requirePermission(ctx, "transfers.create", { entity: "stockTransfers" });
 
-    if (args.quantity <= 0) throw new Error("Quantidade deve ser maior que zero");
+    if (!Number.isFinite(args.quantity) || args.quantity <= 0) {
+      throw new Error("Quantidade deve ser um número finito maior que zero");
+    }
     if (args.fromLocationId === args.toLocationId) throw new Error("Origem e destino não podem ser o mesmo local");
 
     // Validate locations
