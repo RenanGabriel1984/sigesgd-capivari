@@ -402,7 +402,11 @@ export const listUnlinkedEntryUnits = query({
       const product: any = item ? await ctx.db.get(item.productId) : null;
       const location: any = unit.locationId ? await ctx.db.get(unit.locationId) : null;
       return {
-        ...unit,
+        _id: unit._id,
+        patrimonyNumber: unit.patrimonyNumber ?? null,
+        serialNumber: unit.serialNumber ?? null,
+        manufacturer: unit.manufacturer ?? null,
+        model: unit.model ?? null,
         entryNumber: entry.entryNumber,
         invoiceNumber: entry.invoiceNumber ?? null,
         invoiceDate: entry.invoiceDate ?? null,
