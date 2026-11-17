@@ -50,7 +50,25 @@ export const list = query({
       const request = r.requestId ? await ctx.db.get(r.requestId) : null;
       const exit = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
       const location = r.locationId ? await ctx.db.get(r.locationId) : null;
-      return { ...r, product, lot, returnedBy, receivedBy, request, exit, location };
+      const allocations = await ctx.db.query("returnLotAllocations")
+        .withIndex("by_return", (q: any) => q.eq("returnId", r._id))
+        .collect();
+      const lotAllocations = await Promise.all(allocations.map(async (allocation: any) => {
+        const [allocationLot, sourceLocation, destinationLocation] = await Promise.all([
+          ctx.db.get(allocation.lotId as any) as Promise<any>,
+          allocation.sourceLocationId
+            ? ctx.db.get(allocation.sourceLocationId as any) as Promise<any>
+            : Promise.resolve(null),
+          ctx.db.get(allocation.destinationLocationId as any) as Promise<any>,
+        ]);
+        return {
+          lotNumber: allocationLot?.lotNumber ?? "Lote não encontrado",
+          sourceLocationName: sourceLocation?.name ?? "Origem não identificada",
+          destinationLocationName: destinationLocation?.name ?? "Destino não encontrado",
+          quantity: allocation.quantity,
+        };
+      }));
+      return { ...r, product, lot, returnedBy, receivedBy, request, exit, location, lotAllocations };
     }));
   },
 });
@@ -78,7 +96,94 @@ export const returnable = query({
       const request: any = m.requestId ? await ctx.db.get(m.requestId) : null;
       const requester: any = request?.requesterId ? await ctx.db.get(request.requesterId) : null;
       const returned = returnedQuantityForExit(allReturns, m);
-      const available = returnableQuantity(m.quantity, returned);
+
+      const [sourceRows, persistedReturns] = await Promise.all([
+        ctx.db.query("stockMovementLotAllocations")
+          .withIndex("by_movement", (q: any) => q.eq("movementId", m._id))
+          .collect(),
+        ctx.db.query("returnLotAllocations")
+          .withIndex("by_exitMovement", (q: any) => q.eq("exitMovementId", m._id))
+          .collect(),
+      ]);
+      let sourceAllocations: Array<{ lotId: string; sourceLocationId?: string; quantity: number }> = sourceRows
+        .filter((row: any) => row.allocationType === "withdrawal")
+        .map((row: any) => ({
+          lotId: String(row.lotId),
+          sourceLocationId: String(row.locationId),
+          quantity: row.quantity,
+        }));
+
+      // Compatibilidade com saídas legadas que guardavam apenas um lote.
+      if (sourceAllocations.length === 0 && m.lotId) {
+        const productLots = await ctx.db.query("lots")
+          .withIndex("by_product", (q: any) => q.eq("productId", m.productId))
+          .collect();
+        const legacyLot = productLots.find((lot: any) =>
+          String(lot._id) === String(m.lotId) || lot.lotNumber === String(m.lotId),
+        );
+        if (legacyLot) {
+          sourceAllocations = [{
+            lotId: String(legacyLot._id),
+            sourceLocationId: m.locationId ? String(m.locationId) : undefined,
+            quantity: m.quantity,
+          }];
+        }
+      }
+
+      const returnedByKey = new Map<string, number>();
+      for (const row of persistedReturns) {
+        const key = `${String(row.lotId)}::${row.sourceLocationId ? String(row.sourceLocationId) : ""}`;
+        returnedByKey.set(key, (returnedByKey.get(key) ?? 0) + row.quantity);
+      }
+
+      // Devoluções antigas só tinham um lotId no registro-pai. Se esse lote
+      // saiu de mais de um armário, a localização histórica é ambígua e não
+      // se oferece saldo até regularização manual.
+      const childReturnIds = new Set(persistedReturns.map((row: any) => String(row.returnId)));
+      const legacyReturns = allReturns.filter((row: any) =>
+        row.exitMovementId === m._id && row.lotId && !childReturnIds.has(String(row._id)),
+      );
+      const legacyAmbiguousLots = new Set<string>();
+      for (const legacyReturn of legacyReturns) {
+        const matches = sourceAllocations.filter((source: any) => source.lotId === String(legacyReturn.lotId));
+        if (matches.length === 1) {
+          const key = `${matches[0].lotId}::${matches[0].sourceLocationId ?? ""}`;
+          returnedByKey.set(key, (returnedByKey.get(key) ?? 0) + legacyReturn.quantity);
+        } else if (matches.length > 1) {
+          legacyAmbiguousLots.add(String(legacyReturn.lotId));
+        }
+      }
+
+      const allocations = await Promise.all(sourceAllocations.map(async (source: any) => {
+        const lot: any = await ctx.db.get(source.lotId);
+        const sourceLocation: any = source.sourceLocationId
+          ? await ctx.db.get(source.sourceLocationId)
+          : null;
+        const key = `${source.lotId}::${source.sourceLocationId ?? ""}`;
+        const alreadyReturned = legacyAmbiguousLots.has(source.lotId)
+          ? source.quantity
+          : returnedByKey.get(key) ?? 0;
+        return {
+          lotId: source.lotId,
+          lotNumber: lot?.lotNumber ?? "Lote legado",
+          sourceLocationId: source.sourceLocationId,
+          sourceLocationName: sourceLocation?.name ?? "Origem não identificada",
+          allocatedQuantity: source.quantity,
+          alreadyReturned,
+          remaining: Math.max(0, source.quantity - alreadyReturned),
+        };
+      }));
+
+      const availableByExit = returnableQuantity(m.quantity, returned);
+      const availableByLot = allocations.length > 0
+        ? allocations.reduce((sum: number, allocation: any) => sum + allocation.remaining, 0)
+        : (await ctx.db.query("lots")
+            .withIndex("by_product", (q: any) => q.eq("productId", m.productId))
+            .collect()).some((lot: any) => lot.active)
+          ? 0
+          : availableByExit;
+      const available = Math.min(availableByExit, availableByLot);
+
       return {
         ...m,
         product,
@@ -88,6 +193,7 @@ export const returnable = query({
         requestReason: request?.reason ?? null,
         returned,
         available,
+        lotAllocations: allocations,
       };
     }));
 
