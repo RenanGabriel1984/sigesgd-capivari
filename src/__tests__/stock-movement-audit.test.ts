@@ -10,7 +10,7 @@ describe("auditoria histórica de rastreabilidade das movimentações", () => {
   it("é uma consulta interna e somente leitura", () => {
     expect(start).toBeGreaterThanOrEqual(0);
     expect(block).toContain("internalQuery({");
-    expect(block).not.toMatch(/ctx\\.db\\.(insert|patch|replace|delete)\\s*\\(/);
+    for (const write of ["insert", "patch", "replace", "delete"]) {\n      expect(block).not.toContain(`ctx.db.${write}(`);\n    }
   });
 
   it("identifica movimentos sem local e referências inválidas", () => {
