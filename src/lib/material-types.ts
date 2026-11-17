@@ -4,10 +4,10 @@
  *   Material de CONSUMO   → toner, ribbon, cabo, conector, fita isolante,
  *                           pasta térmica... NÃO exige patrimônio.
  *   Material PERMANENTE   → computador, notebook, monitor, switch,
- *                           routerboard... exige unidade patrimonial.
+ *                           routerboard... permite identificação individual.
  *
  * Estrutura:
- *   Produto → Unidade patrimonial → Patrimônio / Serial
+ *   Produto → Unidade de equipamento → identificadores conhecidos (patrimônio / série)
  *
  * O mesmo produto pode ter VÁRIAS unidades com patrimônios diferentes —
  * o patrimônio NUNCA fica no cadastro do produto.
