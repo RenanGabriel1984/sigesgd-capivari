@@ -440,6 +440,9 @@ export const confirm = mutation({
       const product = await ctx.db.get(item.productId);
       if (!product) throw new Error(`Produto não encontrado para item da entrada`);
       if (!product.active) throw new Error(`O produto "${product.name}" está inativo — não é possível confirmar entrada`);
+      if (!item.locationId) throw new Error(`Selecione o armário de destino da entrada de "${product.name}" antes de confirmar.`);
+      const entryLocation = await ctx.db.get(item.locationId);
+      if (!entryLocation || entryLocation.active === false) throw new Error(`O armário selecionado para "${product.name}" não existe ou está inativo.`);
 
       // Generate lot
       const lotNumber = await generateLotNumber(ctx);
