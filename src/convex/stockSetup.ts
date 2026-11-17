@@ -918,3 +918,187 @@ export const getInitialLoadStatus = query({
     return result;
   },
 });
+
+
+/**
+ * Diagnóstico de reconciliação produto × área × localização × lote.
+ *
+ * SOMENTE LEITURA: não cria alocações, não corrige saldos e não altera registros.
+ * Classifica como evidência completa apenas o caso conservador em que há um
+ * único lote ativo, a entrada informa seu local e não há operações posteriores
+ * capazes de deslocar/consumir material sem dimensão de lote/local.
+ */
+export const stockDimensionDiagnostics = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+
+    const [products, stocks, locations, areas, lots, entryItems, transfers, movements, returns, inventories, inventoryCounts] =
+      await Promise.all([
+        ctx.db.query("products").collect(),
+        ctx.db.query("stock").collect(),
+        ctx.db.query("storageLocations").collect(),
+        ctx.db.query("stockAreas").collect(),
+        ctx.db.query("lots").collect(),
+        ctx.db.query("entryItems").collect(),
+        ctx.db.query("stockTransfers").collect(),
+        ctx.db.query("stockMovements").collect(),
+        ctx.db.query("returns").collect(),
+        ctx.db.query("inventories").collect(),
+        ctx.db.query("inventoryCounts").collect(),
+      ]);
+
+    const productById = new Map(products.map((p: any) => [String(p._id), p]));
+    const locationById = new Map(locations.map((l: any) => [String(l._id), l]));
+    const areaById = new Map(areas.map((a: any) => [String(a._id), a]));
+    const lotById = new Map(lots.map((l: any) => [String(l._id), l]));
+    const lotByNumber = new Map(lots.map((l: any) => [String(l.lotNumber), l]));
+    const stockByProduct = new Map(stocks.map((s: any) => [String(s.productId), s]));
+    const itemsByLot = new Map<string, any[]>();
+
+    for (const item of entryItems as any[]) {
+      if (!item.lotId) continue;
+      const lot = lotById.get(String(item.lotId)) ?? lotByNumber.get(String(item.lotId));
+      if (!lot) continue;
+      const key = String(lot._id);
+      const rows = itemsByLot.get(key) ?? [];
+      rows.push(item);
+      itemsByLot.set(key, rows);
+    }
+
+    const rows = products.map((product: any) => {
+      const productId = String(product._id);
+      const productLots = (lots as any[]).filter((lot) => String(lot.productId) === productId);
+      const activeLots = productLots.filter((lot) => lot.active);
+      const productStock = stockByProduct.get(productId) as any;
+      const locationRows = (stocks.length >= 0 ? (ctx as any) : null); // keeps this query independent of write helpers
+      void locationRows;
+      const productTransfers = (transfers as any[]).filter((t) => String(t.productId) === productId);
+      const productMovements = (movements as any[]).filter((m) => String(m.productId) === productId);
+      const productReturns = (returns as any[]).filter((r) => String(r.productId) === productId);
+      const productInventoryIds = new Set(
+        (inventoryCounts as any[])
+          .filter((c) => String(c.productId) === productId)
+          .map((c) => String(c.inventoryId)),
+      );
+      const productInventoryCount = productInventoryIds.size;
+      const lotRows = activeLots.map((lot: any) => {
+        const itemRows = itemsByLot.get(String(lot._id)) ?? [];
+        const itemLocationIds = [...new Set(itemRows.map((item) => item.locationId ? String(item.locationId) : null))];
+        const movementsForLot = productMovements.filter((movement: any) => {
+          const ref = movement.lotId == null ? null : String(movement.lotId);
+          return ref === String(lot._id) || ref === String(lot.lotNumber);
+        });
+        return {
+          lotId: String(lot._id),
+          lotNumber: lot.lotNumber,
+          areaId: lot.areaId ? String(lot.areaId) : null,
+          areaName: lot.areaId ? ((areaById.get(String(lot.areaId)) as any)?.name ?? "Área não encontrada") : null,
+          quantityReceived: lot.quantityReceived,
+          quantityAvailable: lot.quantityAvailable,
+          entryItemCount: itemRows.length,
+          entryLocationIds: itemLocationIds,
+          entryLocationNames: itemLocationIds.filter(Boolean).map((id) => (locationById.get(id as string) as any)?.name ?? "Local não encontrado"),
+          movementReferences: movementsForLot.length,
+          migrationEvidence: itemRows.length === 1 && itemRows[0].locationId && itemLocationIds.length === 1
+            ? "entry_location_only"
+            : "incomplete",
+        };
+      });
+      const knownLocationLots = lotRows.filter((lot: any) => lot.migrationEvidence === "entry_location_only").length;
+      const postEntryMovements = productMovements.filter((movement: any) => movement.type !== "entry");
+      const hasUnscopedOperations = productTransfers.length > 0 || productReturns.length > 0 ||
+        postEntryMovements.length > 0 || productInventoryCount > 0;
+      const locationTotals = (ctx as any);
+      void locationTotals;
+      const physicalByLocation = (globalThis as any).__unused;
+      void physicalByLocation;
+      return {
+        productId,
+        productName: product.name,
+        globalPhysical: productStock?.physicalQuantity ?? 0,
+        globalReserved: productStock?.reservedQuantity ?? 0,
+        activeLotCount: activeLots.length,
+        activeLotsAvailable: activeLots.reduce((sum: number, lot: any) => sum + lot.quantityAvailable, 0),
+        activeLotsWithoutArea: activeLots.filter((lot: any) => !lot.areaId || !areaById.has(String(lot.areaId))).length,
+        activeLotsWithoutEntryLocation: lotRows.filter((lot: any) => lot.entryLocationIds.length === 0 || lot.entryLocationIds[0] == null).length,
+        entryItemsWithLocation: entryItems.filter((item: any) => String(item.productId) === productId && !!item.locationId).length,
+        transferCount: productTransfers.length,
+        transfersWithoutLot: productTransfers.filter((t: any) => !t.lotId).length,
+        returnCount: productReturns.length,
+        nonEntryMovementCount: postEntryMovements.length,
+        inventoryCountCount: productInventoryCount,
+        knownEntryLocationLotCount: knownLocationLots,
+        migrationClassification: activeLots.length === 1 && knownLocationLots === 1 && !hasUnscopedOperations
+          ? "evidence_complete_candidate"
+          : activeLots.length === 0 ? "no_active_lot" : "ambiguous_requires_review",
+        lots: lotRows,
+      };
+    }).filter((row: any) =>
+      row.globalPhysical !== 0 || row.globalReserved !== 0 || row.activeLotCount > 0 ||
+      row.transferCount > 0 || row.returnCount > 0 || row.nonEntryMovementCount > 0
+    ).sort((a: any, b: any) => a.productName.localeCompare(b.productName, "pt-BR"));
+
+    const locationBalances = await ctx.db.query("stockByLocation").collect();
+    const byLocation = new Map<string, { locationId: string; locationName: string; quantity: number; productCount: number }>();
+    for (const balance of locationBalances as any[]) {
+      const key = String(balance.locationId);
+      const current = byLocation.get(key) ?? {
+        locationId: key,
+        locationName: (locationById.get(key) as any)?.name ?? "Local não encontrado",
+        quantity: 0,
+        productCount: 0,
+      };
+      current.quantity += balance.quantity;
+      current.productCount += 1;
+      byLocation.set(key, current);
+    }
+
+    const globalTotal = (stocks as any[]).reduce((sum, row) => sum + row.physicalQuantity, 0);
+    const locationTotal = (locationBalances as any[]).reduce((sum, row) => sum + row.quantity, 0);
+    const activeLotTotal = (lots as any[]).filter((lot) => lot.active).reduce((sum, lot) => sum + lot.quantityAvailable, 0);
+    const lotReferenceCounts = { byId: 0, byNumber: 0, unresolved: 0, empty: 0 };
+    for (const movement of movements as any[]) {
+      if (!movement.lotId) {
+        lotReferenceCounts.empty++;
+      } else if (lotById.has(String(movement.lotId))) {
+        lotReferenceCounts.byId++;
+      } else if (lotByNumber.has(String(movement.lotId))) {
+        lotReferenceCounts.byNumber++;
+      } else {
+        lotReferenceCounts.unresolved++;
+      }
+    }
+
+    const classificationCounts = rows.reduce((acc: Record<string, number>, row: any) => {
+      acc[row.migrationClassification] = (acc[row.migrationClassification] ?? 0) + 1;
+      return acc;
+    }, {});
+
+    return {
+      generatedAt: Date.now(),
+      readOnly: true,
+      totals: {
+        productsAnalyzed: rows.length,
+        globalPhysical: globalTotal,
+        byLocationPhysical: locationTotal,
+        activeLotsAvailable: activeLotTotal,
+        globalVsLocationDifference: globalTotal - locationTotal,
+        globalVsLotsDifference: globalTotal - activeLotTotal,
+        transfers: transfers.length,
+        returns: returns.length,
+        movements: movements.length,
+        inventories: inventories.length,
+      },
+      locationBalances: Array.from(byLocation.values()).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR")),
+      lotMovementReferenceCounts: lotReferenceCounts,
+      migrationClassificationCounts: classificationCounts,
+      products: rows,
+      warnings: [
+        "Diagnóstico somente leitura; nenhuma alocação foi criada ou corrigida.",
+        "A classificação evidence_complete_candidate é conservadora e ainda exige conferência antes de qualquer migração.",
+        "O histórico de movimentos não contém localização de origem/destino de forma estruturada em todas as operações.",
+      ],
+    };
+  },
+});
