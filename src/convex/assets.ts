@@ -176,6 +176,206 @@ export const get = query({
 // MUTATIONS
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SOLICITAÇÃO DE BAIXA — fluxo da TI → Departamento de Patrimônio → barracão
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const listDisposalRequests = query({
+  args: {},
+  handler: async (ctx) => {
+    await requirePermission(ctx, "equipment.view");
+    const requests = await ctx.db
+      .query("disposalRequests")
+      .withIndex("by_created")
+      .order("desc")
+      .take(300);
+    return Promise.all(requests.map(async (request: any) => {
+      const asset: any = await ctx.db.get(request.assetId);
+      const requester: any = await ctx.db.get(request.requestedByUserId);
+      const confirmationRecorder: any = request.confirmationRecordedByUserId
+        ? await ctx.db.get(request.confirmationRecordedByUserId)
+        : null;
+      const warehouseRecorder: any = request.warehouseRecordedByUserId
+        ? await ctx.db.get(request.warehouseRecordedByUserId)
+        : null;
+      return {
+        ...request,
+        asset,
+        requesterName: requester?.name ?? requester?.email ?? "Usuário",
+        confirmationRecorderName: confirmationRecorder?.name ?? confirmationRecorder?.email ?? null,
+        warehouseRecorderName: warehouseRecorder?.name ?? warehouseRecorder?.email ?? null,
+      };
+    }));
+  },
+});
+
+export const requestDisposal = mutation({
+  args: {
+    assetId: v.id("assets"),
+    reason: v.string(),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireManagerOrAdmin(ctx);
+    const reason = args.reason.trim();
+    if (reason.length < 5) throw new Error("Descreva o motivo da solicitação de baixa.");
+    if (reason.length > 2000) throw new Error("O motivo deve ter até 2.000 caracteres.");
+
+    const asset: any = await ctx.db.get(args.assetId);
+    if (!asset) throw new Error("Equipamento não encontrado.");
+    if (["disposed", "sent_to_warehouse", "lost"].includes(asset.status)) {
+      throw new Error("Este equipamento não está elegível para uma nova solicitação de baixa.");
+    }
+
+    const previousRequests = await ctx.db
+      .query("disposalRequests")
+      .withIndex("by_asset", (q: any) => q.eq("assetId", args.assetId))
+      .collect();
+    const openRequest = previousRequests.find((request: any) =>
+      request.status === "sent_to_patrimony" || request.status === "confirmed_by_patrimony"
+    );
+    if (openRequest) throw new Error("Este equipamento já possui uma solicitação de baixa em andamento.");
+
+    const now = Date.now();
+    const description = [asset.manufacturer, asset.model, asset.assetType].filter(Boolean).join(" ");
+    const requestId = await ctx.db.insert("disposalRequests", {
+      assetId: args.assetId,
+      requestedByUserId: userId,
+      reason,
+      status: "sent_to_patrimony",
+      patrimonyNumberSnapshot: asset.patrimonyNumber?.trim() || undefined,
+      serialNumberSnapshot: asset.serialNumber?.trim() || undefined,
+      equipmentDescription: description || "Equipamento de informática",
+      observation: args.observation?.trim() || undefined,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await ctx.db.patch(args.assetId, { status: "disposal_pending", active: true, updatedAt: now });
+    await ctx.db.insert("assetHistory", {
+      assetId: args.assetId,
+      eventType: "disposal_requested",
+      userId,
+      previousStatus: asset.status,
+      newStatus: "disposal_pending",
+      observation: `Solicitação encaminhada ao Departamento de Patrimônio. Motivo: ${reason}`,
+      timestamp: now,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "asset_disposal",
+      entity: "disposalRequests",
+      entityId: requestId,
+      details: `Solicitação de baixa enviada ao Patrimônio para equipamento ${asset.patrimonyNumber ?? asset.serialNumber ?? args.assetId}`,
+      timestamp: now,
+    });
+    return requestId;
+  },
+});
+
+export const recordDisposalConfirmation = mutation({
+  args: {
+    requestId: v.id("disposalRequests"),
+    confirmationReference: v.string(),
+    confirmationDate: v.string(),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireManagerOrAdmin(ctx);
+    const reference = args.confirmationReference.trim();
+    if (!reference || reference.length > 120) {
+      throw new Error("Informe o número do documento ou protocolo da baixa oficial (até 120 caracteres).");
+    }
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(args.confirmationDate)) {
+      throw new Error("Informe a data da confirmação no formato AAAA-MM-DD.");
+    }
+    const request: any = await ctx.db.get(args.requestId);
+    if (!request) throw new Error("Solicitação de baixa não encontrada.");
+    if (request.status !== "sent_to_patrimony") {
+      throw new Error("Somente solicitações encaminhadas ao Patrimônio aguardam confirmação oficial.");
+    }
+    const asset: any = await ctx.db.get(request.assetId);
+    if (!asset) throw new Error("Equipamento relacionado não encontrado.");
+    const now = Date.now();
+    await ctx.db.patch(args.requestId, {
+      status: "confirmed_by_patrimony",
+      confirmationReference: reference,
+      confirmationDate: args.confirmationDate,
+      confirmationRecordedByUserId: userId,
+      confirmedAt: now,
+      observation: args.observation?.trim() || request.observation,
+      updatedAt: now,
+    });
+    await ctx.db.patch(request.assetId, { status: "disposal_authorized", active: true, updatedAt: now });
+    await ctx.db.insert("assetHistory", {
+      assetId: request.assetId,
+      eventType: "disposal_confirmed",
+      userId,
+      previousStatus: asset.status,
+      newStatus: "disposal_authorized",
+      observation: `Baixa oficial confirmada pelo Departamento de Patrimônio. Documento/protocolo: ${reference}; data: ${args.confirmationDate}.`,
+      timestamp: now,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "asset_disposal",
+      entity: "disposalRequests",
+      entityId: args.requestId,
+      details: `Confirmação externa da baixa oficial registrada: ${reference} (${args.confirmationDate})`,
+      timestamp: now,
+    });
+    return args.requestId;
+  },
+});
+
+export const markSentToWarehouse = mutation({
+  args: {
+    requestId: v.id("disposalRequests"),
+    warehouseSentDate: v.string(),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireManagerOrAdmin(ctx);
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(args.warehouseSentDate)) {
+      throw new Error("Informe a data de encaminhamento ao barracão no formato AAAA-MM-DD.");
+    }
+    const request: any = await ctx.db.get(args.requestId);
+    if (!request) throw new Error("Solicitação de baixa não encontrada.");
+    if (request.status !== "confirmed_by_patrimony") {
+      throw new Error("O equipamento só pode ser encaminhado ao barracão após a confirmação da baixa oficial pelo Patrimônio.");
+    }
+    const asset: any = await ctx.db.get(request.assetId);
+    if (!asset) throw new Error("Equipamento relacionado não encontrado.");
+    const now = Date.now();
+    await ctx.db.patch(args.requestId, {
+      status: "sent_to_warehouse",
+      warehouseSentDate: args.warehouseSentDate,
+      warehouseRecordedByUserId: userId,
+      observation: args.observation?.trim() || request.observation,
+      updatedAt: now,
+    });
+    await ctx.db.patch(request.assetId, { status: "sent_to_warehouse", active: false, updatedAt: now });
+    await ctx.db.insert("assetHistory", {
+      assetId: request.assetId,
+      eventType: "sent_to_warehouse",
+      userId,
+      previousStatus: asset.status,
+      newStatus: "sent_to_warehouse",
+      observation: `Encaminhado ao barracão de inservíveis em ${args.warehouseSentDate}, após confirmação da baixa oficial.`,
+      timestamp: now,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "asset_disposal",
+      entity: "disposalRequests",
+      entityId: args.requestId,
+      details: `Equipamento encaminhado ao barracão de inservíveis em ${args.warehouseSentDate}`,
+      timestamp: now,
+    });
+    return args.requestId;
+  },
+});
+
 export const create = mutation({
   args: {
     patrimonyNumber: v.optional(v.string()),
@@ -385,6 +585,9 @@ export const changeStatus = mutation({
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
 
+    if (["disposal_pending", "disposal_authorized", "sent_to_warehouse", "disposed"].includes(args.newStatus)) {
+      throw new Error("As etapas de baixa devem ser registradas pelo fluxo de Solicitação de baixa patrimonial.");
+    }
     const now = Date.now();
     const previousStatus = asset.status;
 
