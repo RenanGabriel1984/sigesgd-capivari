@@ -58,6 +58,7 @@ export default function Requests() {
   const requests = useQuery(api.requests.list);
   const products = useQuery(api.products.listActive);
   const storageLocations = useQuery(api.stockLocations.summary);
+  const stockAreas = useQuery(api.stockAreas.listActive);
   const organizations = useQuery(api.organizations.list);
   const createRequest = useMutation(api.requests.create);
   const allPrinters = useQuery(api.printers.listActive);
@@ -95,7 +96,7 @@ export default function Requests() {
   // ─── Deliver dialog ───
   const [deliverDialog, setDeliverDialog] = useState<any>(null);
   const [deliverItems, setDeliverItems] = useState<
-    Array<{ itemId: string; quantity: number; maxQuantity: number; serialNumbers: string[]; locationId: string }>
+    Array<{ itemId: string; quantity: number; maxQuantity: number; serialNumbers: string[]; locationId: string; areaId: string }>
   >([]);
   const [confirmationPassword, setConfirmationPassword] = useState("");
   const [signatureStep, setSignatureStep] = useState<"items" | "signature">("items");
@@ -284,6 +285,7 @@ export default function Requests() {
         maxQuantity: item.quantityApproved,
         serialNumbers: [] as string[],
         locationId: "",
+        areaId: "",
       }));
     if (dItems.length === 0) {
       toast.error("Nenhum item aprovado para entrega");
@@ -321,6 +323,10 @@ export default function Requests() {
     }
     for (const di of deliverItems) {
       if (di.quantity <= 0) continue;
+      if (!di.areaId) {
+        toast.error("Selecione a área de estoque para cada item entregue.");
+        return;
+      }
       if (!di.locationId) {
         toast.error("Selecione o armário de origem para cada item entregue.");
         return;
@@ -346,6 +352,7 @@ export default function Requests() {
           quantityDelivered: di.quantity,
           serialNumbers: di.serialNumbers.length > 0 ? di.serialNumbers : undefined,
           locationId: di.locationId as any,
+          areaId: di.areaId as any,
         })),
         receivedByUserId: (receivedByUserId || undefined) as any,
         confirmationPassword: confirmationPassword,
@@ -882,6 +889,19 @@ export default function Requests() {
                           }}
                           className="mt-1"
                         />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Área de estoque</Label>
+                        <select
+                          className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                          value={di.areaId}
+                          onChange={(e) => updateDeliverItem(idx, "areaId", e.target.value)}
+                        >
+                          <option value="">Selecione a área de onde o material será retirado...</option>
+                          {(stockAreas ?? []).map((area: any) => (
+                            <option key={area._id} value={area._id}>{area.name}</option>
+                          ))}
+                        </select>
                       </div>
                       <div>
                         <Label className="text-xs">Armário de origem</Label>
