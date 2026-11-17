@@ -16,7 +16,7 @@ const shell = menu;
 const unitsEditor = read("src/components/PatrimonyUnitsEditor.tsx");
 const entryDialog = read("src/components/EntryPatrimonyDialog.tsx");
 
-describe("recebimento de bens permanentes com tombamento posterior", () => {
+describe("recebimento e identificação de bens permanentes", () => {
   it("aceita receber cada unidade sem número oficial de patrimônio", () => {
     expect(validateEntryUnits({
       materialType: "permanent",
@@ -54,9 +54,10 @@ describe("recebimento de bens permanentes com tombamento posterior", () => {
     })).toMatch(/inteiro positivo/);
   });
 
-  it("cria unidades pendentes no rascunho sem patrimônio oficial", () => {
-    expect(entries).toContain('patrimonyRegistrationStatus: "pending"');
-    expect(entries).toContain("só pode ser atribuído pelo setor de Patrimônio após a confirmação da entrada");
+  it("aceita número patrimonial opcional já conhecido sem atribuir tombamento pela TI", () => {
+    expect(entries).toContain("patrimonyNumber: u.patrimonyNumber?.trim() || undefined");
+    expect(entries).not.toContain("patrimonyAssignedByUserId: userId");
+    expect(entries).not.toContain("O número oficial de patrimônio só pode ser atribuído pelo setor de Patrimônio");
   });
 
   it("só lista pendências depois da confirmação da entrada", () => {
@@ -114,9 +115,9 @@ describe("recebimento de bens permanentes com tombamento posterior", () => {
     expect(menu).toContain('permission: "canViewPatrimony"');
     expect(permissionGuard).toContain('user.role === "patrimony_manager"');
     expect(permissionGuard).toContain('<Navigate to="/patrimony" replace />');
-    expect(unitsEditor).toContain("Patrimônio (posterior)");
-    expect(unitsEditor).toContain("Atribuído pelo setor de Patrimônio");
-    expect(entryDialog).toContain("O número oficial de patrimônio será atribuído posteriormente");
+    expect(unitsEditor).toContain("Patrimônio (se conhecido)");
+    expect(unitsEditor).toContain("a TI não realiza tombamento oficial");
+    expect(entryDialog).toContain("o tombamento oficial é responsabilidade do Departamento de Patrimônio");
   });
 
   it("não altera saldo, lotes ou movimentações no tombamento posterior", () => {
