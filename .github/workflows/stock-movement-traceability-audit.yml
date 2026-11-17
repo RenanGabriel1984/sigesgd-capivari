@@ -50,9 +50,19 @@ jobs:
             echo "::error::Secret CONVEX_DEPLOY_KEY_FIRST_HERRING ausente."
             exit 1
           fi
+          # Remove only accidental copy/paste line breaks and surrounding whitespace.
+          normalized_key="$(printf '%s' "${CONVEX_DEPLOY_KEY}" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          CONVEX_DEPLOY_KEY="${normalized_key}"
+          printf 'CONVEX_DEPLOY_KEY=%s\n' "${CONVEX_DEPLOY_KEY}" >> "${GITHUB_ENV}"
+
           prefix="${CONVEX_DEPLOY_KEY%%|*}"
+          token="${CONVEX_DEPLOY_KEY#*|}"
           if [ "${prefix}" != "dev:${TARGET_DEPLOYMENT}" ]; then
             echo "::error::A deploy key não corresponde a dev:${TARGET_DEPLOYMENT}. Nenhuma chamada foi feita."
+            exit 1
+          fi
+          if [[ "${token}" != eyJ* || "${token}" == *'|'* || "${token}" =~ [[:space:]] ]]; then
+            echo "::error::O conteúdo da deploy key não está no formato esperado. Nenhuma chamada foi feita."
             exit 1
           fi
           if grep -nE 'ctx\.db\.(insert|patch|replace|delete)[[:space:]]*\(' scripts/stock-movement-traceability-audit.inline.ts; then
@@ -73,7 +83,8 @@ jobs:
           set -euo pipefail
           query_source="$(cat scripts/stock-movement-traceability-audit.inline.ts)"
           bunx convex --version
-          bunx convex run --deployment "${TARGET_DEPLOYMENT}" --inline-query "${query_source}" 2>&1 | tee "${RUNNER_TEMP}/stock-movement-audit.json"
+          # The validated dev deploy key itself selects first-herring-264.
+          bunx convex run --inline-query "${query_source}" 2>&1 | tee "${RUNNER_TEMP}/stock-movement-audit.json"
           {
             echo "### Auditoria somente leitura concluída"
             echo ""
