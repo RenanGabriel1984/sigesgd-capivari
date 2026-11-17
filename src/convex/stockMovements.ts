@@ -107,7 +107,31 @@ export const createExit = mutation({
 export const reserveStock = mutation({
   args: { productId: v.id("products"), quantity: v.number(), requestId: v.id("requests") },
   handler: async (ctx, args) => {
-    const { userId } = await requireUser(ctx);
+    // Reserva é uma operação que altera o estado do estoque; não basta
+    // possuir movements.view (permissão somente de leitura).
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    if (!Number.isFinite(args.quantity) || args.quantity <= 0) {
+      throw new Error("A quantidade da reserva deve ser um número finito maior que zero");
+    }
+
+    const request = await ctx.db.get(args.requestId);
+    if (!request) throw new Error("Solicitação não encontrada");
+    if (request.status !== "pending") {
+      throw new Error("Somente solicitações pendentes podem ter reserva registrada");
+    }
+    if (request.requesterId === userId) {
+      throw new Error("O solicitante não pode reservar estoque para a própria solicitação");
+    }
+
+    const requestItems = await ctx.db
+      .query("requestItems")
+      .withIndex("by_request", (q) => q.eq("requestId", args.requestId))
+      .collect();
+    const matchingItem = requestItems.find((item) => item.productId === args.productId);
+    if (!matchingItem || args.quantity > matchingItem.quantity) {
+      throw new Error("A reserva deve corresponder a um item e à quantidade solicitada");
+    }
+
     const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
     if (!stock) throw new Error("Registro de estoque não encontrado");
     const available = stock.physicalQuantity - stock.reservedQuantity;
