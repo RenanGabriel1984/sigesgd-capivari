@@ -285,3 +285,5 @@ return {
     action: "Apenas relatório. Nenhuma alteração será aplicada.",
   },
 };
+
+// Read-only post-correction verification trigger.
