@@ -298,6 +298,8 @@ return {
   },
   missingLocationByType,
   historicalBackfillAudit: { count: historicalBackfillAudit.length, rows: historicalBackfillAudit },
+  historicalBackfillByLocation,
+  historicalBackfillLocationMismatches: historicalBackfillMismatches.length,
   missingLocationMovements: missingLocation
     .sort((a, b) => b.timestamp - a.timestamp)
     .map(summarizeMovement),
