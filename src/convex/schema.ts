@@ -460,6 +460,9 @@ const schema = defineSchema(
       timestamp: v.number(),
       canceled: v.optional(v.boolean()),
       canceledAt: v.optional(v.number()),
+      // Registros operacionais executados apenas para teste; preservados no histórico.
+      isTest: v.optional(v.boolean()),
+      testReason: v.optional(v.string()),
     }).index("by_product", ["productId"])
       .index("by_type", ["type"])
       .index("by_user", ["userId"])
