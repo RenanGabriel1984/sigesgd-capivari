@@ -98,7 +98,7 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
   ]},
   { title: "Patrimônio", items: [
-    { label: "Pendências de tombamento", href: "/patrimony", icon: ClipboardCheck, permission: "canViewPatrimony" },
+    { label: "Solicitações de baixa", href: "/patrimony", icon: ClipboardCheck, permission: "canManageAssets" },
   ]},
   // ── Equipamentos ──────────────────────────────────────────────────────────
   // Estrutura por CATEGORIA de equipamento. O fornecedor NUNCA faz parte do
