@@ -64,6 +64,23 @@ jobs:
           echo "Destino validado: dev:${TARGET_DEPLOYMENT}; somente consultas inline."
       - name: Instalar dependências
         run: bun install --frozen-lockfile
+      - name: Conferir metadados de funções do deployment selecionado pela chave (somente leitura)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "A chave validada aponta para dev:${TARGET_DEPLOYMENT}; consultando somente metadados."
+          bunx convex function-spec 2>&1 | tee "${RUNNER_TEMP}/first-herring-function-spec.txt"
+          {
+            echo "### Metadados das funções atualmente implantadas"
+            echo ""
+            echo "- Deployment selecionado pela própria deploy key: `dev:${TARGET_DEPLOYMENT}`"
+            echo "- Consulta de metadados; sem deploy e sem gravação de dados."
+            echo ""
+            echo '~~~text'
+            head -c 50000 "${RUNNER_TEMP}/first-herring-function-spec.txt"
+            echo ""
+            echo '~~~'
+          } >> "${GITHUB_STEP_SUMMARY}"
       - name: Auditoria de rastreabilidade somente leitura
         shell: bash
         run: |
