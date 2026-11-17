@@ -30,6 +30,7 @@ export const PATRIMONY_STATUS_VALUES = [
   "disposal_pending", "unserviceable", "disposed",
 ] as const;
 export type PatrimonyStatus = (typeof PATRIMONY_STATUS_VALUES)[number];
+export type OperationalPatrimonyStatus = Exclude<PatrimonyStatus, "disposal_pending" | "unserviceable" | "disposed">;
 export const PATRIMONY_STATUS_LABELS: Record<PatrimonyStatus, string> = {
   in_stock: "Em estoque",
   in_use: "Em uso",
@@ -58,7 +59,7 @@ export interface PatrimonyUnitDraft {
   departamentoId?: string;
   unidadeId?: string;
   responsibleDestiny?: string;
-  patrimonyStatus?: PatrimonyStatus;
+  patrimonyStatus?: OperationalPatrimonyStatus;
   observation?: string;
 }
 
