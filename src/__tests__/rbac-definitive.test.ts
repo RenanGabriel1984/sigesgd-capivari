@@ -223,6 +223,22 @@ describe("RBAC-06 — técnico bloqueado em users (backend)", () => {
   });
 });
 
+describe("RBAC-07B — reserva de estoque protegida no backend", () => {
+  it("não usa movements.view para reservar e valida solicitação/quantidade", () => {
+    const src = read("src/convex/stockMovements.ts");
+    const start = src.indexOf("export const reserveStock = mutation({");
+    const end = src.indexOf("\n});", start);
+    const handler = src.slice(start, end);
+    expect(handler).toContain('requireStockManagerOrAdmin(ctx)');
+    expect(handler).toContain("Number.isFinite(args.quantity)");
+    expect(handler).toContain('request.status !== "pending"');
+    expect(handler).toContain("request.requesterId === userId");
+    expect(handler).toContain("matchingItem");
+    expect(roleHasPermission("director", "stock.mutate")).toBe(false);
+    expect(roleHasPermission("technician", "stock.mutate")).toBe(false);
+  });
+});
+
 describe("RBAC-07 — técnico bloqueado em entries (backend)", () => {
   it("consultas de entradas exigem entries.view, não apenas stock.view", () => {
     expect(backendRequires("src/convex/entries.ts", "entries.view")).toBe(true);
