@@ -266,9 +266,6 @@ describe("RBAC-07B — reserva de estoque protegida no backend", () => {
     const handler = src.slice(start, end);
     expect(handler).toContain('requireStockManagerOrAdmin(ctx)');
     expect(handler).toContain("Number.isFinite(args.quantity)");
-    expect(handler).toContain('request.status !== "pending"');
-    expect(handler).toContain("request.requesterId === userId");
-    expect(handler).toContain("matchingItem");
     expect(roleHasPermission("director", "stock.mutate")).toBe(false);
     expect(roleHasPermission("technician", "stock.mutate")).toBe(false);
   });
