@@ -706,9 +706,9 @@ const schema = defineSchema(
     }).index("by_active", ["active"])
       .index("by_name", ["name"]),
 
-    // ── Entry Item Units (Unidades patrimoniais por item de entrada) ──
-    // Produto → Unidade patrimonial → Patrimônio/Serial.
-    // Só existe para entrada classificada como Material PERMANENTE.
+    // ── Entry Item Units (Identificação individual por item de entrada) ──
+    // Produto → Unidade de equipamento → identificadores conhecidos (patrimônio/série).
+    // Só existe para entrada classificada como Material PERMANENTE; não atribui tombamento.
     entryItemUnits: defineTable({
       entryId: v.id("entries"),
       entryItemId: v.id("entryItems"),
