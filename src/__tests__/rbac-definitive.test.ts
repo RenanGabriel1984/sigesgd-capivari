@@ -383,7 +383,7 @@ describe("RBAC-20 — rotas protegidas por permissão", () => {
     expect(permissionForRoute("/organization")).toBe("organizations.view");
     expect(permissionForRoute("/audit")).toBe("audit.view");
     expect(permissionForRoute("/settings")).toBe("settings.view");
-    expect(permissionForRoute("/patrimony")).toBe("equipment.view");
+    expect(permissionForRoute("/patrimony")).toBe("equipment.manage");
     expect(permissionForRoute("/entries")).toBe("entries.view");
     expect(permissionForRoute("/suppliers")).toBe("suppliers.view");
   });
