@@ -34,12 +34,45 @@ const historicalBackfillAudit = historicalBackfillAuditLogs
       return false;
     }
   })
-  .map((row) => ({
-    movementId: String(row.entityId ?? ""),
-    timestamp: row.timestamp,
-    userIdPresent: Boolean(row.userId),
-  }))
+  .map((row) => {
+    let details = {};
+    try {
+      details = JSON.parse(row.details ?? "{}");
+    } catch {
+      details = {};
+    }
+    const movement = movements.find(
+      (candidate) => String(candidate._id) === String(row.entityId),
+    );
+    const afterLocationId = details.after?.locationId ?? null;
+    const currentLocationId = movement?.locationId
+      ? String(movement.locationId)
+      : null;
+    return {
+      movementId: String(row.entityId ?? ""),
+      timestamp: row.timestamp,
+      actor: details.actor ?? null,
+      userIdPresent: Boolean(row.userId),
+      afterLocationId,
+      afterLocationName: details.after?.locationName ?? null,
+      currentLocationId,
+      movementLocationMatchesAudit: Boolean(
+        afterLocationId && currentLocationId === afterLocationId,
+      ),
+    };
+  })
   .sort((a, b) => a.movementId.localeCompare(b.movementId));
+const historicalBackfillByLocation = historicalBackfillAudit.reduce(
+  (counts, row) => {
+    const name = row.afterLocationName ?? "unknown";
+    counts[name] = (counts[name] ?? 0) + 1;
+    return counts;
+  },
+  {},
+);
+const historicalBackfillMismatches = historicalBackfillAudit.filter(
+  (row) => !row.movementLocationMatchesAudit,
+);
 
 const productById = new Map(products.map((row) => [String(row._id), row]));
 const userById = new Map(users.map((row) => [String(row._id), row]));
