@@ -70,6 +70,43 @@ describe("lot location FIFO rules", () => {
     });
   });
 
+  it("consumes only lots classified in the selected area", () => {
+    const areaLots = [
+      { lotId: "area-a", lotNumber: "AREA-A", receivedAt: 1, quantityAvailable: 4, active: true, areaId: "area-1" },
+      { lotId: "area-b", lotNumber: "AREA-B", receivedAt: 2, quantityAvailable: 6, active: true, areaId: "area-2" },
+    ];
+    const areaBalances = [
+      { balanceId: "a-01", lotId: "area-a", locationId: "cabinet-01", quantityAvailable: 4 },
+      { balanceId: "b-01", lotId: "area-b", locationId: "cabinet-01", quantityAvailable: 6 },
+    ];
+    const plan = planFifoLotLocationConsumption({
+      lots: areaLots,
+      balances: areaBalances,
+      locationId: "cabinet-01",
+      quantity: 3,
+      areaId: "area-1",
+    });
+    expect(plan.availableAtLocation).toBe(4);
+    expect(plan.allocations).toHaveLength(1);
+    expect(plan.allocations[0].lotId).toBe("area-a");
+  });
+
+  it("does not use another area's quantity to cover a shortage", () => {
+    expect(() => planFifoLotLocationConsumption({
+      lots: [
+        { lotId: "area-a", lotNumber: "AREA-A", receivedAt: 1, quantityAvailable: 4, active: true, areaId: "area-1" },
+        { lotId: "area-b", lotNumber: "AREA-B", receivedAt: 2, quantityAvailable: 6, active: true, areaId: "area-2" },
+      ],
+      balances: [
+        { lotId: "area-a", locationId: "cabinet-01", quantityAvailable: 4 },
+        { lotId: "area-b", locationId: "cabinet-01", quantityAvailable: 6 },
+      ],
+      locationId: "cabinet-01",
+      quantity: 5,
+      areaId: "area-1",
+    })).toThrow(/insuficiente/i);
+  });
+
   it("rejects lots that are not fully mapped to cabinets", () => {
     expect(() => planFifoLotLocationConsumption({
       lots,
