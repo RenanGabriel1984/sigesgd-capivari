@@ -9,6 +9,7 @@ export interface FifoLotForConsumption {
   receivedAt: number;
   quantityAvailable: number;
   active?: boolean;
+  areaId?: string | null;
 }
 
 export interface FifoLotLocationBalance {
@@ -54,8 +55,9 @@ export function planFifoLotLocationConsumption(input: {
   balances: FifoLotLocationBalance[];
   locationId: string;
   quantity: number;
+  areaId?: string | null;
 }): FifoLotConsumptionPlan {
-  const { lots, balances, locationId, quantity } = input;
+  const { lots, balances, locationId, quantity, areaId } = input;
 
   if (!locationId.trim()) throw new Error("Informe o armário de origem da retirada.");
   if (!Number.isFinite(quantity) || quantity <= 0) {
@@ -104,7 +106,12 @@ export function planFifoLotLocationConsumption(input: {
     }
   }
 
-  const availableAtLocation = sumByLotLocation.get(locationId) ?? 0;
+  const eligibleLotIds = new Set(lots
+    .filter((lot) => areaId === undefined || (lot.areaId ?? null) === areaId)
+    .map((lot) => lot.lotId));
+  const availableAtLocation = balances
+    .filter((balance) => balance.locationId === locationId && eligibleLotIds.has(balance.lotId))
+    .reduce((sum, balance) => sum + balance.quantityAvailable, 0);
   if (availableAtLocation + QUANTITY_EPSILON < quantity) {
     throw new Error(
       `Saldo rastreável insuficiente no armário selecionado. Disponível: ${availableAtLocation}; solicitado: ${quantity}.`,
@@ -112,7 +119,7 @@ export function planFifoLotLocationConsumption(input: {
   }
 
   const fifoLots = lots
-    .filter((lot) => lot.active !== false && lot.quantityAvailable > QUANTITY_EPSILON)
+    .filter((lot) => (areaId === undefined || (lot.areaId ?? null) === areaId) && lot.active !== false && lot.quantityAvailable > QUANTITY_EPSILON)
     .map((lot) => ({
       lot,
       balance: balanceByKey.get(`${lot.lotId}::${locationId}`),
