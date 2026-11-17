@@ -13,8 +13,9 @@ import { requirePermission } from "./rbac";
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
-  // RBAC central: entradas exigem sessão com visão de estoque.
-  return requirePermission(ctx, "stock.view");
+  // Consultar entradas é distinto de consultar o saldo do estoque.
+  // Somente perfis com entries.view podem ler notas, fornecedores e itens recebidos.
+  return requirePermission(ctx, "entries.view", { entity: "entries" });
 }
 
 async function requireStockManagerOrAdmin(ctx: any) {
