@@ -111,16 +111,16 @@ export async function consumeLotLocationStock(
     return { locationId: input.locationId, availableAtLocation, allocations: [] };
   }
 
-  const areaKeys = [...new Set(lots
+  const areaKeys: Array<string | null> = Array.from(new Set<string | null>(lots
     .filter((lot: any) => lot.active !== false && lot.quantityAvailable > QUANTITY_EPSILON)
-    .map((lot: any) => lot.areaId ? String(lot.areaId) : null))];
+    .map((lot: any) => lot.areaId ? String(lot.areaId) : null)));
   if (input.areaId && !areaKeys.includes(String(input.areaId))) {
     throw new Error("A área selecionada não possui lotes disponíveis para este produto.");
   }
   if (!input.areaId && areaKeys.length > 1) {
     throw new Error("Este produto possui lotes em mais de uma área. Selecione a área de origem antes da retirada.");
   }
-  const selectedAreaId = input.areaId ? String(input.areaId) : (areaKeys[0] ?? null);
+  const selectedAreaId: string | null = input.areaId ? String(input.areaId) : (areaKeys[0] ?? null);
 
   const lotsById = new Map<string, any>();
   for (const lot of lots) lotsById.set(String(lot._id), lot);
