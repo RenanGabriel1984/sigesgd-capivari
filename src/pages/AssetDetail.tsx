@@ -27,6 +27,7 @@ const ASSET_STATUS_LABELS: Record<string, string> = {
 const ASSET_STATUS_COLORS: Record<string, string> = {
   active: "text-emerald-600 bg-emerald-50", maintenance: "text-amber-600 bg-amber-50",
   inactive: "text-gray-600 bg-gray-50", disposal_pending: "text-orange-600 bg-orange-50",
+  disposal_authorized: "text-amber-700 bg-amber-50", sent_to_warehouse: "text-rose-600 bg-rose-50",
   disposed: "text-rose-600 bg-rose-50", lost: "text-rose-600 bg-rose-50",
 };
 const ASSET_TYPE_LABELS: Record<string, string> = {
