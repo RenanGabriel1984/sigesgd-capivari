@@ -1,6 +1,9 @@
 import { query, mutation } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
+import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -187,6 +190,7 @@ export const createExchange = mutation({
   args: {
     productId: v.id("products"),
     printerId: v.id("printers"),
+    locationId: v.optional(v.id("storageLocations")),
     quantityDelivered: v.number(),
     quantityEmptyReceived: v.number(),
     receivedByUserId: v.optional(v.id("users")),
@@ -198,12 +202,8 @@ export const createExchange = mutation({
   handler: async (ctx, args) => {
     const { userId, user } = await requireManagerOrAdmin(ctx);
 
-    if (!Number.isFinite(args.quantityDelivered) || args.quantityDelivered <= 0) {
-      throw new Error("Quantidade entregue deve ser um número finito maior que zero");
-    }
-    if (!Number.isFinite(args.quantityEmptyReceived) || args.quantityEmptyReceived < 0) {
-      throw new Error("Quantidade de carcaças deve ser um número finito não negativo");
-    }
+    if (!Number.isFinite(args.quantityDelivered) || args.quantityDelivered <= 0) throw new Error("Quantidade entregue deve ser um número finito maior que zero");
+    if (!Number.isFinite(args.quantityEmptyReceived) || args.quantityEmptyReceived < 0) throw new Error("Quantidade de carcaças deve ser um número finito não negativo");
 
     // Validate product
     const product = await ctx.db.get(args.productId);
@@ -214,11 +214,11 @@ export const createExchange = mutation({
     if (!printer) throw new Error("Impressora não encontrada");
 
     // Validate stock (check available = physical - reserved)
-    const stock = await ctx.db
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!stock) throw new Error("Registro de estoque não encontrado");
+      .collect();
+    const stock = requireSingleValidGlobalStock(stockRows, product.name);
     const availableStock = stock.physicalQuantity - stock.reservedQuantity;
     if (availableStock < args.quantityDelivered) {
       throw new Error(`Estoque insuficiente. Disponível: ${availableStock} (físico: ${stock.physicalQuantity}, reservado: ${stock.reservedQuantity}). Necessário: ${args.quantityDelivered}`);
@@ -235,36 +235,23 @@ export const createExchange = mutation({
     const now = Date.now();
     const exchangeNumber = generateExchangeNumber();
 
-    // FIFO Lot Consumption (before stock reduction — mirrors requests.deliver pattern)
-    let remainingToConsume = args.quantityDelivered;
-    let consumedLotId: string | undefined;
-    const lots = await ctx.db
-      .query("lots")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
-      .collect();
-    const sortedLots = lots
-      .filter((l: any) => l.quantityAvailable > 0)
-      .sort((a: any, b: any) => a.receivedAt - b.receivedAt || a.lotNumber.localeCompare(b.lotNumber));
-
-    for (const lot of sortedLots) {
-      if (remainingToConsume <= 0) break;
-      const consumeFromLot = Math.min(lot.quantityAvailable, remainingToConsume);
-      if (consumeFromLot <= 0) continue;
-      await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consumeFromLot });
-      if (!consumedLotId) consumedLotId = lot._id;
-      remainingToConsume -= consumeFromLot;
-    }
-
-    if (remainingToConsume > 0) {
-      throw new Error(`Lotes insuficientes. Faltam ${remainingToConsume} unidades sem lote disponível.`);
-    }
+    // A troca baixa somente no armário de origem selecionado e preserva
+    // a relação de cada lote consumido. O fallback só aceita um armário único.
+    const sourceLocationId = await resolveWithdrawalLocation(ctx, args.productId, args.locationId);
+    const lotConsumption = await consumeLotLocationStock(ctx, {
+      productId: args.productId,
+      locationId: sourceLocationId,
+      quantity: args.quantityDelivered,
+    });
+    const consumedLotId = lotConsumption.allocations[0]?.lotId;
+    const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
 
     // Re-read stock for concurrency safety (double-check pattern)
-    const freshStock = await ctx.db
+    const freshStockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!freshStock) throw new Error("Registro de estoque desapareceu durante a troca");
+      .collect();
+    const freshStock = requireSingleValidGlobalStock(freshStockRows, product.name);
     if (freshStock.physicalQuantity < args.quantityDelivered) {
       throw new Error(`Estoque insuficiente (concorrência). Físico: ${freshStock.physicalQuantity}. Necessário: ${args.quantityDelivered}.`);
     }
@@ -278,7 +265,7 @@ export const createExchange = mutation({
     await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical });
 
     // Create stock movement
-    await ctx.db.insert("stockMovements", {
+    const movementId = await ctx.db.insert("stockMovements", {
       productId: args.productId,
       type: "exit",
       quantity: args.quantityDelivered,
@@ -287,8 +274,15 @@ export const createExchange = mutation({
       previousReserved: freshStock.reservedQuantity,
       newReserved,
       userId,
-      observation: `Troca Gomaq — ${printer.name} (${printer.model})`,
+      lotId: consumedLotId as any,
+      locationId: sourceLocationId,
+      observation: `Troca Gomaq — ${printer.name} (${printer.model}) — armário ${sourceLocation?.name ?? sourceLocationId}; lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
       timestamp: now,
+    });
+
+    await recordLotMovementAllocations(ctx, {
+      movementId, productId: args.productId, locationId: sourceLocationId,
+      allocations: lotConsumption.allocations,
     });
 
     // Create exchange record
@@ -296,6 +290,7 @@ export const createExchange = mutation({
       exchangeNumber,
       productId: args.productId,
       lotId: consumedLotId as any,
+      locationId: sourceLocationId,
       printerId: args.printerId,
       quantityDelivered: args.quantityDelivered,
       quantityEmptyReceived: args.quantityEmptyReceived,
