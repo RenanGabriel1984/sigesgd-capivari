@@ -1822,6 +1822,17 @@ export const stockDimensionOverview = query({
       })).sort((a, b) => a.areaName.localeCompare(b.areaName, "pt-BR"));
       const lotTotal = productLots.reduce((sum, lot) => sum + (Number.isFinite(lot.quantityAvailable) ? lot.quantityAvailable : 0), 0);
       const locatedLotTotal = productBalances.reduce((sum, balance) => sum + (Number.isFinite(balance.quantityAvailable) ? balance.quantityAvailable : 0), 0);
+      const lotRows = productLots.map((lot: any) => ({
+        lotId: String(lot._id),
+        lotNumber: lot.lotNumber,
+        areaName: lot.areaId ? ((areaById.get(String(lot.areaId)) as any)?.name ?? "Área não encontrada") : "Sem área",
+        quantityAvailable: lot.quantityAvailable,
+        locations: productBalances.filter((balance) => String(balance.lotId) === String(lot._id)).map((balance) => ({
+          locationId: String(balance.locationId),
+          locationName: (locationById.get(String(balance.locationId)) as any)?.name ?? "Armário não encontrado",
+          quantityAvailable: balance.quantityAvailable,
+        })),
+      })).filter((lot: any) => lot.quantityAvailable > 0 || lot.locations.length > 0);
       const locationTotal = productLocations.reduce((sum, row) => sum + row.quantity, 0);
       const physical = productLocations.reduce((sum, row) => sum + row.quantity, 0);
       return {
@@ -1833,6 +1844,7 @@ export const stockDimensionOverview = query({
         unmappedLotQuantity: Math.abs(lotTotal - locatedLotTotal),
         invalidBalanceCount,
         areas: areaRows,
+        lots: lotRows,
         locationPhysical: physical,
       };
     }).filter((row: any) =>
