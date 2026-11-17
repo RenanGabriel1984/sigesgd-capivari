@@ -1,0 +1,60 @@
+name: Verificação somente leitura — movimentos históricos de teste
+
+on:
+  push:
+    branches:
+      - codex/historical-stock-location-maintenance
+    paths:
+      - ".github/workflows/verify-historical-test-movements.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CONVEX_MAINTENANCE_KEY: ${{ secrets.CONVEX_MAINTENANCE_KEY_FIRST_HERRING }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76
+        with:
+          bun-version: "1.3.14"
+      - name: Validar deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          key="$(printf '%s' "${CONVEX_MAINTENANCE_KEY}" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          [ "${key%%|*}" = "dev:first-herring-264" ] || { echo "::error::Deployment inesperado."; exit 1; }
+          printf 'CONVEX_DEPLOY_KEY=%s\n' "${key}" >> "${GITHUB_ENV}"
+      - name: Conferir os dois registros sem escrever dados
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/verify.inline.ts" <<'EOF'
+          const ids = [
+            "kx70n82skp2ph9wq5d75020wp58ez5ag",
+            "kx758yrsbatdw2yc4m09ytfapn8en7mn",
+          ];
+          const types = ["return", "exit"];
+          const results = [];
+          for (let i = 0; i < ids.length; i++) {
+            const movement = await ctx.db.get(ids[i]);
+            if (!movement || movement.type !== types[i] || movement.quantity !== 1 || movement.isTest !== true || !movement.testReason) throw new Error("Registro divergente: " + ids[i]);
+            const location = movement.locationId ? await ctx.db.get(movement.locationId) : null;
+            if (!location || location.name !== "Armário TI 01") throw new Error("Local divergente: " + ids[i]);
+            const logs = await ctx.db.query("auditLogs").withIndex("by_entity_entityId", q => q.eq("entity", "stockMovement").eq("entityId", ids[i])).collect();
+            const count = logs.filter(row => { try { return JSON.parse(row.details ?? "{}").operation === "historical_test_movement_classification"; } catch { return false; } }).length;
+            if (count !== 1) throw new Error("Auditoria divergente: " + ids[i]);
+            const balances = await ctx.db.query("lotLocationBalances").withIndex("by_lot", q => q.eq("lotId", movement.lotId)).collect();
+            if (balances.length !== 1 || String(balances[0].locationId) !== String(location._id)) throw new Error("Saldo/local do lote divergente: " + ids[i]);
+            results.push({ id: ids[i], type: movement.type, quantity: movement.quantity, isTest: movement.isTest, location: location.name, auditLogs: count, lotLocationBalanceRows: balances.length });
+          }
+          return { readOnly: true, deployment: "dev:first-herring-264", verified: results.length, results };
+          EOF
+          bunx convex run --inline-query "$(cat "${RUNNER_TEMP}/verify.inline.ts")" > "${RUNNER_TEMP}/result.json"
+          cat "${RUNNER_TEMP}/result.json"
+          node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); if(!j.readOnly || j.verified!==2 || j.results.some(x=>x.location!=="Armário TI 01" || x.isTest!==true || x.auditLogs!==1 || x.lotLocationBalanceRows!==1)) process.exit(1)' "${RUNNER_TEMP}/result.json"
