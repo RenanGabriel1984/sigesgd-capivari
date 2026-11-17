@@ -116,6 +116,9 @@ export const get = query({
     const org = asset.organizationId ? await ctx.db.get(asset.organizationId) : null;
     const responsible = asset.responsibleUserId ? await ctx.db.get(asset.responsibleUserId) : null;
     const location = asset.storageLocationId ? await ctx.db.get(asset.storageLocationId) : null;
+    const sourceEntry: any = asset.entryId ? await ctx.db.get(asset.entryId) : null;
+    const sourceItem: any = asset.entryItemId ? await ctx.db.get(asset.entryItemId) : null;
+    const sourceUnit: any = asset.entryItemUnitId ? await ctx.db.get(asset.entryItemUnitId) : null;
 
     // Get installed parts
     const parts = await ctx.db
@@ -164,6 +167,16 @@ export const get = query({
       organization: org,
       responsible,
       location,
+      sourceEntry: sourceEntry ? {
+        _id: sourceEntry._id,
+        entryNumber: sourceEntry.entryNumber,
+        invoiceNumber: sourceEntry.invoiceNumber ?? null,
+        invoiceDate: sourceEntry.invoiceDate ?? null,
+        receivedAt: sourceEntry.receivedAt,
+        status: sourceEntry.status,
+      } : null,
+      sourceItem,
+      sourceUnit,
       parts: partsWithDetails,
       licenses: licensesWithDetails,
       maintenances: maintWithDetails,
