@@ -422,6 +422,7 @@ export const withdraw = mutation({
       productId: args.productId,
       locationId: sourceLocationId,
       quantity: args.quantity,
+      areaId: PRINT_AREA_ID as Id<"stockAreas">,
     });
     const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
     const consumedLots = lotConsumption.allocations.map((allocation) => ({
