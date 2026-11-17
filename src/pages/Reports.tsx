@@ -85,7 +85,7 @@ function exportStockPositionCSV(data: any[]) {
 }
 
 function exportLotLocationCSV(data: any[]) {
-  const header = "Produto;Lote;Área;Armário;Saldo no armário;Saldo total do lote;Diferença não alocada";
+  const header = "Produto;Lote;Área;Armário;Saldo no armário;Saldo total do lote;Diferença lote/armário";
   const rows = data.map((r) => [
     r.productName,
     r.lotNumber,
@@ -489,7 +489,7 @@ export default function Reports() {
                         <TableHead>Armário</TableHead>
                         <TableHead className="text-right">No armário</TableHead>
                         <TableHead className="text-right">Total do lote</TableHead>
-                        <TableHead className="text-right">Não alocado</TableHead>
+                        <TableHead className="text-right">Diferença lote/armário</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -501,7 +501,7 @@ export default function Reports() {
                           <TableCell className="text-xs">{row.locationName}</TableCell>
                           <TableCell className="text-right font-mono">{row.quantityAvailable}</TableCell>
                           <TableCell className="text-right font-mono">{row.lotTotal}</TableCell>
-                          <TableCell className={row.unmappedQuantity > 0 ? "text-right font-mono text-amber-600" : "text-right font-mono"}>
+                          <TableCell className={Math.abs(row.unmappedQuantity) > 1e-9 ? "text-right font-mono text-amber-600" : "text-right font-mono"}>
                             {row.unmappedQuantity}
                           </TableCell>
                         </TableRow>
