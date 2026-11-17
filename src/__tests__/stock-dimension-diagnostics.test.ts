@@ -1,0 +1,43 @@
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const backend = readFileSync(resolve(__dirname, "../convex/stockSetup.ts"), "utf8");
+
+describe("diagnóstico dimensional do estoque", () => {
+  const start = backend.indexOf("export const stockDimensionDiagnostics = query({");
+  const block = backend.slice(start);
+
+  it("expõe uma consulta autenticada e somente leitura", () => {
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(block).toContain("await requireUser(ctx)");
+    expect(block).not.toMatch(/ctx\.db\.(insert|patch|replace|delete)\s*\(/);
+  });
+
+  it("reúne saldos globais, por localização e por lote/área", () => {
+    expect(block).toContain('ctx.db.query("stock")');
+    expect(block).toContain('ctx.db.query("stockByLocation")');
+    expect(block).toContain('ctx.db.query("lots")');
+    expect(block).toContain("areaId");
+    expect(block).toContain("locationId");
+    expect(block).toContain("quantityAvailable");
+    expect(block).toContain("globalVsLocationDifference");
+    expect(block).toContain("globalVsLotsDifference");
+  });
+
+  it("identifica referências históricas de lote sem presumir uma chave única", () => {
+    expect(block).toContain("lotById");
+    expect(block).toContain("lotByNumber");
+    expect(block).toContain("unresolved");
+    expect(block).toContain("ambiguous_requires_review");
+  });
+
+  it("só classifica evidência completa em cenário legado conservador", () => {
+    expect(block).toContain("evidence_complete_candidate");
+    expect(block).toContain("productTransfers.length > 0");
+    expect(block).toContain("productReturns.length > 0");
+    expect(block).toContain("postEntryMovements.length > 0");
+    expect(block).toContain("productInventoryCount > 0");
+    expect(block).toContain("ainda exige conferência antes de qualquer migração");
+  });
+});
