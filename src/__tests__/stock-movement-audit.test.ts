@@ -80,7 +80,7 @@ describe("correção controlada de localização histórica", () => {
     expect(correctionBlock).toContain('ctx.db.insert("auditLogs"');
     expect(correctionBlock).toContain('entity: "stockMovement"');
     expect(correctionBlock).toContain('operation: "historical_location_backfill"');
-    expect(correctionBlock).toContain("userId deliberadamente");
+    expect(correctionBlock).toContain("userId omitido deliberadamente");
   });
 
   it("mantém saídas, devoluções e transferências fora da correção automática", () => {
