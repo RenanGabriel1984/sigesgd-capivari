@@ -461,6 +461,7 @@ export const quickExit = mutation({
     productId: v.id("products"),
     quantity: v.number(),
     locationId: v.optional(v.id("storageLocations")),
+    areaId: v.optional(v.id("stockAreas")),
     destination: v.string(),
     receiverName: v.string(),
     reason: v.optional(v.string()),
@@ -502,6 +503,7 @@ export const quickExit = mutation({
     const lotConsumption = await consumeLotLocationStock(ctx, {
       productId: args.productId,
       locationId: sourceLocationId,
+      areaId: args.areaId,
       quantity: args.quantity,
     });
     const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
