@@ -66,7 +66,12 @@ jobs:
             "- Saldos por lote/local: " + report.totals.lotLocationBalanceRows,
             "",
             "### Divergências encontradas",
-            ...Object.entries(report.integrity).map(([key, value]) => "- " + key + ": **" + value + "**"),
+            "- Linhas de estoque: " + report.totals.stockRows,
+            "- Linhas por armário: " + report.totals.stockByLocationRows,
+            "- Lotes: " + report.totals.lots,
+            "- Saldos por lote/local: " + report.totals.lotLocationBalanceRows,
+            "- Áreas: " + report.totals.areas,
+            "- Locais: " + report.totals.locations,
             "",
             "Nenhum dado foi criado, alterado ou removido."
           ].join("\n");
