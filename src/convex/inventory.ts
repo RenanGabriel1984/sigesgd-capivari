@@ -377,6 +377,23 @@ export const close = mutation({
         throw new Error(`O inventário mistura contagem por lote e agregada para "${productName}".`);
       }
       if (lotCounts.length > 0) {
+        // Inventário parcial de um único armário não pode inicializar uma
+        // distribuição incompleta. Exige que os demais armários já estejam
+        // reconciliados; inventário geral (todos os armários) pode formar o
+        // primeiro mapa físico lote × armário com contagem humana.
+        if (inv.locationId) {
+          const existingBalances = await ctx.db.query("lotLocationBalances")
+            .withIndex("by_product", (q: any) => q.eq("productId", productId))
+            .collect();
+          const lotTotal = trackedLots.reduce((sum: number, lot: any) => sum + lot.quantityAvailable, 0);
+          const balanceTotal = existingBalances.reduce((sum: number, row: any) => sum + row.quantityAvailable, 0);
+          const locationTotal = sbls.reduce((sum: number, row: any) => sum + row.quantity, 0);
+          if (Math.abs(lotTotal - balanceTotal) > EPSILON ||
+              Math.abs(balanceTotal - locationTotal) > EPSILON ||
+              Math.abs(currentPhysical - locationTotal) > EPSILON) {
+            throw new Error(`Não é seguro fechar inventário apenas do armário selecionado para "${productName}". Faça primeiro um inventário geral de todos os armários ou concilie a distribuição lote × armário.`);
+          }
+        }
         const seen = new Set<string>();
         const lotChanges: Array<{
           lotId: any;
