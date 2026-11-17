@@ -223,6 +223,32 @@ describe("RBAC-06 — técnico bloqueado em users (backend)", () => {
   });
 });
 
+describe("VALIDAÇÃO — quantidades finitas em operações de estoque", () => {
+  it("protege saída rápida, contagem, transferência e troca GomaQ contra NaN/Infinity", () => {
+    const quickExit = read("src/convex/stockSetup.ts");
+    const quickStart = quickExit.indexOf("export const quickExit = mutation({");
+    const quickEnd = quickExit.indexOf("\n});", quickStart);
+    expect(quickExit.slice(quickStart, quickEnd)).toContain("Number.isFinite(args.quantity)");
+
+    const inventory = read("src/convex/inventory.ts");
+    const countStart = inventory.indexOf("export const saveCount = mutation({");
+    const countEnd = inventory.indexOf("\n});", countStart);
+    expect(inventory.slice(countStart, countEnd)).toContain("Number.isFinite(args.countedQuantity)");
+
+    const transfers = read("src/convex/stockTransfers.ts");
+    const transferStart = transfers.indexOf("export const create = mutation({");
+    const transferEnd = transfers.indexOf("\n});", transferStart);
+    expect(transfers.slice(transferStart, transferEnd)).toContain("Number.isFinite(args.quantity)");
+
+    const gomaq = read("src/convex/gomaQ.ts");
+    const exchangeStart = gomaq.indexOf("export const createExchange = mutation({");
+    const exchangeEnd = gomaq.indexOf("\n});", exchangeStart);
+    const exchange = gomaq.slice(exchangeStart, exchangeEnd);
+    expect(exchange).toContain("Number.isFinite(args.quantityDelivered)");
+    expect(exchange).toContain("Number.isFinite(args.quantityEmptyReceived)");
+  });
+});
+
 describe("SEGURANÇA — limpeza destrutiva de dados de teste", () => {
   it("não expõe cleanupTestData como mutation pública", () => {
     const src = read("src/convex/stockSetup.ts");
