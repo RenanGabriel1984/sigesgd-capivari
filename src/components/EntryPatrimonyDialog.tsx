@@ -128,7 +128,7 @@ export function EntryPatrimonyDialog({
       }
       try {
         await confirmEntry({ entryId: entryId as never });
-        toast.success("Entrada confirmada. O tombamento oficial ficará pendente para o setor de Patrimônio.");
+        toast.success("Entrada confirmada e identificações dos equipamentos registradas.");
         onConfirmed(entry?.entryNumber ?? entryNumber ?? "");
       } catch (confirmError) {
         toast.error(
@@ -151,12 +151,10 @@ export function EntryPatrimonyDialog({
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>
-            Unidades patrimoniais{entry?.entryNumber ? ` — ${entry.entryNumber}` : ""}
+            Identificação dos equipamentos{entry?.entryNumber ? ` — ${entry.entryNumber}` : ""}
           </DialogTitle>
           <DialogDescription>
-            Esta entrada foi classificada como material permanente. Informe uma identificação
-            por unidade recebida. O número oficial de patrimônio será atribuído posteriormente
-            pelo setor de Patrimônio. Nada foi somado ao estoque enquanto esta etapa não for concluída.
+            Esta entrada foi classificada como material permanente. Informe uma identificação por unidade recebida e, se já conhecido, o número patrimonial. A TI apenas registra esse dado; o tombamento oficial é responsabilidade do Departamento de Patrimônio. Nada foi somado ao estoque enquanto esta etapa não for concluída.
           </DialogDescription>
         </DialogHeader>
 
@@ -182,7 +180,7 @@ export function EntryPatrimonyDialog({
 
         {quantityMismatch && entry ? (
           <p className="text-xs text-amber-700">
-            Cada item precisa de exatamente uma identificação provisória por unidade recebida.
+            Cada item precisa de exatamente uma identificação por unidade recebida.
           </p>
         ) : null}
 
