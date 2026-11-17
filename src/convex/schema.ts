@@ -838,7 +838,8 @@ const schema = defineSchema(
       storageLocationId: v.optional(v.id("storageLocations")),
       status: v.union(
         v.literal("active"), v.literal("maintenance"), v.literal("inactive"),
-        v.literal("disposal_pending"), v.literal("disposed"), v.literal("lost")
+        v.literal("disposal_pending"), v.literal("disposal_authorized"),
+        v.literal("sent_to_warehouse"), v.literal("disposed"), v.literal("lost")
       ),
       acquisitionDate: v.optional(v.string()),
       observation: v.optional(v.string()),
@@ -851,13 +852,43 @@ const schema = defineSchema(
       .index("by_responsible", ["responsibleUserId"])
       .index("by_patrimony", ["patrimonyNumber"]),
 
+    // ── Solicitações de baixa operacional de equipamentos ──
+    // A TI solicita a baixa; o Departamento de Patrimônio confirma a baixa
+    // oficial; somente depois a TI registra o encaminhamento ao barracão.
+    disposalRequests: defineTable({
+      assetId: v.id("assets"),
+      requestedByUserId: v.id("users"),
+      reason: v.string(),
+      status: v.union(
+        v.literal("sent_to_patrimony"),
+        v.literal("confirmed_by_patrimony"),
+        v.literal("sent_to_warehouse")
+      ),
+      patrimonyNumberSnapshot: v.optional(v.string()),
+      serialNumberSnapshot: v.optional(v.string()),
+      equipmentDescription: v.string(),
+      confirmationReference: v.optional(v.string()),
+      confirmationDate: v.optional(v.string()),
+      confirmationRecordedByUserId: v.optional(v.id("users")),
+      confirmedAt: v.optional(v.number()),
+      warehouseSentDate: v.optional(v.string()),
+      warehouseRecordedByUserId: v.optional(v.id("users")),
+      observation: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_asset", ["assetId"])
+      .index("by_status", ["status"])
+      .index("by_created", ["createdAt"]),
+
     // ── Asset History (Histórico de Equipamentos) ──
     assetHistory: defineTable({
       assetId: v.id("assets"),
       eventType: v.union(
         v.literal("created"), v.literal("assigned"), v.literal("relocated"),
         v.literal("maintenance"), v.literal("returned"), v.literal("status_changed"),
-        v.literal("part_installed"), v.literal("part_removed"), v.literal("disposed")
+        v.literal("part_installed"), v.literal("part_removed"), v.literal("disposed"),
+        v.literal("disposal_requested"), v.literal("disposal_confirmed"),
+        v.literal("sent_to_warehouse")
       ),
       userId: v.id("users"),
       previousOrganizationId: v.optional(v.id("organizations")),
