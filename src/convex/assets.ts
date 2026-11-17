@@ -585,7 +585,7 @@ export const changeStatus = mutation({
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
 
-    if (["disposal_pending", "disposal_authorized", "sent_to_warehouse", "disposed"].includes(args.newStatus)) {
+    if (["disposal_pending", "disposal_authorized", "sent_to_warehouse", "disposed"].includes(args.newStatus) || ["disposal_pending", "disposal_authorized", "sent_to_warehouse", "disposed"].includes(asset.status)) {
       throw new Error("As etapas de baixa devem ser registradas pelo fluxo de Solicitação de baixa patrimonial.");
     }
     const now = Date.now();
