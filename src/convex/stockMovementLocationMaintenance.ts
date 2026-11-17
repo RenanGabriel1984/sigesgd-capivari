@@ -244,6 +244,10 @@ export const applyHistoricalLocationCorrectionsInternal = internalMutation({
       {} as Record<string, number>,
     );
 
+    const correctedByLocationSummary = Object.entries(correctedByLocation)
+      .map(([location, count]) => ({ location, count }))
+      .sort((a, b) => a.location.localeCompare(b.location));
+
     return {
       applied: true,
       mode: "CONTROLLED_ATOMIC_CORRECTION",
@@ -255,7 +259,7 @@ export const applyHistoricalLocationCorrectionsInternal = internalMutation({
       otherMovementFieldsChanged: 0,
       actorAttribution:
         "automated_maintenance_internal; no authenticated user attribution",
-      correctedByLocation,
+      correctedByLocation: correctedByLocationSummary,
       excludedTypes: ["exit", "return", "transfer"],
       excludedUnmatchedCount: EXPECTED_UNLOCATED_COUNT - candidates.length,
       note:
