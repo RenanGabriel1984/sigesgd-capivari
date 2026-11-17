@@ -55,6 +55,7 @@ export default function Exit() {
   const [departamento, setDepartamento] = useState("");
   const [unidade, setUnidade] = useState("");
   const [locationId, setLocationId] = useState("");
+  const [areaId, setAreaId] = useState("");
   const [reason, setReason] = useState<string>(REASONS[0]);
   const [osNumber, setOsNumber] = useState("");
   const [observation, setObservation] = useState("");
@@ -84,9 +85,15 @@ export default function Exit() {
 
   const selectedProduct: ProductRow | undefined =
     products?.find((p) => p._id === productId) ?? undefined;
+  const productDimensions = useQuery(api.stockSetup.productDimensionSummary, productId ? { productId: productId as any } : "skip");
+  const selectedArea = productDimensions?.areas.find((area: any) => String(area.areaId ?? "unclassified") === areaId);
+  const locationOptions = productDimensions?.areas.length === 1
+    ? productDimensions.areas[0].locations
+    : selectedArea?.locations ?? (productDimensions?.areas.length === 0 ? (locationsByProduct.get(productId ?? "") ?? []) : []);
+  const selectedLocation = locationOptions.find((location: any) => String(location.locationId) === locationId);
 
   const available = selectedProduct
-    ? Math.max(0, (selectedProduct.stock?.physicalQuantity ?? 0) - (selectedProduct.stock?.reservedQuantity ?? 0))
+    ? Math.max(0, selectedLocation?.quantityAvailable ?? selectedLocation?.quantity ?? 0)
     : 0;
   const qty = Math.max(0, Number(quantity) || 0);
   const afterExit = Math.max(0, available - qty);
@@ -110,23 +117,25 @@ export default function Exit() {
 
   const pickProduct = (id: string) => {
     setProductId(id);
-    const locs = locationsByProduct.get(id) ?? [];
-    if (locs.length > 0 && !locs.some((l) => l.locationId === locationId)) {
-      setLocationId(locs[0].locationId);
-    }
+    setAreaId("");
+    setLocationId("");
     setStep(1);
   };
 
   const confirm = async () => {
     if (!selectedProduct) return;
     if (qty <= 0) { toast.error("Informe uma quantidade maior que zero"); return; }
-    if (qty > available) { toast.error(`Disponível: ${available} ${UNIT_LABELS[selectedProduct.unitOfMeasure] ?? selectedProduct.unitOfMeasure}`); return; }
+    if (!locationId) { toast.error("Selecione o armário de origem."); return; }
+    if ((productDimensions?.areas.length ?? 0) > 1 && !areaId) { toast.error("Selecione a área de estoque."); return; }
+    if ((productDimensions?.unmappedLotQuantity ?? 0) > 1e-9 || (productDimensions?.invalidBalances.length ?? 0) > 0) { toast.error("O produto possui lotes sem alocação conciliada. Regularize o inventário antes da saída."); return; }
+    if (qty > available) { toast.error(`Disponível no armário/área selecionados: ${available} ${UNIT_LABELS[selectedProduct.unitOfMeasure] ?? selectedProduct.unitOfMeasure}`); return; }
     setSubmitting(true);
     try {
       const res = await quickExit({
         productId: selectedProduct._id as any,
         quantity: qty,
-        locationId: locationId ? (locationId as any) : undefined,
+        locationId: locationId as any,
+        areaId: areaId && areaId !== "unclassified" ? (areaId as any) : undefined,
         destination: destination || "Não informado",
         receiverName: receiverName.trim() || (activeUsers.find((u: any) => u._id === receiverId)?.name ?? user?.name ?? "Não informado"),
         reason,
@@ -143,7 +152,7 @@ export default function Exit() {
 
   const reset = () => {
     setStep(0); setSearch(""); setProductId(null); setQuantity("1");
-    setSecretaria(""); setDepartamento(""); setUnidade(""); setLocationId("");
+    setSecretaria(""); setDepartamento(""); setUnidade(""); setLocationId(""); setAreaId("");
     setReason(REASONS[0]); setOsNumber(""); setObservation(""); setResult(null);
   };
 
@@ -328,18 +337,39 @@ export default function Exit() {
                     </div>
                   </div>
                   {selectedProduct && (
-                    <div>
-                      <Label className="text-sm font-medium">De qual local?</Label>
-                      <Select value={locationId} onValueChange={setLocationId}>
-                        <SelectTrigger className="mt-1"><SelectValue placeholder="Qualquer local" /></SelectTrigger>
-                        <SelectContent>
-                          {(locationsByProduct.get(selectedProduct._id as string) ?? []).map((l) => (
-                            <SelectItem key={l.locationId} value={l.locationId}>
-                              {l.locationName} · {l.quantity} disponível
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <div className="space-y-3">
+                      {(productDimensions?.areas.length ?? 0) > 1 && (
+                        <div>
+                          <Label className="text-sm font-medium">Área de estoque</Label>
+                          <Select value={areaId} onValueChange={(value) => { setAreaId(value); setLocationId(""); }}>
+                            <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione a área de origem" /></SelectTrigger>
+                            <SelectContent>
+                              {(productDimensions?.areas ?? []).filter((area: any) => area.areaId).map((area: any) => (
+                                <SelectItem key={area.areaId} value={String(area.areaId)}>{area.areaName} ({area.quantityAvailable})</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {(productDimensions?.areas ?? []).some((area: any) => !area.areaId) && (
+                            <p className="mt-1 text-xs text-amber-700">Há saldo legado sem área classificada; ele não será misturado a outra área.</p>
+                          )}
+                        </div>
+                      )}
+                      <div>
+                        <Label className="text-sm font-medium">Armário de origem</Label>
+                        <Select value={locationId} onValueChange={setLocationId}>
+                          <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione o armário de origem" /></SelectTrigger>
+                          <SelectContent>
+                            {locationOptions.map((location: any) => (
+                              <SelectItem key={location.locationId} value={String(location.locationId)}>
+                                {location.locationName} · {location.quantityAvailable ?? location.quantity} disponível
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {(productDimensions?.unmappedLotQuantity ?? 0) > 1e-9 && (
+                        <p className="text-xs text-destructive">Há {productDimensions?.unmappedLotQuantity} unidade(s) de lote sem alocação por armário. A retirada ficará bloqueada até a conciliação.</p>
+                      )}
                     </div>
                   )}
                 </div>
