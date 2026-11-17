@@ -294,9 +294,9 @@ export const createExchange = mutation({
       locationId: sourceLocationId,
       quantity: args.quantityDelivered,
       areaId: await (async () => {
-        const area = await ctx.db.query("stockAreas").withIndex("by_name", (q: any) => q.eq("name", "Impressoras")).first();
-        if (!area) throw new Error("Área Impressoras não encontrada. Configure as áreas de estoque antes da troca GomaQ.");
-        return area._id;
+        const printerAreas = await ctx.db.query("stockAreas").withIndex("by_name", (q: any) => q.eq("name", "Impressoras")).collect();
+        if (printerAreas.length !== 1) throw new Error("A área Impressoras precisa existir uma única vez antes da troca GomaQ.");
+        return printerAreas[0]._id;
       })(),
     });
     const consumedLotId = lotConsumption.allocations[0]?.lotId;
