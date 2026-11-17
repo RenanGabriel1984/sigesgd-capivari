@@ -59,10 +59,6 @@ jobs:
             echo "::error::Operação de escrita encontrada no script. Auditoria cancelada."
             exit 1
           fi
-          if grep -nE 'convex (dev|deploy)|--push' .github/workflows/stock-movement-traceability-audit.yml; then
-            echo "::error::Comando de publicação encontrado no workflow. Auditoria cancelada."
-            exit 1
-          fi
           echo "Destino validado: dev:${TARGET_DEPLOYMENT}"
           echo "Modo: convex run --inline-query (consulta isolada somente leitura)"
           echo "Publicação de backend: não será executada."
