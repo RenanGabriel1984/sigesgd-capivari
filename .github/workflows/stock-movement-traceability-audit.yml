@@ -64,6 +64,23 @@ jobs:
           echo "Destino validado: dev:${TARGET_DEPLOYMENT}; somente consultas inline."
       - name: Instalar dependências
         run: bun install --frozen-lockfile
+      - name: Identificar funções atualmente implantadas (somente leitura)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Consultando metadados do deployment fixo: dev:${TARGET_DEPLOYMENT}"
+          bunx convex function-spec --deployment "${TARGET_DEPLOYMENT}" 2>&1 | tee "${RUNNER_TEMP}/first-herring-function-spec.txt"
+          {
+            echo "### Inventário de funções implantadas — somente leitura"
+            echo ""
+            echo "- Deployment: `dev:${TARGET_DEPLOYMENT}`"
+            echo "- Comando: `convex function-spec` (metadados, sem deploy e sem gravação de dados)"
+            echo ""
+            echo '~~~text'
+            head -c 50000 "${RUNNER_TEMP}/first-herring-function-spec.txt"
+            echo ""
+            echo '~~~'
+          } >> "${GITHUB_STEP_SUMMARY}"
       - name: Auditoria de rastreabilidade somente leitura
         shell: bash
         run: |
