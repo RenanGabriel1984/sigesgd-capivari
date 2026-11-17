@@ -850,7 +850,8 @@ const schema = defineSchema(
       .index("by_type", ["assetType"])
       .index("by_organization", ["organizationId"])
       .index("by_responsible", ["responsibleUserId"])
-      .index("by_patrimony", ["patrimonyNumber"]),
+      .index("by_patrimony", ["patrimonyNumber"])
+      .index("by_serial", ["serialNumber"]),
 
     // ── Solicitações de baixa operacional de equipamentos ──
     // A TI solicita a baixa; o Departamento de Patrimônio confirma a baixa
@@ -888,7 +889,7 @@ const schema = defineSchema(
         v.literal("maintenance"), v.literal("returned"), v.literal("status_changed"),
         v.literal("part_installed"), v.literal("part_removed"), v.literal("disposed"),
         v.literal("disposal_requested"), v.literal("disposal_confirmed"),
-        v.literal("sent_to_warehouse")
+        v.literal("sent_to_warehouse"), v.literal("linked_from_entry")
       ),
       userId: v.id("users"),
       previousOrganizationId: v.optional(v.id("organizations")),
