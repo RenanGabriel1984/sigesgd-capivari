@@ -286,6 +286,22 @@ export default function Exit() {
                       <Plus className="h-6 w-6" />
                     </Button>
                   </div>
+                  {selectedProduct && (
+                    <div className="space-y-3">
+                      {(productDimensions?.areas.length ?? 0) > 1 && (
+                        <div>
+                          <Label className="text-sm font-medium">Área de estoque</Label>
+                          <Select value={areaId} onValueChange={(value) => { setAreaId(value); setLocationId(""); }}>
+                            <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione a área de origem" /></SelectTrigger>
+                            <SelectContent>
+                              {(productDimensions?.areas ?? []).filter((area: any) => area.areaId).map((area: any) => (
+                                <SelectItem key={area.areaId} value={String(area.areaId)}>{area.areaName} ({area.quantityAvailable})</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {(productDimensions?.areas ?? []).some((area: any) => !area.areaId) && (
+                            <p className="mt-1 text-xs text-amber-700">Há saldo legado sem área classificada; ele não será misturado a outra área.</p>
+                          )}
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="border rounded-lg p-3">
                       <p className="text-lg font-bold">{available}</p>
@@ -336,22 +352,7 @@ export default function Exit() {
                       <Input value={unidade} onChange={(e) => setUnidade(e.target.value)} placeholder="Unidade (opcional)" />
                     </div>
                   </div>
-                  {selectedProduct && (
-                    <div className="space-y-3">
-                      {(productDimensions?.areas.length ?? 0) > 1 && (
-                        <div>
-                          <Label className="text-sm font-medium">Área de estoque</Label>
-                          <Select value={areaId} onValueChange={(value) => { setAreaId(value); setLocationId(""); }}>
-                            <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione a área de origem" /></SelectTrigger>
-                            <SelectContent>
-                              {(productDimensions?.areas ?? []).filter((area: any) => area.areaId).map((area: any) => (
-                                <SelectItem key={area.areaId} value={String(area.areaId)}>{area.areaName} ({area.quantityAvailable})</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {(productDimensions?.areas ?? []).some((area: any) => !area.areaId) && (
-                            <p className="mt-1 text-xs text-amber-700">Há saldo legado sem área classificada; ele não será misturado a outra área.</p>
-                          )}
+
                         </div>
                       )}
                       <div>
