@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const backend = readFileSync(resolve(__dirname, "../convex/stockSetup.ts"), "utf8");
+const reportsPage = readFileSync(resolve(__dirname, "../pages/Reports.tsx"), "utf8");
 
 describe("diagnóstico dimensional do estoque", () => {
   const start = backend.indexOf("export const stockDimensionDiagnostics = query({");
@@ -64,5 +65,19 @@ describe("visão dimensional consolidada do estoque", () => {
     expect(block).toContain("locationName");
     expect(block).toContain("unmappedLotQuantity");
     expect(block).toContain("globalVsLocationDifference");
+  });
+
+  it("mantém saldos legados sem lote visíveis por armário sem inventar área", () => {
+    expect(block).toContain("untrackedLocations");
+    expect(block).toContain('"Sem classificação por lote"');
+  });
+
+  it("relatório filtra e exporta área, armário e lote em consulta somente leitura", () => {
+    expect(reportsPage).toContain("api.stockSetup.stockDimensionOverview");
+    expect(reportsPage).toContain("dimensionAreaFilter");
+    expect(reportsPage).toContain("dimensionLocationFilter");
+    expect(reportsPage).toContain("dimensionSearch");
+    expect(reportsPage).toContain("exportLotLocationCSV");
+    expect(reportsPage).toContain("rastreabilidade_area_armario_lote.csv");
   });
 });
