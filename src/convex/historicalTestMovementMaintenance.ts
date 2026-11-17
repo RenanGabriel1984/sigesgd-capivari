@@ -60,7 +60,7 @@ export const classifyHistoricalTestMovementsInternal = internalMutation({
         if (movement.lotId !== "n179kw2gk7p08rw1qjh0tygzmm4k480k") {
           throw new Error(`Lote divergente no movimento ${expected.id}`);
         }
-        const product = await ctx.db.get(movement.productId);
+        const product: any = await ctx.db.get(movement.productId);
         if (!product?.name?.toLowerCase().includes("cooler")) {
           throw new Error(`Produto não corresponde ao cooler: ${expected.id}`);
         }
