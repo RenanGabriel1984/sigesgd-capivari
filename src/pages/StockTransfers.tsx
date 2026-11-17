@@ -47,7 +47,6 @@ export default function StockTransfersPage() {
   const transfers = useQuery(api.stockTransfers.list);
   const products = useQuery(api.products.listActive);
   const locations = useQuery(api.storageLocations.listActive);
-  const lots = useQuery(api.lots.listActiveByProduct, productId ? { productId: productId as any } : "skip");
   const createTransfer = useMutation(api.stockTransfers.create);
 
   const [showNew, setShowNew] = useState(false);
@@ -55,6 +54,7 @@ export default function StockTransfersPage() {
   const [fromLocationId, setFromLocationId] = useState("");
   const [toLocationId, setToLocationId] = useState("");
   const [lotId, setLotId] = useState("");
+  const lots = useQuery(api.lots.listActiveByProduct, productId ? { productId: productId as any } : "skip");
   const [quantity, setQuantity] = useState(1);
   const [observation, setObservation] = useState("");
   const [submitting, setSubmitting] = useState(false);
