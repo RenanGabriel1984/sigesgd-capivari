@@ -47,8 +47,8 @@ const ASSET_STATUS_LABELS: Record<string, string> = {
 
 const ASSET_STATUS_COLORS: Record<string, string> = {
   active: "badge-success", maintenance: "badge-warning",
-  inactive: "badge-neutral", disposal_pending: "badge-warning",
-  disposed: "badge-danger", lost: "badge-danger",
+  inactive: "badge-neutral", disposal_pending: "badge-warning", disposal_authorized: "badge-warning",
+  sent_to_warehouse: "badge-danger", disposed: "badge-danger", lost: "badge-danger",
 };
 
 function getTypeIcon(type: string) {
