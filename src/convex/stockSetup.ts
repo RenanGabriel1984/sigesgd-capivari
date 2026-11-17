@@ -144,6 +144,16 @@ async function performInitialLoad(
         active: true,
         observation: `Carga inicial — ${item.quantity} unidades`,
       });
+      if (!item.locationId) throw new Error("Informe o armário para cada item da carga inicial.");
+      const initialLocation = await ctx.db.get(item.locationId);
+      if (!initialLocation || initialLocation.active === false) throw new Error("O armário da carga inicial não existe ou está inativo.");
+      await ctx.db.insert("lotLocationBalances", {
+        lotId,
+        productId: item.productId,
+        locationId: item.locationId,
+        quantityAvailable: item.quantity,
+        updatedAt: now,
+      });
 
       // ── 2. Create entry item ──
       await ctx.db.insert("entryItems", {
