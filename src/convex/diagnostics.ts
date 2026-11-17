@@ -1538,6 +1538,9 @@ export const stockMovementTraceabilityAuditInternal = internalQuery({
       ctx.db.query("stockMovementLotAllocations").collect(),
     ]);
 
+    const movementById = new Map<string, (typeof movements)[number]>();
+    for (const row of movements) movementById.set(String(row._id), row);
+
     const productById = new Map<string, (typeof products)[number]>();
     for (const row of products) productById.set(String(row._id), row);
 
@@ -1594,20 +1597,29 @@ export const stockMovementTraceabilityAuditInternal = internalQuery({
       const lotResolution = resolveLot(movement.lotId);
       const lot = lotResolution.lot;
       const allocationRows = allocationsByMovement.get(String(movement._id)) ?? [];
-      const evidenceEntryId = movement.entryId ?? lot?.entryId;
-      const linkedItems = evidenceEntryId
-        ? (entryItemsByEntry.get(String(evidenceEntryId)) ?? []).filter((item) =>
+      // Evidência da entrada indicada pelo movimento E da entrada registrada no lote.
+      // Em caso de divergência, ambas são apresentadas para revisão — não escolher silenciosamente uma.
+      const evidenceEntryIds = [...new Set(
+        [movement.entryId, lot?.entryId].filter(Boolean).map((id) => String(id))
+      )];
+      const linkedItems = evidenceEntryIds.flatMap((entryId) =>
+        (entryItemsByEntry.get(entryId) ?? [])
+          .filter((item) =>
             item.productId === movement.productId &&
             (!movement.lotId || item.lotId === movement.lotId || item.lotId === String(lot?._id ?? ""))
           )
-        : [];
+          .map((item) => ({ item, evidenceEntryId: entryId }))
+      );
 
       const entryItemLocations = linkedItems
-        .filter((item) => item.locationId)
-        .map((item) => {
+        .filter(({ item }) => item.locationId)
+        .map(({ item, evidenceEntryId }) => {
           const locationId = String(item.locationId);
           const location = locationById.get(locationId);
+          const sourceEntry = entryById.get(evidenceEntryId);
           return {
+            entryId: evidenceEntryId,
+            entryNumber: sourceEntry?.entryNumber ?? null,
             entryItemId: String(item._id),
             lotReference: item.lotId ?? null,
             locationId,
@@ -1650,10 +1662,14 @@ export const stockMovementTraceabilityAuditInternal = internalQuery({
         canceled: movement.canceled ?? false,
         productId: String(movement.productId),
         productName: product?.name ?? null,
+        productExists: Boolean(product),
         userId: String(movement.userId),
         userExists: Boolean(user),
         entryId: movement.entryId ? String(movement.entryId) : null,
         entryNumber: entry?.entryNumber ?? null,
+        entryReferenceValid: movement.entryId ? Boolean(entry) : null,
+        lotEntryId: lot?.entryId ? String(lot.entryId) : null,
+        lotEntryNumber: lot ? entryById.get(String(lot.entryId))?.entryNumber ?? null : null,
         entryAreaId: entry?.areaId ? String(entry.areaId) : null,
         lotReference: movement.lotId ?? null,
         lotResolution: !movement.lotId
@@ -1704,10 +1720,43 @@ export const stockMovementTraceabilityAuditInternal = internalQuery({
       return Boolean(lot && movement.entryId && lot.entryId !== movement.entryId);
     });
     const missingUser = movements.filter((movement) => !userById.has(String(movement.userId)));
+    const missingProduct = movements.filter((movement) => !productById.has(String(movement.productId)));
+    const invalidEntry = movements.filter((movement) =>
+      movement.entryId && !entryById.has(String(movement.entryId))
+    );
     const allocationQuantityMismatch = movements.filter((movement) => {
       const rows = allocationsByMovement.get(String(movement._id)) ?? [];
       return rows.length > 0 &&
         Math.abs(rows.reduce((sum, row) => sum + row.quantity, 0) - movement.quantity) >= 0.000001;
+    });
+
+    const invalidAllocationRows = allocations.filter((allocation) => {
+      const movement = movementById.get(String(allocation.movementId));
+      const product = productById.get(String(allocation.productId));
+      const lot = lotById.get(String(allocation.lotId));
+      const location = locationById.get(String(allocation.locationId));
+      return !movement || !product || !lot || !location ||
+        lot.productId !== allocation.productId ||
+        movement.productId !== allocation.productId;
+    }).map((allocation) => {
+      const movement = movementById.get(String(allocation.movementId));
+      const product = productById.get(String(allocation.productId));
+      const lot = lotById.get(String(allocation.lotId));
+      const location = locationById.get(String(allocation.locationId));
+      return {
+        allocationId: String(allocation._id),
+        movementId: String(allocation.movementId),
+        movementExists: Boolean(movement),
+        productId: String(allocation.productId),
+        productExists: Boolean(product),
+        lotId: String(allocation.lotId),
+        lotExists: Boolean(lot),
+        lotProductMatchesAllocation: lot ? lot.productId === allocation.productId : null,
+        movementProductMatchesAllocation: movement ? movement.productId === allocation.productId : null,
+        locationId: String(allocation.locationId),
+        locationExists: Boolean(location),
+        quantity: allocation.quantity,
+      };
     });
 
     const missingLocationByType: Record<string, number> = {};
@@ -1729,6 +1778,9 @@ export const stockMovementTraceabilityAuditInternal = internalQuery({
         productLotMismatch: productLotMismatch.length,
         entryLotMismatch: entryLotMismatch.length,
         missingUserReference: missingUser.length,
+        missingProductReference: missingProduct.length,
+        invalidEntryReference: invalidEntry.length,
+        invalidAllocationReferences: invalidAllocationRows.length,
         allocationQuantityMismatch: allocationQuantityMismatch.length,
       },
       missingLocationByType,
@@ -1741,6 +1793,9 @@ export const stockMovementTraceabilityAuditInternal = internalQuery({
       productLotMismatchMovements: productLotMismatch.map(summarizeMovement),
       entryLotMismatchMovements: entryLotMismatch.map(summarizeMovement),
       missingUserMovements: missingUser.map(summarizeMovement),
+      missingProductMovements: missingProduct.map(summarizeMovement),
+      invalidEntryMovements: invalidEntry.map(summarizeMovement),
+      invalidAllocationReferences: invalidAllocationRows,
       allocationQuantityMismatchMovements: allocationQuantityMismatch.map(summarizeMovement),
       interpretation: {
         entryItemLocationEvidence: "Local registrado no item da entrada; evidência documental, não correção automática.",
