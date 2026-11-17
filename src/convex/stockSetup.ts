@@ -949,7 +949,6 @@ export const stockDimensionDiagnostics = query({
         ctx.db.query("stockByLocation").collect(),
       ]);
 
-    const productById = new Map(products.map((p: any) => [String(p._id), p]));
     const locationById = new Map(locations.map((l: any) => [String(l._id), l]));
     const areaById = new Map(areas.map((a: any) => [String(a._id), a]));
     const lotById = new Map(lots.map((l: any) => [String(l._id), l]));
@@ -1005,6 +1004,24 @@ export const stockDimensionDiagnostics = query({
         };
       });
       const knownLocationLots = lotRows.filter((lot: any) => lot.migrationEvidence === "entry_location_only").length;
+      const productLocationBalances = (locationBalances as any[])
+        .filter((balance) => String(balance.productId) === productId)
+        .map((balance) => ({
+          locationId: String(balance.locationId),
+          locationName: (locationById.get(String(balance.locationId)) as any)?.name ?? "Local não encontrado",
+          quantity: balance.quantity,
+        }));
+      const areaTotals = new Map<string, { areaId: string; areaName: string; quantityAvailable: number }>();
+      for (const lot of lotRows as any[]) {
+        const key = lot.areaId ?? "unclassified";
+        const current = areaTotals.get(key) ?? {
+          areaId: lot.areaId ?? null,
+          areaName: lot.areaName ?? "Sem área",
+          quantityAvailable: 0,
+        };
+        current.quantityAvailable += lot.quantityAvailable;
+        areaTotals.set(key, current);
+      }
       const postEntryMovements = productMovements.filter((movement: any) => movement.type !== "entry");
       const hasUnscopedOperations = productTransfers.length > 0 || productReturns.length > 0 ||
         postEntryMovements.length > 0 || productInventoryCount > 0;
@@ -1013,7 +1030,11 @@ export const stockDimensionDiagnostics = query({
         productName: product.name,
         globalPhysical: productStock?.physicalQuantity ?? 0,
         globalReserved: productStock?.reservedQuantity ?? 0,
-        byLocationPhysical: (locationBalances as any[]).filter((balance) => String(balance.productId) === productId).reduce((sum, balance) => sum + balance.quantity, 0),
+        byLocationPhysical: productLocationBalances.reduce((sum, balance) => sum + balance.quantity, 0),
+        globalVsLocationDifference: (productStock?.physicalQuantity ?? 0) - productLocationBalances.reduce((sum, balance) => sum + balance.quantity, 0),
+        globalVsLotsDifference: (productStock?.physicalQuantity ?? 0) - activeLots.reduce((sum: number, lot: any) => sum + lot.quantityAvailable, 0),
+        locationBalances: productLocationBalances,
+        areaLotBalances: Array.from(areaTotals.values()),
         activeLotCount: activeLots.length,
         activeLotsAvailable: activeLots.reduce((sum: number, lot: any) => sum + lot.quantityAvailable, 0),
         activeLotsWithoutArea: activeLots.filter((lot: any) => !lot.areaId || !areaById.has(String(lot.areaId))).length,
