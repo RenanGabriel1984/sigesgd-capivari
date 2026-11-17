@@ -829,10 +829,19 @@ export const reverse = mutation({
       const productLots = await ctx.db.query("lots")
         .withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId))
         .collect();
-      const lot = productLots.find((candidate: any) =>
-        String(candidate.productId) === String(item.productId) &&
-        (String(candidate._id) === String(item.lotId) || candidate.lotNumber === String(item.lotId)),
-      ) ?? productLots.find((candidate: any) => String(candidate.productId) === String(item.productId));
+      const productEntryLots = productLots.filter((candidate: any) =>
+        String(candidate.productId) === String(item.productId),
+      );
+      const lotMatches = productEntryLots.filter((candidate: any) =>
+        item.lotId && (String(candidate._id) === String(item.lotId) || candidate.lotNumber === String(item.lotId)),
+      );
+      if (lotMatches.length > 1 || (!item.lotId && productEntryLots.length > 1)) {
+        throw new Error(`Não é seguro estornar "${productName}": há mais de um lote possível na entrada sem vínculo inequívoco.`);
+      }
+      const lot = lotMatches[0] ?? (!item.lotId && productEntryLots.length === 1 ? productEntryLots[0] : null);
+      if (item.lotId && productEntryLots.length > 0 && !lot) {
+        throw new Error(`Não foi possível resolver o lote de origem de "${productName}" para estorno.`);
+      }
 
       const locationRows = await ctx.db.query("stockByLocation")
         .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
