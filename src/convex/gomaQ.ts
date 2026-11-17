@@ -293,6 +293,11 @@ export const createExchange = mutation({
       productId: args.productId,
       locationId: sourceLocationId,
       quantity: args.quantityDelivered,
+      areaId: await (async () => {
+        const area = await ctx.db.query("stockAreas").withIndex("by_name", (q: any) => q.eq("name", "Impressoras")).first();
+        if (!area) throw new Error("Área Impressoras não encontrada. Configure as áreas de estoque antes da troca GomaQ.");
+        return area._id;
+      })(),
     });
     const consumedLotId = lotConsumption.allocations[0]?.lotId;
     const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
