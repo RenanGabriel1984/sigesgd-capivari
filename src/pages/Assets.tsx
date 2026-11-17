@@ -42,7 +42,7 @@ const ASSET_TYPE_LABELS: Record<string, string> = EQUIPMENT_TYPE_LABELS;
 
 const ASSET_STATUS_LABELS: Record<string, string> = {
   active: "Ativo", maintenance: "Manutenção", inactive: "Inativo",
-  disposal_pending: "Descarte Pendente", disposed: "Descartado", lost: "Perdido",
+  disposal_pending: "Solicitação enviada ao Patrimônio", disposal_authorized: "Baixa oficial confirmada", sent_to_warehouse: "Encaminhado ao barracão", disposed: "Baixado (legado)", lost: "Perdido",
 };
 
 const ASSET_STATUS_COLORS: Record<string, string> = {
