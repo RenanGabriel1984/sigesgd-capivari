@@ -157,7 +157,7 @@ export const create = mutation({
       const activeLots = await ctx.db.query("lots")
         .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
         .collect();
-      if (activeLots.some((lot: any) => lot.active && lot.quantityAvailable > 0)) {
+      if (activeLots.some((lot: any) => lot.quantityAvailable > 0)) {
         throw new Error("Selecione o lote para transferir: o produto possui saldo rastreado por lote.");
       }
       const [globalRows, locationRows] = await Promise.all([
