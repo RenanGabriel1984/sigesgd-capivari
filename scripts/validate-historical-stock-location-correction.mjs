@@ -77,8 +77,8 @@ if (mode === "verify") {
     "A mutation retornou IDs diferentes dos IDs aprovados.",
   );
   requireCondition(
-    mutation.correctedByLocation?.["Armário TI 01"] === 34 &&
-      mutation.correctedByLocation?.["Armário TI 02"] === 27,
+    mutation.correctedByLocation?.find((row) => row.location === "Armário TI 01")?.count === 34 &&
+      mutation.correctedByLocation?.find((row) => row.location === "Armário TI 02")?.count === 27,
     "A distribuição por armário difere da distribuição aprovada (34/27).",
   );
 
