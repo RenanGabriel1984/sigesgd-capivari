@@ -23,8 +23,8 @@ describe("integração entre recebimento e cadastro de equipamentos", () => {
 
   it("cria ou associa o equipamento usando vínculo reverso e identificadores existentes", () => {
     expect(assets).toContain("export const createFromEntryUnit = mutation");
-    expect(assets).toContain('withIndex("by_patrimony"');
-    expect(assets).toContain('withIndex("by_serial"');
+    expect(assets).toContain("normalizeIdentifier(asset.patrimonyNumber)");
+    expect(assets).toContain("normalizeIdentifier(asset.serialNumber)");
     expect(assets).toContain("entryItemUnitId: unit._id");
     expect(assets).toContain("await ctx.db.patch(unit._id, { assetId })");
     expect(schema).toContain('.index("by_serial", ["serialNumber"])');
