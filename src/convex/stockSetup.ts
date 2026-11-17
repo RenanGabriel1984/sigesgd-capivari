@@ -4,6 +4,7 @@ import {
   formatConsumedLots,
   type LotConsumption,
 } from "../lib/stock-consumption";
+import { nextLotNumber } from "../lib/lot-numbering";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import {
@@ -26,16 +27,17 @@ async function requireAdmin(ctx: any) {
 }
 
 /**
- * Generate lot number: LOT-YYYY-NNNNNN
+ * Gera número global: LOT-AAAA-NNNNNN. O identificador do lote é único em
+ * todo o estoque, e não reinicia a sequência para cada produto.
  */
-async function generateLotNumber(ctx: any, productId: string): Promise<string> {
+async function generateLotNumber(ctx: any): Promise<string> {
   const year = new Date().getFullYear();
+  const prefix = `LOT-${year}-`;
   const existingLots = await ctx.db
     .query("lots")
-    .withIndex("by_product", (q: any) => q.eq("productId", productId))
+    .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix))
     .collect();
-  const seq = existingLots.length + 1;
-  return `LOT-${year}-${String(seq).padStart(6, "0")}`;
+  return nextLotNumber(existingLots.map((lot: any) => lot.lotNumber), year);
 }
 
 /**
@@ -127,7 +129,7 @@ async function performInitialLoad(
     if (item.quantity === 0) continue;
 
       // ── 1. Create lot for traceability ──
-      const lotNumber = await generateLotNumber(ctx, item.productId);
+      const lotNumber = await generateLotNumber(ctx);
       const lotId = await ctx.db.insert("lots", {
         lotNumber,
         productId: item.productId,

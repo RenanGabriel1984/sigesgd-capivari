@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { validateEntryUnits } from "../lib/material-types";
+import { nextLotNumber } from "../lib/lot-numbering";
 import {
   duplicateInvoiceMessage,
   entryInvoiceFingerprint,
@@ -108,16 +109,11 @@ async function generateEntryNumber(ctx: any): Promise<string> {
 async function generateLotNumber(ctx: any): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `LOT-${year}-`;
-  const existing = await ctx.db.query("lots").withIndex("by_number", (q: any) => q.gte("lotNumber", prefix)).collect();
-  const maxNum = existing.reduce((max: number, l: any) => {
-    const match = l.lotNumber.match(/^LOT-\d{4}-(\d+)$/);
-    if (match) {
-      const num = parseInt(match[1], 10);
-      return num > max ? num : max;
-    }
-    return max;
-  }, 0);
-  return `LOT-${year}-${String(maxNum + 1).padStart(6, "0")}`;
+  const existing = await ctx.db
+    .query("lots")
+    .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix))
+    .collect();
+  return nextLotNumber(existing.map((lot: any) => lot.lotNumber), year);
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
