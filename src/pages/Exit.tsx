@@ -381,30 +381,10 @@ export default function Exit() {
                     </div>
                   </div>
 
-                        </div>
-                      )}
-                      <div>
-                        <Label className="text-sm font-medium">Armário de origem</Label>
-                        <Select value={locationId} onValueChange={setLocationId}>
-                          <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione o armário de origem" /></SelectTrigger>
-                          <SelectContent>
-                            {locationOptions.map((location: any) => (
-                              <SelectItem key={location.locationId} value={String(location.locationId)}>
-                                {location.locationName} · {location.quantityAvailable ?? location.quantity} disponível
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {(Math.abs(productDimensions?.globalVsLocationDifference ?? 0) > 1e-9 || (productDimensions?.unmappedLotQuantity ?? 0) > 1e-9) && (
-                        <p className="text-xs text-destructive">Há divergência entre saldo global, armários e/ou lotes ({productDimensions?.globalVsLocationDifference} global × armários; {productDimensions?.globalVsLotsDifference} global × lotes; {productDimensions?.unmappedLotQuantity} sem alocação). A retirada ficará bloqueada até a conciliação.</p>
-                      )}
-                    </div>
-                  )}
                 </div>
               )}
 
-              {/* PASSO 4 — motivo */}
+              /* PASSO 4 — motivo */}
               {step === 3 && (
                 <div className="space-y-4">
                   <Label className="text-base font-semibold">Por que está retirando?</Label>
