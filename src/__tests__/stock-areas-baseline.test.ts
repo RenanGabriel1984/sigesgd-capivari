@@ -43,6 +43,21 @@ describe("áreas oficiais de estoque", () => {
     expect(block).not.toContain('ctx.db.insert("stockMovements"');
   });
 
+  it("oferece criação explícita e idempotente das áreas oficiais sem tocar no estoque", () => {
+    const block = stockAreasBackend.slice(
+      stockAreasBackend.indexOf("export const createMissingBaselineAreas"),
+      stockAreasBackend.indexOf("export const create = mutation"),
+    );
+    const page = readFileSync(resolve(__dirname, "../pages/StockAreas.tsx"), "utf8");
+    expect(block).toContain("export const createMissingBaselineAreas = mutation");
+    expect(block).toContain("requireStockManagerOrAdmin");
+    expect(block).toContain("normalizedName(candidate.name)");
+    expect(block).not.toContain('ctx.db.insert("lots"');
+    expect(block).not.toContain('ctx.db.patch("stock"');
+    expect(page).toContain("Adicionar");
+    expect(page).toContain("api.stockAreas.createMissingBaselineAreas");
+  });
+
   it("mantém água mineral como área de estoque e módulo com regras específicas", () => {
     const water = BASELINE_STOCK_AREAS.find((area) => area.name === AREA_AGUA_MINERAL);
     expect(water?.description).toContain("módulo específico");
