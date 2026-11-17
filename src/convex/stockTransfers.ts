@@ -2,7 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { planTransfer } from "../lib/transfer-rules";
 import { planLotLocationTransfer } from "../lib/lot-location-rules";
-import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 import { requirePermission } from "./rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
@@ -86,9 +86,58 @@ export const create = mutation({
       lotDoc = await ctx.db.get(args.lotId);
       if (!lotDoc) throw new Error("Lote não encontrado");
       if (lotDoc.productId !== args.productId) throw new Error("Lote não corresponde ao produto");
-      const lotLocations = await ctx.db.query("lotLocationBalances")
-        .withIndex("by_lot", (q: any) => q.eq("lotId", args.lotId))
-        .collect();
+      const [lotLocations, productLots, allBalances, locationRows, globalRows] = await Promise.all([
+        ctx.db.query("lotLocationBalances")
+          .withIndex("by_lot", (q: any) => q.eq("lotId", args.lotId))
+          .collect(),
+        ctx.db.query("lots")
+          .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
+          .collect(),
+        ctx.db.query("lotLocationBalances")
+          .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
+          .collect(),
+        ctx.db.query("stockByLocation")
+          .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
+          .collect(),
+        ctx.db.query("stock")
+          .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
+          .collect(),
+      ]);
+      validateUniqueScopedStockRows(locationRows, product.name);
+      const globalStock = requireSingleValidGlobalStock(globalRows, product.name);
+      const balanceKeys = new Set<string>();
+      const balancesByLot = new Map<string, number>();
+      const balancesByLocation = new Map<string, number>();
+      const knownLots = new Set(productLots.map((lot: any) => String(lot._id)));
+      for (const balance of allBalances as any[]) {
+        const lotKey = String(balance.lotId);
+        const locationKey = String(balance.locationId);
+        if (!knownLots.has(lotKey) || !Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0) {
+          throw new Error("Há saldo lote/armário inválido. Regularize antes de transferir.");
+        }
+        const key = `${lotKey}::${locationKey}`;
+        if (balanceKeys.has(key)) throw new Error("Há saldos duplicados de lote por armário. Regularize antes de transferir.");
+        balanceKeys.add(key);
+        balancesByLot.set(lotKey, (balancesByLot.get(lotKey) ?? 0) + balance.quantityAvailable);
+        balancesByLocation.set(locationKey, (balancesByLocation.get(locationKey) ?? 0) + balance.quantityAvailable);
+      }
+      for (const lot of productLots as any[]) {
+        const distributed = balancesByLot.get(String(lot._id)) ?? 0;
+        if (Math.abs(distributed - lot.quantityAvailable) > 1e-9) {
+          throw new Error(`O lote ${lot.lotNumber} não está conciliado por armário. Regularize antes de transferir.`);
+        }
+      }
+      const physicalByLocation = new Map(locationRows.map((row: any) => [String(row.locationId), row.quantity]));
+      const locationIds = new Set([...physicalByLocation.keys(), ...balancesByLocation.keys()]);
+      for (const locationId of locationIds) {
+        if (Math.abs((physicalByLocation.get(locationId) ?? 0) - (balancesByLocation.get(locationId) ?? 0)) > 1e-9) {
+          throw new Error(`O saldo lote/armário diverge do saldo físico no local ${locationId}. Regularize antes de transferir.`);
+        }
+      }
+      const locationTotal = locationRows.reduce((sum: number, row: any) => sum + row.quantity, 0);
+      if (Math.abs(globalStock.physicalQuantity - locationTotal) > 1e-9) {
+        throw new Error("O saldo global diverge do saldo por armário. Transferência bloqueada.");
+      }
       const fromRows = lotLocations.filter((row: any) => row.locationId === args.fromLocationId);
       const toRows = lotLocations.filter((row: any) => row.locationId === args.toLocationId);
       if (fromRows.length > 1 || toRows.length > 1) {
