@@ -468,8 +468,8 @@ export const quickExit = mutation({
     // Defesa numérica: normaliza Int64 → number (v.number() aceita Int64 via CLI)
     args = { ...args, quantity: Number(args.quantity) };
 
-    if (args.quantity <= 0) {
-      throw new Error("Quantidade deve ser maior que zero");
+    if (!Number.isFinite(args.quantity) || args.quantity <= 0) {
+      throw new Error("Quantidade deve ser um número finito maior que zero");
     }
 
     // ── Validate product ──
