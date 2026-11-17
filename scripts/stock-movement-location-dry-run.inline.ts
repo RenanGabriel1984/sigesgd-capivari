@@ -53,8 +53,9 @@ for (const movement of movements) {
   });
   else excluded.push({movementId:String(movement._id),type,productName:product?.name??null,quantity:movement.quantity,reasons});
 }
-const byType={},byLocation={};
-for(const row of proposed){byType[row.type]=(byType[row.type]??0)+1;byLocation[row.proposed.locationName]=(byLocation[row.proposed.locationName]??0)+1;}
+const byType={},locationCounts=new Map();
+for(const row of proposed){byType[row.type]=(byType[row.type]??0)+1;locationCounts.set(row.proposed.locationName,(locationCounts.get(row.proposed.locationName)??0)+1);}
+const byLocation=[...locationCounts.entries()].map(([location,count])=>({location,count}));
 return {
   generatedAt:Date.now(),mode:"DRY_RUN_ONLY",readOnly:true,deploymentRequested:"first-herring-264",
   writesPerformed:0,mutationsImported:false,
