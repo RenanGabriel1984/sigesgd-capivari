@@ -34,6 +34,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
 import { buildEstimatedNeedRow, NEED_SOURCE_LABELS } from "@/lib/supply-requests";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -1035,6 +1036,8 @@ function PlanejamentoReposicaoTab() {
 type Exchange = {
   _id: string; exchangeNumber: string; productId: string;
   quantityDelivered: number; quantityEmptyReceived: number; exchangedAt: number;
+  product?: { name?: string } | null;
+  printer?: { name?: string; model?: string } | null;
 };
 type Cartridge = {
   _id: string; productId: string; quantity: number;
