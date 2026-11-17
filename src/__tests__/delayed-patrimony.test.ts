@@ -55,9 +55,15 @@ describe("recebimento e identificação de bens permanentes", () => {
   });
 
   it("aceita número patrimonial opcional já conhecido sem atribuir tombamento pela TI", () => {
-    expect(entries).toContain("patrimonyNumber: u.patrimonyNumber?.trim() || undefined");
-    expect(entries).not.toContain("patrimonyAssignedByUserId: userId");
-    expect(entries).not.toContain("O número oficial de patrimônio só pode ser atribuído pelo setor de Patrimônio");
+    const setUnitsBlock = entries.slice(
+      entries.indexOf("export const setUnits = mutation"),
+      entries.indexOf("// ─── Tombamento posterior pelo setor de Patrimônio"),
+    );
+    expect(setUnitsBlock).toContain("patrimonyNumber: u.patrimonyNumber?.trim() || undefined");
+    expect(setUnitsBlock).not.toContain("patrimonyRegistrationStatus");
+    expect(setUnitsBlock).not.toContain("patrimonyAssignedByUserId");
+    expect(setUnitsBlock).not.toContain("O número oficial de patrimônio só pode ser atribuído pelo setor de Patrimônio");
+    expect(entryDialog).toContain("patrimonyNumber: unit.patrimonyNumber?.trim() || undefined");
   });
 
   it("só lista pendências depois da confirmação da entrada", () => {
