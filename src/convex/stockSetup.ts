@@ -6,9 +6,10 @@ import {
 } from "../lib/stock-consumption";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { buildLotLocationMigrationPlan } from "../lib/lot-location-migration";
 import { resolveWithdrawalLocation, consumeLotLocationStock, recordLotMovementAllocations } from "./lotLocationLedger";
-import { getOptionalSingleValidGlobalStock } from "../lib/stock-read-integrity";
+import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 import { v } from "convex/values";
 import {
   applyImplementationStockStamp,
