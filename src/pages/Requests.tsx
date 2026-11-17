@@ -895,7 +895,7 @@ export default function Requests() {
                         <select
                           className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                           value={di.areaId}
-                          onChange={(e) => updateDeliverItem(idx, "areaId", e.target.value)}
+                          onChange={(e) => { updateDeliverItem(idx, "areaId", e.target.value); updateDeliverItem(idx, "locationId", ""); }}
                         >
                           <option value="">Selecione a área de onde o material será retirado...</option>
                           {(stockAreas ?? []).map((area: any) => (
