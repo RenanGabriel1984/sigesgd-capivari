@@ -1,6 +1,6 @@
 // Auditoria dimensional do estoque — SOMENTE LEITURA.
 // Executar via convex run --inline-query. Não chama mutations nem APIs externas.
-const [products, stock, stockByLocation, lots, balances, areas, locations] = await Promise.all([
+const [products, stock, stockByLocation, lots, balances, areas, locations, entries] = await Promise.all([
   ctx.db.query("products").collect(),
   ctx.db.query("stock").collect(),
   ctx.db.query("stockByLocation").collect(),
@@ -16,7 +16,7 @@ const sumBy = (rows, key, value) => {
 };
 const productById = new Map(products.map(x => [String(x._id), x]));
 const lotById = new Map(lots.map(x => [String(x._id), x]));
-const areaIds = new Set(areas.map(x => String(x._id)));
+const areaIds = new Set(areas.map(x => String(x._id)));\nconst entryIds = new Set(entries.map(x => String(x._id)));
 const locationIds = new Set(locations.map(x => String(x._id)));
 const stockByProduct = sumBy(stock, "productId", "physicalQuantity");
 const locationByProduct = sumBy(stockByLocation, "productId", "quantity");
@@ -75,7 +75,7 @@ const invalidStockByLocation = stockByLocation.filter(row =>
 ).map(row=>({ id:String(row._id), productId:String(row.productId), locationId:String(row.locationId), quantity:row.quantity, areaId:row.areaId ? String(row.areaId) : null, areaReferenceValid:row.areaId ? areaIds.has(String(row.areaId)) : null }));
 const invalidLots = lots.filter(row =>
   !productById.has(String(row.productId)) ||
-  !ctx.db.normalizeId("entries", String(row.entryId)) ||
+  !entryIds.has(String(row.entryId)) ||
   (row.areaId && !areaIds.has(String(row.areaId))) ||
   (row.locationId && !locationIds.has(String(row.locationId))) ||
   Number(row.quantityAvailable)<0
