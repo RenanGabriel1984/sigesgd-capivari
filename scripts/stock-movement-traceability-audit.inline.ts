@@ -264,6 +264,7 @@ return {
     allocationQuantityMismatch: allocationQuantityMismatch.length,
   },
   missingLocationByType,
+  historicalBackfillAudit: { count: historicalBackfillAudit.length, rows: historicalBackfillAudit },
   missingLocationMovements: missingLocation
     .sort((a, b) => b.timestamp - a.timestamp)
     .map(summarizeMovement),
