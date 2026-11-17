@@ -104,6 +104,7 @@ describe("classificação de movimentos históricos de teste", () => {
     expect(source).toContain('"Armário TI 01"');
     expect(source).toContain('"ENT-2026-000001"');
     expect(source).toContain("lotBalances.length !== 1");
+    expect(source).toContain("(ctx.db as any).patch");
     expect(source).toContain("movement.quantity !== 1");
     expect(source).toContain("movement.type !== expected.type");
     expect(source).not.toContain("ctx.db.delete(");
