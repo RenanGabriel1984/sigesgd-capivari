@@ -812,6 +812,7 @@ const schema = defineSchema(
       exchangeNumber: v.string(),
       productId: v.id("products"),
       lotId: v.optional(v.id("lots")),
+      locationId: v.optional(v.id("storageLocations")),
       printerId: v.id("printers"),
       quantityDelivered: v.number(),
       quantityEmptyReceived: v.number(),
