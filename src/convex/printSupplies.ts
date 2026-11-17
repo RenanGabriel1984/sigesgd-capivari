@@ -725,7 +725,7 @@ export const withdrawFamily = mutation({
     const reclassifiedFromLots: Array<{ lotId: any; lotNumber: string; qty: number }> = [];
     const consumeAtLocation = async (productId: string, quantity: number, locationId: any) => {
       if (quantity <= 0) return { allocations: [] as any[] };
-      return consumeLotLocationStock(ctx, { productId, locationId, quantity });
+      return consumeLotLocationStock(ctx, { productId, locationId, quantity, areaId: PRINT_AREA_ID });
     };
     const appendWithdrawalAllocations = (productId: any, allocations: Array<any>) => {
       consumedLots.push(...allocations.map((allocation) => ({
