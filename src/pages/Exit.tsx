@@ -127,7 +127,7 @@ export default function Exit() {
     if (qty <= 0) { toast.error("Informe uma quantidade maior que zero"); return; }
     if (!locationId) { toast.error("Selecione o armário de origem."); return; }
     if ((productDimensions?.areas.length ?? 0) > 1 && !areaId) { toast.error("Selecione a área de estoque."); return; }
-    if (Math.abs(productDimensions?.globalVsLocationDifference ?? 0) > 1e-9 || (productDimensions?.unmappedLotQuantity ?? 0) > 1e-9 || (productDimensions?.invalidBalances.length ?? 0) > 0) { toast.error("O produto possui lotes sem alocação conciliada. Regularize o inventário antes da saída."); return; }
+    if (Math.abs(productDimensions?.globalVsLocationDifference ?? 0) > 1e-9 || Math.abs(productDimensions?.globalVsLotsDifference ?? 0) > 1e-9 || (productDimensions?.unmappedLotQuantity ?? 0) > 1e-9 || (productDimensions?.invalidBalances.length ?? 0) > 0) { toast.error("O produto possui lotes sem alocação conciliada. Regularize o inventário antes da saída."); return; }
     if (qty > available) { toast.error(`Disponível no armário/área selecionados: ${available} ${UNIT_LABELS[selectedProduct.unitOfMeasure] ?? selectedProduct.unitOfMeasure}`); return; }
     setSubmitting(true);
     try {
@@ -369,7 +369,7 @@ export default function Exit() {
                         </Select>
                       </div>
                       {(Math.abs(productDimensions?.globalVsLocationDifference ?? 0) > 1e-9 || (productDimensions?.unmappedLotQuantity ?? 0) > 1e-9) && (
-                        <p className="text-xs text-destructive">Há divergência entre saldo global, armários e/ou lotes ({productDimensions?.globalVsLocationDifference} no global × armários; {productDimensions?.unmappedLotQuantity} sem alocação). A retirada ficará bloqueada até a conciliação.</p>
+                        <p className="text-xs text-destructive">Há divergência entre saldo global, armários e/ou lotes ({productDimensions?.globalVsLocationDifference} global × armários; {productDimensions?.globalVsLotsDifference} global × lotes; {productDimensions?.unmappedLotQuantity} sem alocação). A retirada ficará bloqueada até a conciliação.</p>
                       )}
                     </div>
                   )}
