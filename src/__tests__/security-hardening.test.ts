@@ -660,6 +660,8 @@ describe("AUTH-RESET — proteção adicional de recuperação", () => {
     expect(confirmBlock).toMatch(/user\.active === false/);
     expect(confirmBlock).toMatch(/isAnonymous === true/);
     expect(confirmBlock).toMatch(/VALID_ROLE_SET\.has/);
+    const emailSrc = stripComments(read("src/convex/email.ts"));
+    expect(emailSrc).toMatch(/roleHasPermission\(user\.role as AppRole, "settings\.view"\)/);
   });
 
   it("AUTH-RESET-02: valores dinâmicos do e-mail de primeiro acesso são escapados no HTML", () => {
