@@ -913,45 +913,55 @@ export const recordFailedLogin = internalMutation({
     const email = args.email.trim().toLowerCase();
     if (!email) return;
 
+    // Não persistir identificadores arbitrários enviados por visitantes.
+    // Sem esta verificação, uma enxurrada de logins inexistentes criaria
+    // linhas ilimitadas em failedLoginAttempts e auditLogs.
+    const account = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .first();
+    if (!account) return;
+
     const now = Date.now();
     const existing = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
       .first();
 
+    const auditIntervalMs = 15 * 60 * 1000;
+    let shouldAudit = false;
     if (existing) {
       const newAttempts = (existing.attempts ?? 0) + 1;
-      // Não bloquear por e-mail: qualquer visitante poderia provocar negação
-      // de serviço contra uma conta conhecida enviando senhas incorretas.
+      shouldAudit = !Number.isFinite(existing.lastAuditAt) ||
+        now - Number(existing.lastAuditAt) >= auditIntervalMs;
       await ctx.db.patch(existing._id, {
         attempts: newAttempts,
         lastAttemptAt: now,
         lockedUntil: undefined,
+        ...(shouldAudit ? { lastAuditAt: now } : {}),
       });
     } else {
+      shouldAudit = true;
       await ctx.db.insert("failedLoginAttempts", {
         email,
         attempts: 1,
         lastAttemptAt: now,
+        lastAuditAt: now,
       });
     }
 
-    // A auditoria registra também tentativas inválidas. Quando o e-mail
-    // pertence a um usuário cadastrado, associa o evento à conta; caso
-    // contrário preserva o login tentado no detalhe, sem inventar identidade.
-    const account = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", email))
-      .first();
-
-    await ctx.db.insert("auditLogs", {
-      userId: account?._id,
-      action: "login_failed",
-      entity: "auth",
-      entityId: account?._id ? String(account._id) : email,
-      details: `Falha de autenticação para o login ${email}`,
-      timestamp: now,
-    });
+    // Contador atualizado em cada falha, mas o log detalhado é limitado a
+    // um evento por conta a cada 15 minutos para conter abuso do endpoint.
+    if (shouldAudit) {
+      await ctx.db.insert("auditLogs", {
+        userId: account._id,
+        action: "login_failed",
+        entity: "auth",
+        entityId: String(account._id),
+        details: `Falha de autenticação para a conta ${account.email ?? email}; tentativas acumuladas: ${existing ? (existing.attempts ?? 0) + 1 : 1}.`,
+        timestamp: now,
+      });
+    }
   },
 });
 /**
