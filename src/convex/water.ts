@@ -289,9 +289,12 @@ export const closePeriod = mutation({
       ctx.db.query("waterShares").withIndex("by_period", (q) => q.eq("periodId", args.periodId)).collect(),
     ]);
     if (existingShares.length) throw new Error("Este período já possui rateio calculado.");
-    const totalCents = receipts.filter((receipt: any) => !receipt.reversedAt).reduce((sum, receipt) => sum + receipt.totalValueCents, 0);
+    const activeReceipts = receipts.filter((receipt: any) => !receipt.reversedAt);
+    if (activeReceipts.length === 0) throw new Error("Não é possível fechar um período sem recebimentos válidos. Registre as compras de água primeiro.");
+    const totalCents = activeReceipts.reduce((sum, receipt) => sum + receipt.totalValueCents, 0);
     const participants = await Promise.all(period.participantIds.map((id) => ctx.db.get(id)));
     if (participants.some((participant) => !participant)) throw new Error("Há participante inválido no período.");
+    if (participants.length === 0) throw new Error("Inclua ao menos um participante antes de fechar o rateio.");
     const participantData = (participants.filter(Boolean) as Array<{ _id: any; name: string }>)
       .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
     const allocations = splitWaterCostCents(totalCents, participantData.map((person) => String(person._id)));
