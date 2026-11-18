@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "convex/react";
+import { usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -137,8 +137,17 @@ export default function Reports() {
   // ─── Requests Report ───
   const [reqStartDate, setReqStartDate] = useState("");
   const [reqEndDate, setReqEndDate] = useState("");
-  const allRequests = useQuery(api.requests.list, {});
-  const requestReportMayBeTruncated = (allRequests?.length ?? 0) >= 200;
+  const {
+    results: allRequests,
+    status: requestReportStatus,
+    loadMore: loadMoreRequests,
+  } = usePaginatedQuery(api.requests.listPaginated, {}, { initialNumItems: 50 });
+  const requestReportComplete = requestReportStatus === "Exhausted";
+  const filteredRequests = allRequests.filter((r: any) => {
+    if (reqStartDate && r.createdAt < new Date(reqStartDate).getTime()) return false;
+    if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59.999").getTime()) return false;
+    return true;
+  });
 
   // ─── Assets Report ───
   const allAssets = useQuery(api.assets.list, {});
@@ -721,35 +730,31 @@ export default function Reports() {
                 </div>
               </CardContent>
             </Card>
-            {!allRequests ? <p className="text-muted-foreground text-sm">Carregando...</p> : (
+            {requestReportStatus === "LoadingFirstPage" ? <p className="text-muted-foreground text-sm">Carregando solicitações...</p> : (
               <>
-                {requestReportMayBeTruncated && (
+                {!requestReportComplete && (
                   <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
-                    A consulta atual retorna somente as 200 solicitações mais recentes. Se o histórico do período for maior ou incluir registros anteriores, este relatório e o CSV podem estar incompletos.
+                    Histórico paginado: {allRequests.length} registro(s) carregado(s). Carregue as próximas páginas para completar o período e habilitar a exportação integral.
                   </p>
                 )}
-                <div className="flex gap-2 mb-3">
-                  <Badge variant="outline" className="text-xs">{requestReportMayBeTruncated ? "200 solicitações (limite atingido)" : `${allRequests.length} solicitação(ões)`}</Badge>
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => {
-                    const filtered = allRequests.filter((r: any) => {
-                      if (reqStartDate && r.createdAt < new Date(reqStartDate).getTime()) return false;
-                      if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59.999").getTime()) return false;
-                      return true;
-                    });
-                    exportRequestsCSV(filtered.map((r: any) => ({ ...r, requesterName: r.requester?.name ?? "—", secretariaName: r.secretaria?.name ?? "—", itemCount: r.items?.length ?? 0, totalItems: (r.items ?? []).reduce((s: number, i: any) => s + (i.quantityDelivered ?? 0), 0) })));
-                    toast.success("CSV exportado");
-                  }}><Download className="h-3.5 w-3.5" /> CSV</Button>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <Badge variant="outline" className="text-xs">{allRequests.length} solicitação(ões) carregada(s)</Badge>
+                  <Button variant="outline" size="sm" className="gap-1.5" disabled={!requestReportComplete || filteredRequests.length === 0} onClick={() => {
+                    exportRequestsCSV(filteredRequests.map((r: any) => ({ ...r, requesterName: r.requester?.name ?? "—", secretariaName: r.secretaria?.name ?? "—", itemCount: r.items?.length ?? 0, totalItems: (r.items ?? []).reduce((s: number, i: any) => s + (i.quantityDelivered ?? 0), 0) })));
+                    toast.success("CSV integral exportado");
+                  }}><Download className="h-3.5 w-3.5" /> CSV integral</Button>
+                  {(requestReportStatus === "CanLoadMore" || requestReportStatus === "LoadingMore") && (
+                    <Button variant="outline" size="sm" disabled={requestReportStatus === "LoadingMore"} onClick={() => loadMoreRequests(50)}>
+                      {requestReportStatus === "LoadingMore" ? "Carregando..." : "Carregar mais 50"}
+                    </Button>
+                  )}
                 </div>
                 <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table>
                   <TableHeader><TableRow>
                     <TableHead className="text-xs">Data</TableHead><TableHead className="text-xs">Solicitante</TableHead><TableHead className="text-xs">Secretaria</TableHead><TableHead className="text-xs">Motivo</TableHead><TableHead className="text-xs">Status</TableHead><TableHead className="text-xs text-right">Itens</TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
-                    {allRequests.filter((r: any) => {
-                      if (reqStartDate && r.createdAt < new Date(reqStartDate).getTime()) return false;
-                      if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59.999").getTime()) return false;
-                      return true;
-                    }).map((r: any) => (
+                    {filteredRequests.map((r: any) => (
                       <TableRow key={r._id}>
                         <TableCell className="text-xs">{new Date(r.createdAt).toLocaleDateString("pt-BR")}</TableCell>
                         <TableCell className="text-sm">{r.requester?.name ?? "—"}</TableCell>
