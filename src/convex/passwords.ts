@@ -20,6 +20,15 @@ const RESET_REQUEST_COOLDOWN_MS = 60 * 1000;
 /** Mensagem ÚNICA para qualquer falha de autenticação — anti-enumeração (§11). */
 const GENERIC_AUTH_ERROR = "E-mail ou senha incorretos.";
 
+// Equalize PBKDF2 work for unknown, inactive and incomplete accounts.
+const DUMMY_PASSWORD_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
+const DUMMY_PASSWORD_SALT = "00000000000000000000000000000000";
+
+async function rejectCredentials(password: string) {
+  await verifyPassword(password, DUMMY_PASSWORD_HASH, DUMMY_PASSWORD_SALT);
+  return { success: false, error: GENERIC_AUTH_ERROR };
+}
+
 /** Papéis reconhecidos — fail closed na autenticação. */
 const VALID_ROLE_SET = new Set<string>(APP_ROLES);
 
@@ -277,11 +286,11 @@ export const verifyCredentials = internalQuery({
     // TODOS os caminhos de falha devolvem EXATAMENTE a mesma mensagem, com a
     // mesma forma. O chamador não consegue distinguir "e-mail não existe",
     // "usuário inativo", "sem senha", "sem perfil de acesso" ou "senha errada".
-    if (!user) return { success: false, error: GENERIC_AUTH_ERROR };
+    if (!user) return await rejectCredentials(args.password);
 
     // Check if user is active
     if (user.active === false) {
-      return { success: false, error: GENERIC_AUTH_ERROR };
+      return await rejectCredentials(args.password);
     }
 
     // ── B-01 (defesa em profundidade) ────────────────────────────────────
