@@ -152,8 +152,12 @@ export default function Reports() {
   const [movEndDate, setMovEndDate] = useState("");
   const movements = useQuery(api.dashboard.movementReport, {
     startDate: movStartDate ? new Date(movStartDate).getTime() : undefined,
-    endDate: movEndDate ? new Date(movEndDate + "T23:59:59").getTime() : undefined,
+    endDate: movEndDate ? new Date(movEndDate + "T23:59:59.999").getTime() : undefined,
   });
+  // A consulta busca um registro além do limite visível para sinalizar
+  // explicitamente quando o período contém mais de 500 movimentações.
+  const movementReportTruncated = (movements?.length ?? 0) > 500;
+  const displayedMovements = movements?.slice(0, 500);
 
   // ─── Consumption Report ───
   const organizations = useQuery(api.organizations.list);
@@ -387,7 +391,7 @@ export default function Reports() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex flex-wrap gap-2">
                 <Badge variant="outline" className="text-xs">
-                  {movements?.length ?? 0} movimentações
+                  {movementReportTruncated ? "500+ movimentações (exibição limitada)" : `${movements?.length ?? 0} movimentações`}
                 </Badge>
               </div>
               <div className="flex gap-2">
@@ -396,11 +400,11 @@ export default function Reports() {
                   size="sm"
                   className="gap-1.5"
                   onClick={() => {
-                    if (!movements || movements.length === 0) {
+                    if (!displayedMovements || displayedMovements.length === 0) {
                       toast.error("Nenhum dado para exportar");
                       return;
                     }
-                    exportMovementCSV(movements);
+                    exportMovementCSV(displayedMovements);
                     toast.success("CSV exportado com sucesso");
                   }}
                 >
@@ -411,6 +415,12 @@ export default function Reports() {
                 </Button>
               </div>
             </div>
+
+            {movementReportTruncated && (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                O período contém mais de 500 movimentações. A tela e o CSV mostram somente as 500 mais recentes; reduza o intervalo para consultar o restante.
+              </p>
+            )}
 
             <Card className="border-border/50">
               <CardContent className="p-0">
@@ -430,7 +440,7 @@ export default function Reports() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {movements?.map((m) => (
+                      {displayedMovements?.map((m) => (
                         <TableRow key={m._id} className={m.canceled ? "opacity-50" : ""}>
                           <TableCell className="text-xs whitespace-nowrap">
                             {new Date(m.timestamp).toLocaleString("pt-BR")}
