@@ -46,13 +46,20 @@ function escapeHtml(value: string): string {
 
 /** Nome da variável de ambiente que guarda a chave do serviço de e-mail. */
 export const EMAIL_API_KEY_ENV = "FREEBUFF_EMAIL_API_KEY";
+export const RESEND_API_KEY_ENV = "RESEND_API_KEY";
 
 /**
- * Lê a credencial do ambiente. Ausente/vazia ⇒ `null` (falha fechada).
+ * Lê uma credencial de e-mail do ambiente. Ausente/vazia ⇒ `null` (falha fechada).
  * O valor NUNCA é retornado, logado ou incluído em mensagens de erro.
  */
 function readEmailApiKey(): string | null {
   const key = process.env[EMAIL_API_KEY_ENV];
+  return typeof key === "string" && key.trim().length > 0 ? key.trim() : null;
+}
+
+/** Resend is a separate provider and must use its own API credential. */
+function readResendApiKey(): string | null {
+  const key = process.env[RESEND_API_KEY_ENV];
   return typeof key === "string" && key.trim().length > 0 ? key.trim() : null;
 }
 
@@ -274,7 +281,7 @@ export const sendFirstAccessEmail = action({
       throw new Error("A senha temporária informada não corresponde à credencial atual.");
     }
 
-    const apiKey = readEmailApiKey();
+    const apiKey = readResendApiKey();
     const fromEmail =
       process.env.EMAIL_FROM || "Gestão de Estoque SGGD <noreply@capivari.sp.gov.br>";
 
@@ -283,10 +290,10 @@ export const sendFirstAccessEmail = action({
         adminUserId: adminId,
         targetUserId: target.userId,
         delivered: false,
-        reason: `serviço de e-mail não configurado (${EMAIL_API_KEY_ENV})`,
+        reason: `serviço de primeiro acesso não configurado (${RESEND_API_KEY_ENV})`,
       });
       throw new Error(
-        `Serviço de e-mail não configurado (${EMAIL_API_KEY_ENV}). Configure a credencial antes de enviar acessos iniciais.`,
+        `Serviço de primeiro acesso não configurado (${RESEND_API_KEY_ENV}). Configure a credencial Resend antes de enviar acessos iniciais.`,
       );
     }
 
