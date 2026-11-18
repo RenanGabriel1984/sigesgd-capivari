@@ -89,8 +89,11 @@ export const listUsers = query({
     const users = await ctx.db.query("users").collect();
     return Promise.all(
       users.map(async (u: any) => {
-        const org = u.organizationId ? await ctx.db.get(u.organizationId) : null;
-        return { ...u, organization: org };
+        const [org, passwordRecord] = await Promise.all([
+          u.organizationId ? ctx.db.get(u.organizationId) : Promise.resolve(null),
+          ctx.db.query("passwords").withIndex("by_user", (q: any) => q.eq("userId", u._id)).first(),
+        ]);
+        return { ...u, organization: org, hasPassword: !!passwordRecord };
       })
     );
   },
