@@ -102,3 +102,17 @@ describe("autorização contextual de arquivos", () => {
     })).toBe(true);
   });
 });
+
+describe("vínculo direto de arquivos no backend", () => {
+  it("revalida metadados e tamanho mesmo quando registerUpload é ignorado", async () => {
+    const source = await import("node:fs").then(({ readFileSync }) =>
+      readFileSync(new URL("../convex/storage.ts", import.meta.url), "utf-8")
+    );
+    const start = source.indexOf("export async function attachStorageFile(");
+    const end = source.indexOf("\nexport const generateUploadUrl", start);
+    const attach = source.slice(start, end);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(attach).toContain('ctx.db.system.get("_storage"');
+    expect(attach).toContain("isStorageUploadSizeAllowed(metadata.size)");
+  });
+});
