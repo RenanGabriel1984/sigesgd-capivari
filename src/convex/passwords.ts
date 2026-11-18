@@ -909,9 +909,8 @@ export const recordFailedLogin = internalMutation({
 /**
  * Zera o contador de falhas após um login bem-sucedido.
  *
- * O contador é mantido apenas para auditoria e não determina bloqueio.\n * Antes, ele nunca era zerado após o sucesso (o comentário no
- * provider afirmava o contrário). Resultado: depois do primeiro bloqueio, o
- * limite de tentativas deixava de ser aplicado definitivamente.
+ * A contagem é apenas um indicador de auditoria; ela não bloqueia a
+ * autenticação nem impede o titular de tentar novamente.
  *
  * INTERNAL: chamada apenas pelo provider de credenciais, no servidor.
  */
