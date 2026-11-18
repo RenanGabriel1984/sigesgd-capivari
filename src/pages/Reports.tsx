@@ -138,6 +138,7 @@ export default function Reports() {
   const [reqStartDate, setReqStartDate] = useState("");
   const [reqEndDate, setReqEndDate] = useState("");
   const allRequests = useQuery(api.requests.list, {});
+  const requestReportMayBeTruncated = (allRequests?.length ?? 0) >= 200;
 
   // ─── Assets Report ───
   const allAssets = useQuery(api.assets.list, {});
@@ -722,12 +723,17 @@ export default function Reports() {
             </Card>
             {!allRequests ? <p className="text-muted-foreground text-sm">Carregando...</p> : (
               <>
+                {requestReportMayBeTruncated && (
+                  <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
+                    A consulta atual retorna somente as 200 solicitações mais recentes. Se o histórico do período for maior ou incluir registros anteriores, este relatório e o CSV podem estar incompletos.
+                  </p>
+                )}
                 <div className="flex gap-2 mb-3">
-                  <Badge variant="outline" className="text-xs">{allRequests.length} solicitação(ões)</Badge>
+                  <Badge variant="outline" className="text-xs">{requestReportMayBeTruncated ? "200 solicitações (limite atingido)" : `${allRequests.length} solicitação(ões)`}</Badge>
                   <Button variant="outline" size="sm" className="gap-1.5" onClick={() => {
                     const filtered = allRequests.filter((r: any) => {
                       if (reqStartDate && r.createdAt < new Date(reqStartDate).getTime()) return false;
-                      if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59").getTime()) return false;
+                      if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59.999").getTime()) return false;
                       return true;
                     });
                     exportRequestsCSV(filtered.map((r: any) => ({ ...r, requesterName: r.requester?.name ?? "—", secretariaName: r.secretaria?.name ?? "—", itemCount: r.items?.length ?? 0, totalItems: (r.items ?? []).reduce((s: number, i: any) => s + (i.quantityDelivered ?? 0), 0) })));
@@ -741,7 +747,7 @@ export default function Reports() {
                   <TableBody>
                     {allRequests.filter((r: any) => {
                       if (reqStartDate && r.createdAt < new Date(reqStartDate).getTime()) return false;
-                      if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59").getTime()) return false;
+                      if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59.999").getTime()) return false;
                       return true;
                     }).map((r: any) => (
                       <TableRow key={r._id}>
