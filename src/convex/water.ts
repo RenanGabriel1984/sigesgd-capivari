@@ -289,7 +289,7 @@ export const closePeriod = mutation({
       ctx.db.query("waterShares").withIndex("by_period", (q) => q.eq("periodId", args.periodId)).collect(),
     ]);
     if (existingShares.length) throw new Error("Este período já possui rateio calculado.");
-    const totalCents = receipts.reduce((sum, receipt) => sum + receipt.totalValueCents, 0);
+    const totalCents = receipts.filter((receipt: any) => !receipt.reversedAt).reduce((sum, receipt) => sum + receipt.totalValueCents, 0);
     const participants = await Promise.all(period.participantIds.map((id) => ctx.db.get(id)));
     if (participants.some((participant) => !participant)) throw new Error("Há participante inválido no período.");
     const participantData = (participants.filter(Boolean) as Array<{ _id: any; name: string }>)
@@ -401,7 +401,7 @@ export const recordPayment = mutation({
     const share = await ctx.db.get(args.shareId);
     if (!share) throw new Error("Parcela de rateio não encontrada.");
     const payments = await ctx.db.query("waterPayments").withIndex("by_share", (q) => q.eq("shareId", args.shareId)).collect();
-    const paid = payments.reduce((sum, payment) => sum + payment.amountCents, 0);
+    const paid = payments.filter((payment: any) => !payment.reversedAt).reduce((sum, payment) => sum + payment.amountCents, 0);
     const remaining = share.amountDueCents - paid;
     if (args.amountCents > remaining) throw new Error(`O pagamento excede o saldo pendente de R$ ${(remaining / 100).toFixed(2)}.`);
     const id = await ctx.db.insert("waterPayments", {
