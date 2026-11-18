@@ -320,6 +320,8 @@ export const movementReport = query({
         const product = await ctx.db.get(m.productId);
         const user = await ctx.db.get(m.userId);
         const supplier = m.supplierId ? await ctx.db.get(m.supplierId) : null;
+        const area = m.areaId ? await ctx.db.get(m.areaId) : null;
+        const location = m.locationId ? await ctx.db.get(m.locationId) : null;
         return {
           _id: m._id,
           type: m.type,
@@ -332,6 +334,8 @@ export const movementReport = query({
           timestamp: m.timestamp,
           productName: product?.name ?? "",
           productCode: product?.internalCode ?? "",
+          areaName: area?.name ?? (m.areaId ? "Área não encontrada" : "Sem área (legado)"),
+          locationName: location?.name ?? (m.locationId ? "Local não encontrado" : "Sem local registrado"),
           userName: user?.name ?? "",
           supplierName: supplier?.legalName ?? "",
           supplierTrade: supplier?.tradeName ?? "",
