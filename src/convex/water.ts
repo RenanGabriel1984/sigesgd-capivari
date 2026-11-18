@@ -226,7 +226,9 @@ export const createReceipt = mutation({
     if (receiptDateError) throw new Error(receiptDateError);
     if (!Number.isSafeInteger(args.gallonsReceived) || args.gallonsReceived <= 0) throw new Error("A quantidade de galões recebidos deve ser um inteiro maior que zero.");
     if (!Number.isSafeInteger(args.emptyGallonsReturned) || args.emptyGallonsReturned < 0) throw new Error("A quantidade de vazios devolvidos deve ser um inteiro não negativo.");
-    if (!Number.isSafeInteger(args.totalValueCents) || args.totalValueCents < 0) throw new Error("Informe um valor válido.");
+    if (!Number.isSafeInteger(args.totalValueCents) || args.totalValueCents <= 0) throw new Error("O valor total do recebimento deve ser maior que zero.");
+    if ((args.sourceName?.trim().length ?? 0) > 120 || (args.paidByName?.trim().length ?? 0) > 120) throw new Error("Fornecedor e responsável pelo pagamento devem ter no máximo 120 caracteres.");
+    if ((args.observation?.trim().length ?? 0) > 500) throw new Error("A observação deve ter no máximo 500 caracteres.");
     const balance = await currentContainerBalance(ctx);
     if (args.emptyGallonsReturned > balance.emptyGallons) throw new Error(`Há apenas ${balance.emptyGallons} galão(ões) vazio(s) disponível(is) para devolver.`);
     const now = Date.now();
@@ -413,6 +415,7 @@ export const recordPayment = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterPayments", entityId: args.shareId });
     if (!Number.isSafeInteger(args.amountCents) || args.amountCents <= 0) throw new Error("O valor do pagamento deve ser maior que zero.");
+    if ((args.method?.trim().length ?? 0) > 80 || (args.observation?.trim().length ?? 0) > 500) throw new Error("Meio de pagamento deve ter até 80 caracteres e observação até 500 caracteres.");
     if (!isValidWaterTimestamp(args.paidAt)) throw new Error("A data do pagamento é inválida.");
     const share = await ctx.db.get(args.shareId);
     if (!share) throw new Error("Parcela de rateio não encontrada.");
