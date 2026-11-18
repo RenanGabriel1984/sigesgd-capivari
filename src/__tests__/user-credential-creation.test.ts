@@ -35,6 +35,16 @@ describe("cadastro seguro de usuários e credenciais", () => {
     expect(handler.indexOf("args.temporaryPassword.length < 8")).toBeLessThan(handler.indexOf('ctx.db.insert("users"'));
   });
 
+  it("expõe apenas a existência da senha e permite definir ou redefinir", () => {
+    const start = users.indexOf("export const listUsers = query({");
+    const end = users.indexOf("export const listUserOptions", start);
+    const listing = users.slice(start, end);
+    expect(listing).toContain("hasPassword: !!passwordRecord");
+    expect(listing).not.toContain("passwordHash");
+    expect(page).toContain('openPassword(u._id, u.name ?? u.email, !u.hasPassword)');
+    expect(page).toContain('u.hasPassword ? "Redefinir senha" : "Definir senha"');
+  });
+
   it("a interface usa a operação atômica, sem duas chamadas separadas", () => {
     expect(page).toContain("api.users.createUserWithPassword");
     expect(page).toContain("temporaryPassword: tempPassword");
