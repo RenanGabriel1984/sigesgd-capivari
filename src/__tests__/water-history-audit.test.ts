@@ -58,4 +58,11 @@ describe("histórico e auditoria do controle de água", () => {
   });
 
 
+  it("impede fechar período sem recebimentos válidos ou sem participantes", () => {
+    expect(backend).toContain("if (activeReceipts.length === 0) throw new Error");
+    expect(backend).toContain("if (participants.length === 0) throw new Error");
+    expect(backend).toContain("Não é possível fechar um período sem recebimentos válidos");
+  });
+
+
 });
