@@ -27,6 +27,7 @@ import { ArrowRightLeft, Plus, Loader2, RotateCcw } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
+import { roleHasPermission, type AppRole } from "@/lib/rbac";
 
 function LoadingSkeleton() {
   return (
@@ -43,6 +44,7 @@ function LoadingSkeleton() {
 
 export default function StockTransfersPage() {
   const { user } = useAuth();
+  const canManageTransfers = roleHasPermission(user?.role as AppRole | undefined, "transfers.create");
   const transfers = useQuery(api.stockTransfers.list);
   const products = useQuery(api.products.listActive);
   const locations = useQuery(api.storageLocations.listActive);
@@ -137,7 +139,7 @@ export default function StockTransfersPage() {
               Transfere estoque entre áreas/subestoques e locais físicos, que são dimensões independentes.
             </p>
           </div>
-          {(user?.role === "admin" || user?.role === "stock_manager") && (
+          {canManageTransfers && (
             <Button onClick={() => setShowNew(true)} className="gap-2">
               <Plus className="h-4 w-4" /> Nova Transferência
             </Button>
@@ -203,7 +205,7 @@ export default function StockTransfersPage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          {!t.reversedAt && (user?.role === "admin" || user?.role === "stock_manager") && (
+                          {!t.reversedAt && canManageTransfers && (
                             <Button size="sm" variant="outline" className="gap-1" onClick={() => { setSelectedTransfer(t); setReversalReason(""); }}>
                               <RotateCcw className="h-3.5 w-3.5" /> Estornar
                             </Button>
