@@ -65,6 +65,17 @@ describe("implantação inicial do módulo Água Mineral (sem histórico prévio
     expect(page).toContain("Ajuste de saldo / implantação");
   });
 
+  it("exibe orientação sequencial de implantação somente quando o módulo está vazio", () => {
+    expect(page).toContain("Primeira configuração do controle de água");
+    expect(page).toContain("Cadastre os participantes");
+    expect(page).toContain("Faça a contagem física");
+    expect(page).toContain("Abra o período");
+    expect(page).toContain("Registre cada recebimento");
+    expect(page).toContain("Feche o período");
+    expect(page).toContain("periods.length === 0 && dashboard.receipts.length === 0 && dashboard.movements.length === 0 && dashboard.participants.length === 0");
+    expect(page).toContain("O ajuste inicial altera somente o saldo físico de galões");
+  });
+
   it("mantém estornos inativos quando não há lançamentos, sem criar registros artificiais", () => {
     expect(backend).toContain("export const reverseReceipt = mutation");
     expect(backend).toContain("export const reverseContainerMovement = mutation");
