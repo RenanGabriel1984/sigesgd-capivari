@@ -422,7 +422,7 @@ describe("RESET-BF — limite de tentativas na recuperação de senha (§8)", ()
 
   it("RESET-BF-03: token usado/expirado/esgotado nunca é aceito", () => {
     expect(src).toMatch(/!t\.usedAt/);
-    expect(src).toMatch(/t\.expiresAt\s*>\s*Date\.now\(\)/);
+    expect(src).toMatch(/token\.expiresAt\s*>\s*now/);
     expect(src).toMatch(/\(t\.attempts\s*\?\?\s*0\)\s*<\s*RESET_MAX_ATTEMPTS/);
   });
 
