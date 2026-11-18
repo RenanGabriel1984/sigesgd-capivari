@@ -395,6 +395,13 @@ export const reverse = mutation({
 
     const reservations = await ctx.db.query("requestItemReservations")
       .withIndex("by_product", (q: any) => q.eq("productId", transfer.productId)).collect();
+    // Não permitir que reservas corrompidas (NaN, infinito ou negativas) sejam
+    // ignoradas pelo cálculo do lote de destino durante o estorno.
+    if (reservations.some((item: any) =>
+      !Number.isFinite(item.quantityRemaining) || item.quantityRemaining < 0
+    )) {
+      throw new Error("Há reserva por lote com quantidade inválida. Estorno bloqueado para preservar o estoque reservado.");
+    }
     const planned: Array<{ link: any; sourceLot: any; destinationLot: any; sourceBalance: any; destinationBalance: any }> = [];
     let linkedTotal = 0;
     const seenDestinationLots = new Set<string>();
