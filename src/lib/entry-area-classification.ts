@@ -11,3 +11,16 @@ export function resolveEntryItemAreaId(
 ): string | undefined {
   return itemAreaId ?? defaultAreaId ?? undefined;
 }
+
+/**
+ * Resolve a localização física original de um lote durante o estorno.
+ * O lote é a fonte preferencial; saldos derivados e item cobrem registros
+ * históricos que ainda não tinham locationId materializado no lote.
+ */
+export function resolveEntryLotLocationId(
+  lotLocationId: string | null | undefined,
+  balanceLocationId: string | null | undefined,
+  itemLocationId: string | null | undefined,
+): string | undefined {
+  return lotLocationId ?? balanceLocationId ?? itemLocationId ?? undefined;
+}
