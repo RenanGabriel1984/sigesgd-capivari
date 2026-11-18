@@ -502,7 +502,7 @@ export const bootstrapSetPassword = internalMutation({
       requiresReset: false,
     });
 
-    // Clear any brute-force lock so the new password works immediately
+    // Clear residual failed-login counters so the new credential starts clean.
     const failedAttempts = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
@@ -809,7 +809,7 @@ export const confirmPasswordReset = mutation({
       });
     }
 
-    // Clear any lock on the account
+    // Clear residual failed-login counters after successful recovery.
     const failedAttempts = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
@@ -841,7 +841,7 @@ export const confirmPasswordReset = mutation({
 });
 
 /**
- * Check and record failed login attempt for brute force protection.
+ * Record failed login attempts for audit without locking accounts by email.
  *
  * Hardening §9: era uma MUTATION PÚBLICA sem autenticação — qualquer pessoa
  * podia chamá-la 5 vezes com o e-mail de um terceiro e BLOQUEAR a conta
@@ -898,9 +898,9 @@ export const recordFailedLogin = internalMutation({
   },
 });
 /**
- * Zera o contador de tentativas após um login BEN-SUCEDIDO (§10).
+ * Zera o contador de falhas após um login bem-sucedido.
  *
- * Hardening §10: o contador NUNCA era zerado no sucesso (o comentário no
+ * O contador é mantido apenas para auditoria e não determina bloqueio.\n * Antes, ele nunca era zerado após o sucesso (o comentário no
  * provider afirmava o contrário). Resultado: depois do primeiro bloqueio, o
  * limite de tentativas deixava de ser aplicado definitivamente.
  *
@@ -972,7 +972,7 @@ export const recordLogout = mutation({
  * Plano de recuperação de acesso administrativo. Executável APENAS via CLI
  * do deployment (bunx convex run passwords:bootstrapResetPassword ...) ou
  * pelo dashboard — o cliente web NÃO consegue chamá-la.
- * Limpa o bloqueio de tentativas para o novo acesso funcionar imediatamente.
+ * Limpa a contagem residual de falhas para manter a auditoria consistente.
  */
 export const bootstrapResetPassword = internalMutation({
   args: {
