@@ -191,7 +191,7 @@ export default function UsersPage() {
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(u)} title="Editar">
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openPassword(u._id, u.name ?? u.email, true)} title="Definir senha">
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openPassword(u._id, u.name ?? u.email, !u.hasPassword)} title={u.hasPassword ? "Redefinir senha" : "Definir senha"}>
                               <Key className="h-3.5 w-3.5" />
                             </Button>
                             <Button variant="ghost" size="icon" className="h-7 w-7"
