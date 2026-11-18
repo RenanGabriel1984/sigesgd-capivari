@@ -132,8 +132,11 @@ export const stats = query({
     // GOMAQ: exchanges this month
     let gomaqExchangesThisMonth = 0;
     try {
-      const gomaqExchanges = await ctx.db.query("gomaQExchanges").order("desc").take(500);
-      gomaqExchangesThisMonth = gomaqExchanges.filter((e: any) => e.exchangedAt >= monthStartMs).length;
+      const gomaqExchanges = await ctx.db
+        .query("gomaQExchanges")
+        .withIndex("by_date", (q) => q.gte("exchangedAt", monthStartMs).lte("exchangedAt", nowMs))
+        .collect();
+      gomaqExchangesThisMonth = gomaqExchanges.length;
     } catch { /* table may not exist yet */ }
 
     // Assets in maintenance
