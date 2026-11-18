@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { Copy, Plus } from "lucide-react";
+import { Copy, Plus, RotateCcw } from "lucide-react";
 
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -331,6 +331,7 @@ function EntriesPage() {
   const createEntry = useMutation(api.entries.create);
   const updateDraftArea = useMutation(api.entries.updateDraftArea);
   const confirmEntry = useMutation(api.entries.confirm);
+  const reverseEntry = useMutation(api.entries.reverse);
 
   // ── Cadastro rápido de produto (R31 §1) ──
   const [quickProductOpen, setQuickProductOpen] = useState(false);
@@ -351,6 +352,9 @@ function EntriesPage() {
   const [newEntryOpen, setNewEntryOpen] = useState(false);
   const [xmlOpen, setXmlOpen] = useState(false);
   const [danfeOpen, setDanfeOpen] = useState(false);
+  const [entryToReverse, setEntryToReverse] = useState<{ id: string; number: string } | null>(null);
+  const [reverseReason, setReverseReason] = useState("");
+  const [reversingEntry, setReversingEntry] = useState(false);
   const [nfeOpen, setNfeOpen] = useState(false);
   const [supplierOpen, setSupplierOpen] = useState(false);
   const xmlInputRef = useRef<HTMLInputElement>(null);
@@ -1129,6 +1133,31 @@ function EntriesPage() {
     }
   };
 
+  const handleReverseEntry = async () => {
+    if (!entryToReverse) return;
+    const reason = reverseReason.trim();
+    if (!reason) {
+      toast.error("Informe o motivo do estorno.");
+      return;
+    }
+
+    setReversingEntry(true);
+    try {
+      await reverseEntry({ entryId: entryToReverse.id as any, reason });
+      toast.success(`Entrada ${entryToReverse.number} estornada. O estoque foi atualizado e o histórico preservado.`);
+      setEntryToReverse(null);
+      setReverseReason("");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível estornar a entrada. Nenhuma alteração foi confirmada.",
+      );
+    } finally {
+      setReversingEntry(false);
+    }
+  };
+
   const handleManualItemUpdate = (
     index: number,
     field: string,
@@ -1272,10 +1301,20 @@ function EntriesPage() {
                 <TableCell>
                   <div className="flex flex-wrap items-center gap-1">
                     <Badge
-                      variant={entry.status === "confirmed" ? "default" : "secondary"}
+                      variant={
+                        entry.status === "confirmed"
+                          ? "default"
+                          : entry.status === "reversed"
+                            ? "destructive"
+                            : "secondary"
+                      }
                       className="text-[10px]"
                     >
-                      {entry.status === "confirmed" ? "Confirmada" : "Rascunho"}
+                      {entry.status === "confirmed"
+                        ? "Confirmada"
+                        : entry.status === "reversed"
+                          ? "Estornada"
+                          : "Rascunho"}
                     </Badge>
                     {isImplementationStockDate(entry.receivedAt) ? (
                       <Badge variant="outline" className="text-[10px]">
@@ -1311,6 +1350,22 @@ function EntriesPage() {
                         Confirmar
                       </Button>
                     )
+                  ) : entry.status === "confirmed" ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                      onClick={() => {
+                        setReverseReason("");
+                        setEntryToReverse({
+                          id: entry._id as string,
+                          number: entry.entryNumber,
+                        });
+                      }}
+                    >
+                      <RotateCcw className="mr-1 h-3 w-3" />
+                      Estornar
+                    </Button>
                   ) : null}
                 </TableCell>
               </TableRow>
@@ -1327,6 +1382,69 @@ function EntriesPage() {
           </TableBody>
         </Table>
       </div>
+
+      {/* ── Estorno de entrada confirmada ── */}
+      <Dialog
+        open={Boolean(entryToReverse)}
+        onOpenChange={(open) => {
+          if (!open && !reversingEntry) {
+            setEntryToReverse(null);
+            setReverseReason("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Estornar entrada {entryToReverse?.number ?? ""}</DialogTitle>
+            <DialogDescription>
+              Esta operação reverte os saldos e os lotes da entrada original. O registro permanece no histórico como estornado.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+              <p className="font-medium text-destructive">Atenção: operação irreversível pela tela de entradas.</p>
+              <p className="mt-1 text-muted-foreground">
+                O sistema bloqueará o estorno se o lote tiver sido consumido ou reservado, se a localização original não puder ser identificada ou se houver unidade já tombada/vinculada ao Patrimônio.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="entry-reversal-reason">Motivo do estorno *</Label>
+              <Input
+                id="entry-reversal-reason"
+                value={reverseReason}
+                onChange={(event) => setReverseReason(event.target.value)}
+                placeholder="Descreva o motivo e a referência da correção"
+                maxLength={500}
+                disabled={reversingEntry}
+              />
+              <p className="text-xs text-muted-foreground">
+                Informe um motivo objetivo. O usuário, a data/hora e a justificativa serão registrados na auditoria.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              disabled={reversingEntry}
+              onClick={() => {
+                setEntryToReverse(null);
+                setReverseReason("");
+              }}
+            >
+              Voltar
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={reversingEntry || !reverseReason.trim()}
+              onClick={() => void handleReverseEntry()}
+            >
+              {reversingEntry ? "Estornando…" : "Confirmar estorno"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Entrada manual ── */}
       <Dialog
