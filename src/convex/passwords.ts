@@ -107,10 +107,10 @@ export const createPassword = mutation({
     });
     await invalidatePendingPasswordResets(ctx, args.userId);
 
-    // Set requiresPasswordReset flag on user
-    if (args.requiresReset) {
-      await ctx.db.patch(args.userId, { requiresPasswordReset: true });
-    }
+    // Keep the user and credential reset flags synchronized.
+    await ctx.db.patch(args.userId, {
+      requiresPasswordReset: args.requiresReset ?? false,
+    });
 
     await ctx.db.insert("auditLogs", {
       userId: adminId,
@@ -534,6 +534,7 @@ export const bootstrapSetPassword = internalMutation({
       salt,
       requiresReset: false,
     });
+    await ctx.db.patch(user._id, { requiresPasswordReset: false });
     await invalidatePendingPasswordResets(ctx, user._id);
 
     // Clear residual failed-login counters so the new credential starts clean.
@@ -1060,6 +1061,7 @@ export const bootstrapResetPassword = internalMutation({
         requiresReset: false,
       });
     }
+    await ctx.db.patch(user._id, { requiresPasswordReset: false });
 
     // Invalidate recovery codes issued before this administrative reset.
     await invalidatePendingPasswordResets(ctx, user._id);
