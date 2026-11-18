@@ -19,6 +19,22 @@ async function requireUserManager(ctx: any) {
   // rótulo literal "admin".
   return requirePermission(ctx, "users.manage", { entity: "users" });
 }
+function normalizeUserEmail(value: string): string {
+  const email = value.trim().toLowerCase();
+  if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Informe um e-mail válido.");
+  }
+  return email;
+}
+
+function normalizeUserName(value: string): string {
+  const name = value.trim();
+  if (!name || name.length > 120) {
+    throw new Error("O nome deve ter entre 1 e 120 caracteres.");
+  }
+  return name;
+}
+
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -132,12 +148,8 @@ export const createUserWithPassword = mutation({
   },
   handler: async (ctx, args) => {
     const { userId: adminId } = await requireUserManager(ctx);
-    const name = args.name.trim();
-    const email = args.email.trim().toLowerCase();
-    if (!name) throw new Error("Nome é obrigatório.");
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new Error("Informe um e-mail válido.");
-    }
+    const name = normalizeUserName(args.name);
+    const email = normalizeUserEmail(args.email);
     if (args.temporaryPassword.length < 8 || args.temporaryPassword.length > 200) {
       throw new Error("A senha temporária deve ter entre 8 e 200 caracteres.");
     }
@@ -200,12 +212,20 @@ export const createUser = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireUserManager(ctx);
-    const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", args.email.toLowerCase())).first();
+    const name = normalizeUserName(args.name);
+    const email = normalizeUserEmail(args.email);
+    const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).first();
     if (existing) throw new Error("Já existe um usuário com este e-mail");
+    if (args.organizationId) {
+      const organization = await ctx.db.get(args.organizationId);
+      if (!organization || organization.active === false) {
+        throw new Error("Secretaria/departamento não encontrado ou inativo.");
+      }
+    }
 
     const now = Date.now();
     const newUserId = await ctx.db.insert("users", {
-      name: args.name, email: args.email.toLowerCase(), role: args.role,
+      name, email, role: args.role,
       organizationId: args.organizationId, active: true,
       createdAt: now, updatedAt: now,
     });
@@ -244,10 +264,20 @@ export const updateUser = mutation({
         throw new Error("Não é possível desativar ou rebaixar o último administrador ativo");
       }
     }
-    if (updates.email) {
-      const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", updates.email!.toLowerCase())).first();
+    if (updates.name !== undefined) {
+      updates.name = normalizeUserName(updates.name);
+    }
+    if (updates.email !== undefined) {
+      const email = normalizeUserEmail(updates.email);
+      const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).first();
       if (existing && existing._id !== userId) throw new Error("Já existe outro usuário com este e-mail");
-      updates.email = updates.email.toLowerCase();
+      updates.email = email;
+    }
+    if (updates.organizationId) {
+      const organization = await ctx.db.get(updates.organizationId);
+      if (!organization || organization.active === false) {
+        throw new Error("Secretaria/departamento não encontrado ou inativo.");
+      }
     }
 
     await ctx.db.patch(userId, { ...updates, updatedAt: Date.now() });
