@@ -63,6 +63,30 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(approve).toContain("requestItems.some((item: any) => !seenItems.has(item._id as string))");
   });
 
+  it("registra na auditoria da entrega usuário, item, quantidade, área, local, lotes e séries", () => {
+    const deliver = mutationBlock(requests, "deliver");
+    expect(deliver).toContain("deliveredAuditLines");
+    expect(deliver).toContain("product?.name");
+    expect(deliver).toContain("area?.name");
+    expect(deliver).toContain("location?.name");
+    expect(deliver).toContain('ctx.db.query("requestItemLots")');
+    expect(deliver).toContain("lot?.lotNumber");
+    expect(deliver).toContain("input.serialNumbers.join");
+    expect(deliver).toContain("user.name ?? user.email ?? userId");
+  });
+
+  it("registra área, local físico, lotes e todos os IDs na auditoria de devolução", () => {
+    const createReturn = mutationBlock(returns, "create");
+    expect(createReturn).toContain("area?.name");
+    expect(createReturn).toContain("location?.name");
+    expect(createReturn).toContain("returnedLotDetails");
+    expect(createReturn).toContain("returnIds.join");
+  });
+
+  it("identifica rotinas internas sem sessão de usuário nos registros de manutenção histórica", () => {
+    expect(stockSetup).toContain("Ator: rotina interna autorizada, sem sessão de usuário interativa.");
+  });
+
   it("aprova com reserva FIFO restrita ao mesmo lote, área e local físicos", () => {
     const approve = mutationBlock(requests, "approve");
     expect(approve).toContain("planFifoAreaLotAllocation");
