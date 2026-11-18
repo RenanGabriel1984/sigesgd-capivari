@@ -23,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowRightLeft, Plus, Loader2 } from "lucide-react";
+import { ArrowRightLeft, Plus, Loader2, RotateCcw } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
@@ -48,6 +48,7 @@ export default function StockTransfersPage() {
   const locations = useQuery(api.storageLocations.listActive);
   const areas = useQuery(api.stockAreas.listActive);
   const createTransfer = useMutation(api.stockTransfers.create);
+  const reverseTransfer = useMutation(api.stockTransfers.reverse);
 
   const [showNew, setShowNew] = useState(false);
   const [productId, setProductId] = useState("");
@@ -58,6 +59,9 @@ export default function StockTransfersPage() {
   const [quantity, setQuantity] = useState(1);
   const [observation, setObservation] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [selectedTransfer, setSelectedTransfer] = useState<any>(null);
+  const [reversalReason, setReversalReason] = useState("");
+  const [reversing, setReversing] = useState(false);
 
   const handleSubmit = async () => {
     if (!productId || !fromAreaId || !fromLocationId || !toAreaId || !toLocationId) {
@@ -91,6 +95,25 @@ export default function StockTransfersPage() {
       toast.error(e.message ?? "Erro ao registrar transferência");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleReverse = async () => {
+    const reason = reversalReason.trim();
+    if (!selectedTransfer || !reason) {
+      toast.error("Informe a justificativa do estorno");
+      return;
+    }
+    setReversing(true);
+    try {
+      await reverseTransfer({ transferId: selectedTransfer._id, reason });
+      toast.success("Estorno registrado. A transferência original foi preservada no histórico.");
+      setSelectedTransfer(null);
+      setReversalReason("");
+    } catch (e: any) {
+      toast.error(e.message ?? "Não foi possível estornar a transferência");
+    } finally {
+      setReversing(false);
     }
   };
 
@@ -149,6 +172,8 @@ export default function StockTransfersPage() {
                       <TableHead>Origem</TableHead>
                       <TableHead>Destino</TableHead>
                       <TableHead>Responsável</TableHead>
+                      <TableHead>Situação</TableHead>
+                      <TableHead className="text-right">Ação</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -180,6 +205,39 @@ export default function StockTransfersPage() {
             )}
           </CardContent>
         </Card>
+
+        <Dialog open={!!selectedTransfer} onOpenChange={(open) => { if (!open && !reversing) setSelectedTransfer(null); }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <RotateCcw className="h-5 w-5" /> Estornar transferência
+              </DialogTitle>
+            </DialogHeader>
+            {selectedTransfer && (
+              <div className="space-y-3">
+                <div className="rounded-md border p-3 text-sm space-y-1">
+                  <p><strong>Produto:</strong> {selectedTransfer.product?.name ?? "—"}</p>
+                  <p><strong>Quantidade:</strong> {selectedTransfer.quantity}</p>
+                  <p><strong>Origem:</strong> {selectedTransfer.fromArea?.name ?? "Área não identificada"} / {selectedTransfer.fromLocation?.name ?? "—"}</p>
+                  <p><strong>Destino:</strong> {selectedTransfer.toArea?.name ?? "Área não identificada"} / {selectedTransfer.toLocation?.name ?? "—"}</p>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  O estorno só será aceito se os lotes transferidos continuarem integralmente disponíveis no destino e sem reservas. O histórico original não será apagado.
+                </p>
+                <div>
+                  <Label>Justificativa obrigatória</Label>
+                  <Textarea value={reversalReason} onChange={(e) => setReversalReason(e.target.value)} placeholder="Descreva o motivo da reversão..." className="mt-1" />
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" disabled={reversing} onClick={() => setSelectedTransfer(null)}>Cancelar</Button>
+              <Button onClick={handleReverse} disabled={reversing || !reversalReason.trim()} className="gap-2">
+                {reversing ? "Estornando..." : "Confirmar estorno"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={showNew} onOpenChange={setShowNew}>
           <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
