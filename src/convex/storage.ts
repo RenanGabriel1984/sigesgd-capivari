@@ -193,8 +193,10 @@ export const registerUpload = mutation({
     const metadata = await ctx.db.system.get("_storage", storageId as any);
     if (!metadata) throw new Error("O arquivo enviado não foi encontrado no armazenamento.");
     if (!isStorageUploadSizeAllowed(metadata.size)) {
+      // Return a rejection result so the delete commits with the mutation.
+      // Throwing here would roll back the storage deletion with the transaction.
       await ctx.storage.delete(storageId as any);
-      throw new Error("O arquivo deve ter tamanho maior que zero e no máximo 10 MB.");
+      return { ok: false as const, reason: "invalid-size" as const };
     }
     const url = await ctx.storage.getUrl(storageId as any);
     if (!url) throw new Error("O arquivo enviado não foi encontrado no armazenamento.");
@@ -209,7 +211,7 @@ export const registerUpload = mutation({
       existing[0].ownerType === "pending" &&
       String(existing[0].uploaderUserId) === String(userId)
     ) {
-      return storageId;
+      return { ok: true as const, storageId };
     }
     if (existing.length > 0) {
       throw new Error("Este arquivo já está vinculado a outro registro.");
@@ -229,7 +231,7 @@ export const registerUpload = mutation({
       createdAt: now,
       updatedAt: now,
     });
-    return storageId;
+    return { ok: true as const, storageId };
   },
 });
 
