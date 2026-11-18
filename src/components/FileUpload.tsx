@@ -64,7 +64,10 @@ export function FileUpload({
       if (!response.ok) throw new Error("Falha no upload");
 
       const { storageId: newStorageId } = await response.json();
-      await registerUpload({ storageId: newStorageId });
+      const registration = await registerUpload({ storageId: newStorageId });
+      if (!registration.ok) {
+        throw new Error("O arquivo deve ter tamanho maior que zero e no máximo 10 MB.");
+      }
       onUpload(newStorageId);
       toast.success("Arquivo enviado com sucesso");
     } catch (e: any) {
