@@ -7,7 +7,7 @@ const source = readFileSync(resolve(__dirname, "../convex/entries.ts"), "utf-8")
 function mutationBlock(name: string): string {
   const start = source.indexOf(`export const ${name} = mutation({`);
   expect(start).toBeGreaterThanOrEqual(0);
-  const end = source.indexOf("\\nexport const ", start + 1);
+  const end = source.indexOf("\nexport const ", start + 1);
   return source.slice(start, end < 0 ? undefined : end);
 }
 
