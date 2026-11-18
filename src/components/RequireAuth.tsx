@@ -56,6 +56,26 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     );
   }
 
+  // Revoke the UI session immediately when an administrator deactivates
+  // an account, even if the auth token has not expired yet.
+  if (isAuthenticated && user?.active === false) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-6 text-center">
+        <h1 className="text-lg font-semibold">Acesso desativado</h1>
+        <p className="max-w-md text-sm text-muted-foreground">
+          Esta conta foi desativada. Saia do sistema e procure um administrador caso precise recuperar o acesso.
+        </p>
+        <button
+          type="button"
+          className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+          onClick={() => void signOut()}
+        >
+          Sair do sistema
+        </button>
+      </main>
+    );
+  }
+
   // Force password change on first login
   if (user?.requiresPasswordReset && location.pathname !== "/settings") {
     return (
