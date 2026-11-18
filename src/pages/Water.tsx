@@ -199,6 +199,7 @@ export default function WaterPage() {
     } else {
       fullDelta = Number(adjustFull);
       emptyDelta = Number(adjustEmpty);
+      if (movementObservation.trim().length < 8) throw new Error("Informe uma justificativa de pelo menos 8 caracteres para o ajuste de saldo.");
     }
     await recordMovement({
       type: movementType,
@@ -443,7 +444,7 @@ export default function WaterPage() {
                   <div className="grid grid-cols-2 gap-3"><div><Label>Ajuste de cheios (+/-)</Label><Input type="number" step="1" value={adjustFull} onChange={(e) => setAdjustFull(e.target.value)} /></div><div><Label>Ajuste de vazios (+/-)</Label><Input type="number" step="1" value={adjustEmpty} onChange={(e) => setAdjustEmpty(e.target.value)} /></div><p className="col-span-2 text-xs text-muted-foreground">Use valores positivos para acrescentar e negativos para retirar. O sistema impede saldo negativo.</p></div>
                 )}
                 <div><Label>Data</Label><Input type="date" value={movementDate} onChange={(e) => setMovementDate(e.target.value)} /></div>
-                <div><Label>Observação</Label><Input value={movementObservation} onChange={(e) => setMovementObservation(e.target.value)} /></div>
+                <div><Label>{movementType === "adjustment" ? "Justificativa da contagem / ajuste" : "Observação"}</Label><Input value={movementObservation} onChange={(e) => setMovementObservation(e.target.value)} placeholder={movementType === "adjustment" ? "Ex.: Contagem física inicial dos galões" : "Observação (opcional)"} /></div>
                 <Button className="w-full" onClick={() => void handleMovement()}><RefreshCw className="mr-2 h-4 w-4" /> Registrar movimentação</Button>
               </> : <p className="text-sm text-muted-foreground">Seu perfil permite consultar os saldos, mas não registrar movimentações.</p>}
             </CardContent>
