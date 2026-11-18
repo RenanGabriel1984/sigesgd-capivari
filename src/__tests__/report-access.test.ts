@@ -46,6 +46,15 @@ describe("segurança e precisão dos relatórios", () => {
     expect(block).toContain('.lte("timestamp", endDate)');
     expect(block).not.toContain("filtered = movements.filter");
     expect(block).toContain("startDate > endDate");
+    expect(block).toContain(".take(501)");
+  });
+
+  it("inclui o último milissegundo do dia e avisa quando o relatório excede 500 linhas", () => {
+    const page = readFileSync(resolve(root, "src/pages/Reports.tsx"), "utf8");
+    expect(page).toContain('new Date(movEndDate + "T23:59:59.999").getTime()');
+    expect(page).toContain("movements?.slice(0, 500)");
+    expect(page).toContain("movementReportTruncated");
+    expect(page).toContain("A tela e o CSV mostram somente as 500 mais recentes");
   });
 
   it("diretor tem leitura de relatórios, organização, impressoras e GomaQ, sem gerenciamento", () => {
