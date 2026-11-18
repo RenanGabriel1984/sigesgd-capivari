@@ -30,6 +30,11 @@ describe("estorno seguro de transferências", () => {
     expect(reverse).toContain("linkedTotal - transfer.quantity");
   });
 
+  it("bloqueia reservas inválidas antes de avaliar o estorno dos lotes de destino", () => {
+    expect(reverse).toContain("!Number.isFinite(item.quantityRemaining) || item.quantityRemaining < 0");
+    expect(reverse).toContain("Estorno bloqueado para preservar o estoque reservado");
+  });
+
   it("só reverte quando os lotes de destino continuam integralmente disponíveis e sem reservas", () => {
     expect(reverse).toContain("destinationReservations > 0");
     expect(reverse).toContain("destinationLot.quantityAvailable) - link.quantity");
