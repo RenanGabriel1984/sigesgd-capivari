@@ -105,6 +105,32 @@ async function deriveKey(
   );
 }
 
+/**
+ * Recovery OTPs have only six digits, so a plain SHA-256 digest would be
+ * cheaply brute-forced after a database leak. Reuse PBKDF2-SHA-256 with a
+ * fresh random salt, just as for account passwords.
+ */
+export async function hashResetCode(
+  code: string
+): Promise<{ hash: string; salt: string }> {
+  if (!/^\\d{6}$/.test(code)) {
+    throw new Error("Código de recuperação inválido.");
+  }
+  const salt = generateSalt();
+  const keyBits = await deriveKey(code, salt);
+  return { hash: toHex(keyBits), salt };
+}
+
+export async function verifyResetCode(
+  code: string,
+  storedHash: string,
+  storedSalt: string
+): Promise<boolean> {
+  if (!/^\\d{6}$/.test(code)) return false;
+  const keyBits = await deriveKey(code, storedSalt);
+  return constantTimeEquals(toHex(keyBits), storedHash);
+}
+
 export async function hashPassword(
   password: string
 ): Promise<{ hash: string; salt: string }> {
