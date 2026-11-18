@@ -314,7 +314,7 @@ export const movementReport = query({
         return idx;
       })
       .order("desc")
-      .take(500);
+      .take(501);
     return Promise.all(
       movements.map(async (m) => {
         const product = await ctx.db.get(m.productId);
