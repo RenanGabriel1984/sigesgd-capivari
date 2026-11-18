@@ -82,7 +82,11 @@ export type AuditAction = "create" | "update" | "activate" | "deactivate" | "app
   | "asset_part_install"
   | "asset_part_remove"
   | "license_create"
-  | "license_assign";
+  | "license_assign"
+  | "stock_parameter_update"
+  | "product_packaging_update"
+  | "permission_denied"
+  | "reverse_stock_transfer";
 
 export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   create: "Criação",
@@ -122,6 +126,10 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   asset_part_remove: "Remoção de Peça",
   license_create: "Criação de Licença",
   license_assign: "Vinculação de Licença",
+  stock_parameter_update: "Alteração de Parâmetros de Estoque",
+  product_packaging_update: "Alteração de Embalagem",
+  permission_denied: "Acesso Negado",
+  reverse_stock_transfer: "Estorno de Transferência",
 };
 
 // ─── Units of Measure ────────────────────────────────────────────────────────
