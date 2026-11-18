@@ -5,7 +5,7 @@ import {
   validateWaterPeriodRange,
   validateWaterReceiptDate,
   isValidWaterTimestamp,
-  calculateWaterContainerBalance,
+  calculateWaterContainerBalance,\n  validateWaterContainerLedger,
   buildWaterSupplierReturnDeltas,
   summarizeWaterFinances,
 } from "../lib/water-control";
@@ -82,7 +82,43 @@ describe("saldo físico dos galões cheios e vazios", () => {
     expect(balance).toEqual({ fullGallons: 13, emptyGallons: 0 });
   });
 
-  it("concilia ajustes positivos e negativos sem distorcer a fórmula", () => {
+
+  it("rejeita movimentação retroativa que torna o saldo negativo em data passada", () => {
+    const error = validateWaterContainerLedger(
+      [{ receivedAt: 300, gallonsReceived: 10, emptyGallonsReturned: 0 }],
+      [{ date: 200, fullDelta: -4, emptyDelta: 4 }],
+    );
+    expect(error).toMatch(/saldo físico negativo em/i);
+  });
+
+  it("valida a sequência cronológica mesmo quando o saldo final seria positivo", () => {
+    const error = validateWaterContainerLedger(
+      [{ receivedAt: 300, gallonsReceived: 10, emptyGallonsReturned: 0 }],
+      [
+        { date: 100, fullDelta: -5, emptyDelta: 5 },
+        { date: 400, fullDelta: 0, emptyDelta: -5 },
+      ],
+    );
+    expect(error).toMatch(/saldo físico negativo em/i);
+  });
+
+  it("consolida eventos do mesmo timestamp antes de validar", () => {
+    expect(validateWaterContainerLedger(
+      [{ receivedAt: 100, gallonsReceived: 5, emptyGallonsReturned: 0 }],
+      [{ date: 100, fullDelta: -5, emptyDelta: 5 }],
+    )).toBeNull();
+  });
+
+  it("aceita histórico cronológico sem saldo negativo e retorna null", () => {
+    expect(validateWaterContainerLedger(
+      [{ receivedAt: 100, gallonsReceived: 8, emptyGallonsReturned: 0 }],
+      [
+        { date: 200, fullDelta: -3, emptyDelta: 3 },
+        { date: 300, fullDelta: 0, emptyDelta: -2 },
+      ],
+    )).toBeNull();
+  });
+\n  it("concilia ajustes positivos e negativos sem distorcer a fórmula", () => {
     const balance = calculateWaterContainerBalance(
       [{ gallonsReceived: 4, emptyGallonsReturned: 1 }],
       [
