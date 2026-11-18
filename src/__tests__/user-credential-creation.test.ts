@@ -13,7 +13,7 @@ describe("cadastro seguro de usuários e credenciais", () => {
     const end = users.indexOf("export const createUser = mutation({", start);
     const handler = users.slice(start, end);
     expect(start).toBeGreaterThanOrEqual(0);
-    expect(handler).toContain("requireAdmin(ctx)");
+    expect(handler).toContain("requireUserManager(ctx)");
     expect(handler).toContain('ctx.db.insert("users"');
     expect(handler).toContain("hashPassword(args.temporaryPassword)");
     expect(handler).toContain('ctx.db.insert("passwords"');
