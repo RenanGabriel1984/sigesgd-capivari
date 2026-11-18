@@ -229,8 +229,18 @@ export const createReceipt = mutation({
     if (!Number.isSafeInteger(args.totalValueCents) || args.totalValueCents <= 0) throw new Error("O valor total do recebimento deve ser maior que zero.");
     if ((args.sourceName?.trim().length ?? 0) > 120 || (args.paidByName?.trim().length ?? 0) > 120) throw new Error("Fornecedor e responsável pelo pagamento devem ter no máximo 120 caracteres.");
     if ((args.observation?.trim().length ?? 0) > 500) throw new Error("A observação deve ter no máximo 500 caracteres.");
-    const balance = await currentContainerBalance(ctx);
-    if (args.emptyGallonsReturned > balance.emptyGallons) throw new Error(`Há apenas ${balance.emptyGallons} galão(ões) vazio(s) disponível(is) para devolver.`);
+    const [existingReceipts, existingMovements] = await Promise.all([
+      ctx.db.query("waterReceipts").collect(),
+      ctx.db.query("waterContainerMovements").collect(),
+    ]);
+    const ledgerError = validateWaterContainerLedger(
+      [
+        ...existingReceipts.filter((item: any) => !item.reversedAt),
+        { receivedAt: args.receivedAt, gallonsReceived: args.gallonsReceived, emptyGallonsReturned: args.emptyGallonsReturned },
+      ],
+      existingMovements.filter((item: any) => !item.reversedAt),
+    );
+    if (ledgerError) throw new Error(ledgerError);
     const now = Date.now();
     const id = await ctx.db.insert("waterReceipts", {
       periodId: args.periodId,
@@ -270,9 +280,18 @@ export const recordContainerMovement = mutation({
     if (args.type === "adjustment" && args.fullDelta === 0 && args.emptyDelta === 0) throw new Error("Informe ao menos uma quantidade para ajustar.");
     if (args.type === "adjustment" && (args.observation?.trim().length ?? 0) < 8) throw new Error("Informe uma justificativa de pelo menos 8 caracteres para o ajuste de saldo.");
     if ((args.observation?.trim().length ?? 0) > 500) throw new Error("A observação deve ter no máximo 500 caracteres.");
-    const balance = await currentContainerBalance(ctx);
-    if (balance.fullGallons + args.fullDelta < 0) throw new Error("A movimentação deixaria o saldo de galões cheios negativo.");
-    if (balance.emptyGallons + args.emptyDelta < 0) throw new Error("A movimentação deixaria o saldo de galões vazios negativo.");
+    const [receipts, movements] = await Promise.all([
+      ctx.db.query("waterReceipts").collect(),
+      ctx.db.query("waterContainerMovements").collect(),
+    ]);
+    const ledgerError = validateWaterContainerLedger(
+      receipts.filter((item: any) => !item.reversedAt),
+      [
+        ...movements.filter((item: any) => !item.reversedAt),
+        { date: args.date, fullDelta: args.fullDelta, emptyDelta: args.emptyDelta },
+      ],
+    );
+    if (ledgerError) throw new Error(ledgerError);
     const id = await ctx.db.insert("waterContainerMovements", {
       type: args.type, date: args.date, fullDelta: args.fullDelta, emptyDelta: args.emptyDelta,
       observation: args.observation?.trim() || undefined, createdBy: userId, createdAt: Date.now(),
@@ -345,12 +364,12 @@ export const reverseReceipt = mutation({
       ctx.db.query("waterReceipts").collect(),
       ctx.db.query("waterContainerMovements").collect(),
     ]);
-    const physicalBalanceWithoutReceipt = calculateWaterContainerBalance(
+    const ledgerError = validateWaterContainerLedger(
       allReceipts.filter((item: any) => item._id !== args.receiptId && !item.reversedAt),
       allMovements.filter((item: any) => !item.reversedAt),
     );
-    if (physicalBalanceWithoutReceipt.fullGallons < 0 || physicalBalanceWithoutReceipt.emptyGallons < 0) {
-      throw new Error("Os galões deste recebimento já foram consumidos ou o saldo físico ficaria negativo. Faça a conferência física antes de qualquer retificação.");
+    if (ledgerError) {
+      throw new Error(`Não é seguro estornar este recebimento: ${ledgerError}`);
     }
     const now = Date.now();
     await ctx.db.patch(args.receiptId, { reversedAt: now, reversedBy: userId, reversalReason: reason });
@@ -371,11 +390,11 @@ export const reverseContainerMovement = mutation({
       ctx.db.query("waterReceipts").collect(),
       ctx.db.query("waterContainerMovements").collect(),
     ]);
-    const balance = calculateWaterContainerBalance(
+    const ledgerError = validateWaterContainerLedger(
       receipts.filter((receipt: any) => !receipt.reversedAt),
       movements.filter((item: any) => item._id !== args.movementId && !item.reversedAt),
     );
-    if (balance.fullGallons < 0 || balance.emptyGallons < 0) throw new Error("O saldo físico já está inconsistente; não é seguro estornar esta movimentação.");
+    if (ledgerError) throw new Error(`Não é seguro estornar esta movimentação: ${ledgerError}`);
     const now = Date.now();
     await ctx.db.patch(args.movementId, { reversedAt: now, reversedBy: userId, reversalReason: reason });
     await writeAudit(ctx, userId, "update", "waterContainerMovements", String(args.movementId), `ESTORNO da movimentação ${movement.type}. Motivo: ${reason}. Variação original: cheios ${movement.fullDelta}, vazios ${movement.emptyDelta}.`);
