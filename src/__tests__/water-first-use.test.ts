@@ -57,6 +57,7 @@ describe("implantação inicial do módulo Água Mineral (sem histórico prévio
     expect(backend).toContain('if (!Number.isSafeInteger(args.totalValueCents) || args.totalValueCents <= 0)');
     expect(backend).toContain("Fornecedor e responsável pelo pagamento devem ter no máximo 120 caracteres.");
     expect(backend).toContain("A observação deve ter no máximo 500 caracteres.");
+    expect(page).toContain("Informe um valor total maior que zero.");
   });
 
   it("limita meio de pagamento e observação para preservar registros e auditoria", () => {
@@ -88,7 +89,7 @@ describe("implantação inicial do módulo Água Mineral (sem histórico prévio
     expect(page).toContain("Abra o período");
     expect(page).toContain("Registre cada recebimento");
     expect(page).toContain("Feche o período");
-    expect(page).toContain("periods.length === 0 && dashboard.receipts.length === 0 && dashboard.movements.length === 0 && dashboard.participants.length === 0");
+    expect(page).toContain("canManage && periods.length === 0 && dashboard.receipts.length === 0 && dashboard.movements.length === 0 && dashboard.participants.length === 0");
     expect(page).toContain("O ajuste inicial altera somente o saldo físico de galões");
   });
 
