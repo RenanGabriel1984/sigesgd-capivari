@@ -27,12 +27,27 @@ describe("cadastro seguro de usuários e credenciais", () => {
     const start = users.indexOf("export const createUserWithPassword = mutation({");
     const end = users.indexOf("export const createUser = mutation({", start);
     const handler = users.slice(start, end);
-    expect(handler).toContain("args.name.trim()");
-    expect(handler).toContain("args.email.trim().toLowerCase()");
+    expect(handler).toContain("normalizeUserName(args.name)");
+    expect(handler).toContain("normalizeUserEmail(args.email)");
+    expect(users).toContain("email.length > 254");
+    expect(users).toContain("name.length > 120");
     expect(handler).toContain("args.temporaryPassword.length < 8");
     expect(handler).toContain("args.temporaryPassword.length > 200");
     expect(handler).toContain("organization.active === false");
     expect(handler.indexOf("args.temporaryPassword.length < 8")).toBeLessThan(handler.indexOf('ctx.db.insert("users"'));
+  });
+
+  it("aplica a mesma validação às rotas legadas de criação e edição", () => {
+    const createStart = users.indexOf("export const createUser = mutation({");
+    const updateStart = users.indexOf("export const updateUser = mutation({");
+    const activateStart = users.indexOf("export const activateUser", updateStart);
+    const createHandler = users.slice(createStart, updateStart);
+    const updateHandler = users.slice(updateStart, activateStart);
+    expect(createHandler).toContain("normalizeUserName(args.name)");
+    expect(createHandler).toContain("normalizeUserEmail(args.email)");
+    expect(updateHandler).toContain("normalizeUserName(updates.name)");
+    expect(updateHandler).toContain("normalizeUserEmail(updates.email)");
+    expect(updateHandler).toContain("organization.active === false");
   });
 
   it("usa expressão regular compatível com e-mails comuns", () => {
