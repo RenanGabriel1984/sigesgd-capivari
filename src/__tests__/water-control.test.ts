@@ -118,7 +118,8 @@ describe("saldo físico dos galões cheios e vazios", () => {
       ],
     )).toBeNull();
   });
-\n  it("concilia ajustes positivos e negativos sem distorcer a fórmula", () => {
+
+  it("concilia ajustes positivos e negativos sem distorcer a fórmula", () => {
     const balance = calculateWaterContainerBalance(
       [{ gallonsReceived: 4, emptyGallonsReturned: 1 }],
       [
