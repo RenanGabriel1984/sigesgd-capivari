@@ -533,6 +533,7 @@ export const bootstrapSetPassword = internalMutation({
       salt,
       requiresReset: false,
     });
+    await invalidatePendingPasswordResets(ctx, user._id);
 
     // Clear residual failed-login counters so the new credential starts clean.
     const failedAttempts = await ctx.db
@@ -1059,7 +1060,13 @@ export const bootstrapResetPassword = internalMutation({
       });
     }
 
-    // Clear any brute-force lock so the new password works immediately
+    // Invalidate recovery codes issued before this administrative reset.
+    await invalidatePendingPasswordResets(ctx, user._id);
+    await ctx.scheduler.runAfter(0, internal.passwords.invalidateUserSessionsInternal, {
+      userId: user._id,
+    });
+
+    // Clear residual failed-login counters after the credential reset.
     const failedAttempts = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
