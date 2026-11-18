@@ -543,7 +543,7 @@ export const bootstrapSetPassword = internalMutation({
       .withIndex("by_email", (q) => q.eq("email", email))
       .first();
     if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined });
+      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined, lastAuditAt: undefined });
     }
 
     // Audit
@@ -874,6 +874,7 @@ export const confirmPasswordReset = mutation({
       await ctx.db.patch(failedAttempts._id, {
         attempts: 0,
         lockedUntil: undefined,
+        lastAuditAt: undefined,
       });
     }
 
@@ -1005,7 +1006,7 @@ export const recordSuccessfulLogin = internalMutation({
       return { cleared: false };
     }
 
-    await ctx.db.patch(existing._id, { attempts: 0, lockedUntil: undefined });
+    await ctx.db.patch(existing._id, { attempts: 0, lockedUntil: undefined, lastAuditAt: undefined });
     return { cleared: true };
   },
 });
@@ -1098,7 +1099,7 @@ export const bootstrapResetPassword = internalMutation({
       .withIndex("by_email", (q) => q.eq("email", email))
       .first();
     if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined });
+      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined, lastAuditAt: undefined });
     }
 
     await ctx.db.insert("auditLogs", {
