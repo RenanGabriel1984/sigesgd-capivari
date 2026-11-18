@@ -82,11 +82,11 @@ function exportStockPositionByAreaCSV(data: any[]) {
 }
 
 function exportMovementCSV(data: any[]) {
-  const header = ["Data", "Tipo", "Produto", "Quantidade", "Usuário", "Fornecedor", "Documento", "Observação", "Cancelada"];
+  const header = ["Data", "Tipo", "Produto", "Quantidade", "Área", "Local físico", "Usuário", "Fornecedor", "Documento", "Observação", "Cancelada"];
   const rows = data.map((r) => [
     new Date(r.timestamp).toLocaleString("pt-BR"),
     r.type === "entry" ? "Entrada" : r.type === "exit" ? "Saída" : r.type,
-    r.productName, r.quantity, r.userName, r.supplierTrade || r.supplierName,
+    r.productName, r.quantity, r.areaName, r.locationName, r.userName, r.supplierTrade || r.supplierName,
     r.documentNumber, r.observation, r.canceled ? "Sim" : "Não",
   ]);
   downloadCSV("movimentacoes.csv", serializeSemicolonCsv(header, rows));
@@ -311,7 +311,7 @@ export default function Reports() {
                       ))}
                       {!stockPosition && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={11} className="text-center py-8 text-muted-foreground text-sm">
                             Carregando…
                           </TableCell>
                         </TableRow>
@@ -335,7 +335,9 @@ export default function Reports() {
             </CardHeader>
             <CardContent className="p-0"><div className="overflow-x-auto"><Table>
               <TableHeader><TableRow>
-                <TableHead className="text-xs">Produto</TableHead><TableHead className="text-xs">Área</TableHead><TableHead className="text-xs">Local físico</TableHead>
+                <TableHead className="text-xs">Produto</TableHead>
+                        <TableHead className="text-xs">Área</TableHead>
+                        <TableHead className="text-xs">Local físico</TableHead><TableHead className="text-xs">Área</TableHead><TableHead className="text-xs">Local físico</TableHead>
                 <TableHead className="text-xs text-right">Físico</TableHead><TableHead className="text-xs text-right">Reservado</TableHead><TableHead className="text-xs text-right">Disponível</TableHead><TableHead className="text-xs">Integridade</TableHead>
               </TableRow></TableHeader>
               <TableBody>
@@ -460,6 +462,8 @@ export default function Reports() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-sm">{m.productName}</TableCell>
+                          <TableCell className="text-xs">{m.areaName}</TableCell>
+                          <TableCell className="text-xs">{m.locationName}</TableCell>
                           <TableCell className="text-sm text-right font-mono">{m.quantity}</TableCell>
                           <TableCell className="text-xs">{m.userName}</TableCell>
                           <TableCell className="text-xs">{m.supplierTrade || m.supplierName || "—"}</TableCell>
