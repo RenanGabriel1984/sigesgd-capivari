@@ -42,7 +42,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
 
   it("confirma entrada usando área do item/entrada e local físico independente", () => {
     const confirm = mutationBlock(entries, "confirm");
-    expect(confirm).toContain("const effectiveAreaId = item.areaId ?? entry.areaId");
+    expect(confirm).toContain("const effectiveAreaId = resolveEntryItemAreaId(item.areaId, entry.areaId)");
     expect(confirm).toContain("locationId: item.locationId");
     expect(confirm).toContain("areaId: itemAreaId");
     expect(confirm).not.toContain("location.areaId");
