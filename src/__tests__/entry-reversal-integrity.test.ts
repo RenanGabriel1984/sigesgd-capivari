@@ -24,8 +24,11 @@ describe("integridade do estorno de entradas", () => {
   });
 
   it("estorna pelo par correto área + local físico", () => {
-    expect(reverse).toContain("(item.areaId ?? undefined) !== lotAreaId");
-    expect(reverse).toContain("(item.locationId ?? undefined) !== lotLocationId");
+    expect(reverse).toContain("resolveEntryItemAreaId(item.areaId, entry.areaId)");
+    expect(reverse).toContain("const lotAreaId = lot.areaId ?? itemAreaId");
+    expect(reverse).toContain("(itemAreaId ?? undefined) !== (lotAreaId ?? undefined)");
+    expect(reverse).toContain("resolveEntryLotLocationId(lot.locationId, lotLocationRows[0]?.locationId, item.locationId)");
+    expect(reverse).toContain("if (!lotLocationId)");
     expect(reverse).toContain("row.locationId === lotLocationId && (row.areaId ?? undefined) === lotAreaId");
     expect(reverse).toContain("matchingRows.length !== 1");
   });
