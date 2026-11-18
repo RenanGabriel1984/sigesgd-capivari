@@ -229,11 +229,18 @@ export const updateUser = mutation({
     if (userId === adminId && updates.active === false) {
       throw new Error("Você não pode desativar sua própria conta");
     }
-    if (updates.role && updates.role !== "admin") {
-      const user = await ctx.db.get(userId);
-      if (user?.role === "admin") {
-        const admins = await ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect();
-        if (admins.length <= 1) throw new Error("Não é possível alterar o perfil do único administrador");
+    const targetUser = await ctx.db.get(userId);
+    if (!targetUser) throw new Error("Usuário não encontrado");
+    const removesActiveAdmin = targetUser.role === "admin" &&
+      targetUser.active !== false &&
+      (updates.active === false || (updates.role !== undefined && updates.role !== "admin"));
+    if (removesActiveAdmin) {
+      const admins = await ctx.db.query("users")
+        .withIndex("by_role", (q: any) => q.eq("role", "admin"))
+        .collect();
+      const activeAdmins = admins.filter((admin: any) => admin.active !== false);
+      if (activeAdmins.length <= 1) {
+        throw new Error("Não é possível desativar ou rebaixar o último administrador ativo");
       }
     }
     if (updates.email) {
@@ -275,9 +282,14 @@ export const deactivateUser = mutation({
     if (args.userId === adminId) throw new Error("Você não pode desativar sua própria conta");
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
-    if (user.role === "admin") {
-      const admins = await ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect();
-      if (admins.length <= 1) throw new Error("Não é possível desativar o único administrador");
+    if (user.role === "admin" && user.active !== false) {
+      const admins = await ctx.db.query("users")
+        .withIndex("by_role", (q: any) => q.eq("role", "admin"))
+        .collect();
+      const activeAdmins = admins.filter((admin: any) => admin.active !== false);
+      if (activeAdmins.length <= 1) {
+        throw new Error("Não é possível desativar o último administrador ativo");
+      }
     }
     await ctx.db.patch(args.userId, { active: false, updatedAt: Date.now() });
     await ctx.db.insert("auditLogs", {
