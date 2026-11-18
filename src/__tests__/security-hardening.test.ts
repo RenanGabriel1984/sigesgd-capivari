@@ -706,6 +706,28 @@ describe("RESET-HASH — códigos de recuperação protegidos em repouso", () =>
     expect(actionBlock).not.toMatch(/token:\s*code/);
   });
 
+  it("RESET-INPUT-01: solicitações de recuperação limitam e normalizam e-mails sem enumerar contas", () => {
+    const passwordSrc = stripComments(read("src/convex/passwords.ts"));
+    const requestBlock = passwordSrc.slice(
+      passwordSrc.indexOf("export const requestPasswordReset"),
+      passwordSrc.indexOf("export const confirmPasswordReset"),
+    );
+    expect(requestBlock).toMatch(/email\.length > 254/);
+    expect(requestBlock).toMatch(/!\/\^\[\^\\\\s@\]\+@\[\^\\\\s@\]\+\\\\\.\[\^\\\\s@\]\+\$\//);
+    expect(requestBlock).toMatch(/return \{ message: RESET_GENERIC_MESSAGE \}/);
+    expect(requestBlock).not.toMatch(/Number\.isFinite\(args\.email\.length\)/);
+  });
+
+  it("RESET-INPUT-02: confirmação rejeita e-mail fora do limite com erro genérico", () => {
+    const passwordSrc = stripComments(read("src/convex/passwords.ts"));
+    const confirmBlock = passwordSrc.slice(
+      passwordSrc.indexOf("export const confirmPasswordReset"),
+      passwordSrc.indexOf("export const recordFailedLogin"),
+    );
+    expect(confirmBlock).toMatch(/email\.length > 254/);
+    expect(confirmBlock).toMatch(/throw new Error\("Código inválido ou expirado"\)/);
+  });
+
   it("RESET-HASH-03: confirmação aceita hash novo e somente legado plaintext ainda válido", () => {
     const passwordSrc = stripComments(read("src/convex/passwords.ts"));
     const confirmBlock = passwordSrc.slice(
