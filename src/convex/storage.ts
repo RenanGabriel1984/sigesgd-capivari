@@ -288,6 +288,12 @@ export async function attachStorageFile(
     );
   }
 
+  // A mutation de domínio pode ser chamada diretamente sem passar por
+  // registerUpload. Revalidar o tamanho aqui fecha esse caminho de bypass.
+  const metadata = await ctx.db.system.get("_storage", storageId as any);
+  if (!metadata || !isStorageUploadSizeAllowed(metadata.size)) {
+    throw new Error("O arquivo não existe ou excede o limite permitido de 10 MB.");
+  }
   const url = await ctx.storage.getUrl(storageId as any);
   if (!url) throw new Error("O arquivo a ser vinculado não existe no armazenamento.");
 
