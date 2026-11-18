@@ -131,7 +131,7 @@ export const changePassword = mutation({
     newPassword: v.string(),
   },
   handler: async (ctx, args) => {
-    const { userId, user } = await requireUser(ctx);
+    const { userId } = await requireUser(ctx);
     const currentSessionId = await getAuthSessionId(ctx);
 
     assertPasswordPolicy(args.newPassword);
@@ -246,7 +246,7 @@ export const forceChangePassword = mutation({
     newPassword: v.string(),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireUser(ctx);
+    const { userId, user } = await requireUser(ctx);
     const currentSessionId = await getAuthSessionId(ctx);
 
     assertPasswordPolicy(args.newPassword);
