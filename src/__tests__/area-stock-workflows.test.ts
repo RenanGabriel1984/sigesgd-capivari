@@ -83,6 +83,18 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(createReturn).toContain("returnIds.join");
   });
 
+  it("registra a linhagem dos lotes de origem e destino em transferências e estornos", () => {
+    const transfer = mutationBlock(transfers, "create");
+    const reverse = mutationBlock(transfers, "reverse");
+    expect(transfer).toContain("transferLotDetails");
+    expect(transfer).toContain("lot?.lotNumber");
+    expect(transfer).toContain("transferLotDetails.join");
+    expect(reverse).toContain("reversedLotDetails");
+    expect(reverse).toContain("part.sourceLot.lotNumber");
+    expect(reverse).toContain("part.destinationLot.lotNumber");
+    expect(reverse).toContain("reversedLotDetails.join");
+  });
+
   it("identifica rotinas internas sem sessão de usuário nos registros de manutenção histórica", () => {
     expect(stockSetup).toContain("Ator: rotina interna autorizada, sem sessão de usuário interativa.");
   });
