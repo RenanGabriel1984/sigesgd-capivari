@@ -33,6 +33,14 @@ describe("integridade do estorno de entradas", () => {
     expect(reverse).toContain("matchingRows.length !== 1");
   });
 
+  it("bloqueia estorno automático após tombamento ou vínculo patrimonial", () => {
+    expect(reverse).toContain('ctx.db.query("entryItemUnits").withIndex("by_entry"');
+    expect(reverse).toContain('unit.patrimonyRegistrationStatus === "registered"');
+    expect(reverse).toContain("!!unit.assetId");
+    expect(reverse).toContain("!!unit.patrimonyNumber?.trim()");
+    expect(reverse).toContain("Solicite a conciliação do setor de Patrimônio antes do estorno");
+  });
+
   it("preserva o histórico do lote e registra a localização no movimento", () => {
     expect(reverse).toContain("quantityAvailable: lotAfter");
     expect(reverse).toContain("active: lotAfter > 0");
