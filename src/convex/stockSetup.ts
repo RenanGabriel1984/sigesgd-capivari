@@ -1001,7 +1001,7 @@ export const applyLegacyPrinterAreaClassification = internalMutation({
     await ctx.db.insert("auditLogs", {
       action: "update",
       entity: "stockByLocation",
-      details: "Classificação histórica controlada: 22 saldos locais sem área foram associados à área Impressoras após revalidação transacional. Quantidades, estoque global, lotes, entradas e movimentações não foram alterados. Registros: " +
+      details: "Ator: rotina interna autorizada, sem sessão de usuário interativa. Classificação histórica controlada: 22 saldos locais sem área foram associados à área Impressoras após revalidação transacional. Quantidades, estoque global, lotes, entradas e movimentações não foram alterados. Registros: " +
         patches.map((item) => item.rowId).join(", "),
       timestamp: now,
     });
@@ -1321,7 +1321,7 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
       entity: "stock",
       entityId: String(entry._id),
       details:
-        "Classificação documental dos 36 itens da carga inicial como TI Geral, conforme docs/planilha-carga-inicial.csv. " +
+        "Ator: rotina interna autorizada, sem sessão de usuário interativa. Classificação documental dos 36 itens da carga inicial como TI Geral, conforme docs/planilha-carga-inicial.csv. " +
         "Metadados atualizados em lotes, itens da entrada, saldos por localização e movimentos originais. " +
         "Quantidade total classificada: 1.919. Nenhuma quantidade física, reserva ou saldo global foi alterado.",
       timestamp: Date.now(),
@@ -1419,7 +1419,7 @@ export const applyLotLocationMetadataBackfill = internalMutation({
       action: "update",
       entity: "lots",
       details:
-        `Backfill controlado de localização física dos lotes a partir de ${balances.length} vínculos conciliados: ${patched} lote(s) atualizado(s), ${skipped} já corretos. Nenhuma quantidade ou saldo físico foi alterado.`,
+        `Ator: rotina interna autorizada, sem sessão de usuário interativa. Backfill controlado de localização física dos lotes a partir de ${balances.length} vínculos conciliados: ${patched} lote(s) atualizado(s), ${skipped} já corretos. Nenhuma quantidade ou saldo físico foi alterado.`,
       timestamp: now,
     });
     return {
