@@ -52,6 +52,7 @@ import {
   type NfeReviewRow,
 } from "@/components/NfeReviewTable";
 import { NfeEntrySummary } from "@/components/NfeEntrySummary";
+import { resolveEntryAreaPresentation } from "@/lib/entry-area-presentation";
 import { QuickProductForm } from "@/components/QuickProductForm";
 import { SupplierForm } from "@/components/SupplierForm";
 import { NfeDestinationDialog } from "@/components/NfeDestinationDialog";
@@ -1197,6 +1198,7 @@ function EntriesPage() {
               <TableHead>Fornecedor</TableHead>
               <TableHead>NF-e / Série</TableHead>
               <TableHead>Recebida em</TableHead>
+              <TableHead>Áreas</TableHead>
               <TableHead className="text-right">Itens</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead>Status</TableHead>
@@ -1223,6 +1225,43 @@ function EntriesPage() {
                 </TableCell>
                 <TableCell>
                   {new Date(entry.receivedAt).toLocaleDateString("pt-BR")}
+                </TableCell>
+                <TableCell className="min-w-40">
+                  {(() => {
+                    const itemAreas = resolveEntryAreaPresentation(
+                      entry.items,
+                      entry.area?.name,
+                    );
+                    const uniqueAreas = [...new Set(itemAreas.map((item) => item.areaName))];
+                    return (
+                      <TooltipProvider delayDuration={200}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="max-w-56 text-left text-xs text-muted-foreground underline decoration-dotted underline-offset-4 hover:text-foreground"
+                              aria-label={`Ver área de destino dos ${itemAreas.length} itens`}
+                            >
+                              {uniqueAreas.length > 0
+                                ? uniqueAreas.join(", ")
+                                : "—"}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-sm">
+                            <div className="space-y-1">
+                              <p className="font-semibold">Área por item</p>
+                              {itemAreas.length > 0 ? itemAreas.map((item, index) => (
+                                <p key={index}>
+                                  <span className="font-medium">{item.productName}:</span>{" "}
+                                  {item.areaName}
+                                </p>
+                              )) : <p>Entrada sem itens.</p>}
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    );
+                  })()}
                 </TableCell>
                 <TableCell className="text-right">
                   {entry.items?.length ?? 0}
@@ -1278,7 +1317,7 @@ function EntriesPage() {
             ))}
             {filteredEntries.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8}>
+                <TableCell colSpan={9}>
                   <div className="py-10 text-center text-sm text-muted-foreground">
                     Nenhuma entrada encontrada.
                   </div>
