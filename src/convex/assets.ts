@@ -97,7 +97,7 @@ export const list = query({
   },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    let assets = await ctx.db.query("assets").order("desc").take(500);
+    let assets = await ctx.db.query("assets").order("desc").take(501);
 
     if (args.status) assets = assets.filter((a: any) => a.status === args.status);
     if (args.assetType) assets = assets.filter((a: any) => a.assetType === args.assetType);
