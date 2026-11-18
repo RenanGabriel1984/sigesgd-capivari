@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashResetCode, verifyResetCode } from "../convex/auth/passwords";
+import { hashResetCode, verifyResetCode, isValidRecoveryEmail } from "../convex/auth/passwords";
 
 describe("password reset code hashing", () => {
   it("stores a salted PBKDF2 hash and verifies the original code", async () => {
@@ -23,5 +23,20 @@ describe("password reset code hashing", () => {
   it("rejects malformed recovery codes", async () => {
     await expect(hashResetCode("12345")).rejects.toThrow(/inválido/i);
     await expect(verifyResetCode("12345", "0".repeat(64), "0".repeat(32))).resolves.toBe(false);
+  });
+});
+
+describe("password recovery email validation", () => {
+  it("accepts ordinary institutional email addresses", () => {
+    expect(isValidRecoveryEmail("servidor@capivari.sp.gov.br")).toBe(true);
+    expect(isValidRecoveryEmail(" Nome.Sobrenome+ti@example.com ".trim())).toBe(true);
+  });
+
+  it("rejects malformed addresses and overlong input", () => {
+    expect(isValidRecoveryEmail("")).toBe(false);
+    expect(isValidRecoveryEmail("sem-arroba.example.com")).toBe(false);
+    expect(isValidRecoveryEmail("servidor@capivari")).toBe(false);
+    expect(isValidRecoveryEmail("servidor @capivari.sp.gov.br")).toBe(false);
+    expect(isValidRecoveryEmail("a".repeat(250) + "@x.com")).toBe(false);
   });
 });
