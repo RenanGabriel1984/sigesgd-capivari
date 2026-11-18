@@ -831,9 +831,24 @@ export const deliver = mutation({
       receivedByUserId: args.receivedByUserId ?? request.requesterId,
       reverseLogisticsConfirmed: args.reverseLogisticsConfirmed ?? undefined,
     });
+    const deliveredAuditLines = await Promise.all(inputItems.map(async (input) => {
+      const item: any = byId.get(input.itemId);
+      const product: any = await ctx.db.get(item.productId);
+      const area: any = item.areaId ? await ctx.db.get(item.areaId) : null;
+      const location: any = item.sourceLocationId ? await ctx.db.get(item.sourceLocationId) : null;
+      const allocations = await ctx.db.query("requestItemLots")
+        .withIndex("by_requestItem", (q: any) => q.eq("requestItemId", input.itemId))
+        .collect();
+      const lotLabels = await Promise.all(allocations.map(async (allocation: any) => {
+        const lot: any = await ctx.db.get(allocation.lotId);
+        return `${lot?.lotNumber ?? String(allocation.lotId)} x${allocation.quantity}`;
+      }));
+      const serials = input.serialNumbers?.length ? `; séries: ${input.serialNumbers.join(", ")}` : "";
+      return `${product?.name ?? "Produto não encontrado"} x${input.quantityDelivered} | área: ${area?.name ?? (item.areaId ? "não encontrada" : "legado")} | local: ${location?.name ?? (item.sourceLocationId ? "não encontrado" : "não registrado")} | lotes: ${lotLabels.join(", ") || "sem vínculo de lote"}${serials}`;
+    }));
     await ctx.db.insert("auditLogs", {
       userId, action: "deliver", entity: "requests", entityId: args.requestId,
-      details: `Solicitação entregue (${inputItems.length} item(ns)); saldo não entregue liberado.`,
+      details: `Solicitação entregue por ${user.name ?? user.email ?? userId}. Itens: ${deliveredAuditLines.join(" || ")}. Saldo não entregue liberado.`,
       timestamp: now,
     });
     return args.requestId;
