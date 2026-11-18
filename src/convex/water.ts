@@ -266,6 +266,8 @@ export const recordContainerMovement = mutation({
       throw new Error("Na devolução, informe quantos galões cheios e/ou vazios saíram para o fornecedor.");
     }
     if (args.type === "adjustment" && args.fullDelta === 0 && args.emptyDelta === 0) throw new Error("Informe ao menos uma quantidade para ajustar.");
+    if (args.type === "adjustment" && (args.observation?.trim().length ?? 0) < 8) throw new Error("Informe uma justificativa de pelo menos 8 caracteres para o ajuste de saldo.");
+    if ((args.observation?.trim().length ?? 0) > 500) throw new Error("A observação deve ter no máximo 500 caracteres.");
     const balance = await currentContainerBalance(ctx);
     if (balance.fullGallons + args.fullDelta < 0) throw new Error("A movimentação deixaria o saldo de galões cheios negativo.");
     if (balance.emptyGallons + args.emptyDelta < 0) throw new Error("A movimentação deixaria o saldo de galões vazios negativo.");
