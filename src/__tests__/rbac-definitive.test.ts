@@ -363,3 +363,17 @@ describe("integridade da matriz central", () => {
     expect(flags.length).toBeGreaterThanOrEqual(21);
   });
 });
+
+
+describe("RBAC — gestão de usuários respeita a matriz central", () => {
+  it("administração de usuários exige users.manage, sem exigir role literal admin", () => {
+    const src = read("src/convex/users.ts");
+    const start = src.indexOf("async function requireUserManager");
+    const end = src.indexOf("// ─── Bootstrap", start);
+    const guard = src.slice(start, end);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(guard).toContain('requirePermission(ctx, "users.manage"');
+    expect(guard).not.toContain('user.role !== "admin"');
+    expect(roleHasPermission("secretary", "users.manage")).toBe(true);
+  });
+});
