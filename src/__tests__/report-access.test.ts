@@ -77,6 +77,22 @@ describe("segurança e precisão dos relatórios", () => {
     expect(page).toContain("{m.locationName}");
   });
 
+  it("sinaliza limites de histórico nos relatórios de equipamentos e GomaQ", () => {
+    const assets = readFileSync(resolve(root, "src/convex/assets.ts"), "utf8");
+    const gomaq = readFileSync(resolve(root, "src/convex/gomaQ.ts"), "utf8");
+    const page = readFileSync(resolve(root, "src/pages/Reports.tsx"), "utf8");
+    expect(assets).toContain('ctx.db.query("assets").order("desc").take(501)');
+    expect(gomaq).toContain('ctx.db.query("gomaQExchanges").order("desc").take(501)');
+    expect(gomaq).toContain('.take(501);');
+    expect(gomaq).toContain('ctx.db.query("gomaQCollections").order("desc").take(101)');
+    expect(page).toContain("assetReportTruncated");
+    expect(page).toContain("gomaqExchangesTruncated");
+    expect(page).toContain("gomaqCartridgesTruncated");
+    expect(page).toContain("gomaqCollectionsTruncated");
+    expect(page).toContain("A listagem e o CSV não representam o histórico completo");
+    expect(page).toContain("Os indicadores e o CSV não representam o histórico completo");
+  });
+
   it("diretor tem leitura de relatórios, organização, impressoras e GomaQ, sem gerenciamento", () => {
     expect(roleHasPermission("director", "reports.view")).toBe(true);
     expect(roleHasPermission("director", "organizations.view")).toBe(true);
