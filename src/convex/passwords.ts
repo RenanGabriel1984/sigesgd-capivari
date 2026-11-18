@@ -2,7 +2,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { requirePermission } from "./rbac";
 import { mutation, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
-import { hashPassword, verifyPassword, generateSecureNumericCode, nextResetAttempt, verifyResetCode } from "./auth/passwords";
+import { hashPassword, verifyPassword, nextResetAttempt, verifyResetCode } from "./auth/passwords";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
@@ -644,9 +644,6 @@ export const requestPasswordReset = mutation({
       }
     }
 
-    // Generate 6-digit code
-    const code = generateSecureNumericCode();
-
     const resetId: Id<"passwordResets"> = await ctx.db.insert("passwordResets", {
       userId: user._id,
       // The internal email action generates the OTP and persists only its hash.
@@ -664,11 +661,9 @@ export const requestPasswordReset = mutation({
       timestamp: now,
     });
 
-    // Send email with the reset code via the Freebuff email service (same
-    // transport as internal.email.sendPasswordResetEmailInternal). The scheduled INTERNAL action receives
-    // only the reset id and reads the code server-side — the code never
-    // crosses a public endpoint, is never returned to the client and is
-    // never written to production logs.
+    // The scheduled internal action generates the OTP, persists only a salted
+    // hash, and sends the raw code directly to the mail provider. The public
+    // mutation and scheduler payload never receive the raw code.
     await ctx.scheduler.runAfter(0, internal.email.sendPasswordResetEmailInternal, {
       resetId,
     });
