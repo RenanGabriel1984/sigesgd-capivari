@@ -377,6 +377,19 @@ export const approve = mutation({
       }
     }
 
+    // A aprovação deve declarar explicitamente todos os itens da solicitação.
+    // Impede que uma chamada parcial marque a solicitação inteira como aprovada
+    // deixando linhas sem quantityApproved e sem reserva rastreável.
+    const requestItems = await ctx.db.query("requestItems")
+      .withIndex("by_request", (q: any) => q.eq("requestId", args.requestId))
+      .collect();
+    if (
+      seenItems.size !== requestItems.length ||
+      requestItems.some((item: any) => !seenItems.has(item._id as string))
+    ) {
+      throw new Error("A aprovação deve informar exatamente todos os itens da solicitação. Atualize a tela e tente novamente.");
+    }
+
     if (totalItemsToApprove === 0) throw new Error("Nenhum item com quantidade aprovada maior que zero.");
 
     // Fase 2: estoque global e legado precisam fechar antes de gravar qualquer reserva.
