@@ -254,11 +254,9 @@ export const stockPositionByArea = query({
     }
 
     return Promise.all(Array.from(grouped.values()).map(async (row) => {
-      const [product, area, location] = await Promise.all([
-        ctx.db.get(row.productId),
-        row.areaId ? ctx.db.get(row.areaId) : null,
-        ctx.db.get(row.locationId),
-      ]);
+      const product: any = await ctx.db.get(row.productId);
+      const area: any = row.areaId ? await ctx.db.get(row.areaId) : null;
+      const location: any = await ctx.db.get(row.locationId);
       const key = [row.productId, row.areaId ?? "legacy", row.locationId].join("|");
       const reservedQuantity = reservationTotals.get(key) ?? 0;
       const physicalQuantity = row.physicalQuantity;
