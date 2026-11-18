@@ -708,3 +708,34 @@ describe("RESET-HASH — códigos de recuperação protegidos em repouso", () =>
     expect(confirmBlock).toMatch(/token\.expiresAt > now/);
   });
 });
+
+
+describe("AUTH-SESSION — revogação e proteção contra bloqueio remoto", () => {
+  it("AUTH-SESSION-01: login não bloqueia uma conta apenas por tentativas inválidas por e-mail", () => {
+    const credentials = stripComments(read("src/convex/auth/credentials.ts"));
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    expect(credentials).not.toMatch(/passwords\.isLockedOut/);
+    expect(credentials).toMatch(/passwords\.recordFailedLogin/);
+    expect(passwords).not.toMatch(/LOGIN_MAX_ATTEMPTS|LOGIN_LOCK_MINUTES/);
+  });
+
+  it("AUTH-SESSION-02: mudança de senha preserva a sessão atual e revoga as demais", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    expect(passwords).toMatch(/getAuthSessionId\(ctx\)/);
+    expect(passwords).toMatch(/exceptSessionId: currentSessionId/);
+    expect(passwords).toMatch(/invalidateUserSessionsInternal/);
+    expect(passwords).toMatch(/invalidateSessions\(ctx/);
+  });
+
+  it("AUTH-SESSION-03: reset administrativo e recuperação revogam todas as sessões", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    expect(passwords).toMatch(/userId: args\.userId,[\s\S]{0,100}\n\s*\}\);/);
+    expect(passwords).toMatch(/userId: user\.\_id,[\s\S]{0,100}\n\s*\}\);/);
+  });
+
+  it("AUTH-SESSION-04: desativação ou mudança de perfil revoga sessões do usuário", () => {
+    const users = stripComments(read("src/convex/users.ts"));
+    expect(users).toMatch(/securityProfileChanged/);
+    expect(users).toMatch(/internal\.passwords\.invalidateUserSessionsInternal/);
+  });
+});
