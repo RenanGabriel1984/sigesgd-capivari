@@ -14,7 +14,12 @@ describe("proteção de sessão sem perfil SIGESGD", () => {
     expect(source).toContain("Sua sessão foi reconhecida");
   });
 
-  it("oferece encerramento da sessão inconsistente", () => {
+  it("bloqueia imediatamente uma sessão cujo usuário foi desativado", () => {
+    expect(source).toContain("if (isAuthenticated && user?.active === false)");
+    expect(source).toContain("Acesso desativado");
+  });
+
+  it("oferece encerramento da sessão inconsistente ou desativada", () => {
     expect(source).toContain("onClick={() => void signOut()}");
     expect(source).toContain("Sair do sistema");
   });
