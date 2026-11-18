@@ -34,7 +34,7 @@ function LoadingSkeleton() {
 export default function UsersPage() {
   const users = useQuery(api.users.listUsers);
   const orgs = useQuery(api.organizations.list);
-  const createUser = useMutation(api.users.createUser);
+  const createUserWithPassword = useMutation(api.users.createUserWithPassword);
   const updateUser = useMutation(api.users.updateUser);
   const activateUser = useMutation(api.users.activateUser);
   const deactivateUser = useMutation(api.users.deactivateUser);
@@ -88,9 +88,13 @@ export default function UsersPage() {
     if (!tempPassword.trim()) { toast.error("A senha temporária é obrigatória"); return; }
     if (tempPassword.length < 8) { toast.error("A senha temporária deve ter pelo menos 8 caracteres"); return; }
     try {
-      const newUserId = await createUser({ name: name.trim(), email: email.trim(), role, organizationId: (orgId || undefined) as Id<"organizations"> | undefined });
-      // Auto-create password with requiresReset: true
-      await createPassword({ userId: newUserId as Id<"users">, password: tempPassword, requiresReset: true });
+      await createUserWithPassword({
+        name: name.trim(),
+        email: email.trim(),
+        role,
+        organizationId: (orgId || undefined) as Id<"organizations"> | undefined,
+        temporaryPassword: tempPassword,
+      });
       toast.success("Usuário criado com sucesso. Obrigará troca de senha no primeiro acesso.");
       setCreateDialog(false);
     } catch (e: any) { toast.error(e.message ?? "Erro ao criar usuário"); }
@@ -122,7 +126,7 @@ export default function UsersPage() {
 
   const handleSetPassword = async () => {
     if (!passwordDialog) return;
-    if (password.length < 6) { toast.error("A senha deve ter pelo menos 6 caracteres"); return; }
+    if (password.length < 8) { toast.error("A senha deve ter pelo menos 8 caracteres"); return; }
     try {
       if (passwordDialog.isNew) {
         await createPassword({ userId: passwordDialog.userId as Id<"users">, password, requiresReset: true });
@@ -261,10 +265,10 @@ export default function UsersPage() {
             <p className="text-sm text-muted-foreground">
               {passwordDialog?.isNew ? `Definir senha para ${passwordDialog?.userName}` : `Redefinir senha de ${passwordDialog?.userName}`}
             </p>
-            <div><Label>Nova Senha *</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres" /></div>
+            <div><Label>Nova Senha *</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 8 caracteres" /></div>
             {passwordDialog?.isNew && <p className="text-xs text-muted-foreground">O usuário será obrigado a alterar a senha no primeiro acesso.</p>}
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setPasswordDialog(null)}>Cancelar</Button><Button onClick={handleSetPassword} disabled={password.length < 6}>{passwordDialog?.isNew ? "Definir" : "Redefinir"}</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setPasswordDialog(null)}>Cancelar</Button><Button onClick={handleSetPassword} disabled={password.length < 8}>{passwordDialog?.isNew ? "Definir" : "Redefinir"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </AppShell>
