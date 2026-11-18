@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { buildNfeEntrySummary } from "@/lib/nfe-summary";
 import {
   canContinueNfeReview,
   matchNfeProduct,
@@ -172,5 +173,48 @@ describe("NF-e 372043 — ciclo de vida da conferência", () => {
       { productId: CX735_AMARELO_ID, matchStatus: "found", associationType: "automatic" },
       { productId: "", matchStatus: "not_found", associationType: "automatic" },
     ])).toBe(false);
+  });
+});
+
+
+describe("NF-e — classificação de área no resumo", () => {
+  const row = {
+    item: { lineNumber: 1, description: "Teclado", unit: "UN", quantity: 2 },
+    productId: "product-1",
+    matchStatus: "found" as const,
+    locationId: "location-1",
+  };
+
+  const baseInput = {
+    nfe: { number: "123", series: "1", emissionDate: "2026-11-18" },
+    rows: [row],
+    products: [{ _id: "product-1", name: "Teclado" }],
+    locations: [{ _id: "location-1", name: "Armário TI 01" }],
+    areas: [{ _id: "area-ti", name: "TI Geral" }, { _id: "area-copa", name: "Copa e Cozinha" }],
+  };
+
+  it("informa que a área padrão ainda será escolhida quando não há sobrescrita", () => {
+    const summary = buildNfeEntrySummary(baseInput);
+    expect(summary.items[0]).toMatchObject({
+      areaName: "Área padrão será escolhida na próxima etapa",
+      locationName: "Armário TI 01",
+    });
+  });
+
+  it("mostra a área individual do item sem confundi-la com o local físico", () => {
+    const summary = buildNfeEntrySummary({
+      ...baseInput,
+      defaultAreaId: "area-ti",
+      rows: [{ ...row, areaId: "area-copa" }],
+    });
+    expect(summary.items[0]).toMatchObject({
+      areaName: "Copa e Cozinha",
+      locationName: "Armário TI 01",
+    });
+  });
+
+  it("mostra a área padrão quando ela já foi fornecida ao resumo", () => {
+    const summary = buildNfeEntrySummary({ ...baseInput, defaultAreaId: "area-ti" });
+    expect(summary.items[0].areaName).toBe("TI Geral");
   });
 });
