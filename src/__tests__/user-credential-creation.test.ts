@@ -36,7 +36,7 @@ describe("cadastro seguro de usuários e credenciais", () => {
   });
 
   it("usa expressão regular compatível com e-mails comuns", () => {
-    expect(users).toContain('/^[^\s@]+@[^\s@]+\.[^\s@]+$/');
+    expect(users).toContain(String.raw`/^[^\s@]+@[^\s@]+\.[^\s@]+$/`);
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     expect(emailPattern.test("renan.martins@example.com")).toBe(true);
     expect(emailPattern.test("renan@example.com.br")).toBe(true);
