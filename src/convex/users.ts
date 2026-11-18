@@ -133,7 +133,7 @@ export const createUserWithPassword = mutation({
     const name = args.name.trim();
     const email = args.email.trim().toLowerCase();
     if (!name) throw new Error("Nome é obrigatório.");
-    if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       throw new Error("Informe um e-mail válido.");
     }
     if (args.temporaryPassword.length < 8 || args.temporaryPassword.length > 200) {
