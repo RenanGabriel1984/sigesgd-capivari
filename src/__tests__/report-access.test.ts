@@ -57,6 +57,18 @@ describe("segurança e precisão dos relatórios", () => {
     expect(page).toContain("A tela e o CSV mostram somente as 500 mais recentes");
   });
 
+  it("relatório de movimentações identifica a área e o local físico de cada movimento", () => {
+    const block = queryBlock("movementReport", "export const consumptionByOrg");
+    const page = readFileSync(resolve(root, "src/pages/Reports.tsx"), "utf8");
+    expect(block).toContain("ctx.db.get(m.areaId)");
+    expect(block).toContain("ctx.db.get(m.locationId)");
+    expect(block).toContain("areaName: area?.name");
+    expect(block).toContain("locationName: location?.name");
+    expect(page).toContain('"Área", "Local físico"');
+    expect(page).toContain("{m.areaName}");
+    expect(page).toContain("{m.locationName}");
+  });
+
   it("diretor tem leitura de relatórios, organização, impressoras e GomaQ, sem gerenciamento", () => {
     expect(roleHasPermission("director", "reports.view")).toBe(true);
     expect(roleHasPermission("director", "organizations.view")).toBe(true);
