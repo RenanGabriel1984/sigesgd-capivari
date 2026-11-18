@@ -40,7 +40,7 @@ export const listExchanges = query({
   },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    let exchanges = await ctx.db.query("gomaQExchanges").order("desc").take(500);
+    let exchanges = await ctx.db.query("gomaQExchanges").order("desc").take(501);
 
     if (args.startDate) exchanges = exchanges.filter((e: any) => e.exchangedAt >= args.startDate!);
     if (args.endDate) exchanges = exchanges.filter((e: any) => e.exchangedAt <= args.endDate!);
@@ -70,7 +70,7 @@ export const listEmptyCartridges = query({
         .query("gomaQEmptyCartridges")
         .withIndex("by_status", (q) => q.eq("status", args.status!))
         .order("desc")
-        .take(500);
+        .take(501);
     } else {
       cartridges = await ctx.db.query("gomaQEmptyCartridges").order("desc").take(500);
     }
@@ -112,7 +112,7 @@ export const listCollections = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    const collections = await ctx.db.query("gomaQCollections").order("desc").take(100);
+    const collections = await ctx.db.query("gomaQCollections").order("desc").take(101);
     return Promise.all(collections.map(async (c: any) => {
       const responsible = await ctx.db.get(c.responsibleUserId);
       return { ...c, responsible };
