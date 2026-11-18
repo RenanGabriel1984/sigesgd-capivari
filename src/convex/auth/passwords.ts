@@ -13,6 +13,13 @@ const UINT32_RANGE = 0x1_0000_0000;
 const RESET_CODE_SAMPLE_LIMIT =
   Math.floor(UINT32_RANGE / RESET_CODE_RANGE) * RESET_CODE_RANGE;
 
+/** Validação compartilhada do endereço usado nos fluxos públicos de recuperação. */
+export function isValidRecoveryEmail(value: string): boolean {
+  return value.length > 0 &&
+    value.length <= 254 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
 function toHex(buffer: ArrayBuffer): string {
   return Array.from(new Uint8Array(buffer))
     .map((b) => b.toString(16).padStart(2, "0"))
