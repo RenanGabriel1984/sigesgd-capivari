@@ -80,6 +80,12 @@ describe("estorno seguro de transferências", () => {
     expect(firstWrite).toBeGreaterThan(validationEnd);
   });
 
+  it("a interface deriva as ações da matriz RBAC e inclui secretary", () => {
+    expect(page).toContain('roleHasPermission(user?.role as AppRole | undefined, "transfers.create")');
+    expect(page).not.toContain('user?.role === "admin"');
+    expect(page).not.toContain('user?.role === "stock_manager"');
+  });
+
   it("a interface só oferece estorno para transferências não estornadas e exige justificativa", () => {
     expect(page).toContain("!t.reversedAt");
     expect(page).toContain('setSelectedTransfer(t)');
