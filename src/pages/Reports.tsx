@@ -336,8 +336,7 @@ export default function Reports() {
             <CardContent className="p-0"><div className="overflow-x-auto"><Table>
               <TableHeader><TableRow>
                 <TableHead className="text-xs">Produto</TableHead>
-                        <TableHead className="text-xs">Área</TableHead>
-                        <TableHead className="text-xs">Local físico</TableHead><TableHead className="text-xs">Área</TableHead><TableHead className="text-xs">Local físico</TableHead>
+                <TableHead className="text-xs">Área</TableHead><TableHead className="text-xs">Local físico</TableHead>
                 <TableHead className="text-xs text-right">Físico</TableHead><TableHead className="text-xs text-right">Reservado</TableHead><TableHead className="text-xs text-right">Disponível</TableHead><TableHead className="text-xs">Integridade</TableHead>
               </TableRow></TableHeader>
               <TableBody>
@@ -433,6 +432,8 @@ export default function Reports() {
                         <TableHead className="text-xs">Data/Hora</TableHead>
                         <TableHead className="text-xs">Tipo</TableHead>
                         <TableHead className="text-xs">Produto</TableHead>
+                        <TableHead className="text-xs">Área</TableHead>
+                        <TableHead className="text-xs">Local físico</TableHead>
                         <TableHead className="text-xs text-right">Qtd</TableHead>
                         <TableHead className="text-xs">Usuário</TableHead>
                         <TableHead className="text-xs">Fornecedor</TableHead>
