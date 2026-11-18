@@ -36,6 +36,8 @@ describe("estorno seguro de transferências", () => {
     expect(reverse).toContain("destinationLot.active === false");
     expect(reverse).toContain("destinationBalances.length !== 1");
     expect(reverse).toContain("destinationBalances[0].locationId !== transfer.toLocationId");
+    expect(reverse).toContain("sourceBalances[0].locationId !== transfer.fromLocationId");
+    expect(reverse).toContain("sourceBalances[0].quantityAvailable) - Number(sourceLot.quantityAvailable)");
   });
 
   it("confere a consistência dos saldos por área/local com a soma dos lotes", () => {
