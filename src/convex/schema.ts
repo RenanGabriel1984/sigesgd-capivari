@@ -1041,11 +1041,12 @@ const schema = defineSchema(
     }).index("by_user", ["userId"])
       .index("by_token", ["token"]),
 
-    // ── Failed Login Attempts (brute force protection) ──
+    // ── Failed Login Attempts (audit counter; legacy lockout field retained) ──
     failedLoginAttempts: defineTable({
       email: v.string(),
       attempts: v.number(),
       lastAttemptAt: v.number(),
+      // Legacy compatibility only: authentication no longer locks by email.
       lockedUntil: v.optional(v.number()),
     }).index("by_email", ["email"]),
 
