@@ -55,6 +55,9 @@ describe("segurança e precisão dos relatórios", () => {
     expect(page).toContain("movements?.slice(0, 500)");
     expect(page).toContain("movementReportTruncated");
     expect(page).toContain("A tela e o CSV mostram somente as 500 mais recentes");
+    expect(page).toContain('new Date(reqEndDate + "T23:59:59.999").getTime()');
+    expect(page).toContain("requestReportMayBeTruncated");
+    expect(page).toContain("somente as 200 solicitações mais recentes");
   });
 
   it("relatório de movimentações identifica a área e o local físico de cada movimento", () => {
