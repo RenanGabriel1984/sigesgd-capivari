@@ -639,8 +639,12 @@ export const requestPasswordReset = mutation({
     if (recent) return { message: RESET_GENERIC_MESSAGE };
 
     for (const token of existingTokens) {
-      if (!token.usedAt) {
-        await ctx.db.patch(token._id, { usedAt: now });
+      if (!token.usedAt || token.token !== undefined) {
+        // Invalidate previous codes and redact any legacy plaintext value.
+        await ctx.db.patch(token._id, {
+          usedAt: token.usedAt ?? now,
+          token: undefined,
+        });
       }
     }
 
