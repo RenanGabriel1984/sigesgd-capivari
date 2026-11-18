@@ -43,7 +43,7 @@ export const dashboard = query({
       shares.map((share: any) => ({
         shareId: String(share._id),
         participantId: String(share.participantId),
-        participantName: participantNames.get(String(share.participantId)) ?? share.participantName,
+        participantName: share.participantName ?? participantNames.get(String(share.participantId)) ?? "Participante inativo",
         amountDueCents: share.amountDueCents,
       })),
       payments.map((payment: any) => ({
@@ -240,7 +240,7 @@ export const createReceipt = mutation({
       createdBy: userId,
       createdAt: now,
     });
-    await writeAudit(ctx, userId, "create", "waterReceipts", String(id), `Recebimento manual: ${args.gallonsReceived} galão(ões), ${args.emptyGallonsReturned} vazio(s) devolvido(s), total R$ ${(args.totalValueCents / 100).toFixed(2)}. Sem nota fiscal.`);
+    await writeAudit(ctx, userId, "create", "waterReceipts", String(id), `Recebimento manual em ${new Date(args.receivedAt).toLocaleDateString("pt-BR")}: ${args.gallonsReceived} galão(ões), ${args.emptyGallonsReturned} vazio(s) devolvido(s), total R$ ${(args.totalValueCents / 100).toFixed(2)}. Origem: ${args.sourceName?.trim() || "não informada"}. Sem nota fiscal.`);
     return id;
   },
 });
@@ -271,7 +271,7 @@ export const recordContainerMovement = mutation({
       type: args.type, date: args.date, fullDelta: args.fullDelta, emptyDelta: args.emptyDelta,
       observation: args.observation?.trim() || undefined, createdBy: userId, createdAt: Date.now(),
     });
-    await writeAudit(ctx, userId, "create", "waterContainerMovements", String(id), `Galões: cheios ${args.fullDelta >= 0 ? "+" : ""}${args.fullDelta}, vazios ${args.emptyDelta >= 0 ? "+" : ""}${args.emptyDelta}.`);
+    await writeAudit(ctx, userId, "create", "waterContainerMovements", String(id), `Movimentação ${args.type} em ${new Date(args.date).toLocaleDateString("pt-BR")}: galões cheios ${args.fullDelta >= 0 ? "+" : ""}${args.fullDelta}, vazios ${args.emptyDelta >= 0 ? "+" : ""}${args.emptyDelta}.`);
     return id;
   },
 });
@@ -334,7 +334,7 @@ export const recordPayment = mutation({
       method: args.method?.trim() || undefined, observation: args.observation?.trim() || undefined,
       createdBy: userId, createdAt: Date.now(),
     });
-    await writeAudit(ctx, userId, "create", "waterPayments", String(id), `Pagamento de R$ ${(args.amountCents / 100).toFixed(2)} registrado para ${share.participantName}.`);
+    await writeAudit(ctx, userId, "create", "waterPayments", String(id), `Pagamento de R$ ${(args.amountCents / 100).toFixed(2)} registrado para ${share.participantName} em ${new Date(args.paidAt).toLocaleDateString("pt-BR")}. Meio: ${args.method?.trim() || "não informado"}.`);
     return id;
   },
 });
