@@ -833,6 +833,10 @@ const schema = defineSchema(
       responsibleUserId: v.id("users"),
       observation: v.optional(v.string()),
       createdAt: v.number(),
+      // Estorno é imutável e único; o registro original permanece no histórico.
+      reversedAt: v.optional(v.number()),
+      reversedByUserId: v.optional(v.id("users")),
+      reversalReason: v.optional(v.string()),
     }).index("by_product", ["productId"])
       .index("by_from", ["fromLocationId"])
       .index("by_to", ["toLocationId"]),
