@@ -188,7 +188,7 @@ export function buildNfeEntrySummary(input: {
       unitValue: row.item.unitValue,
       totalValue: row.item.totalValue,
       locationName: location?.name,
-      areaName: area?.name ?? "Área padrão não identificada",
+      areaName: area?.name ?? (row.areaId ? "Área selecionada não encontrada" : "Área padrão definida na etapa de destino"),
       supplierLot: row.supplierLot || undefined,
     };
   });
