@@ -190,17 +190,6 @@ export const registerUpload = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requirePermission(ctx, "stock.mutate");
     const storageId = assertValidStorageId(args.storageId);
-    const metadata = await ctx.db.system.get("_storage", storageId as any);
-    if (!metadata) throw new Error("O arquivo enviado não foi encontrado no armazenamento.");
-    if (!isStorageUploadSizeAllowed(metadata.size)) {
-      // Return a rejection result so the delete commits with the mutation.
-      // Throwing here would roll back the storage deletion with the transaction.
-      await ctx.storage.delete(storageId as any);
-      return { ok: false as const, reason: "invalid-size" as const };
-    }
-    const url = await ctx.storage.getUrl(storageId as any);
-    if (!url) throw new Error("O arquivo enviado não foi encontrado no armazenamento.");
-
     const existing = await ctx.db
       .query("storageFiles")
       .withIndex("by_storageId", (q: any) => q.eq("storageId", storageId))
@@ -222,6 +211,17 @@ export const registerUpload = mutation({
     if ((legacyOwners.get(storageId) ?? []).length > 0) {
       throw new Error("Este arquivo já pertence a outro registro.");
     }
+
+    const metadata = await ctx.db.system.get("_storage", storageId as any);
+    if (!metadata) throw new Error("O arquivo enviado não foi encontrado no armazenamento.");
+    if (!isStorageUploadSizeAllowed(metadata.size)) {
+      // Return a rejection result so the delete commits with the mutation.
+      // Throwing here would roll back the storage deletion with the transaction.
+      await ctx.storage.delete(storageId as any);
+      return { ok: false as const, reason: "invalid-size" as const };
+    }
+    const url = await ctx.storage.getUrl(storageId as any);
+    if (!url) throw new Error("O arquivo enviado não foi encontrado no armazenamento.");
 
     const now = Date.now();
     await ctx.db.insert("storageFiles", {
