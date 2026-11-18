@@ -29,6 +29,20 @@ import { generateSecureNumericCode, hashResetCode } from "./auth/passwords";
 
 const SEND_OTP_ENDPOINT = "https://auth.freebuff.app/send_otp";
 
+/** Escape dynamic values before embedding them in transactional HTML. */
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character];
+  });
+}
+
 /** Nome da variável de ambiente que guarda a chave do serviço de e-mail. */
 export const EMAIL_API_KEY_ENV = "FREEBUFF_EMAIL_API_KEY";
 
@@ -214,6 +228,8 @@ export const sendFirstAccessEmail = mutation({
 
     const displayName = (args.name ?? target.name ?? "").toString();
     const safeName = displayName || target.name || "Servidor";
+    const htmlSafeName = escapeHtml(safeName);
+    const htmlSafeTemporaryPassword = escapeHtml(args.temporaryPassword);
 
     try {
       const response = await fetch("https://api.resend.com/emails", {
@@ -235,7 +251,7 @@ export const sendFirstAccessEmail = mutation({
                 <div style="text-align:center;margin-bottom:24px;">
                   <div style="display:inline-block;background:#1a5632;color:white;font-weight:bold;font-size:14px;padding:8px 12px;border-radius:8px;">SG</div>
                 </div>
-                <h1 style="color:#1a5632;font-size:18px;text-align:center;">Bem-vindo, ${safeName}!</h1>
+                <h1 style="color:#1a5632;font-size:18px;text-align:center;">Bem-vindo, ${htmlSafeName}!</h1>
 
                 <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:24px;margin:24px 0;">
                   <p style="color:#444;font-size:14px;line-height:1.5;">
@@ -246,7 +262,7 @@ export const sendFirstAccessEmail = mutation({
                   </p>
                   <div style="text-align:center;margin:16px 0;">
                     <span style="display:inline-block;background:#fff7ed;border:2px solid #C8A84E;border-radius:8px;padding:12px 24px;font-size:20px;font-weight:bold;letter-spacing:3px;color:#8B6914;font-family:monospace;">
-                      ${args.temporaryPassword}
+                      ${htmlSafeTemporaryPassword}
                     </span>
                   </div>
                   <p style="color:#888;font-size:12px;text-align:center;">
