@@ -1,95 +1,69 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { resolveEntryItemAreaId } from "./entry-area-classification";
 
-import { buildEntryDraftFromNfe, type NfeData } from "@/lib/nfe";
-import { buildNfeEntrySummary } from "@/lib/nfe-summary";
-import { resolveEntryAreaPresentation } from "@/lib/entry-area-presentation";
+const root = resolve(__dirname, "../..");
+const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
-const parsedNfe: NfeData = {
-  accessKey: "",
-  number: "123",
-  series: "1",
-  emissionDate: "2026-11-18",
-  items: [
-    {
-      lineNumber: 1,
-      code: "A1",
-      description: "Material de teste",
-      unit: "UN",
-      quantity: 2,
-    },
-  ],
-};
+describe("classificação efetiva por item na confirmação da entrada", () => {
+  it("mantém áreas diferentes para itens da mesma entrada", () => {
+    const defaultArea = "stockAreas:ti";
+    const items = [
+      { productId: "products:toner", areaId: "stockAreas:impressoras" },
+      { productId: "products:detergente", areaId: "stockAreas:limpeza" },
+      { productId: "products:mouse" },
+    ];
 
-describe("classificação de área por item na entrada", () => {
-  it("preserva a área individual ao montar o rascunho da NF-e", () => {
-    const draft = buildEntryDraftFromNfe(parsedNfe, [
-      {
-        productId: "products:item-1",
-        locationId: "storageLocations:armario-1",
-        areaId: "stockAreas:limpeza",
-      },
-    ]);
-
-    expect(draft.items[0].areaId).toBe("stockAreas:limpeza");
-  });
-
-  it("mantém a área individual ausente para herdar a área padrão", () => {
-    const draft = buildEntryDraftFromNfe(parsedNfe, [
-      {
-        productId: "products:item-1",
-        locationId: "storageLocations:armario-1",
-      },
-    ]);
-
-    expect(draft.items[0].areaId).toBeUndefined();
-  });
-
-  it("apresenta áreas individuais no histórico e herda a área geral em registros antigos", () => {
-    const rows = resolveEntryAreaPresentation(
-      [
-        { product: { name: "Detergente" }, area: { name: "Limpeza" } },
-        { product: { name: "Copo descartável" }, area: null },
-      ],
-      "Copa e Cozinha",
-    );
-
-    expect(rows).toEqual([
-      { productName: "Detergente", areaName: "Limpeza" },
-      { productName: "Copo descartável", areaName: "Copa e Cozinha" },
+    expect(items.map((item) =>
+      resolveEntryItemAreaId(item.areaId, defaultArea)
+    )).toEqual([
+      "stockAreas:impressoras",
+      "stockAreas:limpeza",
+      "stockAreas:ti",
     ]);
   });
 
-  it("mostra a área individual no resumo e usa a área do cabeçalho como fallback", () => {
-    const summary = buildNfeEntrySummary({
-      nfe: {
-        number: "123",
-        series: "1",
-        emissionDate: "2026-11-18",
-      },
-      rows: [
-        {
-          item: parsedNfe.items[0],
-          productId: "products:item-1",
-          matchStatus: "found",
-          areaId: "stockAreas:limpeza",
-        },
-        {
-          item: { ...parsedNfe.items[0], lineNumber: 2 },
-          productId: "products:item-1",
-          matchStatus: "found",
-        },
-      ],
-      products: [{ _id: "products:item-1", name: "Material de teste" }],
-      areas: [
-        { _id: "stockAreas:limpeza", name: "Limpeza" },
-        { _id: "stockAreas:ti", name: "TI Geral" },
-      ],
-      defaultAreaId: "stockAreas:ti",
-    });
+  it("usa a área explícita do item mesmo quando o cabeçalho tem outra área", () => {
+    expect(resolveEntryItemAreaId(
+      "stockAreas:copa",
+      "stockAreas:ti",
+    )).toBe("stockAreas:copa");
+  });
 
-    expect(summary.items.map((item) => item.areaName)).toEqual([
-      "Limpeza",
-      "TI Geral",
-    ]);
+  it("faz o item herdar a área padrão quando não há sobrescrita", () => {
+    expect(resolveEntryItemAreaId(undefined, "stockAreas:ti"))
+      .toBe("stockAreas:ti");
+    expect(resolveEntryItemAreaId(null, "stockAreas:ti"))
+      .toBe("stockAreas:ti");
+  });
+
+  it("não inventa área quando nem item nem cabeçalho têm classificação", () => {
+    expect(resolveEntryItemAreaId(undefined, undefined)).toBeUndefined();
+    expect(resolveEntryItemAreaId(null, null)).toBeUndefined();
+  });
+});
+
+describe("integração da classificação com entries.confirm", () => {
+  const entries = read("src/convex/entries.ts");
+
+  it("usa a mesma área efetiva para validar e gravar o lote e o item", () => {
+    expect(entries).toContain("resolveEntryItemAreaId(item.areaId, entry.areaId)");
+    expect(entries).toContain("if (!effectiveAreaId)");
+    expect(entries).toContain("if (!area || !area.active)");
+    expect(entries).toContain("areaId: itemAreaId as any,");
+    expect(entries).toContain('await ctx.db.patch(item._id, {\n        lotId: lotId as string,\n        areaId: itemAreaId as any,');
+  });
+
+  it("grava a área efetiva no saldo por local e na movimentação", () => {
+    expect(entries).toMatch(/stockByLocation[\s\S]*?areaId: itemAreaId as any/);
+    expect(entries).toMatch(/stockMovements[\s\S]*?areaId: itemAreaId as any/);
+    expect(entries).toContain("itemAreas.set(item._id as string, effectiveAreaId as string)");
+  });
+
+  it("rejeita área inativa ou inexistente antes de efetivar os lotes", () => {
+    expect(entries).toContain("if (!area || !area.active)");
+    expect(entries.indexOf("if (!area || !area.active)"))
+      .toBeLessThan(entries.indexOf("// Generate lot"));
   });
 });

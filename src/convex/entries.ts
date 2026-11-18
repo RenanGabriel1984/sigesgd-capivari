@@ -13,6 +13,7 @@ import { requirePermission } from "./rbac";
 import { attachStorageFile } from "./storage";
 import type { Id } from "./_generated/dataModel";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
+import { resolveEntryItemAreaId } from "../lib/entry-area-classification";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -504,7 +505,7 @@ export const confirm = mutation({
         .collect();
       getOptionalSingleValidGlobalStock(globalRows, product.name);
 
-      const effectiveAreaId = item.areaId ?? entry.areaId;
+      const effectiveAreaId = resolveEntryItemAreaId(item.areaId, entry.areaId);
       if (!effectiveAreaId) {
         throw new Error(
           `A entrada ${entry.entryNumber} não possui área/subestoque definida para "${product.name}". ` +
