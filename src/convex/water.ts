@@ -15,7 +15,7 @@ async function currentContainerBalance(ctx: any) {
     ctx.db.query("waterReceipts").collect(),
     ctx.db.query("waterContainerMovements").collect(),
   ]);
-  return calculateWaterContainerBalance(receipts, movements);
+  return calculateWaterContainerBalance(receipts.filter((receipt: any) => !receipt.reversedAt), movements.filter((movement: any) => !movement.reversedAt));
 }
 
 async function writeAudit(ctx: any, userId: any, action: "create" | "update", entity: string, entityId: string, details: string) {
@@ -39,14 +39,14 @@ export const dashboard = query({
     const sortedParticipants = participants.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
     const participantNames = new Map(sortedParticipants.map((person: any) => [String(person._id), person.name]));
     const financialSummary = summarizeWaterFinances(
-      allReceipts,
+      allReceipts.filter((receipt: any) => !receipt.reversedAt),
       shares.map((share: any) => ({
         shareId: String(share._id),
         participantId: String(share.participantId),
         participantName: share.participantName ?? participantNames.get(String(share.participantId)) ?? "Participante inativo",
         amountDueCents: share.amountDueCents,
       })),
-      payments.map((payment: any) => ({
+      payments.filter((payment: any) => !payment.reversedAt).map((payment: any) => ({
         shareId: String(payment.shareId),
         amountCents: payment.amountCents,
       })),
@@ -76,7 +76,8 @@ export const periodDetails = query({
     const sharesWithPayments = await Promise.all(shares.map(async (share: any) => {
       const payments = await ctx.db.query("waterPayments")
         .withIndex("by_share", (q: any) => q.eq("shareId", share._id)).collect();
-      const paidCents = payments.reduce((sum: number, payment: any) => sum + payment.amountCents, 0);
+      const activePayments = payments.filter((payment: any) => !payment.reversedAt);
+      const paidCents = activePayments.reduce((sum: number, payment: any) => sum + payment.amountCents, 0);
       return {
         ...share,
         payments,
@@ -85,8 +86,9 @@ export const periodDetails = query({
         paymentStatus: paidCents >= share.amountDueCents ? "paid" : paidCents > 0 ? "partial" : "pending",
       };
     }));
-    const totalValueCents = receipts.reduce((sum, receipt) => sum + receipt.totalValueCents, 0);
-    const totalGallonsReceived = receipts.reduce((sum, receipt) => sum + receipt.gallonsReceived, 0);
+    const activeReceipts = receipts.filter((receipt: any) => !receipt.reversedAt);
+    const totalValueCents = activeReceipts.reduce((sum, receipt) => sum + receipt.totalValueCents, 0);
+    const totalGallonsReceived = activeReceipts.reduce((sum, receipt) => sum + receipt.gallonsReceived, 0);
     const totalPaidCents = sharesWithPayments.reduce((sum: number, share: any) => sum + share.paidCents, 0);
     return {
       period,
@@ -308,6 +310,79 @@ export const closePeriod = mutation({
     await ctx.db.patch(args.periodId, { status: "closed", closedAt: Date.now(), totalValueCents: totalCents });
     await writeAudit(ctx, userId, "update", "waterPeriods", String(args.periodId), `Período fechado. Total R$ ${(totalCents / 100).toFixed(2)} dividido entre ${participantData.length} participante(s).`);
     return { totalCents, participants: participantData.length, sharesCreated: allocations.length };
+  },
+});
+
+
+/** Estorno lógico: preserva o lançamento original e sua trilha de auditoria. */
+function validateReversalReason(reason: string) {
+  const normalized = reason.trim();
+  if (normalized.length < 8) throw new Error("Informe uma justificativa de pelo menos 8 caracteres.");
+  if (normalized.length > 500) throw new Error("A justificativa deve ter no máximo 500 caracteres.");
+  return normalized;
+}
+
+export const reverseReceipt = mutation({
+  args: { receiptId: v.id("waterReceipts"), reason: v.string() },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterReceipts", entityId: args.receiptId });
+    const reason = validateReversalReason(args.reason);
+    const receipt = await ctx.db.get(args.receiptId);
+    if (!receipt) throw new Error("Recebimento não encontrado.");
+    if (receipt.reversedAt) throw new Error("Este recebimento já foi estornado.");
+    const period = await ctx.db.get(receipt.periodId);
+    if (!period || period.status !== "open") throw new Error("Não é permitido estornar recebimento após o fechamento do rateio. É necessária uma retificação financeira específica.");
+    const shares = await ctx.db.query("waterShares").withIndex("by_period", (q) => q.eq("periodId", receipt.periodId)).collect();
+    if (shares.length) throw new Error("O recebimento já possui rateio. Estorne ou retifique o rateio antes de alterar esta compra.");
+    const now = Date.now();
+    await ctx.db.patch(args.receiptId, { reversedAt: now, reversedBy: userId, reversalReason: reason });
+    await writeAudit(ctx, userId, "update", "waterReceipts", String(args.receiptId), `ESTORNO do recebimento original. Motivo: ${reason}. Valor: R$ ${(receipt.totalValueCents / 100).toFixed(2)}; galões: ${receipt.gallonsReceived}; data original: ${new Date(receipt.receivedAt).toLocaleDateString("pt-BR")}.`);
+    return { reversed: true, receiptId: args.receiptId, reversedAt: now };
+  },
+});
+
+export const reverseContainerMovement = mutation({
+  args: { movementId: v.id("waterContainerMovements"), reason: v.string() },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterContainerMovements", entityId: args.movementId });
+    const reason = validateReversalReason(args.reason);
+    const movement = await ctx.db.get(args.movementId);
+    if (!movement) throw new Error("Movimentação não encontrada.");
+    if (movement.reversedAt) throw new Error("Esta movimentação já foi estornada.");
+    const [receipts, movements] = await Promise.all([
+      ctx.db.query("waterReceipts").collect(),
+      ctx.db.query("waterContainerMovements").collect(),
+    ]);
+    const balance = calculateWaterContainerBalance(
+      receipts.filter((receipt: any) => !receipt.reversedAt),
+      movements.filter((item: any) => item._id !== args.movementId && !item.reversedAt),
+    );
+    if (balance.fullGallons < 0 || balance.emptyGallons < 0) throw new Error("O saldo físico já está inconsistente; não é seguro estornar esta movimentação.");
+    const now = Date.now();
+    await ctx.db.patch(args.movementId, { reversedAt: now, reversedBy: userId, reversalReason: reason });
+    await writeAudit(ctx, userId, "update", "waterContainerMovements", String(args.movementId), `ESTORNO da movimentação ${movement.type}. Motivo: ${reason}. Variação original: cheios ${movement.fullDelta}, vazios ${movement.emptyDelta}.`);
+    return { reversed: true, movementId: args.movementId, reversedAt: now };
+  },
+});
+
+export const reversePayment = mutation({
+  args: { paymentId: v.id("waterPayments"), reason: v.string() },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterPayments", entityId: args.paymentId });
+    const reason = validateReversalReason(args.reason);
+    const payment = await ctx.db.get(args.paymentId);
+    if (!payment) throw new Error("Pagamento não encontrado.");
+    if (payment.reversedAt) throw new Error("Este pagamento já foi estornado.");
+    const share = await ctx.db.get(payment.shareId);
+    if (!share) throw new Error("Parcela de rateio não encontrada.");
+    const payments = await ctx.db.query("waterPayments").withIndex("by_share", (q) => q.eq("shareId", payment.shareId)).collect();
+    const paidAfterReversal = payments.filter((item: any) => item._id !== args.paymentId && !item.reversedAt)
+      .reduce((sum: number, item: any) => sum + item.amountCents, 0);
+    if (paidAfterReversal > share.amountDueCents) throw new Error("A parcela possui pagamentos inconsistentes; não é seguro estornar.");
+    const now = Date.now();
+    await ctx.db.patch(args.paymentId, { reversedAt: now, reversedBy: userId, reversalReason: reason });
+    await writeAudit(ctx, userId, "update", "waterPayments", String(args.paymentId), `ESTORNO de pagamento de R$ ${(payment.amountCents / 100).toFixed(2)} de ${share.participantName}. Data original: ${new Date(payment.paidAt).toLocaleDateString("pt-BR")}. Motivo: ${reason}.`);
+    return { reversed: true, paymentId: args.paymentId, reversedAt: now };
   },
 });
 
