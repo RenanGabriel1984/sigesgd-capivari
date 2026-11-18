@@ -476,14 +476,14 @@ export default function Reports() {
                       ))}
                       {!movements && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={11} className="text-center py-8 text-muted-foreground text-sm">
                             Carregando…
                           </TableCell>
                         </TableRow>
                       )}
                       {movements && movements.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={11} className="text-center py-8 text-muted-foreground text-sm">
                             Nenhuma movimentação encontrada
                           </TableCell>
                         </TableRow>
