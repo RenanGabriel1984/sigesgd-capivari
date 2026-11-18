@@ -646,3 +646,43 @@ describe("SEC — anti-autoaprovação (§4) preservada", () => {
     expect(reqSrc).toMatch(/requireRequestAction\(ctx,\s*"requests\.reject"/);
   });
 });
+
+describe("RESET-HASH — códigos de recuperação protegidos em repouso", () => {
+  it("RESET-HASH-01: novos registros não persistem o código em texto", () => {
+    const passwordSrc = stripComments(read("src/convex/passwords.ts"));
+    const schemaSrc = stripComments(read("src/convex/schema.ts"));
+    const requestBlock = passwordSrc.slice(
+      passwordSrc.indexOf("export const requestPasswordReset"),
+      passwordSrc.indexOf("export const confirmPasswordReset"),
+    );
+    expect(schemaSrc).toMatch(/token:\s*v\.optional\(v\.string\(\)\)/);
+    expect(schemaSrc).toMatch(/tokenHash:\s*v\.optional\(v\.string\(\)\)/);
+    expect(schemaSrc).toMatch(/tokenSalt:\s*v\.optional\(v\.string\(\)\)/);
+    expect(requestBlock).not.toMatch(/token:\s*code/);
+    expect(requestBlock).toMatch(/runAfter\(0,\s*internal\.email\.sendPasswordResetEmailInternal/);
+  });
+
+  it("RESET-HASH-02: envio gera hash antes de persistir e envia o código sem armazená-lo", () => {
+    const emailSrc = stripComments(read("src/convex/email.ts"));
+    const actionBlock = emailSrc.slice(
+      emailSrc.indexOf("export const sendPasswordResetEmailInternal"),
+      emailSrc.indexOf("E-mail de primeiro acesso"),
+    );
+    expect(actionBlock).toMatch(/generateSecureNumericCode\(\)/);
+    expect(actionBlock).toMatch(/hashResetCode\(code\)/);
+    expect(actionBlock).toMatch(/storePasswordResetHashInternal/);
+    expect(actionBlock).toMatch(/sendOtpEmail\(payload\.email,\s*code\)/);
+    expect(actionBlock).not.toMatch(/token:\s*code/);
+  });
+
+  it("RESET-HASH-03: confirmação aceita hash novo e somente legado plaintext ainda válido", () => {
+    const passwordSrc = stripComments(read("src/convex/passwords.ts"));
+    const confirmBlock = passwordSrc.slice(
+      passwordSrc.indexOf("export const confirmPasswordReset"),
+      passwordSrc.indexOf("export const recordFailedLogin"),
+    );
+    expect(confirmBlock).toMatch(/verifyResetCode\(args\.code,\s*activeToken\.tokenHash/);
+    expect(confirmBlock).toMatch(/activeToken\.token === args\.code/);
+    expect(confirmBlock).toMatch(/token\.expiresAt > now/);
+  });
+});
