@@ -55,6 +55,14 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(create).not.toContain("sourceLocation.areaId");
   });
 
+  it("exige que a aprovação inclua todos os itens da solicitação antes de gravar reservas", () => {
+    const approve = mutationBlock(requests, "approve");
+    expect(approve).toContain('ctx.db.query("requestItems")');
+    expect(approve).toContain('q.eq("requestId", args.requestId)');
+    expect(approve).toContain("seenItems.size !== requestItems.length");
+    expect(approve).toContain("requestItems.some((item: any) => !seenItems.has(item._id as string))");
+  });
+
   it("aprova com reserva FIFO restrita ao mesmo lote, área e local físicos", () => {
     const approve = mutationBlock(requests, "approve");
     expect(approve).toContain("planFifoAreaLotAllocation");
