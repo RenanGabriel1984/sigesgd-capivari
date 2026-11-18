@@ -8,6 +8,12 @@ const backend = read("src/convex/water.ts");
 const page = read("src/pages/Water.tsx");
 
 describe("histórico e auditoria do controle de água", () => {
+  it("mantém todas as competências acessíveis no seletor, sem truncar o histórico em 24 períodos", () => {
+    const dashboardQuery = backend.slice(backend.indexOf("export const dashboard"), backend.indexOf("export const periodDetails"));
+    expect(dashboardQuery).toContain('ctx.db.query("waterPeriods").withIndex("by_startAt").order("desc").collect()');
+    expect(dashboardQuery).not.toContain('.take(24)');
+  });
+
   it("preserva o nome congelado no rateio mesmo após renomear participante", () => {
     expect(backend).toContain('participantName: share.participantName ?? participantNames.get(String(share.participantId)) ?? "Participante inativo"');
     expect(backend).toContain("participantName: participant.name");
