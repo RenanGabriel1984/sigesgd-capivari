@@ -741,6 +741,29 @@ describe("AUTH-SESSION — revogação e proteção contra bloqueio remoto", () 
 });
 
 
+describe("EMAIL-FIRST-ACCESS — envio externo fora de mutation", () => {
+  it("EMAIL-FIRST-ACCESS-01: envio usa action autenticada, valida o administrador e confere a senha armazenada", () => {
+    const emailSrc = stripComments(read("src/convex/email.ts"));
+    const actionBlock = emailSrc.slice(emailSrc.indexOf("export const sendFirstAccessEmail"));
+    expect(actionBlock).toMatch(/sendFirstAccessEmail = action\(/);
+    expect(actionBlock).toMatch(/getAuthUserId\(ctx\)/);
+    expect(actionBlock).toMatch(/getFirstAccessRecipientInternal/);
+    expect(actionBlock).toMatch(/verifyPassword\(\s*args\.temporaryPassword/);
+    expect(actionBlock).toMatch(/fetch\("https:\/\/api\.resend\.com\/emails"/);
+    expect(emailSrc).toMatch(/roleHasPermission\(admin\.role as AppRole, "users\.manage"\)/);
+  });
+
+  it("EMAIL-FIRST-ACCESS-02: senha temporária não é persistida no agendador nem em logs de auditoria", () => {
+    const emailSrc = stripComments(read("src/convex/email.ts"));
+    const auditBlock = emailSrc.slice(
+      emailSrc.indexOf("export const recordFirstAccessEmailAuditInternal"),
+      emailSrc.indexOf("export const sendFirstAccessEmail"),
+    );
+    expect(auditBlock).not.toMatch(/temporaryPassword|passwordHash|salt/);
+    expect(emailSrc).not.toMatch(/scheduler\.runAfter[\s\S]{0,100}temporaryPassword/);
+  });
+});
+
 describe("AUTH-TIMING — anti-enumeração por tempo de resposta", () => {
   it("AUTH-TIMING-01: contas inexistentes, inativas, inválidas ou sem senha executam PBKDF2 fictício", () => {
     const passwords = stripComments(read("src/convex/passwords.ts"));
