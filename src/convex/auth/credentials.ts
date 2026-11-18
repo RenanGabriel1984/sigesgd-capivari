@@ -34,6 +34,9 @@ export const credentials = ConvexCredentials<DataModel>({
     if (!password) {
       throw new ConvexError("Senha é obrigatória");
     }
+    if (email.length > 254 || password.length > 200) {
+      throw new ConvexError("E-mail ou senha incorretos.");
+    }
 
     const normalizedEmail = email.trim().toLowerCase();
 
