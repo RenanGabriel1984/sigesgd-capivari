@@ -26,7 +26,7 @@ describe("segurança e precisão dos relatórios", () => {
   });
 
   it("dashboard conta todas as trocas GomaQ da competência pelo índice de data, sem limite arbitrário", () => {
-    expect(dashboard).toContain('.withIndex("by_date", (q) => q.gte("exchangedAt", monthStartMs).lte("exchangedAt", nowMs))');
+    expect(dashboard).toContain('.withIndex("by_date", (q) => q.gte("exchangedAt", monthStartMs).lte("exchangedAt", Date.now()))');
     expect(dashboard).toContain("gomaqExchangesThisMonth = gomaqExchanges.length");
     expect(dashboard).not.toContain('query("gomaQExchanges").order("desc").take(500)');
   });
