@@ -24,7 +24,7 @@ export const dashboard = query({
     await requirePermission(ctx, "water.view", { entity: "water" });
     const [participants, periods, allReceipts, allMovements, shares, payments] = await Promise.all([
       ctx.db.query("waterParticipants").collect(),
-      ctx.db.query("waterPeriods").withIndex("by_startAt").order("desc").take(24),
+      ctx.db.query("waterPeriods").withIndex("by_startAt").order("desc").collect(),
       ctx.db.query("waterReceipts").collect(),
       ctx.db.query("waterContainerMovements").collect(),
       ctx.db.query("waterShares").collect(),
