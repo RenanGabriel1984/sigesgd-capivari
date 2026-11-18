@@ -5,7 +5,8 @@ import {
   validateWaterPeriodRange,
   validateWaterReceiptDate,
   isValidWaterTimestamp,
-  calculateWaterContainerBalance,\n  validateWaterContainerLedger,
+  calculateWaterContainerBalance,
+  validateWaterContainerLedger,
   buildWaterSupplierReturnDeltas,
   summarizeWaterFinances,
 } from "../lib/water-control";
