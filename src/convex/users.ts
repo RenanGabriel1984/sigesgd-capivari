@@ -252,16 +252,23 @@ export const updateUser = mutation({
     }
     const targetUser = await ctx.db.get(userId);
     if (!targetUser) throw new Error("Usuário não encontrado");
-    const removesActiveAdmin = targetUser.role === "admin" &&
+    // admin e secretary possuem o mesmo acesso integral na matriz RBAC.
+    // Ambos contam como gestores de usuários para evitar lockout administrativo.
+    const targetIsUserManager = targetUser.role === "admin" || targetUser.role === "secretary";
+    const remainsUserManager = updates.role === undefined ||
+      updates.role === "admin" || updates.role === "secretary";
+    const removesActiveAdmin = targetIsUserManager &&
       targetUser.active !== false &&
-      (updates.active === false || (updates.role !== undefined && updates.role !== "admin"));
+      (updates.active === false || (updates.role !== undefined && !remainsUserManager));
     if (removesActiveAdmin) {
-      const admins = await ctx.db.query("users")
-        .withIndex("by_role", (q: any) => q.eq("role", "admin"))
-        .collect();
-      const activeAdmins = admins.filter((admin: any) => admin.active !== false);
-      if (activeAdmins.length <= 1) {
-        throw new Error("Não é possível desativar ou rebaixar o último administrador ativo");
+      const [admins, secretaries] = await Promise.all([
+        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "secretary")).collect(),
+      ]);
+      const activeUserManagers = [...admins, ...secretaries]
+        .filter((manager: any) => manager.active !== false);
+      if (activeUserManagers.length <= 1) {
+        throw new Error("Não é possível desativar ou rebaixar o último administrador/secretário com acesso integral");
       }
     }
     if (updates.name !== undefined) {
@@ -325,13 +332,15 @@ export const deactivateUser = mutation({
     if (args.userId === adminId) throw new Error("Você não pode desativar sua própria conta");
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
-    if (user.role === "admin" && user.active !== false) {
-      const admins = await ctx.db.query("users")
-        .withIndex("by_role", (q: any) => q.eq("role", "admin"))
-        .collect();
-      const activeAdmins = admins.filter((admin: any) => admin.active !== false);
-      if (activeAdmins.length <= 1) {
-        throw new Error("Não é possível desativar o último administrador ativo");
+    if ((user.role === "admin" || user.role === "secretary") && user.active !== false) {
+      const [admins, secretaries] = await Promise.all([
+        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "secretary")).collect(),
+      ]);
+      const activeUserManagers = [...admins, ...secretaries]
+        .filter((manager: any) => manager.active !== false);
+      if (activeUserManagers.length <= 1) {
+        throw new Error("Não é possível desativar o último administrador/secretário com acesso integral");
       }
     }
     await ctx.db.patch(args.userId, { active: false, updatedAt: Date.now() });
