@@ -442,8 +442,6 @@ function EntriesPage() {
     locations: locationList,
     areas: areas ?? [],
     defaultAreaId: nfeDestination.areaId ?? undefined,
-    areas: areas ?? [],
-    defaultAreaId: nfeDestination.areaId ?? undefined,
     supplier: nfeSupplier,
     afNumber: nfeAfNumber,
     processNumber: nfeProcessNumber,
@@ -643,12 +641,17 @@ function EntriesPage() {
     const invalidIndex = nfeItems.findIndex((row) => {
       if (!row.productId || !row.locationId) return true;
       const location = locationList.find((item) => item._id === row.locationId);
-      return !location || !location.active;
+      if (!location || !location.active) return true;
+      if (row.areaId) {
+        const itemArea = (areas ?? []).find((item) => item._id === row.areaId);
+        if (!itemArea || !itemArea.active) return true;
+      }
+      return false;
     });
     if (invalidIndex >= 0) {
       setDestinationOpen(false);
       setNfeStep("products");
-      toast.error("Associe cada item da NF-e a um local físico ativo. A área é uma classificação independente do armário.");
+      toast.error("Revise os itens: cada um precisa de local físico ativo e, quando houver sobrescrita, de área ativa. A área é independente do armário.");
       return;
     }
     setNfeDestination({ materialType, areaId });
