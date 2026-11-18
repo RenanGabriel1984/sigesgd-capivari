@@ -2,7 +2,7 @@ import { getAuthUserId, getAuthSessionId, invalidateSessions } from "@convex-dev
 import { requirePermission } from "./rbac";
 import { mutation, internalQuery, internalMutation, internalAction } from "./_generated/server";
 import { v } from "convex/values";
-import { hashPassword, verifyPassword, nextResetAttempt, verifyResetCode } from "./auth/passwords";
+import { hashPassword, verifyPassword, nextResetAttempt, verifyResetCode, isValidRecoveryEmail } from "./auth/passwords";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
@@ -676,7 +676,7 @@ export const requestPasswordReset = mutation({
     if (
       !email ||
       email.length > 254 ||
-      !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)
+      !isValidRecoveryEmail(email)
     ) {
       return { message: RESET_GENERIC_MESSAGE };
     }
@@ -772,7 +772,7 @@ export const confirmPasswordReset = mutation({
     if (
       !email ||
       email.length > 254 ||
-      !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)
+      !isValidRecoveryEmail(email)
     ) {
       throw new Error("Código inválido ou expirado");
     }
