@@ -110,6 +110,11 @@ describe("integração da compatibilidade histórica com entries.reverse", () =>
     expect(reverseBody).toContain("locationStock.quantity - item.quantity");
   });
 
+  it("bloqueia o estorno quando a localização física original não pode ser recuperada", () => {
+    expect(reverseBody).toContain("if (!lotLocationId)");
+    expect(reverseBody).toContain("Regularize a localização antes do estorno");
+  });
+
   it("bloqueia saldo lote × armário duplicado antes de aplicar o estorno", () => {
     expect(reverseBody).toContain("if (lotLocationRows.length > 1)");
     expect(reverseBody.indexOf("if (lotLocationRows.length > 1)"))
