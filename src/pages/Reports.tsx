@@ -151,11 +151,19 @@ export default function Reports() {
 
   // ─── Assets Report ───
   const allAssets = useQuery(api.assets.list, {});
+  const assetReportTruncated = (allAssets?.length ?? 0) > 500;
+  const displayedAssets = allAssets?.slice(0, 500);
 
   // ─── GomaQ Report ───
   const gomaqExchanges = useQuery(api.gomaQ.listExchanges, {});
   const gomaqCartridges = useQuery(api.gomaQ.listEmptyCartridges, {});
   const gomaqCollections = useQuery(api.gomaQ.listCollections);
+  const gomaqExchangesTruncated = (gomaqExchanges?.length ?? 0) > 500;
+  const gomaqCartridgesTruncated = (gomaqCartridges?.length ?? 0) > 500;
+  const gomaqCollectionsTruncated = (gomaqCollections?.length ?? 0) > 100;
+  const displayedGomaqExchanges = gomaqExchanges?.slice(0, 500);
+  const displayedGomaqCartridges = gomaqCartridges?.slice(0, 500);
+  const displayedGomaqCollections = gomaqCollections?.slice(0, 100);
 
   // ─── Movement Report ───
   const [movStartDate, setMovStartDate] = useState("");
@@ -775,15 +783,16 @@ export default function Reports() {
             {!allAssets ? <p className="text-muted-foreground text-sm">Carregando...</p> : (
               <>
                 <div className="flex gap-2 mb-3">
-                  <Badge variant="outline" className="text-xs">{allAssets.length} equipamento(s)</Badge>
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { exportAssetsCSV(allAssets); toast.success("CSV exportado"); }}><Download className="h-3.5 w-3.5" /> CSV</Button>
+                  <Badge variant="outline" className="text-xs">{displayedAssets?.length ?? 0}{assetReportTruncated ? "+" : ""} equipamento(s)</Badge>
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { exportAssetsCSV(displayedAssets ?? []); toast.success(assetReportTruncated ? "CSV dos 500 equipamentos mais recentes exportado" : "CSV exportado"); }}><Download className="h-3.5 w-3.5" /> CSV até 500</Button>
                 </div>
+                {assetReportTruncated && <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">Este relatório está limitado aos 500 equipamentos mais recentes. A listagem e o CSV não representam o histórico completo.</p>}
                 <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table>
                   <TableHeader><TableRow>
                     <TableHead className="text-xs">Patrimônio</TableHead><TableHead className="text-xs">Série</TableHead><TableHead className="text-xs">Tipo</TableHead><TableHead className="text-xs">Fabricante / Modelo</TableHead><TableHead className="text-xs">Usuário</TableHead><TableHead className="text-xs">Secretaria</TableHead><TableHead className="text-xs">Status</TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
-                    {allAssets.map((a: any) => (
+                    {displayedAssets?.map((a: any) => (
                       <TableRow key={a._id}>
                         <TableCell className="text-xs font-mono">{a.patrimonyNumber ?? "—"}</TableCell>
                         <TableCell className="text-xs">{a.serialNumber ?? "—"}</TableCell>
@@ -803,21 +812,22 @@ export default function Reports() {
           {/* ═══ RELATÓRIO 7: GOMAQ ═══ */}
           <TabsContent value="gomaq" className="space-y-4 mt-4">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total de Trocas</p><p className="text-2xl font-bold">{gomaqExchanges?.length ?? 0}</p></CardContent></Card>
-              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Carcaças Aguardando</p><p className="text-2xl font-bold text-orange-600">{gomaqCartridges?.filter((c: any) => c.status === "awaiting_collection").length ?? 0}</p></CardContent></Card>
-              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Coletas Realizadas</p><p className="text-2xl font-bold">{gomaqCollections?.length ?? 0}</p></CardContent></Card>
-              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Coletado</p><p className="text-2xl font-bold">{gomaqCollections?.reduce((s: number, c: any) => s + c.totalCartridges, 0) ?? 0}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total de Trocas</p><p className="text-2xl font-bold">{displayedGomaqExchanges?.length ?? 0}{gomaqExchangesTruncated ? "+" : ""}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Carcaças Aguardando</p><p className="text-2xl font-bold text-orange-600">{displayedGomaqCartridges?.filter((c: any) => c.status === "awaiting_collection").length ?? 0}{gomaqCartridgesTruncated ? "+" : ""}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Coletas Realizadas</p><p className="text-2xl font-bold">{displayedGomaqCollections?.length ?? 0}{gomaqCollectionsTruncated ? "+" : ""}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Coletado</p><p className="text-2xl font-bold">{displayedGomaqCollections?.reduce((s: number, c: any) => s + c.totalCartridges, 0) ?? 0}{gomaqCollectionsTruncated ? "+" : ""}</p></CardContent></Card>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { if (gomaqExchanges) { exportGomaqCSV(gomaqExchanges); toast.success("CSV exportado"); } }}><Download className="h-3.5 w-3.5" /> CSV Trocas</Button>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { if (displayedGomaqExchanges) { exportGomaqCSV(displayedGomaqExchanges); toast.success(gomaqExchangesTruncated ? "CSV das 500 trocas mais recentes exportado" : "CSV exportado"); } }}><Download className="h-3.5 w-3.5" /> CSV até 500 Trocas</Button>
             </div>
+            {(gomaqExchangesTruncated || gomaqCartridgesTruncated || gomaqCollectionsTruncated) && <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">Dados limitados aos registros mais recentes: até 500 trocas e carcaças, e até 100 coletas. Os indicadores e o CSV não representam o histórico completo quando houver limite excedido.</p>}
             {gomaqExchanges && gomaqExchanges.length > 0 && (
               <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table>
                 <TableHeader><TableRow>
                   <TableHead className="text-xs">Data</TableHead><TableHead className="text-xs">Nº</TableHead><TableHead className="text-xs">Produto</TableHead><TableHead className="text-xs text-right">Qtd</TableHead><TableHead className="text-xs">Impressora</TableHead><TableHead className="text-xs text-right">Carcaças</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
-                  {gomaqExchanges.slice(0, 100).map((e: any) => (
+                  {displayedGomaqExchanges?.slice(0, 100).map((e: any) => (
                     <TableRow key={e._id}>
                       <TableCell className="text-xs">{new Date(e.exchangedAt).toLocaleDateString("pt-BR")}</TableCell>
                       <TableCell className="text-xs font-mono">{e.exchangeNumber}</TableCell>
