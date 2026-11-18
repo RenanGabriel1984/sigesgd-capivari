@@ -134,7 +134,7 @@ export const stats = query({
     try {
       const gomaqExchanges = await ctx.db
         .query("gomaQExchanges")
-        .withIndex("by_date", (q) => q.gte("exchangedAt", monthStartMs).lte("exchangedAt", nowMs))
+        .withIndex("by_date", (q) => q.gte("exchangedAt", monthStartMs).lte("exchangedAt", Date.now()))
         .collect();
       gomaqExchangesThisMonth = gomaqExchanges.length;
     } catch { /* table may not exist yet */ }
