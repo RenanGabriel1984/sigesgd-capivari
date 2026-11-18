@@ -75,6 +75,12 @@ function exportStockPositionCSV(data: any[]) {
   downloadCSV("posicao_estoque.csv", serializeSemicolonCsv(header, rows));
 }
 
+function exportStockPositionByAreaCSV(data: any[]) {
+  const header = ["Produto", "Código", "Área", "Local físico", "Saldo físico", "Reservado", "Disponível", "Unidade", "Linhas de saldo"];
+  const rows = data.map((r) => [r.productName, r.internalCode, r.areaName, r.locationName, r.physicalQuantity, r.reservedQuantity, r.availableQuantity, UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure, r.duplicateRows]);
+  downloadCSV("posicao_estoque_por_area_local.csv", serializeSemicolonCsv(header, rows));
+}
+
 function exportMovementCSV(data: any[]) {
   const header = ["Data", "Tipo", "Produto", "Quantidade", "Usuário", "Fornecedor", "Documento", "Observação", "Cancelada"];
   const rows = data.map((r) => [
@@ -125,6 +131,7 @@ function exportGomaqCSV(exchanges: any[]) {
 export default function Reports() {
   // ─── Stock Position ───
   const stockPosition = useQuery(api.dashboard.stockPosition);
+  const stockPositionByArea = useQuery(api.dashboard.stockPositionByArea);
   const tonerMetrics = useQuery(api.printers.tonerMetrics);
 
   // ─── Requests Report ───
@@ -310,6 +317,35 @@ export default function Reports() {
                 </div>
               </CardContent>
             </Card>
+          <Card className="border-border/50">
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">Posição por área e local físico</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">Saldo físico separado por produto, área e armário. Reservas são exibidas à parte.</p>
+              </div>
+              <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => {
+                if (!stockPositionByArea || stockPositionByArea.length === 0) { toast.error("Nenhum saldo por área/local para exportar"); return; }
+                exportStockPositionByAreaCSV(stockPositionByArea);
+                toast.success("CSV por área/local exportado");
+              }}><Download className="h-3.5 w-3.5" /> CSV detalhado</Button>
+            </CardHeader>
+            <CardContent className="p-0"><div className="overflow-x-auto"><Table>
+              <TableHeader><TableRow>
+                <TableHead className="text-xs">Produto</TableHead><TableHead className="text-xs">Área</TableHead><TableHead className="text-xs">Local físico</TableHead>
+                <TableHead className="text-xs text-right">Físico</TableHead><TableHead className="text-xs text-right">Reservado</TableHead><TableHead className="text-xs text-right">Disponível</TableHead><TableHead className="text-xs">Integridade</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {stockPositionByArea?.map((item) => <TableRow key={item._id}>
+                  <TableCell className="text-sm font-medium"><div>{item.productName}</div><div className="text-[10px] text-muted-foreground font-mono">{item.internalCode || "—"}</div></TableCell>
+                  <TableCell className="text-xs">{item.areaName}</TableCell><TableCell className="text-xs">{item.locationName}</TableCell>
+                  <TableCell className="text-sm text-right font-mono">{item.physicalQuantity}</TableCell><TableCell className="text-sm text-right font-mono">{item.reservedQuantity}</TableCell><TableCell className="text-sm text-right font-mono">{item.availableQuantity}</TableCell>
+                  <TableCell>{item.inconsistent ? <Badge variant="destructive" className="text-[10px]">Revisar {item.duplicateRows > 1 ? "(" + item.duplicateRows + " linhas)" : ""}</Badge> : <Badge variant="outline" className="text-[10px]">OK</Badge>}</TableCell>
+                </TableRow>)}
+                {!stockPositionByArea && <TableRow><TableCell colSpan={7} className="text-center py-6 text-muted-foreground text-sm">Carregando…</TableCell></TableRow>}
+                {stockPositionByArea?.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-6 text-muted-foreground text-sm">Nenhum saldo por área/local registrado.</TableCell></TableRow>}
+              </TableBody>
+            </Table></div></CardContent>
+          </Card>
           </TabsContent>
 
           {/* ═══ RELATÓRIO 2: MOVIMENTAÇÕES POR PERÍODO ═══ */}
