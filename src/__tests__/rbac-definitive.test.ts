@@ -377,3 +377,25 @@ describe("RBAC — gestão de usuários respeita a matriz central", () => {
     expect(roleHasPermission("secretary", "users.manage")).toBe(true);
   });
 });
+
+
+describe("RBAC — proteção do último administrador ativo", () => {
+  it("updateUser não pode desativar ou rebaixar o último administrador ativo", () => {
+    const src = read("src/convex/users.ts");
+    const start = src.indexOf("export const updateUser");
+    const end = src.indexOf("export const activateUser", start);
+    const update = src.slice(start, end);
+    expect(update).toContain("removesActiveAdmin");
+    expect(update).toContain("admin.active !== false");
+    expect(update).toContain("activeAdmins.length <= 1");
+  });
+
+  it("deactivateUser conta apenas administradores ativos", () => {
+    const src = read("src/convex/users.ts");
+    const start = src.indexOf("export const deactivateUser");
+    const end = src.indexOf("export const recordLogin", start);
+    const deactivate = src.slice(start, end);
+    expect(deactivate).toContain("user.active !== false");
+    expect(deactivate).toContain("activeAdmins.length <= 1");
+  });
+});
