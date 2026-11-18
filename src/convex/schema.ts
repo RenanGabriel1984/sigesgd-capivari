@@ -1028,7 +1028,10 @@ const schema = defineSchema(
     // ── Password Reset Tokens ──
     passwordResets: defineTable({
       userId: v.id("users"),
-      token: v.string(),
+      // Optional legacy field: new recovery codes are stored only as salted hashes.
+      token: v.optional(v.string()),
+      tokenHash: v.optional(v.string()),
+      tokenSalt: v.optional(v.string()),
       expiresAt: v.number(),
       usedAt: v.optional(v.number()),
       // Tentativas de confirmação do código. Ao atingir o limite o token é
