@@ -224,6 +224,7 @@ export const create = mutation({
       model: v.optional(v.string()),
       specification: v.optional(v.string()),
       locationId: v.optional(v.id("storageLocations")),
+      areaId: v.optional(v.id("stockAreas")),
       photoStorageId: v.optional(v.string()),
       supplierLotNumber: v.optional(v.string()),
       observation: v.optional(v.string()),
@@ -270,6 +271,12 @@ export const create = mutation({
       const product = await ctx.db.get(item.productId);
       if (!product) throw new Error(`Produto não encontrado: ${item.productId}`);
       if (!product.active) throw new Error(`O produto "${product.name}" está inativo`);
+      if (item.areaId) {
+        const itemArea = await ctx.db.get(item.areaId);
+        if (!itemArea || !itemArea.active) {
+          throw new Error(`A área selecionada para "${product.name}" não existe ou está inativa.`);
+        }
+      }
     }
 
     const now = Date.now();
@@ -339,6 +346,7 @@ export const create = mutation({
         model: item.model,
         specification: item.specification,
         locationId: item.locationId,
+        areaId: item.areaId,
         photoStorageId: item.photoStorageId,
         supplierLotNumber: item.supplierLotNumber || undefined,
         observation: item.observation,
