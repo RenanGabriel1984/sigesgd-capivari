@@ -56,8 +56,13 @@ describe("segurança e precisão dos relatórios", () => {
     expect(page).toContain("movementReportTruncated");
     expect(page).toContain("A tela e o CSV mostram somente as 500 mais recentes");
     expect(page).toContain('new Date(reqEndDate + "T23:59:59.999").getTime()');
-    expect(page).toContain("requestReportMayBeTruncated");
-    expect(page).toContain("somente as 200 solicitações mais recentes");
+    expect(page).toContain("usePaginatedQuery(api.requests.listPaginated, {}, { initialNumItems: 50 })");
+    expect(page).toContain('const requestReportComplete = requestReportStatus === "Exhausted"');
+    expect(page).toContain("disabled={!requestReportComplete || filteredRequests.length === 0}");
+    expect(page).toContain("CSV integral");
+    expect(page).toContain("Carregar mais 50");
+    expect(page).not.toContain("requestReportMayBeTruncated");
+    expect(page).not.toContain("somente as 200 solicitações mais recentes");
   });
 
   it("relatório de movimentações identifica a área e o local físico de cada movimento", () => {
