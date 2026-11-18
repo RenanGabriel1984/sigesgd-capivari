@@ -916,11 +916,26 @@ export const reverse = mutation({
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "confirmed") throw new Error("Apenas entradas confirmadas podem ser estornadas");
 
-    const [items, entryLots] = await Promise.all([
+    const [items, entryLots, entryUnits] = await Promise.all([
       ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect(),
       ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect(),
+      ctx.db.query("entryItemUnits").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect(),
     ]);
     if (items.length === 0) throw new Error("Entrada confirmada não possui itens para estornar");
+
+    // Depois do tombamento, o bem já tem vínculo administrativo próprio.
+    // Não desfazemos esse vínculo automaticamente ao estornar o estoque:
+    // o setor de Patrimônio precisa conciliar o ativo antes de qualquer reversão.
+    const registeredPatrimonyUnit = entryUnits.find((unit: any) =>
+      unit.patrimonyRegistrationStatus === "registered" ||
+      !!unit.assetId ||
+      !!unit.patrimonyNumber?.trim()
+    );
+    if (registeredPatrimonyUnit) {
+      throw new Error(
+        "Não é possível estornar esta entrada: há unidade já tombada ou vinculada a um ativo. Solicite a conciliação do setor de Patrimônio antes do estorno.",
+      );
+    }
 
     const now = Date.now();
     const reversalDetails: string[] = [];
