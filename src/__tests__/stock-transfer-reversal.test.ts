@@ -59,6 +59,8 @@ describe("estorno seguro de transferências", () => {
     expect(schema).toContain("reversedAt: v.optional(v.number())");
     expect(schema).toContain("reversedByUserId: v.optional(v.id(\"users\"))");
     expect(schema).toContain("reversalReason: v.optional(v.string())");
+    expect(schema).toContain('REVERSE_TRANSFER: "reverse_stock_transfer"');
+    expect(schema).toContain("v.literal(AUDIT_ACTIONS.REVERSE_TRANSFER)");
     expect(reverse).toContain("reversedAt: now, reversedByUserId: userId, reversalReason: reason");
     expect(reverse).toContain('action: "reverse_stock_transfer"');
     expect(reverse).toContain('ctx.db.insert("stockMovements"');
