@@ -67,8 +67,11 @@ Referências oficiais:
 
 O repositório contém:
 - issuer de autenticação federada Freebuff em src/convex/auth.config.ts;
-- envio de recuperação de senha pelo endpoint https://auth.freebuff.app/send_otp;
-- variável FREEBUFF_EMAIL_API_KEY no backend.
+- envio de recuperação de senha pelo endpoint https://auth.freebuff.app/send_otp, autenticado por `FREEBUFF_EMAIL_API_KEY`;
+- envio de primeiro acesso pela API Resend, autenticado separadamente por `RESEND_API_KEY`;
+- remetente `EMAIL_FROM`, que deve corresponder a um domínio/endereço verificado no Resend.
+
+As duas chaves são credenciais de provedores distintos e não podem ser intercambiadas. Todas são segredos exclusivos do backend Convex; nenhuma deve ser incluída em variáveis `VITE_*` ou no bundle do frontend.
 
 Para a instalação municipal, precisamos:
 - validar se o provider próprio do Convex funciona sem o issuer Freebuff;
