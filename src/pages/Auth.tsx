@@ -63,8 +63,10 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [faShowPassword, setFaShowPassword] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && isAuthenticated) {
-      // Check if user needs to change password (first access)
+    // Convex queries return undefined while loading. Do not redirect until the
+    // user profile arrives, otherwise the first-access password dialog can be
+    // skipped and a temporary-password account lands directly in the app.
+    if (!authLoading && isAuthenticated && user !== undefined) {
       if (user?.requiresPasswordReset) {
         setFirstAccessOpen(true);
         return;
@@ -86,7 +88,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       formData.set("email", email.trim().toLowerCase());
       formData.set("password", password);
       await signIn("credentials", formData);
-      navigate(redirect);
+      // Navigation is coordinated by the effect above after currentUser loads,
+      // so accounts requiring a first-login password change are not skipped.
+      setIsLoading(false);
     } catch (error) {
       setError(
         getLoginErrorMessage(
