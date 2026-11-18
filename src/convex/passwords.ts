@@ -671,8 +671,15 @@ export const requestPasswordReset = mutation({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
-    if (!email) throw new Error("E-mail é obrigatório");
-    if (!Number.isFinite(args.email.length)) throw new Error("E-mail inválido");
+    // Public recovery endpoints accept bounded, normalized addresses only.
+    // Invalid input gets the same generic response as an unknown account.
+    if (
+      !email ||
+      email.length > 254 ||
+      !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)
+    ) {
+      return { message: RESET_GENERIC_MESSAGE };
+    }
 
     // Find user by email
     const user = await ctx.db
@@ -762,7 +769,13 @@ export const confirmPasswordReset = mutation({
   },
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
-    if (!email) throw new Error("E-mail é obrigatório");
+    if (
+      !email ||
+      email.length > 254 ||
+      !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)
+    ) {
+      throw new Error("Código inválido ou expirado");
+    }
     assertPasswordPolicy(args.newPassword);
 
     const user = await ctx.db
