@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildEntryDraftFromNfe, type NfeData } from "@/lib/nfe";
 import { buildNfeEntrySummary } from "@/lib/nfe-summary";
+import { resolveEntryAreaPresentation } from "@/lib/entry-area-presentation";
 
 const parsedNfe: NfeData = {
   accessKey: "",
@@ -41,6 +42,21 @@ describe("classificação de área por item na entrada", () => {
     ]);
 
     expect(draft.items[0].areaId).toBeUndefined();
+  });
+
+  it("apresenta áreas individuais no histórico e herda a área geral em registros antigos", () => {
+    const rows = resolveEntryAreaPresentation(
+      [
+        { product: { name: "Detergente" }, area: { name: "Limpeza" } },
+        { product: { name: "Copo descartável" }, area: null },
+      ],
+      "Copa e Cozinha",
+    );
+
+    expect(rows).toEqual([
+      { productName: "Detergente", areaName: "Limpeza" },
+      { productName: "Copo descartável", areaName: "Copa e Cozinha" },
+    ]);
   });
 
   it("mostra a área individual no resumo e usa a área do cabeçalho como fallback", () => {
