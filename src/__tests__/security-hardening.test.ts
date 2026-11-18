@@ -781,6 +781,10 @@ describe("EMAIL-FIRST-ACCESS — envio externo fora de mutation", () => {
     expect(actionBlock).toMatch(/getFirstAccessRecipientInternal/);
     expect(actionBlock).toMatch(/verifyPassword\(\s*args\.temporaryPassword/);
     expect(actionBlock).toMatch(/fetch\("https:\/\/api\.resend\.com\/emails"/);
+    expect(actionBlock).toMatch(/readResendApiKey\(\)/);
+    expect(actionBlock).not.toMatch(/readEmailApiKey\(\)/);
+    expect(emailSrc).toMatch(/RESEND_API_KEY_ENV = "RESEND_API_KEY"/);
+    expect(emailSrc).toMatch(/EMAIL_API_KEY_ENV = "FREEBUFF_EMAIL_API_KEY"/);
     expect(emailSrc).toMatch(/roleHasPermission\(admin\.role as AppRole, "users\.manage"\)/);
   });
 
