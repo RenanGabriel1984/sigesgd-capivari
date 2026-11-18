@@ -42,6 +42,12 @@ describe("implantação inicial do módulo Água Mineral (sem histórico prévio
     expect(backend).toContain("balance.emptyGallons + args.emptyDelta < 0");
   });
 
+  it("exige justificativa auditável para implantação do saldo físico inicial", () => {
+    expect(backend).toContain('if (args.type === "adjustment" && (args.observation?.trim().length ?? 0) < 8)');
+    expect(page).toContain("Justificativa da contagem / ajuste");
+    expect(page).toContain("Informe uma justificativa de pelo menos 8 caracteres para o ajuste de saldo.");
+  });
+
   it("não permite fechar período sem compra válida e participantes", () => {
     expect(backend).toContain("if (activeReceipts.length === 0) throw new Error");
     expect(backend).toContain("if (participants.length === 0) throw new Error");
