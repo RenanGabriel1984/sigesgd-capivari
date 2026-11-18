@@ -9,13 +9,14 @@ import { generateSecureNumericCode, hashResetCode, verifyPassword } from "./auth
  * Gestão de Estoque SGGD — Transporte de e-mail.
  *
  * ─── Hardening B-07 (segredos) ───────────────────────────────────────────────
- * A credencial do serviço de e-mail NÃO vive mais no código-fonte. Ela é lida
- * de `FREEBUFF_EMAIL_API_KEY` (variável de ambiente/secret do deployment).
+ * As credenciais de e-mail NÃO vivem no código-fonte:
+ * - `FREEBUFF_EMAIL_API_KEY`: endpoint Freebuff usado na recuperação por OTP;
+ * - `RESEND_API_KEY`: API Resend usada no envio de primeiro acesso.
  *
- * A chave que estava versionada (`fb_email_...`) deve ser considerada
- * COMPROMETIDA e ROTACIONADA no provedor. Sem a variável configurada, o
- * envio falha FECHADO: nenhuma requisição sai, nenhum segredo é escrito em
- * log e nenhum dado do usuário vaza.
+ * A chave antiga que estava versionada (`fb_email_...`) deve ser considerada
+ * COMPROMETIDA e ROTACIONADA no provedor. Sem a credencial específica, o
+ * respectivo envio falha FECHADO: nenhuma requisição sai, nenhum segredo é
+ * escrito em log e nenhum dado do usuário vaza.
  *
  * ─── Recuperação de senha ───────────────────────────────────────────────────
  * (`passwords.requestPasswordReset`)
