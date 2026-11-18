@@ -197,6 +197,18 @@ export default function StockTransfersPage() {
                         <TableCell className="text-sm">
                           {t.responsible?.name ?? "\u2014"}
                         </TableCell>
+                        <TableCell>
+                          <Badge variant={t.reversedAt ? "destructive" : "secondary"}>
+                            {t.reversedAt ? "Estornada" : "Concluída"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {!t.reversedAt && (user?.role === "admin" || user?.role === "stock_manager") && (
+                            <Button size="sm" variant="outline" className="gap-1" onClick={() => { setSelectedTransfer(t); setReversalReason(""); }}>
+                              <RotateCcw className="h-3.5 w-3.5" /> Estornar
+                            </Button>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
