@@ -13,7 +13,7 @@ import { requirePermission } from "./rbac";
 import { attachStorageFile } from "./storage";
 import type { Id } from "./_generated/dataModel";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
-import { resolveEntryItemAreaId } from "../lib/entry-area-classification";
+import { resolveEntryItemAreaId, resolveEntryLotLocationId } from "../lib/entry-area-classification";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -988,7 +988,7 @@ export const reverse = mutation({
       if (lotLocationRows.length > 1) {
         throw new Error(`Não é possível estornar "${product?.name ?? "item"}": há saldos lote × armário duplicados.`);
       }
-      const lotLocationId = lot.locationId ?? lotLocationRows[0]?.locationId ?? item.locationId ?? undefined;
+      const lotLocationId = resolveEntryLotLocationId(lot.locationId, lotLocationRows[0]?.locationId, item.locationId);
       if (
         (itemAreaId ?? undefined) !== (lotAreaId ?? undefined) ||
         (item.locationId && lotLocationId && item.locationId !== lotLocationId)
