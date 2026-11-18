@@ -55,6 +55,9 @@ export default function WaterPage() {
   const recordMovement = useMutation(api.water.recordContainerMovement);
   const closePeriod = useMutation(api.water.closePeriod);
   const recordPayment = useMutation(api.water.recordPayment);
+  const reverseReceipt = useMutation(api.water.reverseReceipt);
+  const reverseMovement = useMutation(api.water.reverseContainerMovement);
+  const reversePayment = useMutation(api.water.reversePayment);
 
   const [participantName, setParticipantName] = useState("");
   const [periodTitle, setPeriodTitle] = useState("");
@@ -105,6 +108,41 @@ export default function WaterPage() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Não foi possível concluir a operação.");
     }
+  };
+
+  const requestReversalReason = (label: string) => {
+    const reason = window.prompt(`Justificativa obrigatória para estornar: ${label}`);
+    return reason?.trim() ?? "";
+  };
+
+  const handleReverseReceipt = (receipt: any) => {
+    if (!canManage || receipt.reversedAt) return;
+    const reason = requestReversalReason("recebimento");
+    if (reason.length < 8) {
+      if (reason) toast.error("Informe uma justificativa de pelo menos 8 caracteres.");
+      return;
+    }
+    void runAction("Recebimento estornado; histórico preservado", () => reverseReceipt({ receiptId: receipt._id, reason }));
+  };
+
+  const handleReverseMovement = (movement: any) => {
+    if (!canManage || movement.reversedAt) return;
+    const reason = requestReversalReason("movimentação de galões");
+    if (reason.length < 8) {
+      if (reason) toast.error("Informe uma justificativa de pelo menos 8 caracteres.");
+      return;
+    }
+    void runAction("Movimentação estornada; histórico preservado", () => reverseMovement({ movementId: movement._id, reason }));
+  };
+
+  const handleReversePayment = (payment: any) => {
+    if (!canManage || payment.reversedAt) return;
+    const reason = requestReversalReason("pagamento");
+    if (reason.length < 8) {
+      if (reason) toast.error("Informe uma justificativa de pelo menos 8 caracteres.");
+      return;
+    }
+    void runAction("Pagamento estornado; saldo devedor recalculado", () => reversePayment({ paymentId: payment._id, reason }));
   };
 
   const handleCreatePeriod = () => runAction("Período de rateio aberto", async () => {
@@ -339,8 +377,8 @@ export default function WaterPage() {
 
               {details.receipts.length > 0 && <div className="overflow-x-auto rounded-lg border">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/50"><tr><th className="p-2 text-left">Data</th><th className="p-2 text-right">Cheios</th><th className="p-2 text-right">Vazios entregues</th><th className="p-2 text-right">Valor</th><th className="p-2 text-left">Origem</th></tr></thead>
-                  <tbody>{details.receipts.map((receipt: any) => <tr key={receipt._id} className="border-t"><td className="p-2">{formatDate(receipt.receivedAt)}</td><td className="p-2 text-right">{receipt.gallonsReceived}</td><td className="p-2 text-right">{receipt.emptyGallonsReturned}</td><td className="p-2 text-right">{money(receipt.totalValueCents)}</td><td className="p-2">{receipt.sourceName ?? "—"}</td></tr>)}</tbody>
+                  <thead className="bg-muted/50"><tr><th className="p-2 text-left">Data</th><th className="p-2 text-right">Cheios</th><th className="p-2 text-right">Vazios entregues</th><th className="p-2 text-right">Valor</th><th className="p-2 text-left">Origem / situação</th><th className="p-2">Ação</th></tr></thead>
+                  <tbody>{details.receipts.map((receipt: any) => <tr key={receipt._id} className="border-t"><td className="p-2">{formatDate(receipt.receivedAt)}</td><td className="p-2 text-right">{receipt.gallonsReceived}</td><td className="p-2 text-right">{receipt.emptyGallonsReturned}</td><td className="p-2 text-right">{money(receipt.totalValueCents)}</td><td className="p-2">{receipt.sourceName ?? "—"}{receipt.reversedAt && <Badge variant="destructive" className="ml-2">Estornado</Badge>}</td><td className="p-2">{canManage && !receipt.reversedAt && details.period.status === "open" ? <Button size="sm" variant="outline" onClick={() => handleReverseReceipt(receipt)}>Estornar</Button> : receipt.reversedAt ? <span className="text-xs text-muted-foreground" title={receipt.reversalReason}>Estornado</span> : "—"}</td></tr>)}</tbody>
                 </table>
               </div>}
 
@@ -348,10 +386,10 @@ export default function WaterPage() {
                 <h3 className="text-sm font-medium">Rateio individual</h3>
                 <div className="overflow-x-auto rounded-lg border">
                   <table className="w-full text-sm">
-                    <thead className="bg-muted/50"><tr><th className="p-2 text-left">Participante</th><th className="p-2 text-right">Devido</th><th className="p-2 text-right">Pago</th><th className="p-2 text-left">Situação</th><th className="p-2 text-left">Registrar pagamento</th></tr></thead>
+                    <thead className="bg-muted/50"><tr><th className="p-2 text-left">Participante</th><th className="p-2 text-right">Devido</th><th className="p-2 text-right">Pago</th><th className="p-2">Histórico de pagamentos</th><th className="p-2 text-left">Situação</th><th className="p-2 text-left">Registrar pagamento</th></tr></thead>
                     <tbody>
                       {details.shares.map((share: any) => <tr key={share._id} className="border-t align-middle">
-                        <td className="p-2 font-medium">{share.participantName}</td><td className="p-2 text-right">{money(share.amountDueCents)}</td><td className="p-2 text-right">{money(share.paidCents)}</td>
+                        <td className="p-2 font-medium">{share.participantName}</td><td className="p-2 text-right">{money(share.amountDueCents)}</td><td className="p-2 text-right">{money(share.paidCents)}</td><td className="p-2"><div className="space-y-1">{share.payments.map((payment: any) => <div key={payment._id} className="flex items-center gap-2 text-xs"><span>{formatDate(payment.paidAt)} — {money(payment.amountCents)}</span>{payment.reversedAt ? <Badge variant="destructive">Estornado</Badge> : canManage ? <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => handleReversePayment(payment)}>Estornar</Button> : null}</div>)}</div></td>
                         <td className="p-2"><Badge variant={share.paymentStatus === "paid" ? "default" : "secondary"}>{share.paymentStatus === "paid" ? "Pago" : share.paymentStatus === "partial" ? "Parcial" : "Pendente"}</Badge></td>
                         <td className="p-2"><div className="flex min-w-[280px] flex-col gap-1"><Input type="date" className="h-8" aria-label={`Data do pagamento de ${share.participantName}`} value={paymentDates[share._id] ?? localDateInput()} onChange={(e) => setPaymentDates((old) => ({ ...old, [share._id]: e.target.value }))} disabled={!canManage || share.remainingCents <= 0} /><div className="flex gap-1"><Input className="h-8" inputMode="decimal" placeholder="R$" value={paymentValues[share._id] ?? ""} onChange={(e) => setPaymentValues((old) => ({ ...old, [share._id]: e.target.value }))} disabled={!canManage || share.remainingCents <= 0} /><Button size="sm" className="h-8" disabled={!canManage || share.remainingCents <= 0} onClick={() => {
                           const cents = parseWaterMoneyToCents(paymentValues[share._id] ?? "");
@@ -361,7 +399,7 @@ export default function WaterPage() {
                           }, () => setPaymentValues((old) => ({ ...old, [share._id]: "" })));
                         }}>Registrar</Button></div></div></td>
                       </tr>)}
-                      {details.shares.length === 0 && <tr><td colSpan={5} className="p-6 text-center text-muted-foreground">Nenhum participante foi incluído no rateio.</td></tr>}
+                      {details.shares.length === 0 && <tr><td colSpan={6} className="p-6 text-center text-muted-foreground">Nenhum participante foi incluído no rateio.</td></tr>}
                     </tbody>
                   </table>
                 </div>
@@ -409,7 +447,7 @@ export default function WaterPage() {
         <Card>
           <CardHeader><CardTitle className="text-base">Movimentações recentes de galões</CardTitle></CardHeader>
           <CardContent>
-            {dashboard.movements.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma movimentação de consumo, devolução ou ajuste registrada.</p> : <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="p-2">Data</th><th className="p-2">Tipo</th><th className="p-2 text-right">Cheios (+/-)</th><th className="p-2 text-right">Vazios (+/-)</th><th className="p-2">Observação</th></tr></thead><tbody>{dashboard.movements.map((movement: any) => <tr key={movement._id} className="border-b"><td className="p-2">{formatDate(movement.date)}</td><td className="p-2">{movement.type === "consumption" ? "Consumo" : movement.type === "return" ? "Devolução" : "Ajuste"}</td><td className="p-2 text-right">{movement.fullDelta > 0 ? "+" : ""}{movement.fullDelta}</td><td className="p-2 text-right">{movement.emptyDelta > 0 ? "+" : ""}{movement.emptyDelta}</td><td className="p-2">{movement.observation ?? "—"}</td></tr>)}</tbody></table></div>}
+            {dashboard.movements.length === 0 ? <p className="text-sm text-muted-foreground">Nenhuma movimentação de consumo, devolução ou ajuste registrada.</p> : <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left"><th className="p-2">Data</th><th className="p-2">Tipo</th><th className="p-2 text-right">Cheios (+/-)</th><th className="p-2 text-right">Vazios (+/-)</th><th className="p-2">Observação / situação</th><th className="p-2">Ação</th></tr></thead><tbody>{dashboard.movements.map((movement: any) => <tr key={movement._id} className="border-b"><td className="p-2">{formatDate(movement.date)}</td><td className="p-2">{movement.type === "consumption" ? "Consumo" : movement.type === "return" ? "Devolução" : "Ajuste"}</td><td className="p-2 text-right">{movement.fullDelta > 0 ? "+" : ""}{movement.fullDelta}</td><td className="p-2 text-right">{movement.emptyDelta > 0 ? "+" : ""}{movement.emptyDelta}</td><td className="p-2">{movement.observation ?? "—"}{movement.reversedAt && <Badge variant="destructive" className="ml-2">Estornado</Badge>}{movement.reversedAt && <span className="ml-2 text-xs text-muted-foreground" title={movement.reversalReason}>{movement.reversalReason}</span>}</td><td className="p-2">{canManage && !movement.reversedAt ? <Button size="sm" variant="outline" onClick={() => handleReverseMovement(movement)}>Estornar</Button> : "—"}</td></tr>)}</tbody></table></div>}
           </CardContent>
         </Card>
       </div>
