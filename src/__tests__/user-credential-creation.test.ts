@@ -66,3 +66,23 @@ describe("cadastro seguro de usuários e credenciais", () => {
     expect(page).toContain("if (password.length < 8)");
   });
 });
+
+
+describe("primeiro acesso após autenticação", () => {
+  const authPage = read("src/pages/Auth.tsx");
+
+  it("aguarda o perfil Convex carregar antes de redirecionar", () => {
+    expect(authPage).toContain("isAuthenticated && user !== undefined");
+    expect(authPage).toContain("if (user?.requiresPasswordReset)");
+    expect(authPage).not.toContain("if (!authLoading && isAuthenticated) {");
+  });
+
+  it("não navega imediatamente após signIn antes de verificar a troca obrigatória", () => {
+    const start = authPage.indexOf('await signIn("credentials", formData)');
+    const end = authPage.indexOf("} catch (error)", start);
+    const signInHandler = authPage.slice(start, end);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(signInHandler).not.toContain("navigate(redirect)");
+    expect(signInHandler).toContain("setIsLoading(false)");
+  });
+});
