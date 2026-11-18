@@ -56,6 +56,8 @@ export type NfeReviewRow = {
   matchSource?: ProductMatchSource;
   matchReason?: string;
   associationType: ProductAssociationType;
+  /** Área específica do item; ausente significa herdar a área padrão. */
+  areaId?: string;
   locationId?: string;
   supplierLot?: string;
   /** Valores reconhecidos no documento (comparação/destaque de alteração). */
