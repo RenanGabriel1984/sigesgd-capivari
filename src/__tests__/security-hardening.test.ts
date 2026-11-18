@@ -816,6 +816,23 @@ describe("AUTH-TIMING — anti-enumeração por tempo de resposta", () => {
 });
 
 
+describe("STORAGE-UPLOAD — autorização e limite no servidor", () => {
+  it("STORAGE-UPLOAD-01: geração e registro exigem permissão de mutação e validam metadados", () => {
+    const storage = stripComments(read("src/convex/storage.ts"));
+    const uploadStart = storage.indexOf("export const generateUploadUrl");
+    const uploadEnd = storage.indexOf("export const getUrl", uploadStart);
+    const registerStart = storage.indexOf("export const registerUpload");
+    const registerEnd = storage.indexOf("export async function attachStorageFile", registerStart);
+    const generateBlock = storage.slice(uploadStart, uploadEnd);
+    const registerBlock = storage.slice(registerStart, registerEnd);
+    expect(generateBlock).toMatch(/requirePermission\(ctx, "stock\.mutate"\)/);
+    expect(registerBlock).toMatch(/requirePermission\(ctx, "stock\.mutate"\)/);
+    expect(registerBlock).toMatch(/ctx\.db\.system\.get\("_storage"/);
+    expect(registerBlock).toMatch(/isStorageUploadSizeAllowed\(metadata\.size\)/);
+    expect(registerBlock).toMatch(/ctx\.storage\.delete/);
+  });
+});
+
 describe("AUTH-RESET-REVOCATION — códigos antigos após mudança de acesso", () => {
   it("AUTH-RESET-REVOCATION-01: mudança de senha invalida todos os códigos pendentes", () => {
     const passwords = stripComments(read("src/convex/passwords.ts"));
