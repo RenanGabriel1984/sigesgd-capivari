@@ -161,7 +161,7 @@ export default function WaterPage() {
   const handleCreateReceipt = () => runAction("Recebimento manual registrado", async () => {
     if (!openPeriod) throw new Error("Abra um período de rateio antes de registrar o recebimento.");
     const cents = parseWaterMoneyToCents(receiptValue);
-    if (cents === null) throw new Error("Informe um valor total válido.");
+    if (cents === null || cents <= 0) throw new Error("Informe um valor total maior que zero.");
     await createReceipt({
       periodId: openPeriod._id,
       receivedAt: dateToTimestamp(receiptDate),
@@ -250,7 +250,7 @@ export default function WaterPage() {
           <Badge variant="outline">Controle interno — sem nota fiscal</Badge>
         </div>
 
-        {periods.length === 0 && dashboard.receipts.length === 0 && dashboard.movements.length === 0 && dashboard.participants.length === 0 && (
+        {canManage && periods.length === 0 && dashboard.receipts.length === 0 && dashboard.movements.length === 0 && dashboard.participants.length === 0 && (
           <Card className="border-primary/30">
             <CardHeader><CardTitle className="text-base">Primeira configuração do controle de água</CardTitle></CardHeader>
             <CardContent className="space-y-3">
