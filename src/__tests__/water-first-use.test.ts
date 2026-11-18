@@ -53,6 +53,16 @@ describe("implantação inicial do módulo Água Mineral (sem histórico prévio
     expect(backend).toContain("if (participants.length === 0) throw new Error");
   });
 
+  it("rejeita recebimento com valor zero e limita campos descritivos", () => {
+    expect(backend).toContain('if (!Number.isSafeInteger(args.totalValueCents) || args.totalValueCents <= 0)');
+    expect(backend).toContain("Fornecedor e responsável pelo pagamento devem ter no máximo 120 caracteres.");
+    expect(backend).toContain("A observação deve ter no máximo 500 caracteres.");
+  });
+
+  it("limita meio de pagamento e observação para preservar registros e auditoria", () => {
+    expect(backend).toContain("Meio de pagamento deve ter até 80 caracteres e observação até 500 caracteres.");
+  });
+
   it("não permite registrar pagamento sem uma parcela de rateio existente", () => {
     expect(backend).toContain('const share = await ctx.db.get(args.shareId)');
     expect(backend).toContain('if (!share) throw new Error("Parcela de rateio não encontrada.")');
