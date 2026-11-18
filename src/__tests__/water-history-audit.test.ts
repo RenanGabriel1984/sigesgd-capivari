@@ -35,4 +35,22 @@ describe("histórico e auditoria do controle de água", () => {
     expect(page).toContain("paidAt: dateToTimestamp(paymentDates[share._id] ?? localDateInput())");
     expect(page).not.toContain("paidAt: Date.now()");
   });
+
+  it("implementa estornos lógicos com motivo, ator, data e bloqueio de reexecução", () => {
+    expect(backend).toContain("export const reverseReceipt = mutation");
+    expect(backend).toContain("export const reverseContainerMovement = mutation");
+    expect(backend).toContain("export const reversePayment = mutation");
+    expect(backend).toContain("if (receipt.reversedAt) throw new Error");
+    expect(backend).toContain("if (movement.reversedAt) throw new Error");
+    expect(backend).toContain("if (payment.reversedAt) throw new Error");
+    expect(backend).toContain("reversalReason: reason");
+    expect(backend).toContain("Não é permitido estornar recebimento após o fechamento do rateio");
+  });
+
+  it("exclui lançamentos estornados dos saldos físicos e financeiros", () => {
+    expect(backend).toContain("receipts.filter((receipt: any) => !receipt.reversedAt)");
+    expect(backend).toContain("movements.filter((movement: any) => !movement.reversedAt)");
+    expect(backend).toContain("payments.filter((payment: any) => !payment.reversedAt)");
+  });
+
 });
