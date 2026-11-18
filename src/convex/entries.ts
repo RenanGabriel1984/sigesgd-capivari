@@ -978,9 +978,21 @@ export const reverse = mutation({
         );
       }
 
-      const lotAreaId = lot.areaId ?? undefined;
-      const lotLocationId = lot.locationId ?? undefined;
-      if ((item.areaId ?? undefined) !== lotAreaId || (item.locationId ?? undefined) !== lotLocationId) {
+      // Compatibilidade histórica: entradas anteriores à classificação por
+      // item podem ter areaId apenas no cabeçalho; lotes antigos também podem
+      // ter a localização preservada somente em lotLocationBalances.
+      const itemAreaId = resolveEntryItemAreaId(item.areaId, entry.areaId);
+      const lotAreaId = lot.areaId ?? itemAreaId;
+      const lotLocationRows = await ctx.db.query("lotLocationBalances")
+        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+      if (lotLocationRows.length > 1) {
+        throw new Error(`Não é possível estornar "${product?.name ?? "item"}": há saldos lote × armário duplicados.`);
+      }
+      const lotLocationId = lot.locationId ?? lotLocationRows[0]?.locationId ?? item.locationId ?? undefined;
+      if (
+        (itemAreaId ?? undefined) !== (lotAreaId ?? undefined) ||
+        (item.locationId && lotLocationId && item.locationId !== lotLocationId)
+      ) {
         throw new Error(`Não é possível estornar "${product?.name ?? "item"}": área/local do item diverge do lote original.`);
       }
 
@@ -1017,7 +1029,7 @@ export const reverse = mutation({
         active: lotAfter > 0,
       });
       await adjustLotLocationBalance(ctx, {
-        lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
+        lotId: lot._id, productId: lot.productId, locationId: lotLocationId,
         delta: -Number(item.quantity),
       });
       if (locationStock) {
