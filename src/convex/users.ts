@@ -113,6 +113,80 @@ export const listUserOptions = query({
 
 // ─── Mutations ───────────────────────────────────────────────────────────────
 
+/**
+ * Cria usuário e credencial em uma única transação.
+ * Evita deixar contas sem senha caso a segunda chamada falhe no cliente.
+ */
+export const createUserWithPassword = mutation({
+  args: {
+    name: v.string(),
+    email: v.string(),
+    role: v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician"), v.literal("patrimony_manager")),
+    organizationId: v.optional(v.id("organizations")),
+    temporaryPassword: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { userId: adminId } = await requireAdmin(ctx);
+    const name = args.name.trim();
+    const email = args.email.trim().toLowerCase();
+    if (!name) throw new Error("Nome é obrigatório.");
+    if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+      throw new Error("Informe um e-mail válido.");
+    }
+    if (args.temporaryPassword.length < 8 || args.temporaryPassword.length > 200) {
+      throw new Error("A senha temporária deve ter entre 8 e 200 caracteres.");
+    }
+    const existing = await ctx.db.query("users")
+      .withIndex("email", (q: any) => q.eq("email", email))
+      .first();
+    if (existing) throw new Error("Já existe um usuário com este e-mail.");
+
+    if (args.organizationId) {
+      const organization = await ctx.db.get(args.organizationId);
+      if (!organization || organization.active === false) {
+        throw new Error("Secretaria/departamento não encontrado ou inativo.");
+      }
+    }
+
+    const now = Date.now();
+    const newUserId = await ctx.db.insert("users", {
+      name,
+      email,
+      role: args.role,
+      organizationId: args.organizationId,
+      active: true,
+      requiresPasswordReset: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const { hash, salt } = await hashPassword(args.temporaryPassword);
+    const passwordId = await ctx.db.insert("passwords", {
+      userId: newUserId,
+      passwordHash: hash,
+      salt,
+      requiresReset: true,
+    });
+
+    await ctx.db.insert("auditLogs", {
+      userId: adminId,
+      action: "create",
+      entity: "users",
+      entityId: newUserId,
+      details: `Usuário "${name}" criado com perfil "${args.role}" e credencial temporária configurada.`,
+      timestamp: now,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId: adminId,
+      action: "create",
+      entity: "passwords",
+      entityId: passwordId,
+      details: `Senha temporária definida para o usuário "${name}"; troca obrigatória no primeiro acesso.`,
+      timestamp: now,
+    });
+    return newUserId;
+  },
+});
+
 export const createUser = mutation({
   args: {
     name: v.string(), email: v.string(),
