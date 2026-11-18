@@ -488,9 +488,10 @@ describe("SEC — contabilidade de falhas de login (§9/§10) e enumeração (§
     expect(pwSrc).not.toMatch(/export const recordFailedLogin = mutation\(/);
   });
 
-  it("SEC-BF-02: o bloqueio é reavaliado quando a janela expira", () => {
-    expect(pwSrc).toMatch(/lockExpired/);
-    expect(pwSrc).toMatch(/!existing\.lockedUntil\s*\|\|\s*lockExpired/);
+  it("SEC-BF-02: tentativas inválidas são auditadas sem bloqueio remoto por e-mail", () => {
+    expect(pwSrc).not.toMatch(/lockExpired|LOGIN_MAX_ATTEMPTS|LOGIN_LOCK_MINUTES/);
+    expect(pwSrc).toMatch(/attempts: newAttempts/);
+    expect(pwSrc).toMatch(/lockedUntil: undefined/);
   });
 
   it("SEC-BF-03: login bem-sucedido zera o contador de tentativas", () => {
@@ -508,10 +509,13 @@ describe("SEC — contabilidade de falhas de login (§9/§10) e enumeração (§
     expect(verifyBlock).not.toMatch(/Usuário não encontrado/);
     expect(verifyBlock).not.toMatch(/Usuário inativo/);
     expect(verifyBlock).not.toMatch(/Senha não configurada/);
-    // Nenhum caminho de falha devolve uma mensagem diferente.
-    const failures = verifyBlock.match(/return \{ success: false, error: ([^}]+)\}/g) ?? [];
+    // Contas sem perfil executam o mesmo PBKDF2 fictício; senha incorreta
+    // usa o mesmo erro genérico após a verificação real.
+    const failures = verifyBlock.match(/return await rejectCredentials\(args\.password\)/g) ?? [];
     expect(failures.length).toBeGreaterThan(3);
-    for (const f of failures) expect(f).toContain("GENERIC_AUTH_ERROR");
+    expect(pwSrc).toMatch(/async function rejectCredentials\(password: string\)/);
+    expect(pwSrc).toMatch(/verifyPassword\(password, DUMMY_PASSWORD_HASH, DUMMY_PASSWORD_SALT\)/);
+    expect(verifyBlock).toMatch(/return \{ success: false, error: GENERIC_AUTH_ERROR \}/);
   });
 
   it("SEC-ENUM-02: verifyCredentials recusa identidade anônima e sem role", () => {
