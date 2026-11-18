@@ -77,6 +77,7 @@ export default function WaterPage() {
   const [adjustEmpty, setAdjustEmpty] = useState("0");
   const [movementObservation, setMovementObservation] = useState("");
   const [paymentValues, setPaymentValues] = useState<Record<string, string>>({});
+  const [paymentDates, setPaymentDates] = useState<Record<string, string>>({});
 
   const periods = dashboard?.periods ?? [];
   const openPeriod = dashboard?.openPeriod ?? null;
@@ -352,13 +353,13 @@ export default function WaterPage() {
                       {details.shares.map((share: any) => <tr key={share._id} className="border-t align-middle">
                         <td className="p-2 font-medium">{share.participantName}</td><td className="p-2 text-right">{money(share.amountDueCents)}</td><td className="p-2 text-right">{money(share.paidCents)}</td>
                         <td className="p-2"><Badge variant={share.paymentStatus === "paid" ? "default" : "secondary"}>{share.paymentStatus === "paid" ? "Pago" : share.paymentStatus === "partial" ? "Parcial" : "Pendente"}</Badge></td>
-                        <td className="p-2"><div className="flex min-w-[190px] gap-1"><Input className="h-8" inputMode="decimal" placeholder="R$" value={paymentValues[share._id] ?? ""} onChange={(e) => setPaymentValues((old) => ({ ...old, [share._id]: e.target.value }))} disabled={!canManage || share.remainingCents <= 0} /><Button size="sm" className="h-8" disabled={!canManage || share.remainingCents <= 0} onClick={() => {
+                        <td className="p-2"><div className="flex min-w-[280px] flex-col gap-1"><Input type="date" className="h-8" aria-label={`Data do pagamento de ${share.participantName}`} value={paymentDates[share._id] ?? localDateInput()} onChange={(e) => setPaymentDates((old) => ({ ...old, [share._id]: e.target.value }))} disabled={!canManage || share.remainingCents <= 0} /><div className="flex gap-1"><Input className="h-8" inputMode="decimal" placeholder="R$" value={paymentValues[share._id] ?? ""} onChange={(e) => setPaymentValues((old) => ({ ...old, [share._id]: e.target.value }))} disabled={!canManage || share.remainingCents <= 0} /><Button size="sm" className="h-8" disabled={!canManage || share.remainingCents <= 0} onClick={() => {
                           const cents = parseWaterMoneyToCents(paymentValues[share._id] ?? "");
                           void runAction(`Pagamento de ${share.participantName} registrado`, async () => {
                             if (!cents) throw new Error("Informe o valor do pagamento.");
-                            await recordPayment({ shareId: share._id, amountCents: cents, paidAt: Date.now() });
+                            await recordPayment({ shareId: share._id, amountCents: cents, paidAt: dateToTimestamp(paymentDates[share._id] ?? localDateInput()) });
                           }, () => setPaymentValues((old) => ({ ...old, [share._id]: "" })));
-                        }}>Registrar</Button></div></td>
+                        }}>Registrar</Button></div></div></td>
                       </tr>)}
                       {details.shares.length === 0 && <tr><td colSpan={5} className="p-6 text-center text-muted-foreground">Nenhum participante foi incluído no rateio.</td></tr>}
                     </tbody>
