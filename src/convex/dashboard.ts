@@ -217,6 +217,74 @@ export const stockPosition = query({
 });
 
 /**
+ * Posição física detalhada por produto × área × local.
+ * Usa stockByLocation como fonte operacional; registros legados sem área
+ * permanecem visíveis como "Sem área (legado)" e nunca são inferidos pelo armário.
+ */
+export const stockPositionByArea = query({
+  args: {},
+  handler: async (ctx) => {
+    await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "stockPositionByArea" });
+    const [balances, reservations] = await Promise.all([
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("requestItemReservations").collect(),
+    ]);
+
+    const reservationTotals = new Map<string, number>();
+    for (const reservation of reservations) {
+      const remaining = Number(reservation.quantityRemaining ?? 0);
+      if (!Number.isFinite(remaining) || remaining <= 0) continue;
+      const key = [reservation.productId, reservation.areaId, reservation.locationId].join("|");
+      reservationTotals.set(key, (reservationTotals.get(key) ?? 0) + remaining);
+    }
+
+    const grouped = new Map<string, { productId: any; areaId?: any; locationId: any; physicalQuantity: number; sourceRows: number }>();
+    for (const balance of balances) {
+      const key = [balance.productId, balance.areaId ?? "legacy", balance.locationId].join("|");
+      const current = grouped.get(key) ?? {
+        productId: balance.productId,
+        areaId: balance.areaId,
+        locationId: balance.locationId,
+        physicalQuantity: 0,
+        sourceRows: 0,
+      };
+      current.physicalQuantity += Number(balance.quantity ?? 0);
+      current.sourceRows += 1;
+      grouped.set(key, current);
+    }
+
+    return Promise.all(Array.from(grouped.values()).map(async (row) => {
+      const [product, area, location] = await Promise.all([
+        ctx.db.get(row.productId),
+        row.areaId ? ctx.db.get(row.areaId) : null,
+        ctx.db.get(row.locationId),
+      ]);
+      const key = [row.productId, row.areaId ?? "legacy", row.locationId].join("|");
+      const reservedQuantity = reservationTotals.get(key) ?? 0;
+      const physicalQuantity = row.physicalQuantity;
+      return {
+        _id: key,
+        productId: row.productId,
+        productName: product?.name ?? "Produto não encontrado",
+        internalCode: product?.internalCode ?? "",
+        unitOfMeasure: product?.unitOfMeasure ?? "",
+        areaName: area?.name ?? (row.areaId ? "Área não encontrada" : "Sem área (legado)"),
+        locationName: location?.name ?? "Local não encontrado",
+        physicalQuantity,
+        reservedQuantity,
+        availableQuantity: physicalQuantity - reservedQuantity,
+        duplicateRows: row.sourceRows,
+        inconsistent: !Number.isFinite(physicalQuantity) || physicalQuantity < 0 || reservedQuantity > physicalQuantity || row.sourceRows > 1,
+      };
+    })).then((rows) => rows.sort((a, b) =>
+      a.productName.localeCompare(b.productName, "pt-BR") ||
+      a.areaName.localeCompare(b.areaName, "pt-BR") ||
+      a.locationName.localeCompare(b.locationName, "pt-BR")
+    ));
+  },
+});
+
+/**
  * Movement Report: all movements with full info
  */
 export const movementReport = query({
