@@ -48,8 +48,8 @@ describe("histórico e auditoria do controle de água", () => {
   });
 
   it("exclui lançamentos estornados dos saldos físicos e financeiros", () => {
-    expect(backend).toContain("receipts.filter((receipt: any) => !receipt.reversedAt)");
-    expect(backend).toContain("movements.filter((movement: any) => !movement.reversedAt)");
+    expect(backend).toContain("allReceipts.filter((receipt: any) => !receipt.reversedAt)");
+    expect(backend).toContain("allMovements.filter((movement: any) => !movement.reversedAt)");
     expect(backend).toContain("payments.filter((payment: any) => !payment.reversedAt)");
   });
 
