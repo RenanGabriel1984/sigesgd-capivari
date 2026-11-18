@@ -17,6 +17,22 @@ import { resolveEntryItemAreaId, resolveEntryLotLocationId } from "../lib/entry-
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
+function assertNonNegativeFiniteAmount(value: number | undefined, label: string): void {
+  if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+    throw new Error(`${label} deve ser um valor numérico finito e não negativo.`);
+  }
+}
+
+function assertEntryFinancialValues(input: {
+  totalValue?: number;
+  unitCost?: number;
+  totalCost?: number;
+}, label: string): void {
+  assertNonNegativeFiniteAmount(input.totalValue, `Valor total da ${label}`);
+  assertNonNegativeFiniteAmount(input.unitCost, `Custo unitário de ${label}`);
+  assertNonNegativeFiniteAmount(input.totalCost, `Custo total de ${label}`);
+}
+
 async function requireUser(ctx: any) {
   // RBAC central: entradas exigem sessão com visão de estoque.
   return requirePermission(ctx, "stock.view");
@@ -245,6 +261,7 @@ export const create = mutation({
     const { userId } = await requireStockManagerOrAdmin(ctx);
 
     if (args.items.length === 0) throw new Error("A entrada deve ter pelo menos um item");
+    assertEntryFinancialValues({ totalValue: args.totalValue }, "entrada");
 
     // ── Anti-duplicidade (D5): chave de acesso OU fornecedor+número+série ──
     // Vale para importação XML/DANFE E para a entrada manual. Entrada estornada
@@ -269,6 +286,7 @@ export const create = mutation({
 
     // Validate each item
     for (const item of args.items) {
+      assertEntryFinancialValues({ unitCost: item.unitCost, totalCost: item.totalCost }, `item ${item.productId}`);
       if (item.quantity <= 0) throw new Error(`Quantidade inválida para o item ${item.productId}`);
       if (!isFinite(item.quantity)) throw new Error(`Quantidade não finita para o item ${item.productId}`);
       const product = await ctx.db.get(item.productId);
@@ -691,6 +709,7 @@ export const addItem = mutation({
     if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ter itens adicionados");
     if (args.quantity <= 0) throw new Error("A quantidade deve ser maior que zero");
     if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
+    assertEntryFinancialValues({ unitCost: args.unitCost, totalCost: args.totalCost }, "item");
 
     const product = await ctx.db.get(args.productId);
     if (!product) throw new Error("Produto não encontrado");
@@ -767,6 +786,7 @@ export const updateItem = mutation({
       if (args.quantity <= 0) throw new Error("A quantidade deve ser maior que zero");
       if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
     }
+    assertEntryFinancialValues({ unitCost: args.unitCost, totalCost: args.totalCost }, "item");
 
     if (args.productId) {
       const product = await ctx.db.get(args.productId);
