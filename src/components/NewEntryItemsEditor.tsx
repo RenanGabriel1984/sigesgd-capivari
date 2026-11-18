@@ -153,31 +153,32 @@ export function NewEntryItemsEditor({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs">Área / subestoque</Label>
-                <Select
-                  value={item.areaId || "default"}
-                  disabled={disableAreaSelection}
-                  onValueChange={(value) =>
-                    onUpdateItem(index, "areaId", value === "default" ? "" : String(value))
-                  }
-                >
-                  <SelectTrigger className="mt-1 h-8">
-                    <SelectValue placeholder="Área padrão da entrada" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="default">
-                      {defaultAreaName ? `Padrão — ${defaultAreaName}` : "Padrão da entrada"}
+            <div>
+              <Label className="text-xs">Área / subestoque</Label>
+              <Select
+                value={item.areaId || "default"}
+                disabled={disableAreaSelection}
+                onValueChange={(value) =>
+                  onUpdateItem(index, "areaId", value === "default" ? "" : String(value))
+                }
+              >
+                <SelectTrigger className="mt-1 h-8">
+                  <SelectValue placeholder="Área padrão da entrada" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">
+                    {defaultAreaName ? `Padrão — ${defaultAreaName}` : "Padrão da entrada"}
+                  </SelectItem>
+                  {areas.map((area) => (
+                    <SelectItem key={area._id} value={area._id}>
+                      {area.name}
                     </SelectItem>
-                    {areas.map((area) => (
-                      <SelectItem key={area._id} value={area._id}>
-                        {area.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Custo por unidade *</Label>
                 <Input
