@@ -297,10 +297,10 @@ export const verifyCredentials = internalQuery({
     // Identidade anônima (provider removido) ou identidade sem `role`
     // válido nunca é autenticada, mesmo com senha correta.
     if ((user as { isAnonymous?: boolean }).isAnonymous === true) {
-      return { success: false, error: GENERIC_AUTH_ERROR };
+      return await rejectCredentials(args.password);
     }
     if (!VALID_ROLE_SET.has(user.role as string)) {
-      return { success: false, error: GENERIC_AUTH_ERROR };
+      return await rejectCredentials(args.password);
     }
 
     // Find password record
@@ -310,7 +310,7 @@ export const verifyCredentials = internalQuery({
       .first();
 
     if (!passwordRecord) {
-      return { success: false, error: GENERIC_AUTH_ERROR };
+      return await rejectCredentials(args.password);
     }
 
     // Verify password
