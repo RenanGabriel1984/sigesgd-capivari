@@ -647,6 +647,28 @@ describe("SEC — anti-autoaprovação (§4) preservada", () => {
   });
 });
 
+describe("AUTH-RESET — proteção adicional de recuperação", () => {
+  it("AUTH-RESET-01: confirmação rejeita contas inativas, anônimas ou sem papel válido", () => {
+    const passwordSrc = stripComments(read("src/convex/passwords.ts"));
+    const confirmBlock = passwordSrc.slice(
+      passwordSrc.indexOf("export const confirmPasswordReset"),
+      passwordSrc.indexOf("export const recordFailedLogin"),
+    );
+    expect(confirmBlock).toMatch(/user\.active === false/);
+    expect(confirmBlock).toMatch(/isAnonymous === true/);
+    expect(confirmBlock).toMatch(/VALID_ROLE_SET\.has/);
+  });
+
+  it("AUTH-RESET-02: valores dinâmicos do e-mail de primeiro acesso são escapados no HTML", () => {
+    const emailSrc = stripComments(read("src/convex/email.ts"));
+    expect(emailSrc).toMatch(/function escapeHtml\(value: string\)/);
+    expect(emailSrc).toMatch(/htmlSafeName = escapeHtml\(safeName\)/);
+    expect(emailSrc).toMatch(/htmlSafeTemporaryPassword = escapeHtml\(args\.temporaryPassword\)/);
+    expect(emailSrc).toMatch(/Bem-vindo, \$\{htmlSafeName\}/);
+    expect(emailSrc).toMatch(/\$\{htmlSafeTemporaryPassword\}/);
+  });
+});
+
 describe("RESET-HASH — códigos de recuperação protegidos em repouso", () => {
   it("RESET-HASH-01: novos registros não persistem o código em texto", () => {
     const passwordSrc = stripComments(read("src/convex/passwords.ts"));
