@@ -885,5 +885,10 @@ describe("AUTH-FAILURE-AUDIT — contenção de abuso no login", () => {
     expect(block).toMatch(/lastAuditAt/);
     expect(block).toMatch(/if \(shouldAudit\)/);
     expect(block).not.toMatch(/entityId: account\?\._id \? String\(account\._id\) : email/);
+    const successful = passwords.slice(
+      passwords.indexOf("export const recordSuccessfulLogin"),
+      passwords.indexOf("export const recordLogout"),
+    );
+    expect(successful).toContain("lastAuditAt: undefined");
   });
 });
