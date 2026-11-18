@@ -80,7 +80,7 @@ O estoque é controlado por uma **fonte única de verdade**: a tabela `stock`, c
 
 | Módulo | Status | Descrição |
 |--------|--------|-----------|
-| Autenticação | ✅ Implementado | Credenciais + OTP por e-mail, RBAC (admin, stock_manager, director, secretary, technician, patrimony_manager) |
+| Autenticação | ✅ Implementado | Login por e-mail/senha, recuperação por código OTP, primeiro acesso e RBAC (admin, stock_manager, director, secretary, technician, patrimony_manager) |
 | Cadastro de Produtos | ✅ Implementado | CRUD completo, categorias, fornecedores, compatibilidade com impressoras |
 | Estoque | ✅ Implementado | Saldo físico/reservado, fonte única, proteção contra negativo |
 | Entradas | ✅ Implementado | Entradas multi-item, origem, NF, AF, fornecedor, fotos, documentos, lotes automáticos |
@@ -154,6 +154,10 @@ bun vitest
 | `VITE_CONVEX_URL` | URL do deployment Convex (cliente) |
 | `CONVEX_DEPLOYMENT` | Deployment do Convex (backend) |
 | `CONVEX_SITE_URL` | URL do site para autenticação |
+| `FREEBUFF_EMAIL_API_KEY` | Segredo do backend Convex usado pelo serviço de recuperação de senha e envio de primeiro acesso; obrigatório para envio de e-mails |
+| `EMAIL_FROM` | Remetente verificado no provedor de e-mail (opcional; usa o padrão institucional definido no código) |
+
+`FREEBUFF_EMAIL_API_KEY` e `EMAIL_FROM` são variáveis do ambiente **do backend Convex**, não variáveis `VITE_*`; nunca devem ser expostas ao frontend nem versionadas. A ausência da chave faz o envio falhar de forma segura.
 
 > ⚠️ **Nunca commite arquivos `.env` ou `.env.local`.** O `.gitignore` já os exclui.
 
