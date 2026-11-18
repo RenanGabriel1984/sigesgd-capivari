@@ -65,6 +65,10 @@ const ALL_ACTIONS = [
   "asset_part_remove",
   "license_create",
   "license_assign",
+  "stock_parameter_update",
+  "product_packaging_update",
+  "permission_denied",
+  "reverse_stock_transfer",
 ] as const;
 
 const ENTITY_OPTIONS = [
@@ -87,6 +91,14 @@ const ENTITY_OPTIONS = [
   { value: "assetMaintenances", label: "Manutenções" },
   { value: "licenses", label: "Licenças" },
   { value: "licenseAssignments", label: "Vinculações de Licença" },
+  { value: "stockAreas", label: "Áreas de Estoque" },
+  { value: "waterParticipants", label: "Participantes da Água" },
+  { value: "waterPeriods", label: "Períodos de Rateio da Água" },
+  { value: "waterReceipts", label: "Recebimentos de Água" },
+  { value: "waterContainerMovements", label: "Movimentações de Galões" },
+  { value: "waterShares", label: "Rateios de Água" },
+  { value: "waterPayments", label: "Pagamentos de Água" },
+  { value: "storageFiles", label: "Arquivos Anexados" },
 ];
 
 export default function Audit() {
@@ -251,7 +263,7 @@ export default function Audit() {
                         {new Date(log.timestamp).toLocaleString("pt-BR")}
                       </TableCell>
                       <TableCell className="text-sm">
-                        <div>{log.user?.name ?? (log.action === "login_failed" ? "Tentativa de login" : "Sistema")}</div>
+                        <div>{log.user?.name ?? (log.action === "login_failed" ? "Tentativa de login" : log.userId ? "Usuário não localizado" : "Rotina interna / Sistema")}</div>
                         {log.user?.email && (
                           <div className="text-xs text-muted-foreground">{log.user.email}</div>
                         )}
