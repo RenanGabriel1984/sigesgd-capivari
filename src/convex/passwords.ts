@@ -105,6 +105,7 @@ export const createPassword = mutation({
       salt,
       requiresReset: args.requiresReset ?? false,
     });
+    await invalidatePendingPasswordResets(ctx, args.userId);
 
     // Set requiresPasswordReset flag on user
     if (args.requiresReset) {
