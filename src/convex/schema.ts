@@ -1081,6 +1081,9 @@ const schema = defineSchema(
       observation: v.optional(v.string()),
       createdBy: v.id("users"),
       createdAt: v.number(),
+      reversedAt: v.optional(v.number()),
+      reversedBy: v.optional(v.id("users")),
+      reversalReason: v.optional(v.string()),
     }).index("by_period", ["periodId"])
       .index("by_receivedAt", ["receivedAt"]),
 
@@ -1092,6 +1095,9 @@ const schema = defineSchema(
       observation: v.optional(v.string()),
       createdBy: v.id("users"),
       createdAt: v.number(),
+      reversedAt: v.optional(v.number()),
+      reversedBy: v.optional(v.id("users")),
+      reversalReason: v.optional(v.string()),
     }).index("by_date", ["date"]),
 
     waterShares: defineTable({
@@ -1111,6 +1117,9 @@ const schema = defineSchema(
       observation: v.optional(v.string()),
       createdBy: v.id("users"),
       createdAt: v.number(),
+      reversedAt: v.optional(v.number()),
+      reversedBy: v.optional(v.id("users")),
+      reversalReason: v.optional(v.string()),
     }).index("by_share", ["shareId"])
       .index("by_paidAt", ["paidAt"]),
 
