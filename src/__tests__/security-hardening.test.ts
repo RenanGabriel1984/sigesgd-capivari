@@ -556,13 +556,16 @@ describe("SEC — segredos (B-07)", () => {
     expect(emailSrc).toMatch(/email_not_configured/);
   });
 
-  it("SEC-SECRET-03: sendFirstAccessEmail é protegido e não relay público", () => {
+  it("SEC-SECRET-03: sendFirstAccessEmail é action autenticada e não relay público", () => {
     const emailSrc = stripComments(read("src/convex/email.ts"));
-    expect(emailSrc).toMatch(/export const sendFirstAccessEmail = mutation\(/);
-    expect(emailSrc).toMatch(/requirePermission\(ctx,\s*"users\.manage"/);
+    expect(emailSrc).toMatch(/export const sendFirstAccessEmail = action\(/);
+    expect(emailSrc).toMatch(/getAuthUserId\(ctx\)/);
+    expect(emailSrc).toMatch(/getFirstAccessRecipientInternal/);
+    expect(emailSrc).toMatch(/roleHasPermission\(admin\.role as AppRole, "users\.manage"\)/);
     // O destinatário precisa existir como usuário SIGESGD.
     expect(emailSrc).toMatch(/withIndex\("email"/);
-    // Nenhuma senha em log.
+    // A senha é conferida contra o hash e nunca é gravada em auditoria/log.
+    expect(emailSrc).toMatch(/verifyPassword\(\s*args\.temporaryPassword/);
     expect(emailSrc).not.toMatch(/console\.(log|info|warn|error)\([^)]*temporaryPassword/);
   });
 });
