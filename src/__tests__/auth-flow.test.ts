@@ -43,10 +43,10 @@ describe("First Access — Forced Password Change", () => {
     expect(currentHash).not.toBe(oldPasswordHash);
   });
 
-  it("FF. New password must be at least 6 characters", () => {
-    const passwords = ["abc", "12345", "123456", "MinhaSenh@1"];
-    const valid = passwords.filter((p) => p.length >= 6);
-    expect(valid).toEqual(["123456", "MinhaSenh@1"]);
+  it("FF. New password must be at least 8 characters", () => {
+    const passwords = ["abc", "12345", "123456", "1234567", "12345678", "MinhaSenh@1"];
+    const valid = passwords.filter((p) => p.length >= 8);
+    expect(valid).toEqual(["12345678", "MinhaSenh@1"]);
   });
 
   it("FG. New password and confirmation must match", () => {
