@@ -25,6 +25,21 @@ describe("segurança e precisão dos relatórios", () => {
     }
   });
 
+  it("posição detalhada usa saldo por produto × área × local e exibe reservas separadamente", () => {
+    const block = queryBlock("stockPositionByArea", "export const movementReport");
+    const page = readFileSync(resolve(root, "src/pages/Reports.tsx"), "utf8");
+    expect(block).toContain('requirePermission(ctx, "reports.view"');
+    expect(block).toContain('ctx.db.query("stockByLocation").collect()');
+    expect(block).toContain('ctx.db.query("requestItemReservations").collect()');
+    expect(block).toContain("reservation.quantityRemaining");
+    expect(block).toContain('"Sem área (legado)"');
+    expect(block).toContain("duplicateRows");
+    expect(block).toContain("inconsistent:");
+    expect(page).toContain("api.dashboard.stockPositionByArea");
+    expect(page).toContain("Posição por área e local físico");
+    expect(page).toContain("CSV detalhado");
+  });
+
   it("filtra as duas extremidades no índice antes do limite de registros", () => {
     const block = queryBlock("movementReport", "export const consumptionByOrg");
     expect(block).toContain('.gte("timestamp", startDate)');
