@@ -822,6 +822,8 @@ export default function Reports() {
             </div>
             {(gomaqExchangesTruncated || gomaqCartridgesTruncated || gomaqCollectionsTruncated) && <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">Dados limitados aos registros mais recentes: até 500 trocas e carcaças, e até 100 coletas. Os indicadores e o CSV não representam o histórico completo quando houver limite excedido.</p>}
             {gomaqExchanges && gomaqExchanges.length > 0 && (
+              <>
+              <p className="text-xs text-muted-foreground">A tabela exibe até 100 trocas mais recentes; o CSV exporta até 500.</p>
               <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table>
                 <TableHeader><TableRow>
                   <TableHead className="text-xs">Data</TableHead><TableHead className="text-xs">Nº</TableHead><TableHead className="text-xs">Produto</TableHead><TableHead className="text-xs text-right">Qtd</TableHead><TableHead className="text-xs">Impressora</TableHead><TableHead className="text-xs text-right">Carcaças</TableHead>
@@ -839,6 +841,7 @@ export default function Reports() {
                   ))}
                 </TableBody>
               </Table></div></CardContent></Card>
+              </>
             )}
           </TabsContent>
         </Tabs>
