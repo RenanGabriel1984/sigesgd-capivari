@@ -7,16 +7,10 @@ import {
   validateWaterReceiptDate,
   isValidWaterTimestamp,
   calculateWaterContainerBalance,
+  validateWaterContainerLedger,
   summarizeWaterFinances,
 } from "../lib/water-control";
 
-async function currentContainerBalance(ctx: any) {
-  const [receipts, movements] = await Promise.all([
-    ctx.db.query("waterReceipts").collect(),
-    ctx.db.query("waterContainerMovements").collect(),
-  ]);
-  return calculateWaterContainerBalance(receipts.filter((receipt: any) => !receipt.reversedAt), movements.filter((movement: any) => !movement.reversedAt));
-}
 
 async function writeAudit(ctx: any, userId: any, action: "create" | "update", entity: string, entityId: string, details: string) {
   await ctx.db.insert("auditLogs", {
