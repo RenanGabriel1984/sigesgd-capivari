@@ -138,8 +138,9 @@ export const list = query({
       const itemsWithProduct = await Promise.all(items.map(async (item: any) => {
         const product = await ctx.db.get(item.productId);
         const location = item.locationId ? await ctx.db.get(item.locationId) : null;
+        const area = item.areaId ? await ctx.db.get(item.areaId) : null;
         const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
-        return { ...item, product, location, units };
+        return { ...item, product, location, area, units };
       }));
       const area = e.areaId ? await ctx.db.get(e.areaId) : null;
       return { ...e, responsible, supplier, area, items: itemsWithProduct };
