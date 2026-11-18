@@ -265,6 +265,9 @@ export const updateUser = mutation({
       await ctx.scheduler.runAfter(0, internal.passwords.invalidateUserSessionsInternal, {
         userId,
       });
+      await ctx.scheduler.runAfter(0, internal.passwords.invalidatePasswordResetsForUserInternal, {
+        userId,
+      });
     }
     return userId;
   },
@@ -307,6 +310,9 @@ export const deactivateUser = mutation({
       details: `Usuário "${user.name}" desativado`, timestamp: Date.now(),
     });
     await ctx.scheduler.runAfter(0, internal.passwords.invalidateUserSessionsInternal, {
+      userId: args.userId,
+    });
+    await ctx.scheduler.runAfter(0, internal.passwords.invalidatePasswordResetsForUserInternal, {
       userId: args.userId,
     });
     return true;
