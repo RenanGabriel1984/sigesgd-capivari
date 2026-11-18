@@ -258,7 +258,10 @@ export const create = mutation({
         productId: sourceLot.productId, entryId: sourceLot.entryId,
         brand: sourceLot.brand, model: sourceLot.model, specification: sourceLot.specification,
         quantityReceived: part.quantity, quantityAvailable: part.quantity,
-        unitCost: sourceLot.unitCost, receivedAt: now, supplierId: sourceLot.supplierId,
+        unitCost: sourceLot.unitCost,
+        // A transferência não é uma nova aquisição: preservar a data original
+        // mantém a ordem FIFO e a idade real do material no lote de destino.
+        receivedAt: sourceLot.receivedAt, supplierId: sourceLot.supplierId,
         invoiceNumber: sourceLot.invoiceNumber, purchaseAuthorizationNumber: sourceLot.purchaseAuthorizationNumber,
         photoStorageId: sourceLot.photoStorageId, supplierLotNumber: sourceLot.supplierLotNumber,
         active: true,
