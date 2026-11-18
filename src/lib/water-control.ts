@@ -218,3 +218,66 @@ export function summarizeWaterFinances(
     ),
   };
 }
+
+
+export interface WaterDatedReceiptBalanceInput extends WaterReceiptBalanceInput {
+  receivedAt: number;
+}
+
+export interface WaterDatedMovementBalanceInput extends WaterMovementBalanceInput {
+  date: number;
+}
+
+/**
+ * Valida o livro físico em ordem cronológica. Eventos no mesmo timestamp são
+ * consolidados antes da validação, pois o sistema registra datas sem uma ordem
+ * operacional confiável dentro do mesmo dia.
+ */
+export function validateWaterContainerLedger(
+  receipts: readonly WaterDatedReceiptBalanceInput[],
+  movements: readonly WaterDatedMovementBalanceInput[],
+): string | null {
+  const events = [
+    ...receipts.map((receipt) => ({
+      timestamp: receipt.receivedAt,
+      fullDelta: receipt.gallonsReceived,
+      emptyDelta: -receipt.emptyGallonsReturned,
+    })),
+    ...movements.map((movement) => ({
+      timestamp: movement.date,
+      fullDelta: movement.fullDelta,
+      emptyDelta: movement.emptyDelta,
+    })),
+  ];
+
+  for (const event of events) {
+    if (!isValidWaterTimestamp(event.timestamp) ||
+        !Number.isSafeInteger(event.fullDelta) ||
+        !Number.isSafeInteger(event.emptyDelta)) {
+      return "O histórico físico contém data ou quantidade inválida.";
+    }
+  }
+
+  events.sort((a, b) => a.timestamp - b.timestamp);
+  let fullGallons = 0;
+  let emptyGallons = 0;
+
+  for (let index = 0; index < events.length;) {
+    const timestamp = events[index].timestamp;
+    let fullDelta = 0;
+    let emptyDelta = 0;
+    while (index < events.length && events[index].timestamp === timestamp) {
+      fullDelta += events[index].fullDelta;
+      emptyDelta += events[index].emptyDelta;
+      index += 1;
+    }
+    fullGallons += fullDelta;
+    emptyGallons += emptyDelta;
+    if (fullGallons < 0 || emptyGallons < 0) {
+      const date = new Date(timestamp).toLocaleDateString("pt-BR");
+      return `O histórico deixaria o saldo físico negativo em ${date}. Confira os lançamentos anteriores.`;
+    }
+  }
+
+  return null;
+}
