@@ -786,3 +786,28 @@ describe("AUTH-TIMING — anti-enumeração por tempo de resposta", () => {
     expect(credentials).toMatch(/email\.length > 254 \|\| password\.length > 200/);
   });
 });
+
+
+describe("AUTH-RESET-REVOCATION — códigos antigos após mudança de acesso", () => {
+  it("AUTH-RESET-REVOCATION-01: mudança de senha invalida todos os códigos pendentes", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    expect(passwords).toMatch(/async function invalidatePendingPasswordResets/);
+    expect(passwords).toMatch(/invalidatePendingPasswordResets\(ctx, userId\)/);
+    expect(passwords).toMatch(/invalidatePendingPasswordResets\(ctx, args\.userId\)/);
+    expect(passwords).toMatch(/invalidatePendingPasswordResets\(ctx, user\.\_id\)/);
+  });
+
+  it("AUTH-RESET-REVOCATION-02: desativação e alteração de perfil invalidam códigos pendentes", () => {
+    const users = stripComments(read("src/convex/users.ts"));
+    expect(users).toMatch(/internal\.passwords\.invalidatePasswordResetsForUserInternal/);
+  });
+
+  it("AUTH-RESET-REVOCATION-03: força de troca só é aceita quando o primeiro acesso está pendente", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    const forceBlock = passwords.slice(
+      passwords.indexOf("export const forceChangePassword"),
+      passwords.indexOf("/** Verify email and password"),
+    );
+    expect(forceBlock).toMatch(/user\.requiresPasswordReset !== true && passwordRecord\.requiresReset !== true/);
+  });
+});
