@@ -113,7 +113,7 @@ async function deriveKey(
 export async function hashResetCode(
   code: string
 ): Promise<{ hash: string; salt: string }> {
-  if (!/^\\d{6}$/.test(code)) {
+  if (!/^\d{6}$/.test(code)) {
     throw new Error("Código de recuperação inválido.");
   }
   const salt = generateSalt();
@@ -126,7 +126,7 @@ export async function verifyResetCode(
   storedHash: string,
   storedSalt: string
 ): Promise<boolean> {
-  if (!/^\\d{6}$/.test(code)) return false;
+  if (!/^\d{6}$/.test(code)) return false;
   const keyBits = await deriveKey(code, storedSalt);
   return constantTimeEquals(toHex(keyBits), storedHash);
 }
