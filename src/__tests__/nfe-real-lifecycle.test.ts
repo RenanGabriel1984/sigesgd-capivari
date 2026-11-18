@@ -179,7 +179,7 @@ describe("NF-e 372043 — ciclo de vida da conferência", () => {
 
 describe("NF-e — classificação de área no resumo", () => {
   const row = {
-    item: { lineNumber: 1, description: "Teclado", unit: "UN", quantity: 2 },
+    item: { lineNumber: 1, code: "T-01", description: "Teclado", unit: "UN", quantity: 2 },
     productId: "product-1",
     matchStatus: "found" as const,
     locationId: "location-1",
