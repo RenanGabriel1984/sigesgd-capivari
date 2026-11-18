@@ -468,6 +468,11 @@ export const create = mutation({
     }
 
     const exitLabel = exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
+    const area: any = exit.areaId ? await ctx.db.get(exit.areaId) : null;
+    const location: any = targetLocationId ? await ctx.db.get(targetLocationId) : null;
+    const returnedLotDetails = parts.map((part: any) =>
+      `${part.lot?.lotNumber ?? "lote não identificado"} x${part.quantity}`
+    ).join(", ");
     await ctx.db.insert("auditLogs", {
       userId,
       action: "return_stock",
@@ -480,8 +485,9 @@ export const create = mutation({
         condition,
         reason,
       }) +
-        (restocked ? " | reintegrada ao estoque utilizável" : " | em avaliação, sem recompor o estoque disponível") +
-        (parts.length > 1 ? ` | distribuída entre ${parts.length} lotes` : ""),
+        ` | área: ${area?.name ?? (exit.areaId ? "não encontrada" : "legado")} | local físico: ${location?.name ?? (targetLocationId ? "não encontrado" : "não registrado")}` +
+        ` | lotes: ${returnedLotDetails || "sem lote identificado"} | registros: ${returnIds.join(", ")}` +
+        (restocked ? " | reintegrada ao estoque utilizável" : " | em avaliação, sem recompor o estoque disponível"),
       timestamp: now,
     });
 
