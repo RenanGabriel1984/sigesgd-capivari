@@ -12,10 +12,11 @@ async function requireUser(ctx: any) {
   return auth;
 }
 
-async function requireAdmin(ctx: any) {
-  const { userId, user } = await requireUser(ctx);
-  if (user.role !== "admin") throw new Error("Apenas administradores podem executar esta operação");
-  return { userId, user };
+async function requireUserManager(ctx: any) {
+  // Admin e secretary têm o mesmo conjunto de permissões na matriz central.
+  // A autorização deve seguir users.manage, sem restringir indevidamente ao
+  // rótulo literal "admin".
+  return requirePermission(ctx, "users.manage", { entity: "users" });
 }
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
@@ -129,7 +130,7 @@ export const createUserWithPassword = mutation({
     temporaryPassword: v.string(),
   },
   handler: async (ctx, args) => {
-    const { userId: adminId } = await requireAdmin(ctx);
+    const { userId: adminId } = await requireUserManager(ctx);
     const name = args.name.trim();
     const email = args.email.trim().toLowerCase();
     if (!name) throw new Error("Nome é obrigatório.");
@@ -197,7 +198,7 @@ export const createUser = mutation({
     organizationId: v.optional(v.id("organizations")),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireAdmin(ctx);
+    const { userId } = await requireUserManager(ctx);
     const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", args.email.toLowerCase())).first();
     if (existing) throw new Error("Já existe um usuário com este e-mail");
 
@@ -222,7 +223,7 @@ export const updateUser = mutation({
     organizationId: v.optional(v.id("organizations")), active: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { userId: adminId } = await requireAdmin(ctx);
+    const { userId: adminId } = await requireUserManager(ctx);
     const { userId, ...updates } = args;
 
     if (userId === adminId && updates.active === false) {
@@ -255,7 +256,7 @@ export const updateUser = mutation({
 export const activateUser = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
-    const { userId: adminId } = await requireAdmin(ctx);
+    const { userId: adminId } = await requireUserManager(ctx);
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
     await ctx.db.patch(args.userId, { active: true, updatedAt: Date.now() });
@@ -270,7 +271,7 @@ export const activateUser = mutation({
 export const deactivateUser = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
-    const { userId: adminId } = await requireAdmin(ctx);
+    const { userId: adminId } = await requireUserManager(ctx);
     if (args.userId === adminId) throw new Error("Você não pode desativar sua própria conta");
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
