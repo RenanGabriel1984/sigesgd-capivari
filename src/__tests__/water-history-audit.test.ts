@@ -53,4 +53,9 @@ describe("histórico e auditoria do controle de água", () => {
     expect(backend).toContain("payments.filter((payment: any) => !payment.reversedAt)");
   });
 
+  it("ignora pagamentos estornados ao calcular o limite de novos pagamentos", () => {
+    expect(backend).toContain("payments.filter((payment: any) => !payment.reversedAt).reduce");
+  });
+
+
 });
