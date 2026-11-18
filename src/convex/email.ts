@@ -104,7 +104,7 @@ export const getPasswordResetForEmailInternal = internalQuery({
     if (!user?.email || user.active === false) return null;
     // B-01: identidade anônima ou sem perfil válido nunca recebe recuperação.
     if ((user as { isAnonymous?: boolean }).isAnonymous === true) return null;
-    if (!user.role) return null;
+    if (!roleHasPermission(user.role as AppRole, "settings.view")) return null;
 
     return { email: user.email };
   },
