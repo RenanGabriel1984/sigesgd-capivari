@@ -105,7 +105,7 @@ describe("integração da compatibilidade histórica com entries.reverse", () =>
 
   it("recupera localização legada e aplica o estorno no mesmo armário", () => {
     expect(reverseBody).toContain("withIndex(\"by_lot\", (q: any) => q.eq(\"lotId\", lot._id))");
-    expect(reverseBody).toContain("const lotLocationId = lot.locationId ?? lotLocationRows[0]?.locationId ?? item.locationId ?? undefined");
+    expect(reverseBody).toContain("resolveEntryLotLocationId(lot.locationId, lotLocationRows[0]?.locationId, item.locationId)");
     expect(reverseBody).toContain("locationId: lotLocationId");
     expect(reverseBody).toContain("locationStock.quantity - item.quantity");
   });
