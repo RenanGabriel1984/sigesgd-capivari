@@ -703,8 +703,16 @@ export const confirmPasswordReset = mutation({
       .withIndex("email", (q) => q.eq("email", email))
       .first();
 
-    // Generic error to prevent email enumeration
-    if (!user) throw new Error("Código inválido ou expirado");
+    // Generic error to prevent enumeration and prevent disabled/invalid profiles
+    // from using a previously issued recovery code after access was revoked.
+    if (
+      !user ||
+      user.active === false ||
+      (user as { isAnonymous?: boolean }).isAnonymous === true ||
+      !VALID_ROLE_SET.has(user.role as string)
+    ) {
+      throw new Error("Código inválido ou expirado");
+    }
 
     // Find valid token
     const tokens = await ctx.db
