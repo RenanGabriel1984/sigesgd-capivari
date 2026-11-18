@@ -317,3 +317,175 @@ export const create = mutation({
     return transferId;
   },
 });
+
+
+// ─── Estorno seguro de transferência ────────────────────────────────────────
+// Reverte somente a quantidade ainda integralmente disponível nos lotes de
+// destino. Não apaga a transferência original nem altera o saldo global.
+export const reverse = mutation({
+  args: {
+    transferId: v.id("stockTransfers"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "transfers.create", { entity: "stockTransfers" });
+    const reason = args.reason.trim();
+    if (!reason) throw new Error("O motivo do estorno é obrigatório");
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) throw new Error("Transferência não encontrada");
+    if (transfer.reversedAt) throw new Error("Esta transferência já foi estornada");
+    if (!transfer.fromAreaId || !transfer.toAreaId) {
+      throw new Error("Transferência histórica sem áreas identificadas. Faça a conciliação antes de estornar.");
+    }
+    if (!Number.isFinite(transfer.quantity) || transfer.quantity <= 0) {
+      throw new Error("Quantidade original da transferência inválida");
+    }
+
+    const [product, fromLocation, toLocation, fromArea, toArea, globalRows, links] = await Promise.all([
+      ctx.db.get(transfer.productId),
+      ctx.db.get(transfer.fromLocationId),
+      ctx.db.get(transfer.toLocationId),
+      ctx.db.get(transfer.fromAreaId),
+      ctx.db.get(transfer.toAreaId),
+      ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", transfer.productId)).collect(),
+      ctx.db.query("stockTransferLots").withIndex("by_transfer", (q: any) => q.eq("transferId", args.transferId)).collect(),
+    ]);
+    if (!product || !fromLocation || !toLocation || !fromArea || !toArea) {
+      throw new Error("Produto, área ou local da transferência não está mais disponível");
+    }
+    if (!links.length) throw new Error("A transferência não possui linhagem de lotes; estorno bloqueado para evitar perda de rastreabilidade.");
+    const globalStock = globalRows.length === 1 ? globalRows[0] : null;
+    if (!globalStock || !Number.isFinite(globalStock.physicalQuantity) ||
+        !Number.isFinite(globalStock.reservedQuantity) ||
+        globalStock.physicalQuantity < globalStock.reservedQuantity ||
+        globalStock.reservedQuantity < 0) {
+      throw new Error("Saldo global ausente, duplicado ou inconsistente. Estorno bloqueado.");
+    }
+
+    const allLots = await ctx.db.query("lots")
+      .withIndex("by_product", (q: any) => q.eq("productId", transfer.productId)).collect();
+    const locationRows = await ctx.db.query("stockByLocation")
+      .withIndex("by_product", (q: any) => q.eq("productId", transfer.productId)).collect();
+    const sourceStockRows = locationRows.filter((row: any) =>
+      row.locationId === transfer.fromLocationId && row.areaId === transfer.fromAreaId
+    );
+    const destinationStockRows = locationRows.filter((row: any) =>
+      row.locationId === transfer.toLocationId && row.areaId === transfer.toAreaId
+    );
+    if (sourceStockRows.length !== 1 || destinationStockRows.length !== 1) {
+      throw new Error("Saldo por área/local ausente ou duplicado na origem/destino. Estorno bloqueado.");
+    }
+    const sourceStock = sourceStockRows[0];
+    const destinationStock = destinationStockRows[0];
+    const sourceQuantity = requireValidScopedStockQuantity(sourceStock.quantity, "origem do estorno");
+    const destinationQuantity = requireValidScopedStockQuantity(destinationStock.quantity, "destino do estorno");
+    const sourceLots = allLots.filter((lot: any) => lot.areaId === transfer.fromAreaId && lot.locationId === transfer.fromLocationId);
+    const destinationLots = allLots.filter((lot: any) => lot.areaId === transfer.toAreaId && lot.locationId === transfer.toLocationId);
+    const sourceLotTotal = sourceLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+    const destinationLotTotal = destinationLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+    if (Math.abs(sourceLotTotal - sourceQuantity) > 1e-9 ||
+        Math.abs(destinationLotTotal - destinationQuantity) > 1e-9) {
+      throw new Error("Saldo por área/local diverge dos lotes. Regularize antes de estornar.");
+    }
+
+    const reservations = await ctx.db.query("requestItemReservations")
+      .withIndex("by_product", (q: any) => q.eq("productId", transfer.productId)).collect();
+    const planned: Array<{ link: any; sourceLot: any; destinationLot: any; sourceBalance: any; destinationBalance: any }> = [];
+    let linkedTotal = 0;
+    const seenDestinationLots = new Set<string>();
+    const seenSourceLots = new Set<string>();
+    for (const link of links) {
+      if (!Number.isFinite(link.quantity) || link.quantity <= 0 ||
+          seenDestinationLots.has(String(link.destinationLotId)) ||
+          seenSourceLots.has(String(link.sourceLotId))) {
+        throw new Error("Linhagem de lotes duplicada ou com quantidade inválida. Estorno bloqueado.");
+      }
+      seenDestinationLots.add(String(link.destinationLotId));
+      seenSourceLots.add(String(link.sourceLotId));
+      const [sourceLot, destinationLot, sourceBalances, destinationBalances] = await Promise.all([
+        ctx.db.get(link.sourceLotId),
+        ctx.db.get(link.destinationLotId),
+        ctx.db.query("lotLocationBalances").withIndex("by_lot", (q: any) => q.eq("lotId", link.sourceLotId)).collect(),
+        ctx.db.query("lotLocationBalances").withIndex("by_lot", (q: any) => q.eq("lotId", link.destinationLotId)).collect(),
+      ]);
+      if (!sourceLot || !destinationLot ||
+          sourceLot.productId !== transfer.productId || destinationLot.productId !== transfer.productId ||
+          sourceLot.areaId !== transfer.fromAreaId || sourceLot.locationId !== transfer.fromLocationId ||
+          destinationLot.areaId !== transfer.toAreaId || destinationLot.locationId !== transfer.toLocationId) {
+        throw new Error("Lote de origem/destino não corresponde à transferência registrada.");
+      }
+      if (sourceBalances.length > 1 || destinationBalances.length !== 1 ||
+          destinationBalances[0].locationId !== transfer.toLocationId ||
+          Math.abs(Number(destinationBalances[0].quantityAvailable) - link.quantity) > 1e-9) {
+        throw new Error(`O saldo físico do lote de destino ${destinationLot.lotNumber} mudou ou está inconsistente. Estorno bloqueado.`);
+      }
+      const destinationReservations = reservations
+        .filter((item: any) => item.lotId === destinationLot._id)
+        .reduce((sum: number, item: any) => sum + Number(item.quantityRemaining ?? 0), 0);
+      if (destinationReservations > 0) {
+        throw new Error(`O lote de destino ${destinationLot.lotNumber} possui reserva ativa; conclua ou cancele a reserva antes do estorno.`);
+      }
+      if (Math.abs(Number(destinationLot.quantityAvailable) - link.quantity) > 1e-9 ||
+          destinationLot.active === false) {
+        throw new Error(`O lote de destino ${destinationLot.lotNumber} foi consumido, movimentado ou alterado após a transferência. Estorno integral bloqueado.`);
+      }
+      if (!Number.isFinite(sourceLot.quantityAvailable) || sourceLot.quantityAvailable < 0) {
+        throw new Error(`O lote de origem ${sourceLot.lotNumber} possui saldo inválido.`);
+      }
+      planned.push({ link, sourceLot, destinationLot, sourceBalance: sourceBalances[0] ?? null, destinationBalance: destinationBalances[0] });
+      linkedTotal += link.quantity;
+    }
+    if (Math.abs(linkedTotal - transfer.quantity) > 1e-9) {
+      throw new Error("A soma da linhagem dos lotes diverge da quantidade da transferência.");
+    }
+    if (destinationQuantity < transfer.quantity) {
+      throw new Error("O saldo do destino foi consumido ou reservado após a transferência. Estorno bloqueado.");
+    }
+
+    // Todas as validações são concluídas antes da primeira escrita.
+    const now = Date.now();
+    for (const part of planned) {
+      await ctx.db.patch(part.sourceLot._id, {
+        quantityAvailable: Number(part.sourceLot.quantityAvailable) + part.link.quantity,
+        active: true,
+      });
+      await ctx.db.patch(part.destinationLot._id, { quantityAvailable: 0, active: false });
+      await adjustLotLocationBalance(ctx, {
+        lotId: part.destinationLot._id, productId: transfer.productId,
+        locationId: transfer.toLocationId, delta: -part.link.quantity,
+      });
+      await adjustLotLocationBalance(ctx, {
+        lotId: part.sourceLot._id, productId: transfer.productId,
+        locationId: transfer.fromLocationId, delta: part.link.quantity, allowCreate: true,
+      });
+    }
+    await ctx.db.patch(sourceStock._id, { quantity: sourceQuantity + transfer.quantity });
+    await ctx.db.patch(destinationStock._id, { quantity: destinationQuantity - transfer.quantity });
+    await ctx.db.patch(transfer._id, {
+      reversedAt: now, reversedByUserId: userId, reversalReason: reason,
+    });
+
+    const movementId = await ctx.db.insert("stockMovements", {
+      productId: transfer.productId, type: "transfer", quantity: transfer.quantity,
+      previousPhysical: globalStock.physicalQuantity, newPhysical: globalStock.physicalQuantity,
+      previousReserved: globalStock.reservedQuantity, newReserved: globalStock.reservedQuantity,
+      userId, areaId: transfer.toAreaId, locationId: transfer.toLocationId,
+      toLocationId: transfer.fromLocationId, toAreaId: transfer.fromAreaId,
+      observation: `ESTORNO da transferência ${args.transferId}: ${toArea.name}/${toLocation.name} → ${fromArea.name}/${fromLocation.name}. Motivo: ${reason}`,
+      timestamp: now,
+    });
+    for (const part of planned) {
+      await ctx.db.insert("stockMovementLots", {
+        movementId, lotId: part.destinationLot._id, quantity: part.link.quantity,
+        areaId: transfer.toAreaId, locationId: transfer.toLocationId,
+      });
+    }
+    await ctx.db.insert("auditLogs", {
+      userId, action: "reverse_stock_transfer", entity: "stockTransfers", entityId: transfer._id,
+      details: `Estorno da transferência de ${transfer.quantity} ${product.name}: ${toArea.name}/${toLocation.name} → ${fromArea.name}/${fromLocation.name}. Motivo: ${reason}. Lotes de origem restaurados: ${planned.length}.`,
+      timestamp: now,
+    });
+    return transfer._id;
+  },
+});
