@@ -140,6 +140,7 @@ type ManualEntryItem = {
   model: string;
   specification: string;
   locationId: string;
+  areaId: string;
   photoStorageId: string;
   supplierLotNumber: string;
 };
@@ -153,6 +154,7 @@ const emptyEntryItem = (): ManualEntryItem => ({
   model: "",
   specification: "",
   locationId: "",
+  areaId: "",
   photoStorageId: "",
   supplierLotNumber: "",
 });
@@ -438,6 +440,10 @@ function EntriesPage() {
     rows: nfeItems,
     products: productOptions,
     locations: locationList,
+    areas: areas ?? [],
+    defaultAreaId: nfeDestination.areaId ?? undefined,
+    areas: areas ?? [],
+    defaultAreaId: nfeDestination.areaId ?? undefined,
     supplier: nfeSupplier,
     afNumber: nfeAfNumber,
     processNumber: nfeProcessNumber,
@@ -833,6 +839,7 @@ function EntriesPage() {
         nfeItems.map((row) => ({
           productId: row.productId,
           locationId: row.locationId,
+          areaId: row.areaId,
           supplierLotNumber: row.supplierLot,
           matchSource: row.matchSource,
           matchScore: row.matchScore,
@@ -999,6 +1006,13 @@ function EntriesPage() {
         toast.error("Selecione um local físico ativo para cada item da entrada.");
         return;
       }
+      if (item.areaId) {
+        const itemArea = (areas ?? []).find((entry) => entry._id === item.areaId);
+        if (!itemArea || !itemArea.active) {
+          toast.error("A área selecionada para um item não está ativa. Revise a classificação.");
+          return;
+        }
+      }
     }
 
     setManualSaving(true);
@@ -1045,6 +1059,7 @@ function EntriesPage() {
             model: item.model || undefined,
             specification: item.specification || undefined,
             locationId: (item.locationId || undefined) as any,
+            areaId: (item.areaId || undefined) as any,
             photoStorageId: item.photoStorageId || undefined,
             supplierLotNumber: item.supplierLotNumber || undefined,
           })),
@@ -1398,6 +1413,9 @@ function EntriesPage() {
               items={items}
               products={productOptions}
               locations={locationList}
+              areas={areas ?? []}
+              defaultAreaName={(areas ?? []).find((area) => area._id === areaId)?.name}
+              disableAreaSelection={Boolean(manualDraft)}
               locationRequired
               onUpdateItem={handleManualItemUpdate}
               onAddItem={() => setItems((current) => [...current, emptyEntryItem()])}
@@ -1761,6 +1779,9 @@ function EntriesPage() {
                   items={nfeItems}
                   products={productOptions}
                   locations={locationList}
+                  areas={areas ?? []}
+                  defaultAreaName={(areas ?? []).find((area) => area._id === nfeDestination.areaId)?.name}
+                  disableAreaSelection={Boolean(nfeDraft)}
                   documentTotal={nfe.totalValue}
                   onUpdate={(index, patch) =>
                     setNfeItems((current) =>
