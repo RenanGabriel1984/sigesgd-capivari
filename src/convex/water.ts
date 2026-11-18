@@ -334,6 +334,17 @@ export const reverseReceipt = mutation({
     if (!period || period.status !== "open") throw new Error("Não é permitido estornar recebimento após o fechamento do rateio. É necessária uma retificação financeira específica.");
     const shares = await ctx.db.query("waterShares").withIndex("by_period", (q) => q.eq("periodId", receipt.periodId)).collect();
     if (shares.length) throw new Error("O recebimento já possui rateio. Estorne ou retifique o rateio antes de alterar esta compra.");
+    const [allReceipts, allMovements] = await Promise.all([
+      ctx.db.query("waterReceipts").collect(),
+      ctx.db.query("waterContainerMovements").collect(),
+    ]);
+    const physicalBalanceWithoutReceipt = calculateWaterContainerBalance(
+      allReceipts.filter((item: any) => item._id !== args.receiptId && !item.reversedAt),
+      allMovements.filter((item: any) => !item.reversedAt),
+    );
+    if (physicalBalanceWithoutReceipt.fullGallons < 0 || physicalBalanceWithoutReceipt.emptyGallons < 0) {
+      throw new Error("Os galões deste recebimento já foram consumidos ou o saldo físico ficaria negativo. Faça a conferência física antes de qualquer retificação.");
+    }
     const now = Date.now();
     await ctx.db.patch(args.receiptId, { reversedAt: now, reversedBy: userId, reversalReason: reason });
     await writeAudit(ctx, userId, "update", "waterReceipts", String(args.receiptId), `ESTORNO do recebimento original. Motivo: ${reason}. Valor: R$ ${(receipt.totalValueCents / 100).toFixed(2)}; galões: ${receipt.gallonsReceived}; data original: ${new Date(receipt.receivedAt).toLocaleDateString("pt-BR")}.`);
