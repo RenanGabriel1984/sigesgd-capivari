@@ -18,12 +18,11 @@ import { generateSecureNumericCode, hashResetCode } from "./auth/passwords";
  *
  * ─── Recuperação de senha ───────────────────────────────────────────────────
  * (`passwords.requestPasswordReset`)
- *  - o código numérico de 6 dígitos continua sendo gerado e gravado em
- *    `passwordResets` (token, expiresAt 15 min, usedAt, attempts, userId);
  *  - a mutation agenda esta ação INTERNA passando apenas o `resetId`;
- *  - o código é lido AQUI, no servidor, direto da tabela `passwordResets`
- *    — nunca trafega em args públicos, não é retornado pela mutation e
- *    não é impresso em logs de produção;
+ *  - esta ação gera o código em memória, deriva um hash PBKDF2 com salt
+ *    aleatório e persiste somente hash/salt em `passwordResets`;
+ *  - o código em texto segue diretamente ao provedor de e-mail, sem ser
+ *    gravado na tabela, no payload agendado, em resposta pública ou em logs;
  *  - se o registro já foi consumido (`usedAt`), expirou ou esgotou as
  *    tentativas, nada é enviado.
  */
@@ -87,7 +86,7 @@ export const getPasswordResetForEmailInternal = internalQuery({
     if ((reset.attempts ?? 0) >= 5) return null;
 
     const user = await ctx.db.get(reset.userId);
-    if (!user?.email) return null;
+    if (!user?.email || user.active === false) return null;
     // B-01: identidade anônima ou sem perfil válido nunca recebe recuperação.
     if ((user as { isAnonymous?: boolean }).isAnonymous === true) return null;
     if (!user.role) return null;
