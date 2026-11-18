@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { action, internalAction, internalQuery, mutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requirePermission } from "./rbac";
+import { generateSecureNumericCode, hashResetCode } from "./auth/passwords";
 
 /**
  * Gestão de Estoque SGGD — Transporte de e-mail.
@@ -91,7 +92,7 @@ export const getPasswordResetForEmailInternal = internalQuery({
     if ((user as { isAnonymous?: boolean }).isAnonymous === true) return null;
     if (!user.role) return null;
 
-    return { email: user.email, code: reset.token };
+    return { email: user.email };
   },
 });
 
@@ -114,11 +115,27 @@ export const sendPasswordResetEmailInternal = internalAction({
       return { sent: false, reason: "reset-not-found" };
     }
 
+    // Generate the OTP inside this internal action. It exists only in memory
+    // and is passed to an internal mutation as a salted hash, never as a DB value.
+    const code = generateSecureNumericCode();
+    const { hash, salt } = await hashResetCode(code);
+    const stored = await ctx.runMutation(
+      internal.passwords.storePasswordResetHashInternal,
+      { resetId: args.resetId, tokenHash: hash, tokenSalt: salt },
+    );
+    if (!stored) {
+      return { sent: false, reason: "reset-not-active" };
+    }
+
     try {
-      await sendOtpEmail(payload.email, payload.code);
+      await sendOtpEmail(payload.email, code);
       return { sent: true };
     } catch (error: any) {
-      // NUNCA logar o código nem o corpo do erro (poderia conter dados sensíveis).
+      // Invalidate the code if delivery fails; never log the code or payload.
+      await ctx.runMutation(
+        internal.passwords.invalidatePasswordResetInternal,
+        { resetId: args.resetId },
+      );
       console.error(
         "[Estoque SGGD] Falha no envio do e-mail de recuperação:",
         error?.response?.status ?? error?.code ?? error?.message ?? "erro-desconhecido",
