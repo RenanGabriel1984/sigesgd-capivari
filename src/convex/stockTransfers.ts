@@ -309,9 +309,13 @@ export const create = mutation({
       }
     }
 
+    const transferLotDetails = await Promise.all(planned.map(async (part) => {
+      const lot: any = await ctx.db.get(part.lotId);
+      return `${lot?.lotNumber ?? String(part.lotId)} x${part.quantity}`;
+    }));
     await ctx.db.insert("auditLogs", {
       userId, action: "transfer_stock", entity: "stockTransfers", entityId: transferId,
-      details: `Transferência de ${args.quantity} ${product.name}: ${fromArea.name}/${fromLocation.name} → ${toArea.name}/${toLocation.name}; ${planned.length} lote(s) com origem rastreável.`,
+      details: `Transferência de ${args.quantity} ${product.name}: ${fromArea.name}/${fromLocation.name} → ${toArea.name}/${toLocation.name}; lotes de origem: ${transferLotDetails.join(", ")}. Operador: ${userId}.`,
       timestamp: now,
     });
     return transferId;
@@ -486,9 +490,12 @@ export const reverse = mutation({
         areaId: transfer.toAreaId, locationId: transfer.toLocationId,
       });
     }
+    const reversedLotDetails = planned.map((part: any) =>
+      `${part.sourceLot.lotNumber} restaurado / ${part.destinationLot.lotNumber} revertido x${part.link.quantity}`
+    );
     await ctx.db.insert("auditLogs", {
       userId, action: "reverse_stock_transfer", entity: "stockTransfers", entityId: transfer._id,
-      details: `Estorno da transferência de ${transfer.quantity} ${product.name}: ${toArea.name}/${toLocation.name} → ${fromArea.name}/${fromLocation.name}. Motivo: ${reason}. Lotes de origem restaurados: ${planned.length}.`,
+      details: `Estorno da transferência de ${transfer.quantity} ${product.name}: ${toArea.name}/${toLocation.name} → ${fromArea.name}/${fromLocation.name}. Motivo: ${reason}. Lotes: ${reversedLotDetails.join(", ")}. Operador: ${userId}.`,
       timestamp: now,
     });
     return transfer._id;
