@@ -739,3 +739,24 @@ describe("AUTH-SESSION — revogação e proteção contra bloqueio remoto", () 
     expect(users).toMatch(/internal\.passwords\.invalidateUserSessionsInternal/);
   });
 });
+
+
+describe("AUTH-TIMING — anti-enumeração por tempo de resposta", () => {
+  it("AUTH-TIMING-01: contas inexistentes, inativas, inválidas ou sem senha executam PBKDF2 fictício", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    const verifyBlock = passwords.slice(
+      passwords.indexOf("export const verifyCredentials"),
+      passwords.indexOf("/** Check if a user has a password configured."),
+    );
+    expect(passwords).toMatch(/const DUMMY_PASSWORD_HASH/);
+    expect(passwords).toMatch(/const DUMMY_PASSWORD_SALT/);
+    expect(passwords).toMatch(/async function rejectCredentials\(password: string\)/);
+    expect(verifyBlock.match(/return await rejectCredentials\(args\.password\)/g)?.length).toBe(5);
+    expect(verifyBlock).toMatch(/if \(!valid\)\s*\{\s*return \{ success: false, error: GENERIC_AUTH_ERROR \};/);
+  });
+
+  it("AUTH-TIMING-02: entradas excessivamente longas são rejeitadas antes da derivação", () => {
+    const credentials = stripComments(read("src/convex/auth/credentials.ts"));
+    expect(credentials).toMatch(/email\.length > 254 \|\| password\.length > 200/);
+  });
+});
