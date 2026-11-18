@@ -35,6 +35,14 @@ describe("cadastro seguro de usuários e credenciais", () => {
     expect(handler.indexOf("args.temporaryPassword.length < 8")).toBeLessThan(handler.indexOf('ctx.db.insert("users"'));
   });
 
+  it("usa expressão regular compatível com e-mails comuns", () => {
+    expect(users).toContain('/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/');
+    const emailPattern = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
+    expect(emailPattern.test("renan.martins@example.com")).toBe(true);
+    expect(emailPattern.test("renan@example.com.br")).toBe(true);
+    expect(emailPattern.test("renan example.com")).toBe(false);
+  });
+
   it("expõe apenas a existência da senha e permite definir ou redefinir", () => {
     const start = users.indexOf("export const listUsers = query({");
     const end = users.indexOf("export const listUserOptions", start);
