@@ -869,3 +869,18 @@ describe("AUTH-RESET-REVOCATION — códigos antigos após mudança de acesso", 
     expect(forceBlock).toMatch(/user\.requiresPasswordReset !== true && passwordRecord\.requiresReset !== true/);
   });
 });
+
+describe("AUTH-FAILURE-AUDIT — contenção de abuso no login", () => {
+  it("não persiste tentativas para e-mails inexistentes e limita logs por conta", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    const start = passwords.indexOf("export const recordFailedLogin");
+    const end = passwords.indexOf("export const recordSuccessfulLogin", start);
+    const block = passwords.slice(start, end);
+    expect(block).toMatch(/const account = await ctx\.db[\s\S]*?\.withIndex\("email"/);
+    expect(block).toMatch(/if \(!account\) return/);
+    expect(block).toMatch(/auditIntervalMs = 15 \* 60 \* 1000/);
+    expect(block).toMatch(/lastAuditAt/);
+    expect(block).toMatch(/if \(shouldAudit\)/);
+    expect(block).not.toMatch(/entityId: account\?\._id \? String\(account\._id\) : email/);
+  });
+});
