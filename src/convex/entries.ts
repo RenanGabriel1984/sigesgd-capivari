@@ -995,6 +995,11 @@ export const reverse = mutation({
       ) {
         throw new Error(`Não é possível estornar "${product?.name ?? "item"}": área/local do item diverge do lote original.`);
       }
+      if (!lotLocationId) {
+        throw new Error(
+          `Não é possível estornar "${product?.name ?? "item"}": o local físico do lote original não está identificado. Regularize a localização antes do estorno.`,
+        );
+      }
 
       let locationStock: any = null;
       if (lotLocationId) {
