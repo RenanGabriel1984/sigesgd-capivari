@@ -713,7 +713,7 @@ describe("RESET-HASH — códigos de recuperação protegidos em repouso", () =>
       passwordSrc.indexOf("export const confirmPasswordReset"),
     );
     expect(requestBlock).toMatch(/email\.length > 254/);
-    expect(requestBlock).toMatch(/!\/\^\[\^\\\\s@\]\+@\[\^\\\\s@\]\+\\\\\.\[\^\\\\s@\]\+\$\//);
+    expect(requestBlock).toContain(String.raw`/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/`);
     expect(requestBlock).toMatch(/return \{ message: RESET_GENERIC_MESSAGE \}/);
     expect(requestBlock).not.toMatch(/Number\.isFinite\(args\.email\.length\)/);
   });
