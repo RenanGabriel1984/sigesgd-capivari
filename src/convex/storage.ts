@@ -5,6 +5,7 @@ import { requirePermission, effectiveRole } from "./rbac";
 import {
   canAttachPendingStorageFile,
   canReadStorageFile,
+  isStorageUploadSizeAllowed,
   type StorageOwnerType,
 } from "../lib/storage-access";
 
@@ -187,8 +188,14 @@ async function resolveAuthorizedUrls(ctx: any, rawIds: string[]): Promise<Record
 export const registerUpload = mutation({
   args: { storageId: v.string() },
   handler: async (ctx, args) => {
-    const { userId } = await requirePermission(ctx, "stock.view");
+    const { userId } = await requirePermission(ctx, "stock.mutate");
     const storageId = assertValidStorageId(args.storageId);
+    const metadata = await ctx.db.system.get("_storage", storageId as any);
+    if (!metadata) throw new Error("O arquivo enviado não foi encontrado no armazenamento.");
+    if (!isStorageUploadSizeAllowed(metadata.size)) {
+      await ctx.storage.delete(storageId as any);
+      throw new Error("O arquivo deve ter tamanho maior que zero e no máximo 10 MB.");
+    }
     const url = await ctx.storage.getUrl(storageId as any);
     if (!url) throw new Error("O arquivo enviado não foi encontrado no armazenamento.");
 
@@ -302,7 +309,7 @@ export async function attachStorageFile(
 export const generateUploadUrl = mutation({
   args: {},
   handler: async (ctx) => {
-    await requirePermission(ctx, "stock.view");
+    await requirePermission(ctx, "stock.mutate");
     return await ctx.storage.generateUploadUrl();
   },
 });
