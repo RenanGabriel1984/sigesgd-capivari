@@ -66,7 +66,10 @@ export interface NfeReviewTableProps {
   items: NfeReviewRow[];
   products: NfeReviewProduct[];
   locations?: Array<{ _id: string; name: string }>;
-  /** Atualiza UMA linha (associação manual, lote, local, quantidade, valores). */
+  areas?: Array<{ _id: string; name: string }>;
+  defaultAreaName?: string;
+  disableAreaSelection?: boolean;
+  /** Atualiza UMA linha (associação manual, lote, local, área, quantidade, valores). */
   onUpdate: (index: number, patch: Partial<NfeReviewRow>) => void;
   /** Abre o cadastro de produto para a LINHA indicada (índice do item). */
   onNewProduct?: (index: number) => void;
@@ -105,6 +108,9 @@ export function NfeReviewTable({
   items,
   products,
   locations,
+  areas,
+  defaultAreaName,
+  disableAreaSelection = false,
   onUpdate,
   onNewProduct,
   sourceLabel,
@@ -363,7 +369,34 @@ export function NfeReviewTable({
                 )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Local */}
+                  {/* Área: sem sobrescrita, o item herda a área padrão da entrada. */}
+                  <div className="min-w-0 max-w-full overflow-hidden">
+                    <span className="block text-[10px] uppercase text-muted-foreground">
+                      Área / subestoque
+                    </span>
+                    <Select
+                      value={review.areaId || "default"}
+                      disabled={disableAreaSelection}
+                      onValueChange={(value) =>
+                        onUpdate(index, { areaId: value === "default" ? undefined : value })
+                      }
+                    >
+                      <SelectTrigger className="mt-1 h-8 w-full min-w-0">
+                        <SelectValue placeholder="Área padrão da entrada" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">
+                          {defaultAreaName ? `Padrão — ${defaultAreaName}` : "Padrão da entrada"}
+                        </SelectItem>
+                        {(areas ?? []).map((area) => (
+                          <SelectItem key={area._id} value={area._id}>
+                            {area.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {/* Local físico — dimensão independente da área. */}
                   <div className="min-w-0 max-w-full overflow-hidden">
                     <span className="block text-[10px] uppercase text-muted-foreground">
                       Local
