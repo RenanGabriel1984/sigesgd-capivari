@@ -3,6 +3,7 @@ import { query, mutation, internalMutation, QueryCtx } from "./_generated/server
 import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
 import { requirePermission } from "./rbac";
+import { internal } from "./_generated/api";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -256,6 +257,15 @@ export const updateUser = mutation({
       userId: adminId, action, entity: "users", entityId: userId,
       details: `Usuário "${user?.name}" — ${JSON.stringify(updates)}`, timestamp: Date.now(),
     });
+    const securityProfileChanged =
+      updates.active === false ||
+      (updates.role !== undefined && updates.role !== targetUser.role) ||
+      (updates.email !== undefined && updates.email !== targetUser.email);
+    if (securityProfileChanged) {
+      await ctx.scheduler.runAfter(0, internal.passwords.invalidateUserSessionsInternal, {
+        userId,
+      });
+    }
     return userId;
   },
 });
@@ -295,6 +305,9 @@ export const deactivateUser = mutation({
     await ctx.db.insert("auditLogs", {
       userId: adminId, action: "deactivate", entity: "users", entityId: args.userId,
       details: `Usuário "${user.name}" desativado`, timestamp: Date.now(),
+    });
+    await ctx.scheduler.runAfter(0, internal.passwords.invalidateUserSessionsInternal, {
+      userId: args.userId,
     });
     return true;
   },
