@@ -38,8 +38,8 @@ describe("implantação inicial do módulo Água Mineral (sem histórico prévio
     expect(backend).toContain('v.literal("adjustment")');
     expect(backend).toContain('if (args.type === "adjustment" && args.fullDelta === 0 && args.emptyDelta === 0)');
     expect(backend).toContain('entity: "waterContainerMovements"');
-    expect(backend).toContain("balance.fullGallons + args.fullDelta < 0");
-    expect(backend).toContain("balance.emptyGallons + args.emptyDelta < 0");
+    expect(backend).toContain("validateWaterContainerLedger(");
+    expect(backend).toContain("if (ledgerError) throw new Error(ledgerError);");
   });
 
   it("exige justificativa auditável para implantação do saldo físico inicial", () => {
