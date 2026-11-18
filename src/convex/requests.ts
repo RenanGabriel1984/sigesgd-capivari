@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { verifyPassword } from "./auth/passwords";
 import { generateExitNumber } from "./stockHelpers";
 import { requirePermission, requireRequestAction } from "./rbac";
@@ -61,6 +62,28 @@ export const list = query({
       requests = await ctx.db.query("requests").withIndex("by_requester", (q) => q.eq("requesterId", user._id)).order("desc").take(200);
     }
     return Promise.all(requests.map(async (r) => enrichRequest(ctx, r)));
+  },
+});
+
+/**
+ * Histórico completo de solicitações com paginação real.
+ * O escopo continua derivado do usuário autenticado: perfis operacionais
+ * consultam apenas as próprias solicitações; perfis com visão completa
+ * consultam o histórico geral.
+ */
+export const listPaginated = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    const { user } = await requireUser(ctx);
+    const role = (user.role ?? "technician") as UserRole;
+    const source = hasFullVisibility(role)
+      ? ctx.db.query("requests").withIndex("by_created").order("desc")
+      : ctx.db.query("requests").withIndex("by_requester", (q) => q.eq("requesterId", user._id)).order("desc");
+    const result = await source.paginate(args.paginationOpts);
+    return {
+      ...result,
+      page: await Promise.all(result.page.map(async (request) => enrichRequest(ctx, request))),
+    };
   },
 });
 
