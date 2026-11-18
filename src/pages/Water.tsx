@@ -249,6 +249,23 @@ export default function WaterPage() {
           <Badge variant="outline">Controle interno — sem nota fiscal</Badge>
         </div>
 
+        {periods.length === 0 && dashboard.receipts.length === 0 && dashboard.movements.length === 0 && dashboard.participants.length === 0 && (
+          <Card className="border-primary/30">
+            <CardHeader><CardTitle className="text-base">Primeira configuração do controle de água</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">Este módulo ainda não possui lançamentos. Siga esta sequência para iniciar sem criar saldos ou despesas fictícias:</p>
+              <ol className="list-decimal space-y-2 pl-5 text-sm">
+                <li><strong>Cadastre os participantes</strong> que realmente consomem água, na seção Participantes do consumo.</li>
+                <li><strong>Faça a contagem física</strong> dos galões cheios e vazios e registre em Movimentação dos galões → Ajuste de saldo / implantação. Use observação identificando a contagem inicial.</li>
+                <li><strong>Abra o período</strong> correspondente à competência em que as compras serão rateadas. Confira a lista de participantes antes de registrar as compras.</li>
+                <li><strong>Registre cada recebimento</strong> com data, quantidade de cheios, vazios entregues e valor efetivamente pago/contratado.</li>
+                <li><strong>Feche o período</strong> somente quando todas as compras da competência estiverem lançadas e os participantes conferidos. Depois registre pagamentos individuais, inclusive parciais.</li>
+              </ol>
+              <p className="text-xs text-muted-foreground">O ajuste inicial altera somente o saldo físico de galões; não cria compra, rateio, pagamento ou dívida.</p>
+            </CardContent>
+          </Card>
+        )}
+        
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Card><CardContent className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><Droplets className="h-4 w-4" /> Galões cheios</div><p className="mt-2 text-2xl font-semibold tabular-nums">{balance.fullGallons}</p></CardContent></Card>
           <Card><CardContent className="p-4"><div className="flex items-center gap-2 text-xs text-muted-foreground"><PackageOpen className="h-4 w-4" /> Galões vazios</div><p className="mt-2 text-2xl font-semibold tabular-nums">{balance.emptyGallons}</p></CardContent></Card>
