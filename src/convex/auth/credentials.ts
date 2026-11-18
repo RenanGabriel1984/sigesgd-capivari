@@ -55,9 +55,7 @@ export const credentials = ConvexCredentials<DataModel>({
       throw new ConvexError(result.error ?? "E-mail ou senha incorretos.");
     }
 
-    // §10 — Login válido: limpa o contador de tentativas e qualquer bloqueio
-    // residual, para que a proteção de força bruta continue válida daqui em
-    // diante.
+    // Login válido: limpa o contador de falhas mantido para auditoria.
     await ctx.runMutation(internal.passwords.recordSuccessfulLogin, {
       email: normalizedEmail,
     });
