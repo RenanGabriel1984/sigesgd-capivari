@@ -1109,22 +1109,13 @@ export const officialProductsInternal = internalQuery({
 });
 
 /**
- * 8. passwordResetE2EInternal (ação interna — canal CLI/dashboard)
+ * 8. passwordResetE2EInternal (desativado por segurança)
  *
- * Exercita o fluxo completo de recuperação de senha CONTRA O DEPLOYMENT REAL,
- * sem expor o código e SEM depender do scheduler (injeção neutra):
- *
- *   request (reset real, mutation pública) → scheduler neutro → envio por
- *   `internal.email.sendPasswordResetEmailInternal` (aceite reportado) →
- *   confirmPasswordReset (fluxo público real) → token usado → senha nova
- *   válida → restauração da senha original (hash + salt idênticos,
- *   rejeitando a senha de teste).
- *
- * NUNCA retorna o código nem grava código em logs.
- *
- * NOTA: o tipo de retorno é anotado explicitamente porque a inferência a
- * partir do corpo (que referencia o registro `api`/`internal`) fecha um
- * ciclo de tipos com o próprio módulo (TS7022) e envenena o registro gerado.
+ * O teste anterior dependia de ler o OTP em texto no banco para confirmar
+ * automaticamente a redefinição. Como os códigos agora são armazenados
+ * somente como hash, esse atalho foi aposentado. A validação deve usar o
+ * código entregue ao usuário, sem criar uma via interna para recuperar o
+ * segredo.
  */
 /**
  * O teste E2E antigo lia o código em texto do banco para confirmar a senha.
