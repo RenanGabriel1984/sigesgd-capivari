@@ -415,11 +415,9 @@ export const reverse = mutation({
           destinationLot.areaId !== transfer.toAreaId || destinationLot.locationId !== transfer.toLocationId) {
         throw new Error("Lote de origem/destino não corresponde à transferência registrada.");
       }
-      if (sourceBalances.length > 1 ||
-          (sourceBalances.length === 1 && (
-            sourceBalances[0].locationId !== transfer.fromLocationId ||
-            Math.abs(Number(sourceBalances[0].quantityAvailable) - Number(sourceLot.quantityAvailable)) > 1e-9
-          ))) {
+      if (sourceBalances.length !== 1 ||
+          sourceBalances[0].locationId !== transfer.fromLocationId ||
+          Math.abs(Number(sourceBalances[0].quantityAvailable) - Number(sourceLot.quantityAvailable)) > 1e-9) {
         throw new Error(`O saldo físico do lote de origem ${sourceLot.lotNumber} está inconsistente. Estorno bloqueado.`);
       }
       if (destinationBalances.length !== 1 ||
