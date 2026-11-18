@@ -56,6 +56,23 @@ async function requireAdmin(ctx: any) {
   // RBAC central: operações administrativas de senha = gestão de usuários.
   return requirePermission(ctx, "users.manage", { entity: "passwords" });
 }
+/** Invalida OTPs pendentes quando a credencial ou o acesso muda. */
+async function invalidatePendingPasswordResets(ctx: any, userId: Id<"users">): Promise<void> {
+  const resets = await ctx.db
+    .query("passwordResets")
+    .withIndex("by_user", (q: any) => q.eq("userId", userId))
+    .collect();
+  const now = Date.now();
+  for (const reset of resets) {
+    const patch: Record<string, unknown> = {};
+    if (!reset.usedAt) patch.usedAt = now;
+    if (reset.token !== undefined) patch.token = undefined;
+    if (Object.keys(patch).length > 0) {
+      await ctx.db.patch(reset._id, patch);
+    }
+  }
+}
+
 
 /** Create password for a user (admin only). */
 export const createPassword = mutation({
@@ -114,7 +131,7 @@ export const changePassword = mutation({
     newPassword: v.string(),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireUser(ctx);
+    const { userId, user } = await requireUser(ctx);
     const currentSessionId = await getAuthSessionId(ctx);
 
     assertPasswordPolicy(args.newPassword);
@@ -148,6 +165,7 @@ export const changePassword = mutation({
 
     // Clear requiresPasswordReset flag on user
     await ctx.db.patch(userId, { requiresPasswordReset: false });
+    await invalidatePendingPasswordResets(ctx, userId);
 
     await ctx.db.insert("auditLogs", {
       userId,
@@ -204,6 +222,7 @@ export const adminResetPassword = mutation({
 
     // Set requiresPasswordReset flag on user
     await ctx.db.patch(args.userId, { requiresPasswordReset: true });
+    await invalidatePendingPasswordResets(ctx, args.userId);
 
     await ctx.db.insert("auditLogs", {
       userId: adminId,
@@ -238,6 +257,9 @@ export const forceChangePassword = mutation({
       .first();
 
     if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+    if (user.requiresPasswordReset !== true && passwordRecord.requiresReset !== true) {
+      throw new Error("A troca obrigatória de senha não está pendente. Use a opção Alterar Senha.");
+    }
 
     const { hash, salt } = await hashPassword(args.newPassword);
 
@@ -249,6 +271,7 @@ export const forceChangePassword = mutation({
 
     // Clear requiresPasswordReset flag on user
     await ctx.db.patch(userId, { requiresPasswordReset: false });
+    await invalidatePendingPasswordResets(ctx, userId);
 
     await ctx.db.insert("auditLogs", {
       userId,
@@ -583,6 +606,14 @@ export const diagnosticListUsers = internalQuery({
 const RESET_GENERIC_MESSAGE =
   "Se os dados estiverem cadastrados, enviaremos as instruções para recuperação.";
 
+export const invalidatePasswordResetsForUserInternal = internalMutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, args) => {
+    await invalidatePendingPasswordResets(ctx, args.userId);
+    return true;
+  },
+});
+
 /** Revoga sessões antigas após alteração de senha ou de perfil. */
 export const invalidateUserSessionsInternal = internalAction({
   args: {
@@ -832,6 +863,7 @@ export const confirmPasswordReset = mutation({
 
     // Clear requiresPasswordReset flag
     await ctx.db.patch(user._id, { requiresPasswordReset: false });
+    await invalidatePendingPasswordResets(ctx, user._id);
     await ctx.scheduler.runAfter(0, internal.passwords.invalidateUserSessionsInternal, {
       userId: user._id,
     });
