@@ -380,22 +380,24 @@ describe("RBAC — gestão de usuários respeita a matriz central", () => {
 
 
 describe("RBAC — proteção do último administrador ativo", () => {
-  it("updateUser não pode desativar ou rebaixar o último administrador ativo", () => {
+  it("updateUser protege o último administrador ou secretário com acesso integral", () => {
     const src = read("src/convex/users.ts");
     const start = src.indexOf("export const updateUser");
     const end = src.indexOf("export const activateUser", start);
     const update = src.slice(start, end);
     expect(update).toContain("removesActiveAdmin");
-    expect(update).toContain("admin.active !== false");
-    expect(update).toContain("activeAdmins.length <= 1");
+    expect(update).toContain('targetUser.role === "secretary"');
+    expect(update).toContain('q.eq("role", "secretary")');
+    expect(update).toContain("activeUserManagers.length <= 1");
   });
 
-  it("deactivateUser conta apenas administradores ativos", () => {
+  it("deactivateUser protege o último administrador ou secretário com acesso integral", () => {
     const src = read("src/convex/users.ts");
     const start = src.indexOf("export const deactivateUser");
     const end = src.indexOf("export const recordLogin", start);
     const deactivate = src.slice(start, end);
-    expect(deactivate).toContain("user.active !== false");
-    expect(deactivate).toContain("activeAdmins.length <= 1");
+    expect(deactivate).toContain('user.role === "secretary"');
+    expect(deactivate).toContain('q.eq("role", "secretary")');
+    expect(deactivate).toContain("activeUserManagers.length <= 1");
   });
 });
