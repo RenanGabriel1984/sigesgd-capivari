@@ -830,6 +830,9 @@ describe("STORAGE-UPLOAD — autorização e limite no servidor", () => {
     expect(registerBlock).toMatch(/ctx\.db\.system\.get\("_storage"/);
     expect(registerBlock).toMatch(/isStorageUploadSizeAllowed\(metadata\.size\)/);
     expect(registerBlock).toMatch(/ctx\.storage\.delete/);
+    expect(registerBlock).toMatch(/return \{ ok: false as const, reason: "invalid-size" as const \}/);
+    const uploadUi = stripComments(read("src/components/FileUpload.tsx"));
+    expect(uploadUi).toMatch(/if \(!registration\.ok\)/);
   });
 });
 
