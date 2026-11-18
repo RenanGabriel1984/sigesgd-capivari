@@ -1046,6 +1046,7 @@ const schema = defineSchema(
       email: v.string(),
       attempts: v.number(),
       lastAttemptAt: v.number(),
+      lastAuditAt: v.optional(v.number()),
       // Legacy compatibility only: authentication no longer locks by email.
       lockedUntil: v.optional(v.number()),
     }).index("by_email", ["email"]),
