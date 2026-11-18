@@ -1,5 +1,11 @@
 import { roleHasPermission, type AppPermission, type AppRole } from "./rbac";
 
+export const MAX_STORAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+export function isStorageUploadSizeAllowed(size: number): boolean {
+  return Number.isSafeInteger(size) && size > 0 && size <= MAX_STORAGE_UPLOAD_BYTES;
+}
+
 export type StorageOwnerType =
   | "pending"
   | "entry"
