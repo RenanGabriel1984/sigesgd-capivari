@@ -3,7 +3,25 @@ import {
   canAttachPendingStorageFile,
   canReadStorageFile,
   getStorageOwnerPermission,
+  isStorageUploadSizeAllowed,
+  MAX_STORAGE_UPLOAD_BYTES,
 } from "@/lib/storage-access";
+
+describe("limite de upload aplicado também no backend", () => {
+  it("aceita somente arquivos maiores que zero e de até 10 MB", () => {
+    expect(isStorageUploadSizeAllowed(1)).toBe(true);
+    expect(isStorageUploadSizeAllowed(MAX_STORAGE_UPLOAD_BYTES)).toBe(true);
+    expect(isStorageUploadSizeAllowed(MAX_STORAGE_UPLOAD_BYTES + 1)).toBe(false);
+    expect(isStorageUploadSizeAllowed(0)).toBe(false);
+    expect(isStorageUploadSizeAllowed(-1)).toBe(false);
+    expect(isStorageUploadSizeAllowed(Number.NaN)).toBe(false);
+    expect(isStorageUploadSizeAllowed(1.5)).toBe(false);
+  });
+
+  it("usa um limite único compartilhado entre interface e backend", () => {
+    expect(MAX_STORAGE_UPLOAD_BYTES).toBe(10 * 1024 * 1024);
+  });
+});
 
 describe("autorização contextual de arquivos", () => {
   it("permite vincular somente arquivo pendente enviado pelo próprio usuário", () => {
