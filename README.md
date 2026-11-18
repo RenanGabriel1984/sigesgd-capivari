@@ -154,10 +154,11 @@ bun vitest
 | `VITE_CONVEX_URL` | URL do deployment Convex (cliente) |
 | `CONVEX_DEPLOYMENT` | Deployment do Convex (backend) |
 | `CONVEX_SITE_URL` | URL do site para autenticação |
-| `FREEBUFF_EMAIL_API_KEY` | Segredo do backend Convex usado pelo serviço de recuperação de senha e envio de primeiro acesso; obrigatório para envio de e-mails |
-| `EMAIL_FROM` | Remetente verificado no provedor de e-mail (opcional; usa o padrão institucional definido no código) |
+| `FREEBUFF_EMAIL_API_KEY` | Segredo do backend Convex para o endpoint Freebuff de recuperação por OTP |
+| `RESEND_API_KEY` | Segredo separado do backend Convex para envio de e-mail de primeiro acesso via Resend |
+| `EMAIL_FROM` | Remetente verificado no Resend (opcional; usa o padrão institucional definido no código) |
 
-`FREEBUFF_EMAIL_API_KEY` e `EMAIL_FROM` são variáveis do ambiente **do backend Convex**, não variáveis `VITE_*`; nunca devem ser expostas ao frontend nem versionadas. A ausência da chave faz o envio falhar de forma segura.
+As credenciais `FREEBUFF_EMAIL_API_KEY` e `RESEND_API_KEY` pertencem a provedores diferentes e **não são intercambiáveis**. Todas essas variáveis são do ambiente **do backend Convex**, não variáveis `VITE_*`; nunca devem ser expostas ao frontend nem versionadas. Cada fluxo falha de forma segura quando sua própria credencial está ausente.
 
 > ⚠️ **Nunca commite arquivos `.env` ou `.env.local`.** O `.gitignore` já os exclui.
 
