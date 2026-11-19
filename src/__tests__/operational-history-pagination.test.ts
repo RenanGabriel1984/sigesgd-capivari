@@ -15,11 +15,35 @@ describe("paginação dos históricos operacionais", () => {
     }
   });
 
-  it("oferece carregamento incremental nas três telas", () => {
+  it("usa cursor do Convex também em equipamentos, movimentações e solicitações", () => {
+    for (const path of ["convex/assets.ts", "convex/stockMovements.ts", "convex/requests.ts"]) {
+      const source = read(path);
+      expect(source).toContain("paginationOptsValidator");
+      expect(source).toContain("paginate(args.paginationOpts)");
+      expect(source).toContain("page: enriched");
+    }
+  });
+
+  it("oferece carregamento incremental nas telas de entradas, transferências e devoluções", () => {
     const cases = [
       ["pages/Entries.tsx", "api.entries.listPage", "loadMoreEntries", "Carregar mais entradas"],
       ["pages/StockTransfers.tsx", "api.stockTransfers.listPage", "loadMoreTransfers", "Carregar mais transferências"],
       ["pages/Returns.tsx", "api.returns.listPage", "loadMoreReturns", "Carregar mais devoluções"],
+    ] as const;
+    for (const [path, query, loader, label] of cases) {
+      const source = read(path);
+      expect(source).toContain(query);
+      expect(source).toContain(loader);
+      expect(source).toContain(label);
+      expect(source).toContain('"LoadingMore"');
+    }
+  });
+
+  it("oferece carregamento incremental em equipamentos, movimentações e solicitações", () => {
+    const cases = [
+      ["pages/Assets.tsx", "api.assets.listPaginated", "loadMoreAssets", "Carregar mais equipamentos"],
+      ["pages/Movements.tsx", "api.stockMovements.listPaginated", "loadMoreMovements", "Carregar mais movimentações"],
+      ["pages/Requests.tsx", "api.requests.listPaginated", "loadMoreRequests", "Carregar mais solicitações"],
     ] as const;
     for (const [path, query, loader, label] of cases) {
       const source = read(path);
