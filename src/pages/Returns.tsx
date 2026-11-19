@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { usePaginatedQuery, useQuery, useMutation } from "convex/react";
 import { useSearchParams } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -73,7 +73,7 @@ export default function ReturnsPage() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const exits = useQuery(api.returns.returnable);
-  const returns = useQuery(api.returns.list);
+  const { results: returns, status: returnsStatus, loadMore: loadMoreReturns } = usePaginatedQuery(api.returns.listPage, {}, { initialNumItems: 50 });
   const locations = useQuery(api.storageLocations.listActive);
   const createReturn = useMutation(api.returns.create);
 
@@ -169,7 +169,7 @@ export default function ReturnsPage() {
 
   const canProcess = roleHasPermission(user?.role, "returns.create");
 
-  if (exits === undefined || returns === undefined) return <LoadingSkeleton />;
+  if (exits === undefined || returnsStatus === "LoadingFirstPage") return <LoadingSkeleton />;
 
   return (
     <AppShell>
@@ -324,6 +324,13 @@ export default function ReturnsPage() {
                 </Table>
               </div>
             )}
+            {returnsStatus !== "Exhausted" ? (
+              <div className="flex justify-center pt-4">
+                <Button variant="outline" onClick={() => loadMoreReturns(50)} disabled={returnsStatus === "LoadingMore"}>
+                  {returnsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais devoluções"}
+                </Button>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
