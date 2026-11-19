@@ -5,6 +5,7 @@ import { requirePermission } from "./rbac";
 import { findEquipmentCategory, buildRelatedStockProducts } from "../lib/equipment-categories";
 import type { RelatedStockProduct } from "../lib/equipment-categories";
 import { maskLicenseKey } from "../lib/license-keys";
+import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -302,6 +303,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
     const patrimonyNumber = args.patrimonyNumber?.trim() || undefined;
     if (patrimonyNumber) {
       await requirePermission(ctx, "patrimony.assign", { entity: "assets" });
@@ -380,6 +382,7 @@ export const update = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
     if (args.patrimonyNumber !== undefined) {
       await requirePermission(ctx, "patrimony.assign", {
         entity: "assets",
@@ -438,6 +441,7 @@ export const assign = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
     if (asset.status === "disposed" || asset.status === "lost") {
       throw new Error("Equipamento baixado ou extraviado não pode receber nova atribuição. Regularize o status primeiro.");
     }
@@ -498,6 +502,7 @@ export const transfer = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
     if (asset.status === "disposed" || asset.status === "lost") {
       throw new Error("Equipamento baixado ou extraviado não pode ser transferido. Regularize o status primeiro.");
     }
@@ -547,6 +552,7 @@ export const changeStatus = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
 
     if (!ASSET_STATUSES.includes(args.newStatus as (typeof ASSET_STATUSES)[number])) {
       throw new Error("Status de equipamento inválido.");
