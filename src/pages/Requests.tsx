@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useSearchParams } from "react-router";
-import { useQuery, useMutation } from "convex/react";
+import { usePaginatedQuery, useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { AppShell } from "@/components/AppShell";
@@ -57,7 +57,7 @@ const REASON_OPTIONS = [
 
 export default function Requests() {
   const { user } = useAuth();
-  const requests = useQuery(api.requests.list);
+  const { results: requests, status: requestsStatus, loadMore: loadMoreRequests } = usePaginatedQuery(api.requests.listPaginated, {}, { initialNumItems: 50 });
   const products = useQuery(api.products.listActive);
   const stockAreas = useQuery(api.stockAreas.listActive);
   const storageLocations = useQuery(api.storageLocations.listActive);
@@ -594,6 +594,13 @@ export default function Requests() {
                 <p className="text-muted-foreground text-sm">Nenhuma solicitação</p>
               </CardContent></Card>
             ) : myRequests.map((r) => renderRequest(r, r.status === "pending" && permissions.canApproveRequests))}
+            {requestsStatus !== "Exhausted" && (
+              <div className="flex justify-center">
+                <Button variant="outline" onClick={() => loadMoreRequests(50)} disabled={requestsStatus === "LoadingMore"}>
+                  {requestsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais solicitações"}
+                </Button>
+              </div>
+            )}
           </TabsContent>
           <TabsContent value="pending" className="space-y-3 mt-4">
             {pendingForApproval.length === 0 ? (
@@ -602,9 +609,23 @@ export default function Requests() {
                 <p className="text-muted-foreground text-sm">Nenhuma pendente</p>
               </CardContent></Card>
             ) : pendingForApproval.map((r) => renderRequest(r, true))}
+            {requestsStatus !== "Exhausted" && (
+              <div className="flex justify-center">
+                <Button variant="outline" onClick={() => loadMoreRequests(50)} disabled={requestsStatus === "LoadingMore"}>
+                  {requestsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais solicitações"}
+                </Button>
+              </div>
+            )}
           </TabsContent>
           <TabsContent value="all" className="space-y-3 mt-4">
-            {requests?.map((r) => renderRequest(r, r.status === "pending" && permissions.canApproveRequests && (role === "admin" || r.requesterId !== user?._id)))}
+            {requests.map((r) => renderRequest(r, r.status === "pending" && permissions.canApproveRequests && (role === "admin" || r.requesterId !== user?._id)))}
+            {requestsStatus !== "Exhausted" && (
+              <div className="flex justify-center">
+                <Button variant="outline" onClick={() => loadMoreRequests(50)} disabled={requestsStatus === "LoadingMore"}>
+                  {requestsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais solicitações"}
+                </Button>
+              </div>
+            )}
           </TabsContent>
 
           {/* ═══ Arquivo Histórico ═══ */}
