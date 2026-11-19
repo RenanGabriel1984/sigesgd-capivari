@@ -18,7 +18,7 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    const transfers = await ctx.db.query("stockTransfers").order("desc").take(200);
+    const transfers = await ctx.db.query("stockTransfers").order("desc").collect();
     return Promise.all(transfers.map(async (t: any) => {
       const product = await ctx.db.get(t.productId);
       const lot = t.lotId ? await ctx.db.get(t.lotId) : null;
@@ -42,7 +42,7 @@ export const listByProduct = query({
       .query("stockTransfers")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .order("desc")
-      .take(100);
+      .collect();
     return Promise.all(transfers.map(async (t: any) => {
       const fromLocation = await ctx.db.get(t.fromLocationId);
       const toLocation = await ctx.db.get(t.toLocationId);
