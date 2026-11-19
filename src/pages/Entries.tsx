@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { toast } from "sonner";
-import { Copy, Plus } from "lucide-react";
+import { Copy, Plus, RotateCcw } from "lucide-react";
 
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -52,6 +52,7 @@ import {
   type NfeReviewRow,
 } from "@/components/NfeReviewTable";
 import { NfeEntrySummary } from "@/components/NfeEntrySummary";
+import { resolveEntryAreaPresentation } from "@/lib/entry-area-presentation";
 import { QuickProductForm } from "@/components/QuickProductForm";
 import { SupplierForm } from "@/components/SupplierForm";
 import { NfeDestinationDialog } from "@/components/NfeDestinationDialog";
@@ -140,6 +141,7 @@ type ManualEntryItem = {
   model: string;
   specification: string;
   locationId: string;
+  areaId: string;
   photoStorageId: string;
   supplierLotNumber: string;
 };
@@ -153,6 +155,7 @@ const emptyEntryItem = (): ManualEntryItem => ({
   model: "",
   specification: "",
   locationId: "",
+  areaId: "",
   photoStorageId: "",
   supplierLotNumber: "",
 });
@@ -179,6 +182,7 @@ function isImplementationStockDate(receivedAt: number): boolean {
 /** Upload do documento original pelo MESMO mecanismo do XML (storage). */
 async function uploadFile(
   generateUploadUrl: () => Promise<string>,
+  registerUpload: (args: { storageId: string }) => Promise<unknown>,
   file: File,
   contentType?: string,
 ): Promise<string> {
@@ -192,6 +196,7 @@ async function uploadFile(
   });
   if (!response.ok) throw new Error("Falha no upload");
   const payload = (await response.json()) as { storageId: string };
+  await registerUpload({ storageId: payload.storageId });
   return payload.storageId;
 }
 
@@ -308,7 +313,7 @@ function EntriesPageSkeleton() {
 function EntriesPage() {
   useAuth();
 
-  const entries = useQuery(api.entries.list);
+  const { results: entries, status: entriesStatus, loadMore: loadMoreEntries } = usePaginatedQuery(api.entries.listPage, {}, { initialNumItems: 50 });
   const suppliers = useQuery(api.suppliers.list);
   const locations = useQuery(api.storageLocations.listActive);
   const areas = useQuery(api.stockAreas.listActive);
@@ -322,8 +327,11 @@ function EntriesPage() {
   const createCategory = useMutation(api.categories.create);
   const upsertNfeProductAlias = useMutation(api.nfeProductAliases.upsert);
   const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
+  const registerUpload = useMutation(api.storage.registerUpload);
   const createEntry = useMutation(api.entries.create);
+  const updateDraftArea = useMutation(api.entries.updateDraftArea);
   const confirmEntry = useMutation(api.entries.confirm);
+  const reverseEntry = useMutation(api.entries.reverse);
 
   // ── Cadastro rápido de produto (R31 §1) ──
   const [quickProductOpen, setQuickProductOpen] = useState(false);
@@ -344,6 +352,9 @@ function EntriesPage() {
   const [newEntryOpen, setNewEntryOpen] = useState(false);
   const [xmlOpen, setXmlOpen] = useState(false);
   const [danfeOpen, setDanfeOpen] = useState(false);
+  const [entryToReverse, setEntryToReverse] = useState<{ id: string; number: string } | null>(null);
+  const [reverseReason, setReverseReason] = useState("");
+  const [reversingEntry, setReversingEntry] = useState(false);
   const [nfeOpen, setNfeOpen] = useState(false);
   const [supplierOpen, setSupplierOpen] = useState(false);
   const xmlInputRef = useRef<HTMLInputElement>(null);
@@ -434,6 +445,8 @@ function EntriesPage() {
     rows: nfeItems,
     products: productOptions,
     locations: locationList,
+    areas: areas ?? [],
+    defaultAreaId: nfeDestination.areaId ?? undefined,
     supplier: nfeSupplier,
     afNumber: nfeAfNumber,
     processNumber: nfeProcessNumber,
@@ -626,6 +639,26 @@ function EntriesPage() {
     materialType: MaterialType,
     areaId: string,
   ) => {
+    if (!areaId.trim()) {
+      toast.error(NFE_DESTINATION_REQUIRED_MESSAGE);
+      return;
+    }
+    const invalidIndex = nfeItems.findIndex((row) => {
+      if (!row.productId || !row.locationId) return true;
+      const location = locationList.find((item) => item._id === row.locationId);
+      if (!location || !location.active) return true;
+      if (row.areaId) {
+        const itemArea = (areas ?? []).find((item) => item._id === row.areaId);
+        if (!itemArea || !itemArea.active) return true;
+      }
+      return false;
+    });
+    if (invalidIndex >= 0) {
+      setDestinationOpen(false);
+      setNfeStep("products");
+      toast.error("Revise os itens: cada um precisa de local físico ativo e, quando houver sobrescrita, de área ativa. A área é independente do armário.");
+      return;
+    }
     setNfeDestination({ materialType, areaId });
     setDestinationOpen(false);
     void handleConfirmImport({ materialType, areaId });
@@ -793,6 +826,12 @@ function EntriesPage() {
             areaId: nfeDestination.areaId ?? "",
           }
         : null);
+    const selectedAreaId = destinationOverride?.areaId ?? nfeDestination.areaId ?? "";
+    if (!selectedAreaId.trim()) {
+      setDestinationOpen(true);
+      toast.error(NFE_DESTINATION_REQUIRED_MESSAGE);
+      return;
+    }
     // D1: material permanente é decidido pelo destino RESOLVIDO (override ou
     // estado persistido), nunca por um default.
     const effectiveMaterialType =
@@ -808,6 +847,7 @@ function EntriesPage() {
         nfeItems.map((row) => ({
           productId: row.productId,
           locationId: row.locationId,
+          areaId: row.areaId,
           supplierLotNumber: row.supplierLot,
           matchSource: row.matchSource,
           matchScore: row.matchScore,
@@ -827,6 +867,12 @@ function EntriesPage() {
 
     setNfeConfirming(true);
     try {
+      if (nfeDraft) {
+        await updateDraftArea({
+          entryId: nfeDraft.entryId as any,
+          areaId: selectedAreaId as any,
+        });
+      }
       const result = await runEntryImport({
         destination: destinationOverride,
         destinationState: nfeDestination,
@@ -836,6 +882,7 @@ function EntriesPage() {
           ? () =>
               uploadFile(
                 generateUploadUrl,
+                registerUpload,
                 danfeFile,
                 danfeFile.type || "application/pdf",
               )
@@ -844,6 +891,7 @@ function EntriesPage() {
           ? () =>
               uploadFile(
                 generateUploadUrl,
+                registerUpload,
                 nfeXmlFile,
                 nfeXmlFile.type || "application/xml",
               )
@@ -956,9 +1004,33 @@ function EntriesPage() {
       );
       return;
     }
+    if (!areaId.trim()) {
+      toast.error("Selecione a área/subestoque de destino antes de registrar a entrada.");
+      return;
+    }
+    for (const item of withProduct) {
+      const location = locationList.find((entry) => entry._id === item.locationId);
+      if (!location || !location.active) {
+        toast.error("Selecione um local físico ativo para cada item da entrada.");
+        return;
+      }
+      if (item.areaId) {
+        const itemArea = (areas ?? []).find((entry) => entry._id === item.areaId);
+        if (!itemArea || !itemArea.active) {
+          toast.error("A área selecionada para um item não está ativa. Revise a classificação.");
+          return;
+        }
+      }
+    }
 
     setManualSaving(true);
     try {
+      if (manualDraft) {
+        await updateDraftArea({
+          entryId: manualDraft.entryId as any,
+          areaId: areaId as any,
+        });
+      }
       const result = await runEntryImport({
         destination: { materialType: manualMaterialType, areaId },
         existingDraft: manualDraft,
@@ -995,6 +1067,7 @@ function EntriesPage() {
             model: item.model || undefined,
             specification: item.specification || undefined,
             locationId: (item.locationId || undefined) as any,
+            areaId: (item.areaId || undefined) as any,
             photoStorageId: item.photoStorageId || undefined,
             supplierLotNumber: item.supplierLotNumber || undefined,
           })),
@@ -1060,6 +1133,31 @@ function EntriesPage() {
     }
   };
 
+  const handleReverseEntry = async () => {
+    if (!entryToReverse) return;
+    const reason = reverseReason.trim();
+    if (!reason) {
+      toast.error("Informe o motivo do estorno.");
+      return;
+    }
+
+    setReversingEntry(true);
+    try {
+      await reverseEntry({ entryId: entryToReverse.id as any, reason });
+      toast.success(`Entrada ${entryToReverse.number} estornada. O estoque foi atualizado e o histórico preservado.`);
+      setEntryToReverse(null);
+      setReverseReason("");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível estornar a entrada. Nenhuma alteração foi confirmada.",
+      );
+    } finally {
+      setReversingEntry(false);
+    }
+  };
+
   const handleManualItemUpdate = (
     index: number,
     field: string,
@@ -1077,7 +1175,7 @@ function EntriesPage() {
     );
   };
 
-  if (entries === undefined) return <EntriesPageSkeleton />;
+  if (entriesStatus === "LoadingFirstPage") return <EntriesPageSkeleton />;
 
   const searchTerm = search.trim().toLowerCase();
   const filteredEntries = (entries ?? []).filter((entry) => {
@@ -1098,7 +1196,7 @@ function EntriesPage() {
           <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight">Entradas</h1>
             <p className="text-sm text-muted-foreground">
-              {entries.length} entrada(s) — XML, DANFE/OCR ou manual, sempre com
+              Exibindo {entries.length} entrada(s) carregadas — XML, DANFE/OCR ou manual, sempre com
               conferência antes de afetar o estoque
             </p>
           </div>
@@ -1129,6 +1227,7 @@ function EntriesPage() {
               <TableHead>Fornecedor</TableHead>
               <TableHead>NF-e / Série</TableHead>
               <TableHead>Recebida em</TableHead>
+              <TableHead>Áreas</TableHead>
               <TableHead className="text-right">Itens</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead>Status</TableHead>
@@ -1156,6 +1255,43 @@ function EntriesPage() {
                 <TableCell>
                   {new Date(entry.receivedAt).toLocaleDateString("pt-BR")}
                 </TableCell>
+                <TableCell className="min-w-40">
+                  {(() => {
+                    const itemAreas = resolveEntryAreaPresentation(
+                      entry.items,
+                      entry.area?.name,
+                    );
+                    const uniqueAreas = [...new Set(itemAreas.map((item) => item.areaName))];
+                    return (
+                      <TooltipProvider delayDuration={200}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="max-w-56 text-left text-xs text-muted-foreground underline decoration-dotted underline-offset-4 hover:text-foreground"
+                              aria-label={`Ver área de destino dos ${itemAreas.length} itens`}
+                            >
+                              {uniqueAreas.length > 0
+                                ? uniqueAreas.join(", ")
+                                : "—"}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent className="max-w-sm">
+                            <div className="space-y-1">
+                              <p className="font-semibold">Área por item</p>
+                              {itemAreas.length > 0 ? itemAreas.map((item, index) => (
+                                <p key={index}>
+                                  <span className="font-medium">{item.productName}:</span>{" "}
+                                  {item.areaName}
+                                </p>
+                              )) : <p>Entrada sem itens.</p>}
+                            </div>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    );
+                  })()}
+                </TableCell>
                 <TableCell className="text-right">
                   {entry.items?.length ?? 0}
                 </TableCell>
@@ -1165,10 +1301,20 @@ function EntriesPage() {
                 <TableCell>
                   <div className="flex flex-wrap items-center gap-1">
                     <Badge
-                      variant={entry.status === "confirmed" ? "default" : "secondary"}
+                      variant={
+                        entry.status === "confirmed"
+                          ? "default"
+                          : entry.status === "reversed"
+                            ? "destructive"
+                            : "secondary"
+                      }
                       className="text-[10px]"
                     >
-                      {entry.status === "confirmed" ? "Confirmada" : "Rascunho"}
+                      {entry.status === "confirmed"
+                        ? "Confirmada"
+                        : entry.status === "reversed"
+                          ? "Estornada"
+                          : "Rascunho"}
                     </Badge>
                     {isImplementationStockDate(entry.receivedAt) ? (
                       <Badge variant="outline" className="text-[10px]">
@@ -1204,13 +1350,29 @@ function EntriesPage() {
                         Confirmar
                       </Button>
                     )
+                  ) : entry.status === "confirmed" ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                      onClick={() => {
+                        setReverseReason("");
+                        setEntryToReverse({
+                          id: entry._id as string,
+                          number: entry.entryNumber,
+                        });
+                      }}
+                    >
+                      <RotateCcw className="mr-1 h-3 w-3" />
+                      Estornar
+                    </Button>
                   ) : null}
                 </TableCell>
               </TableRow>
             ))}
             {filteredEntries.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8}>
+                <TableCell colSpan={9}>
                   <div className="py-10 text-center text-sm text-muted-foreground">
                     Nenhuma entrada encontrada.
                   </div>
@@ -1219,7 +1381,77 @@ function EntriesPage() {
             ) : null}
           </TableBody>
         </Table>
+        {entriesStatus !== "Exhausted" ? (
+          <div className="flex justify-center py-3">
+            <Button variant="outline" onClick={() => loadMoreEntries(50)} disabled={entriesStatus === "LoadingMore"}>
+              {entriesStatus === "LoadingMore" ? "Carregando..." : "Carregar mais entradas"}
+            </Button>
+          </div>
+        ) : null}
       </div>
+
+      {/* ── Estorno de entrada confirmada ── */}
+      <Dialog
+        open={Boolean(entryToReverse)}
+        onOpenChange={(open) => {
+          if (!open && !reversingEntry) {
+            setEntryToReverse(null);
+            setReverseReason("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Estornar entrada {entryToReverse?.number ?? ""}</DialogTitle>
+            <DialogDescription>
+              Esta operação reverte os saldos e os lotes da entrada original. O registro permanece no histórico como estornado.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+              <p className="font-medium text-destructive">Atenção: operação irreversível pela tela de entradas.</p>
+              <p className="mt-1 text-muted-foreground">
+                O sistema bloqueará o estorno se o lote tiver sido consumido ou reservado, se a localização original não puder ser identificada ou se houver unidade já tombada/vinculada ao Patrimônio.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="entry-reversal-reason">Motivo do estorno *</Label>
+              <Input
+                id="entry-reversal-reason"
+                value={reverseReason}
+                onChange={(event) => setReverseReason(event.target.value)}
+                placeholder="Descreva o motivo e a referência da correção"
+                maxLength={500}
+                disabled={reversingEntry}
+              />
+              <p className="text-xs text-muted-foreground">
+                Informe um motivo objetivo. O usuário, a data/hora e a justificativa serão registrados na auditoria.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              disabled={reversingEntry}
+              onClick={() => {
+                setEntryToReverse(null);
+                setReverseReason("");
+              }}
+            >
+              Voltar
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={reversingEntry || !reverseReason.trim()}
+              onClick={() => void handleReverseEntry()}
+            >
+              {reversingEntry ? "Estornando…" : "Confirmar estorno"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Entrada manual ── */}
       <Dialog
@@ -1296,13 +1528,15 @@ function EntriesPage() {
                 </SelectContent>
               </Select>
             </FieldRow>
-            <FieldRow label="Área de destino">
-              <Select value={areaId || "none"} onValueChange={(value) => setAreaId(value === "none" ? "" : value)}>
+            <FieldRow
+              label="Área de destino *"
+              tooltip="Obrigatória. A área classifica a finalidade do material; o armário é uma escolha física independente."
+            >
+              <Select value={areaId} onValueChange={setAreaId}>
                 <SelectTrigger className="mt-1 h-10 w-full min-w-0 max-w-full">
-                  <SelectValue placeholder="Selecionar área" />
+                  <SelectValue placeholder="Selecionar área/subestoque" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Sem área definida</SelectItem>
                   {(areas ?? []).map((area) => (
                     <SelectItem key={area._id} value={area._id}>
                       {area.name}
@@ -1346,6 +1580,10 @@ function EntriesPage() {
               items={items}
               products={productOptions}
               locations={locationList}
+              areas={areas ?? []}
+              defaultAreaName={(areas ?? []).find((area) => area._id === areaId)?.name}
+              disableAreaSelection={Boolean(manualDraft)}
+              locationRequired
               onUpdateItem={handleManualItemUpdate}
               onAddItem={() => setItems((current) => [...current, emptyEntryItem()])}
               onRemoveItem={(index) =>
@@ -1708,6 +1946,9 @@ function EntriesPage() {
                   items={nfeItems}
                   products={productOptions}
                   locations={locationList}
+                  areas={areas ?? []}
+                  defaultAreaName={(areas ?? []).find((area) => area._id === nfeDestination.areaId)?.name}
+                  disableAreaSelection={Boolean(nfeDraft)}
                   documentTotal={nfe.totalValue}
                   onUpdate={(index, patch) =>
                     setNfeItems((current) =>
@@ -1821,6 +2062,7 @@ function EntriesPage() {
         products={productOptions.map((product) => ({
           _id: product._id,
           name: product.name,
+          hasSerial: product.hasSerial,
         }))}
         locations={locationList.map((location) => ({
           _id: location._id,

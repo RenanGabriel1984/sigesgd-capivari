@@ -4,6 +4,7 @@ import { api } from "@/convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Camera, Upload, X, FileText, Image, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { MAX_STORAGE_UPLOAD_BYTES } from "@/lib/storage-access";
 
 interface FileUploadProps {
   /** Current storage ID (if file already uploaded) */
@@ -24,8 +25,6 @@ interface FileUploadProps {
   size?: "sm" | "md";
 }
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-
 export function FileUpload({
   storageId,
   onUpload,
@@ -37,6 +36,7 @@ export function FileUpload({
   size = "md",
 }: FileUploadProps) {
   const generateUploadUrl = useMutation(api.storage.generateUploadUrl);
+  const registerUpload = useMutation(api.storage.registerUpload);
   const fileUrl = useQuery(
     api.storage.getUrl,
     storageId ? { storageId } : "skip"
@@ -47,8 +47,8 @@ export function FileUpload({
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
-    if (file.size > MAX_FILE_SIZE) {
-      toast.error("Arquivo muito grande. Tamanho máximo: 10MB");
+    if (file.size <= 0 || file.size > MAX_STORAGE_UPLOAD_BYTES) {
+      toast.error("O arquivo deve ter tamanho maior que zero e no máximo 10 MB.");
       return;
     }
 
@@ -64,6 +64,10 @@ export function FileUpload({
       if (!response.ok) throw new Error("Falha no upload");
 
       const { storageId: newStorageId } = await response.json();
+      const registration = await registerUpload({ storageId: newStorageId });
+      if (!registration.ok) {
+        throw new Error("O arquivo deve ter tamanho maior que zero e no máximo 10 MB.");
+      }
       onUpload(newStorageId);
       toast.success("Arquivo enviado com sucesso");
     } catch (e: any) {

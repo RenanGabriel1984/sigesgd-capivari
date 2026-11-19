@@ -1,0 +1,450 @@
+import { query, mutation } from "./_generated/server";
+import { v } from "convex/values";
+import { requirePermission } from "./rbac";
+import { assertTextLimits } from "../lib/text-limits";
+import {
+  splitWaterCostCents,
+  validateWaterPeriodRange,
+  validateWaterReceiptDate,
+  isValidWaterTimestamp,
+  calculateWaterContainerBalance,
+  validateWaterContainerLedger,
+  summarizeWaterFinances,
+} from "../lib/water-control";
+
+
+async function writeAudit(ctx: any, userId: any, action: "create" | "update", entity: string, entityId: string, details: string) {
+  await ctx.db.insert("auditLogs", {
+    userId, action, entity, entityId, details, timestamp: Date.now(),
+  });
+}
+
+export const dashboard = query({
+  args: {},
+  handler: async (ctx) => {
+    await requirePermission(ctx, "water.view", { entity: "water" });
+    const [participants, periods, allReceipts, allMovements, shares, payments] = await Promise.all([
+      ctx.db.query("waterParticipants").collect(),
+      ctx.db.query("waterPeriods").withIndex("by_startAt").order("desc").collect(),
+      ctx.db.query("waterReceipts").collect(),
+      ctx.db.query("waterContainerMovements").collect(),
+      ctx.db.query("waterShares").collect(),
+      ctx.db.query("waterPayments").collect(),
+    ]);
+    const sortedParticipants = participants.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    const participantNames = new Map(sortedParticipants.map((person: any) => [String(person._id), person.name]));
+    const financialSummary = summarizeWaterFinances(
+      allReceipts.filter((receipt: any) => !receipt.reversedAt),
+      shares.map((share: any) => ({
+        shareId: String(share._id),
+        participantId: String(share.participantId),
+        participantName: share.participantName ?? participantNames.get(String(share.participantId)) ?? "Participante inativo",
+        amountDueCents: share.amountDueCents,
+      })),
+      payments.filter((payment: any) => !payment.reversedAt).map((payment: any) => ({
+        shareId: String(payment.shareId),
+        amountCents: payment.amountCents,
+      })),
+    );
+    return {
+      participants: sortedParticipants,
+      periods,
+      openPeriod: periods.find((period) => period.status === "open") ?? null,
+      receipts: allReceipts.sort((a, b) => b.receivedAt - a.receivedAt),
+      movements: allMovements.sort((a, b) => b.date - a.date),
+      balance: calculateWaterContainerBalance(allReceipts.filter((receipt: any) => !receipt.reversedAt), allMovements.filter((movement: any) => !movement.reversedAt)),
+      financialSummary,
+    };
+  },
+});
+
+export const periodDetails = query({
+  args: { periodId: v.id("waterPeriods") },
+  handler: async (ctx, args) => {
+    await requirePermission(ctx, "water.view", { entity: "waterPeriods", entityId: args.periodId });
+    const period = await ctx.db.get(args.periodId);
+    if (!period) return null;
+    const [receipts, shares] = await Promise.all([
+      ctx.db.query("waterReceipts").withIndex("by_period", (q) => q.eq("periodId", args.periodId)).collect(),
+      ctx.db.query("waterShares").withIndex("by_period", (q) => q.eq("periodId", args.periodId)).collect(),
+    ]);
+    const sharesWithPayments = await Promise.all(shares.map(async (share: any) => {
+      const payments = await ctx.db.query("waterPayments")
+        .withIndex("by_share", (q: any) => q.eq("shareId", share._id)).collect();
+      const activePayments = payments.filter((payment: any) => !payment.reversedAt);
+      const paidCents = activePayments.reduce((sum: number, payment: any) => sum + payment.amountCents, 0);
+      return {
+        ...share,
+        payments,
+        paidCents,
+        remainingCents: Math.max(0, share.amountDueCents - paidCents),
+        paymentStatus: paidCents >= share.amountDueCents ? "paid" : paidCents > 0 ? "partial" : "pending",
+      };
+    }));
+    const activeReceipts = receipts.filter((receipt: any) => !receipt.reversedAt);
+    const totalValueCents = activeReceipts.reduce((sum, receipt) => sum + receipt.totalValueCents, 0);
+    const totalGallonsReceived = activeReceipts.reduce((sum, receipt) => sum + receipt.gallonsReceived, 0);
+    const totalPaidCents = sharesWithPayments.reduce((sum: number, share: any) => sum + share.paidCents, 0);
+    return {
+      period,
+      receipts: receipts.sort((a, b) => b.receivedAt - a.receivedAt),
+      shares: sharesWithPayments.sort((a: any, b: any) => a.participantName.localeCompare(b.participantName, "pt-BR")),
+      totalValueCents,
+      totalGallonsReceived,
+      totalPaidCents,
+      totalOutstandingCents: Math.max(0, totalValueCents - totalPaidCents),
+    };
+  },
+});
+
+export const createParticipant = mutation({
+  args: { name: v.string(), observation: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterParticipants" });
+    assertTextLimits({ observation: args.observation }, 500);
+    const name = args.name.trim();
+    if (!name) throw new Error("Informe o nome da pessoa.");
+    if (name.length > 120) throw new Error("O nome deve ter no máximo 120 caracteres.");
+    const existing = await ctx.db.query("waterParticipants").collect();
+    if (existing.some((person: any) => person.name.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"))) {
+      throw new Error("Essa pessoa já está cadastrada.");
+    }
+    const now = Date.now();
+    const id = await ctx.db.insert("waterParticipants", {
+      name, observation: args.observation?.trim() || undefined, active: true, createdAt: now, updatedAt: now,
+    });
+    await writeAudit(ctx, userId, "create", "waterParticipants", String(id), `Participante "${name}" cadastrado.`);
+    return id;
+  },
+});
+
+export const updateParticipant = mutation({
+  args: {
+    participantId: v.id("waterParticipants"),
+    name: v.optional(v.string()),
+    active: v.optional(v.boolean()),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterParticipants", entityId: args.participantId });
+    assertTextLimits({ observation: args.observation }, 500);
+    const participant = await ctx.db.get(args.participantId);
+    if (!participant) throw new Error("Participante não encontrado.");
+    const updates: Record<string, unknown> = { updatedAt: Date.now() };
+    if (args.name !== undefined) {
+      const name = args.name.trim();
+      if (!name) throw new Error("O nome não pode ficar vazio.");
+      if (name.length > 120) throw new Error("O nome deve ter no máximo 120 caracteres.");
+      const all = await ctx.db.query("waterParticipants").collect();
+      if (all.some((person: any) => person._id !== args.participantId && person.name.toLocaleLowerCase("pt-BR") === name.toLocaleLowerCase("pt-BR"))) {
+        throw new Error("Já existe uma pessoa cadastrada com esse nome.");
+      }
+      updates.name = name;
+    }
+    if (args.active !== undefined) updates.active = args.active;
+    if (args.observation !== undefined) updates.observation = args.observation.trim() || undefined;
+    await ctx.db.patch(args.participantId, updates);
+    await writeAudit(ctx, userId, "update", "waterParticipants", String(args.participantId), JSON.stringify(updates));
+    return args.participantId;
+  },
+});
+
+export const createPeriod = mutation({
+  args: {
+    title: v.string(),
+    cadence: v.union(v.literal("monthly"), v.literal("bimonthly"), v.literal("custom")),
+    startAt: v.number(),
+    endAt: v.number(),
+    participantIds: v.array(v.id("waterParticipants")),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterPeriods" });
+    const title = args.title.trim();
+    if (!title) throw new Error("Informe o nome do período.");
+    if (title.length > 120) throw new Error("O nome do período deve ter no máximo 120 caracteres.");
+    const dateError = validateWaterPeriodRange(args.startAt, args.endAt);
+    if (dateError) throw new Error(dateError);
+    const allPeriods = await ctx.db.query("waterPeriods").collect();
+    if (allPeriods.some((period: any) =>
+      args.startAt <= period.endAt && args.endAt >= period.startAt
+    )) {
+      throw new Error("O intervalo informado se sobrepõe a outro período de rateio já cadastrado.");
+    }
+    const open = await ctx.db.query("waterPeriods").withIndex("by_status", (q) => q.eq("status", "open")).first();
+    if (open) throw new Error("Feche o período atual antes de abrir outro.");
+    const participantIds = [...new Set(args.participantIds)];
+    for (const participantId of participantIds) {
+      const participant = await ctx.db.get(participantId);
+      if (!participant || !participant.active) throw new Error("O período só pode incluir participantes ativos.");
+    }
+    const now = Date.now();
+    const id = await ctx.db.insert("waterPeriods", {
+      title, cadence: args.cadence, startAt: args.startAt, endAt: args.endAt,
+      participantIds, status: "open", createdBy: userId, createdAt: now,
+    });
+    await writeAudit(ctx, userId, "create", "waterPeriods", String(id), `Período "${title}" aberto com ${participantIds.length} participante(s).`);
+    return id;
+  },
+});
+
+export const setPeriodParticipants = mutation({
+  args: { periodId: v.id("waterPeriods"), participantIds: v.array(v.id("waterParticipants")) },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterPeriods", entityId: args.periodId });
+    const period = await ctx.db.get(args.periodId);
+    if (!period || period.status !== "open") throw new Error("Somente um período aberto pode ter participantes alterados.");
+    const participantIds = [...new Set(args.participantIds)];
+    for (const participantId of participantIds) {
+      const participant = await ctx.db.get(participantId);
+      if (!participant || !participant.active) throw new Error("O período só pode incluir participantes ativos.");
+    }
+    await ctx.db.patch(args.periodId, { participantIds });
+    await writeAudit(ctx, userId, "update", "waterPeriods", String(args.periodId), `Participantes atualizados: ${participantIds.length}.`);
+    return participantIds.length;
+  },
+});
+
+export const createReceipt = mutation({
+  args: {
+    periodId: v.id("waterPeriods"),
+    receivedAt: v.number(),
+    gallonsReceived: v.number(),
+    emptyGallonsReturned: v.number(),
+    totalValueCents: v.number(),
+    sourceName: v.optional(v.string()),
+    paidByName: v.optional(v.string()),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterReceipts" });
+    const period = await ctx.db.get(args.periodId);
+    if (!period || period.status !== "open") throw new Error("Selecione um período de rateio aberto.");
+    const receiptDateError = validateWaterReceiptDate(args.receivedAt, period.startAt, period.endAt);
+    if (receiptDateError) throw new Error(receiptDateError);
+    if (!Number.isSafeInteger(args.gallonsReceived) || args.gallonsReceived <= 0) throw new Error("A quantidade de galões recebidos deve ser um inteiro maior que zero.");
+    if (!Number.isSafeInteger(args.emptyGallonsReturned) || args.emptyGallonsReturned < 0) throw new Error("A quantidade de vazios devolvidos deve ser um inteiro não negativo.");
+    if (!Number.isSafeInteger(args.totalValueCents) || args.totalValueCents <= 0) throw new Error("O valor total do recebimento deve ser maior que zero.");
+    if ((args.sourceName?.trim().length ?? 0) > 120 || (args.paidByName?.trim().length ?? 0) > 120) throw new Error("Fornecedor e responsável pelo pagamento devem ter no máximo 120 caracteres.");
+    if ((args.observation?.trim().length ?? 0) > 500) throw new Error("A observação deve ter no máximo 500 caracteres.");
+    const [existingReceipts, existingMovements] = await Promise.all([
+      ctx.db.query("waterReceipts").collect(),
+      ctx.db.query("waterContainerMovements").collect(),
+    ]);
+    const ledgerError = validateWaterContainerLedger(
+      [
+        ...existingReceipts.filter((item: any) => !item.reversedAt),
+        { receivedAt: args.receivedAt, gallonsReceived: args.gallonsReceived, emptyGallonsReturned: args.emptyGallonsReturned },
+      ],
+      existingMovements.filter((item: any) => !item.reversedAt),
+    );
+    if (ledgerError) throw new Error(ledgerError);
+    const now = Date.now();
+    const id = await ctx.db.insert("waterReceipts", {
+      periodId: args.periodId,
+      receivedAt: args.receivedAt,
+      gallonsReceived: args.gallonsReceived,
+      emptyGallonsReturned: args.emptyGallonsReturned,
+      totalValueCents: args.totalValueCents,
+      sourceName: args.sourceName?.trim() || undefined,
+      paidByName: args.paidByName?.trim() || undefined,
+      observation: args.observation?.trim() || undefined,
+      createdBy: userId,
+      createdAt: now,
+    });
+    await writeAudit(ctx, userId, "create", "waterReceipts", String(id), `Recebimento manual em ${new Date(args.receivedAt).toLocaleDateString("pt-BR")}: ${args.gallonsReceived} galão(ões), ${args.emptyGallonsReturned} vazio(s) devolvido(s), total R$ ${(args.totalValueCents / 100).toFixed(2)}. Origem: ${args.sourceName?.trim() || "não informada"}. Sem nota fiscal.`);
+    return id;
+  },
+});
+
+export const recordContainerMovement = mutation({
+  args: {
+    type: v.union(v.literal("consumption"), v.literal("return"), v.literal("adjustment")),
+    date: v.number(),
+    fullDelta: v.number(),
+    emptyDelta: v.number(),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterContainerMovements" });
+    if (!isValidWaterTimestamp(args.date)) throw new Error("A data da movimentação é inválida.");
+    if (!Number.isSafeInteger(args.fullDelta) || !Number.isSafeInteger(args.emptyDelta)) throw new Error("As quantidades devem ser números inteiros.");
+    if (args.type === "consumption" && (args.fullDelta >= 0 || args.emptyDelta !== -args.fullDelta)) {
+      throw new Error("No consumo, galões cheios saem e a mesma quantidade entra como vazios.");
+    }
+    if (args.type === "return" && (args.fullDelta > 0 || args.emptyDelta > 0 || (args.fullDelta === 0 && args.emptyDelta === 0))) {
+      throw new Error("Na devolução, informe quantos galões cheios e/ou vazios saíram para o fornecedor.");
+    }
+    if (args.type === "adjustment" && args.fullDelta === 0 && args.emptyDelta === 0) throw new Error("Informe ao menos uma quantidade para ajustar.");
+    if (args.type === "adjustment" && (args.observation?.trim().length ?? 0) < 8) throw new Error("Informe uma justificativa de pelo menos 8 caracteres para o ajuste de saldo.");
+    if ((args.observation?.trim().length ?? 0) > 500) throw new Error("A observação deve ter no máximo 500 caracteres.");
+    const [receipts, movements] = await Promise.all([
+      ctx.db.query("waterReceipts").collect(),
+      ctx.db.query("waterContainerMovements").collect(),
+    ]);
+    const ledgerError = validateWaterContainerLedger(
+      receipts.filter((item: any) => !item.reversedAt),
+      [
+        ...movements.filter((item: any) => !item.reversedAt),
+        { date: args.date, fullDelta: args.fullDelta, emptyDelta: args.emptyDelta },
+      ],
+    );
+    if (ledgerError) throw new Error(ledgerError);
+    const id = await ctx.db.insert("waterContainerMovements", {
+      type: args.type, date: args.date, fullDelta: args.fullDelta, emptyDelta: args.emptyDelta,
+      observation: args.observation?.trim() || undefined, createdBy: userId, createdAt: Date.now(),
+    });
+    await writeAudit(ctx, userId, "create", "waterContainerMovements", String(id), `Movimentação ${args.type} em ${new Date(args.date).toLocaleDateString("pt-BR")}: galões cheios ${args.fullDelta >= 0 ? "+" : ""}${args.fullDelta}, vazios ${args.emptyDelta >= 0 ? "+" : ""}${args.emptyDelta}.`);
+    return id;
+  },
+});
+
+export const closePeriod = mutation({
+  args: { periodId: v.id("waterPeriods") },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterPeriods", entityId: args.periodId });
+    const period = await ctx.db.get(args.periodId);
+    if (!period || period.status !== "open") throw new Error("O período não está aberto.");
+    const [receipts, existingShares] = await Promise.all([
+      ctx.db.query("waterReceipts").withIndex("by_period", (q) => q.eq("periodId", args.periodId)).collect(),
+      ctx.db.query("waterShares").withIndex("by_period", (q) => q.eq("periodId", args.periodId)).collect(),
+    ]);
+    if (existingShares.length) throw new Error("Este período já possui rateio calculado.");
+    const activeReceipts = receipts.filter((receipt: any) => !receipt.reversedAt);
+    if (activeReceipts.length === 0) throw new Error("Não é possível fechar um período sem recebimentos válidos. Registre as compras de água primeiro.");
+    const totalCents = activeReceipts.reduce((sum, receipt) => sum + receipt.totalValueCents, 0);
+    const participants = await Promise.all(period.participantIds.map((id) => ctx.db.get(id)));
+    if (participants.some((participant) => !participant)) throw new Error("Há participante inválido no período.");
+    if (participants.length === 0) throw new Error("Inclua ao menos um participante antes de fechar o rateio.");
+    const participantData = (participants.filter(Boolean) as Array<{ _id: any; name: string }>)
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    const allocations = splitWaterCostCents(totalCents, participantData.map((person) => String(person._id)));
+    for (const allocation of allocations) {
+      const participant = participantData.find((person) => String(person._id) === allocation.participantId);
+      if (participant) {
+        await ctx.db.insert("waterShares", {
+          periodId: args.periodId,
+          participantId: participant._id,
+          participantName: participant.name,
+          amountDueCents: allocation.amountDueCents,
+          createdAt: Date.now(),
+        });
+      }
+    }
+    await ctx.db.patch(args.periodId, { status: "closed", closedAt: Date.now(), totalValueCents: totalCents });
+    await writeAudit(ctx, userId, "update", "waterPeriods", String(args.periodId), `Período fechado. Total R$ ${(totalCents / 100).toFixed(2)} dividido entre ${participantData.length} participante(s).`);
+    return { totalCents, participants: participantData.length, sharesCreated: allocations.length };
+  },
+});
+
+
+/** Estorno lógico: preserva o lançamento original e sua trilha de auditoria. */
+function validateReversalReason(reason: string) {
+  const normalized = reason.trim();
+  if (normalized.length < 8) throw new Error("Informe uma justificativa de pelo menos 8 caracteres.");
+  if (normalized.length > 500) throw new Error("A justificativa deve ter no máximo 500 caracteres.");
+  return normalized;
+}
+
+export const reverseReceipt = mutation({
+  args: { receiptId: v.id("waterReceipts"), reason: v.string() },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterReceipts", entityId: args.receiptId });
+    const reason = validateReversalReason(args.reason);
+    const receipt = await ctx.db.get(args.receiptId);
+    if (!receipt) throw new Error("Recebimento não encontrado.");
+    if (receipt.reversedAt) throw new Error("Este recebimento já foi estornado.");
+    const period = await ctx.db.get(receipt.periodId);
+    if (!period || period.status !== "open") throw new Error("Não é permitido estornar recebimento após o fechamento do rateio. É necessária uma retificação financeira específica.");
+    const shares = await ctx.db.query("waterShares").withIndex("by_period", (q) => q.eq("periodId", receipt.periodId)).collect();
+    if (shares.length) throw new Error("O recebimento já possui rateio. Estorne ou retifique o rateio antes de alterar esta compra.");
+    const [allReceipts, allMovements] = await Promise.all([
+      ctx.db.query("waterReceipts").collect(),
+      ctx.db.query("waterContainerMovements").collect(),
+    ]);
+    const ledgerError = validateWaterContainerLedger(
+      allReceipts.filter((item: any) => item._id !== args.receiptId && !item.reversedAt),
+      allMovements.filter((item: any) => !item.reversedAt),
+    );
+    if (ledgerError) {
+      throw new Error(`Não é seguro estornar este recebimento: ${ledgerError}`);
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.receiptId, { reversedAt: now, reversedBy: userId, reversalReason: reason });
+    await writeAudit(ctx, userId, "update", "waterReceipts", String(args.receiptId), `ESTORNO do recebimento original. Motivo: ${reason}. Valor: R$ ${(receipt.totalValueCents / 100).toFixed(2)}; galões: ${receipt.gallonsReceived}; data original: ${new Date(receipt.receivedAt).toLocaleDateString("pt-BR")}.`);
+    return { reversed: true, receiptId: args.receiptId, reversedAt: now };
+  },
+});
+
+export const reverseContainerMovement = mutation({
+  args: { movementId: v.id("waterContainerMovements"), reason: v.string() },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterContainerMovements", entityId: args.movementId });
+    const reason = validateReversalReason(args.reason);
+    const movement = await ctx.db.get(args.movementId);
+    if (!movement) throw new Error("Movimentação não encontrada.");
+    if (movement.reversedAt) throw new Error("Esta movimentação já foi estornada.");
+    const [receipts, movements] = await Promise.all([
+      ctx.db.query("waterReceipts").collect(),
+      ctx.db.query("waterContainerMovements").collect(),
+    ]);
+    const ledgerError = validateWaterContainerLedger(
+      receipts.filter((receipt: any) => !receipt.reversedAt),
+      movements.filter((item: any) => item._id !== args.movementId && !item.reversedAt),
+    );
+    if (ledgerError) throw new Error(`Não é seguro estornar esta movimentação: ${ledgerError}`);
+    const now = Date.now();
+    await ctx.db.patch(args.movementId, { reversedAt: now, reversedBy: userId, reversalReason: reason });
+    await writeAudit(ctx, userId, "update", "waterContainerMovements", String(args.movementId), `ESTORNO da movimentação ${movement.type}. Motivo: ${reason}. Variação original: cheios ${movement.fullDelta}, vazios ${movement.emptyDelta}.`);
+    return { reversed: true, movementId: args.movementId, reversedAt: now };
+  },
+});
+
+export const reversePayment = mutation({
+  args: { paymentId: v.id("waterPayments"), reason: v.string() },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterPayments", entityId: args.paymentId });
+    const reason = validateReversalReason(args.reason);
+    const payment = await ctx.db.get(args.paymentId);
+    if (!payment) throw new Error("Pagamento não encontrado.");
+    if (payment.reversedAt) throw new Error("Este pagamento já foi estornado.");
+    const share = await ctx.db.get(payment.shareId);
+    if (!share) throw new Error("Parcela de rateio não encontrada.");
+    const payments = await ctx.db.query("waterPayments").withIndex("by_share", (q) => q.eq("shareId", payment.shareId)).collect();
+    const paidAfterReversal = payments.filter((item: any) => item._id !== args.paymentId && !item.reversedAt)
+      .reduce((sum: number, item: any) => sum + item.amountCents, 0);
+    if (paidAfterReversal > share.amountDueCents) throw new Error("A parcela possui pagamentos inconsistentes; não é seguro estornar.");
+    const now = Date.now();
+    await ctx.db.patch(args.paymentId, { reversedAt: now, reversedBy: userId, reversalReason: reason });
+    await writeAudit(ctx, userId, "update", "waterPayments", String(args.paymentId), `ESTORNO de pagamento de R$ ${(payment.amountCents / 100).toFixed(2)} de ${share.participantName}. Data original: ${new Date(payment.paidAt).toLocaleDateString("pt-BR")}. Motivo: ${reason}.`);
+    return { reversed: true, paymentId: args.paymentId, reversedAt: now };
+  },
+});
+
+export const recordPayment = mutation({
+  args: {
+    shareId: v.id("waterShares"),
+    amountCents: v.number(),
+    paidAt: v.number(),
+    method: v.optional(v.string()),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterPayments", entityId: args.shareId });
+    if (!Number.isSafeInteger(args.amountCents) || args.amountCents <= 0) throw new Error("O valor do pagamento deve ser maior que zero.");
+    if ((args.method?.trim().length ?? 0) > 80 || (args.observation?.trim().length ?? 0) > 500) throw new Error("Meio de pagamento deve ter até 80 caracteres e observação até 500 caracteres.");
+    if (!isValidWaterTimestamp(args.paidAt)) throw new Error("A data do pagamento é inválida.");
+    const share = await ctx.db.get(args.shareId);
+    if (!share) throw new Error("Parcela de rateio não encontrada.");
+    const payments = await ctx.db.query("waterPayments").withIndex("by_share", (q) => q.eq("shareId", args.shareId)).collect();
+    const paid = payments.filter((payment: any) => !payment.reversedAt).reduce((sum, payment) => sum + payment.amountCents, 0);
+    const remaining = share.amountDueCents - paid;
+    if (args.amountCents > remaining) throw new Error(`O pagamento excede o saldo pendente de R$ ${(remaining / 100).toFixed(2)}.`);
+    const id = await ctx.db.insert("waterPayments", {
+      shareId: args.shareId, amountCents: args.amountCents, paidAt: args.paidAt,
+      method: args.method?.trim() || undefined, observation: args.observation?.trim() || undefined,
+      createdBy: userId, createdAt: Date.now(),
+    });
+    await writeAudit(ctx, userId, "create", "waterPayments", String(id), `Pagamento de R$ ${(args.amountCents / 100).toFixed(2)} registrado para ${share.participantName} em ${new Date(args.paidAt).toLocaleDateString("pt-BR")}. Meio: ${args.method?.trim() || "não informado"}.`);
+    return id;
+  },
+});

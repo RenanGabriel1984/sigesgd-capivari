@@ -16,28 +16,28 @@ export interface SheetRow {
   brand: string;
   quantity: number;
   unitOfMeasure: string;
+  areaName: string;
   observation: string;
 }
 
 /**
  * Interpreta o texto colado/importado da planilha de inventário físico.
  *
- * Formato aceito (separador `;` ou `,`, cabeçalho opcional):
- *   Localização; Produto; Marca; Quantidade; Unidade; Observação
- *   Armário TI 01; Cabo HDMI; Exbom; 8; un; Caixa original
+ * Formato aceito (separador `;` ou `,`, cabeçalho recomendado):
+ *   Legado: Localização; Produto; Marca; Quantidade; Unidade; Observação
+ *   Atual:  Localização; Produto; Marca; Quantidade; Unidade; Área; Observação
  *
- * A Observação é a ÚLTIMA coluna: tudo após o 5º separador é preservado
- * integralmente (inclusive separadores internos e espaços), pois observações
- * reais contêm `;` — ex.: "Parte do kit original e 4 cores; CX735",
- * "Cat5E; 5 caixas com 100".
+ * A coluna Área só é reconhecida quando declarada no cabeçalho. A Observação
+ * permanece como última coluna e preserva separadores internos, sem confundir
+ * observações antigas com a nova coluna de área.
  *
  * Linhas sem produto são ignoradas; quantidade inválida vira 0.
  */
-/** Divide a linha nos 5 primeiros campos; o restante vira o 6º (observação). */
-function splitWithRest(line: string, sep: string): string[] {
+/** Divide os campos fixos; preserva o restante da última coluna. */
+function splitWithRest(line: string, sep: string, maxSeparators = 5): string[] {
   const out: string[] = [];
   let rest = line;
-  for (let k = 0; k < 5; k++) {
+  for (let k = 0; k < maxSeparators; k++) {
     const idx = rest.indexOf(sep);
     if (idx === -1) break;
     out.push(rest.slice(0, idx));
@@ -63,20 +63,25 @@ export function parseSheetText(text: string): SheetRow[] {
 
   const rows: SheetRow[] = [];
   let isFirstLine = true;
+  let hasAreaColumn = false;
   for (const line of lines) {
-    const cols = splitWithRest(line, sep).map(clean);
+    // A coluna Área só é interpretada quando declarada no cabeçalho. Isso
+    // preserva observações legadas que podem conter ponto e vírgula.
+    const headerOrLegacyCols = splitWithRest(line, sep, 6).map(clean);
     if (isFirstLine) {
-      const first = (cols[0] ?? "").toLowerCase();
-      if (["local", "localização", "localizacao", "location", "localidade"].includes(first)) {
+      const header = (headerOrLegacyCols[0] ?? "").toLowerCase();
+      if (["local", "localização", "localizacao", "location", "localidade"].includes(header)) {
+        hasAreaColumn = headerOrLegacyCols.some((value) =>
+          /^(área|area|subestoque)$/i.test(value.trim())
+        );
         isFirstLine = false;
         continue;
       }
       isFirstLine = false;
     }
+
+    const cols = splitWithRest(line, sep, hasAreaColumn ? 6 : 5).map(clean);
     if (!cols[1]) continue;
-    // splitWithRest garante no máximo 6 campos: cols[5] é a observação
-    // integral (com separadores internos preservados).
-    const observation = cols[5] ?? "";
     const [locationName, productName, brand, quantity, unitOfMeasure] = cols;
     rows.push({
       locationName: locationName ?? "",
@@ -84,7 +89,8 @@ export function parseSheetText(text: string): SheetRow[] {
       brand: brand ?? "",
       quantity: Math.max(0, Number((quantity ?? "").replace(",", ".")) || 0),
       unitOfMeasure: unitOfMeasure || "un",
-      observation,
+      areaName: hasAreaColumn ? (cols[5] ?? "") : "",
+      observation: hasAreaColumn ? (cols[6] ?? "") : (cols[5] ?? ""),
     });
   }
   return rows;
@@ -225,6 +231,54 @@ export function applyImplementationStockStamp(
   if (isImplementationStockStamped(observation)) return observation as string;
   const prior = (observation ?? "").trim();
   return prior ? `${prior} | ${IMPLEMENTATION_STOCK_STAMP}` : IMPLEMENTATION_STOCK_STAMP;
+}
+
+/** Próximo número de entrada calculado pelo maior sequencial existente. */
+export function nextEntryNumber(existingNumbers: string[], year: number): string {
+  const prefix = "ENT-" + year + "-";
+  const max = existingNumbers.reduce((value, number) => {
+    const match = String(number ?? "").match(/^ENT-\d{4}-(\d+)$/);
+    if (!match || !number.startsWith(prefix)) return value;
+    const sequence = Number(match[1]);
+    return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
+  }, 0);
+  return prefix + String(max + 1).padStart(6, "0");
+}
+
+/** Próximo número de lote calculado globalmente, não por produto. */
+export function nextLotNumber(existingNumbers: string[], year: number): string {
+  const prefix = "LOT-" + year + "-";
+  const max = existingNumbers.reduce((value, number) => {
+    const match = String(number ?? "").match(/^LOT-\d{4}-(\d+)$/);
+    if (!match || !number.startsWith(prefix)) return value;
+    const sequence = Number(match[1]);
+    return Number.isSafeInteger(sequence) && sequence > value ? sequence : value;
+  }, 0);
+  return prefix + String(max + 1).padStart(6, "0");
+}
+
+/**
+ * Sequências globais compartilhadas: números ENT/LOT nunca dependem da
+ * quantidade de documentos de um produto e nunca reutilizam lacunas antigas.
+ */
+export async function generateNextEntryNumber(ctx: any): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `ENT-${year}-`;
+  const existing = await ctx.db
+    .query("entries")
+    .withIndex("by_number", (q: any) => q.gte("entryNumber", prefix))
+    .collect();
+  return nextEntryNumber(existing.map((entry: any) => String(entry.entryNumber ?? "")), year);
+}
+
+export async function generateNextLotNumber(ctx: any): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `LOT-${year}-`;
+  const existing = await ctx.db
+    .query("lots")
+    .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix))
+    .collect();
+  return nextLotNumber(existing.map((lot: any) => String(lot.lotNumber ?? "")), year);
 }
 
 /**

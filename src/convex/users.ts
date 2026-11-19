@@ -3,8 +3,9 @@ import { query, mutation, internalMutation, QueryCtx } from "./_generated/server
 import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
 import { requirePermission } from "./rbac";
+import { internal } from "./_generated/api";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // Compatibilidade: wrapper fino sobre a camada central src/lib/rbac.ts
@@ -12,11 +13,28 @@ async function requireUser(ctx: any) {
   return auth;
 }
 
-async function requireAdmin(ctx: any) {
-  const { userId, user } = await requireUser(ctx);
-  if (user.role !== "admin") throw new Error("Apenas administradores podem executar esta operação");
-  return { userId, user };
+async function requireUserManager(ctx: any) {
+  // Admin e secretary têm o mesmo conjunto de permissões na matriz central.
+  // A autorização deve seguir users.manage, sem restringir indevidamente ao
+  // rótulo literal "admin".
+  return requirePermission(ctx, "users.manage", { entity: "users" });
 }
+function normalizeUserEmail(value: string): string {
+  const email = value.trim().toLowerCase();
+  if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Informe um e-mail válido.");
+  }
+  return email;
+}
+
+function normalizeUserName(value: string): string {
+  const name = value.trim();
+  if (!name || name.length > 120) {
+    throw new Error("O nome deve ter entre 1 e 120 caracteres.");
+  }
+  return name;
+}
+
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
 
@@ -89,8 +107,11 @@ export const listUsers = query({
     const users = await ctx.db.query("users").collect();
     return Promise.all(
       users.map(async (u: any) => {
-        const org = u.organizationId ? await ctx.db.get(u.organizationId) : null;
-        return { ...u, organization: org };
+        const [org, passwordRecord] = await Promise.all([
+          u.organizationId ? ctx.db.get(u.organizationId) : Promise.resolve(null),
+          ctx.db.query("passwords").withIndex("by_user", (q: any) => q.eq("userId", u._id)).first(),
+        ]);
+        return { ...u, organization: org, hasPassword: !!passwordRecord };
       })
     );
   },
@@ -113,20 +134,98 @@ export const listUserOptions = query({
 
 // ─── Mutations ───────────────────────────────────────────────────────────────
 
-export const createUser = mutation({
+/**
+ * Cria usuário e credencial em uma única transação.
+ * Evita deixar contas sem senha caso a segunda chamada falhe no cliente.
+ */
+export const createUserWithPassword = mutation({
   args: {
-    name: v.string(), email: v.string(),
-    role: v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician")),
+    name: v.string(),
+    email: v.string(),
+    role: v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician"), v.literal("patrimony_manager")),
     organizationId: v.optional(v.id("organizations")),
+    temporaryPassword: v.string(),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireAdmin(ctx);
-    const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", args.email.toLowerCase())).first();
-    if (existing) throw new Error("Já existe um usuário com este e-mail");
+    const { userId: adminId } = await requireUserManager(ctx);
+    const name = normalizeUserName(args.name);
+    const email = normalizeUserEmail(args.email);
+    if (args.temporaryPassword.length < 8 || args.temporaryPassword.length > 200) {
+      throw new Error("A senha temporária deve ter entre 8 e 200 caracteres.");
+    }
+    const existing = await ctx.db.query("users")
+      .withIndex("email", (q: any) => q.eq("email", email))
+      .first();
+    if (existing) throw new Error("Já existe um usuário com este e-mail.");
+
+    if (args.organizationId) {
+      const organization = await ctx.db.get(args.organizationId);
+      if (!organization || organization.active === false) {
+        throw new Error("Secretaria/departamento não encontrado ou inativo.");
+      }
+    }
 
     const now = Date.now();
     const newUserId = await ctx.db.insert("users", {
-      name: args.name, email: args.email.toLowerCase(), role: args.role,
+      name,
+      email,
+      role: args.role,
+      organizationId: args.organizationId,
+      active: true,
+      requiresPasswordReset: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const { hash, salt } = await hashPassword(args.temporaryPassword);
+    const passwordId = await ctx.db.insert("passwords", {
+      userId: newUserId,
+      passwordHash: hash,
+      salt,
+      requiresReset: true,
+    });
+
+    await ctx.db.insert("auditLogs", {
+      userId: adminId,
+      action: "create",
+      entity: "users",
+      entityId: newUserId,
+      details: `Usuário "${name}" criado com perfil "${args.role}" e credencial temporária configurada.`,
+      timestamp: now,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId: adminId,
+      action: "create",
+      entity: "passwords",
+      entityId: passwordId,
+      details: `Senha temporária definida para o usuário "${name}"; troca obrigatória no primeiro acesso.`,
+      timestamp: now,
+    });
+    return newUserId;
+  },
+});
+
+export const createUser = mutation({
+  args: {
+    name: v.string(), email: v.string(),
+    role: v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician"), v.literal("patrimony_manager")),
+    organizationId: v.optional(v.id("organizations")),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireUserManager(ctx);
+    const name = normalizeUserName(args.name);
+    const email = normalizeUserEmail(args.email);
+    const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).first();
+    if (existing) throw new Error("Já existe um usuário com este e-mail");
+    if (args.organizationId) {
+      const organization = await ctx.db.get(args.organizationId);
+      if (!organization || organization.active === false) {
+        throw new Error("Secretaria/departamento não encontrado ou inativo.");
+      }
+    }
+
+    const now = Date.now();
+    const newUserId = await ctx.db.insert("users", {
+      name, email, role: args.role,
       organizationId: args.organizationId, active: true,
       createdAt: now, updatedAt: now,
     });
@@ -141,27 +240,51 @@ export const createUser = mutation({
 export const updateUser = mutation({
   args: {
     userId: v.id("users"), name: v.optional(v.string()), email: v.optional(v.string()),
-    role: v.optional(v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician"))),
+    role: v.optional(v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician"), v.literal("patrimony_manager"))),
     organizationId: v.optional(v.id("organizations")), active: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { userId: adminId } = await requireAdmin(ctx);
+    const { userId: adminId } = await requireUserManager(ctx);
     const { userId, ...updates } = args;
 
     if (userId === adminId && updates.active === false) {
       throw new Error("Você não pode desativar sua própria conta");
     }
-    if (updates.role && updates.role !== "admin") {
-      const user = await ctx.db.get(userId);
-      if (user?.role === "admin") {
-        const admins = await ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect();
-        if (admins.length <= 1) throw new Error("Não é possível alterar o perfil do único administrador");
+    const targetUser = await ctx.db.get(userId);
+    if (!targetUser) throw new Error("Usuário não encontrado");
+    // admin e secretary possuem o mesmo acesso integral na matriz RBAC.
+    // Ambos contam como gestores de usuários para evitar lockout administrativo.
+    const targetIsUserManager = targetUser.role === "admin" || targetUser.role === "secretary";
+    const remainsUserManager = updates.role === undefined ||
+      updates.role === "admin" || updates.role === "secretary";
+    const removesActiveAdmin = targetIsUserManager &&
+      targetUser.active !== false &&
+      (updates.active === false || (updates.role !== undefined && !remainsUserManager));
+    if (removesActiveAdmin) {
+      const [admins, secretaries] = await Promise.all([
+        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "secretary")).collect(),
+      ]);
+      const activeUserManagers = [...admins, ...secretaries]
+        .filter((manager: any) => manager.active !== false);
+      if (activeUserManagers.length <= 1) {
+        throw new Error("Não é possível desativar ou rebaixar o último administrador/secretário com acesso integral");
       }
     }
-    if (updates.email) {
-      const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", updates.email!.toLowerCase())).first();
+    if (updates.name !== undefined) {
+      updates.name = normalizeUserName(updates.name);
+    }
+    if (updates.email !== undefined) {
+      const email = normalizeUserEmail(updates.email);
+      const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).first();
       if (existing && existing._id !== userId) throw new Error("Já existe outro usuário com este e-mail");
-      updates.email = updates.email.toLowerCase();
+      updates.email = email;
+    }
+    if (updates.organizationId) {
+      const organization = await ctx.db.get(updates.organizationId);
+      if (!organization || organization.active === false) {
+        throw new Error("Secretaria/departamento não encontrado ou inativo.");
+      }
     }
 
     await ctx.db.patch(userId, { ...updates, updatedAt: Date.now() });
@@ -171,6 +294,18 @@ export const updateUser = mutation({
       userId: adminId, action, entity: "users", entityId: userId,
       details: `Usuário "${user?.name}" — ${JSON.stringify(updates)}`, timestamp: Date.now(),
     });
+    const securityProfileChanged =
+      updates.active === false ||
+      (updates.role !== undefined && updates.role !== targetUser.role) ||
+      (updates.email !== undefined && updates.email !== targetUser.email);
+    if (securityProfileChanged) {
+      await ctx.scheduler.runAfter(0, internal.passwords.invalidateUserSessionsInternal, {
+        userId,
+      });
+      await ctx.scheduler.runAfter(0, internal.passwords.invalidatePasswordResetsForUserInternal, {
+        userId,
+      });
+    }
     return userId;
   },
 });
@@ -178,7 +313,7 @@ export const updateUser = mutation({
 export const activateUser = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
-    const { userId: adminId } = await requireAdmin(ctx);
+    const { userId: adminId } = await requireUserManager(ctx);
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
     await ctx.db.patch(args.userId, { active: true, updatedAt: Date.now() });
@@ -193,18 +328,31 @@ export const activateUser = mutation({
 export const deactivateUser = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
-    const { userId: adminId } = await requireAdmin(ctx);
+    const { userId: adminId } = await requireUserManager(ctx);
     if (args.userId === adminId) throw new Error("Você não pode desativar sua própria conta");
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
-    if (user.role === "admin") {
-      const admins = await ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect();
-      if (admins.length <= 1) throw new Error("Não é possível desativar o único administrador");
+    if ((user.role === "admin" || user.role === "secretary") && user.active !== false) {
+      const [admins, secretaries] = await Promise.all([
+        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "secretary")).collect(),
+      ]);
+      const activeUserManagers = [...admins, ...secretaries]
+        .filter((manager: any) => manager.active !== false);
+      if (activeUserManagers.length <= 1) {
+        throw new Error("Não é possível desativar o último administrador/secretário com acesso integral");
+      }
     }
     await ctx.db.patch(args.userId, { active: false, updatedAt: Date.now() });
     await ctx.db.insert("auditLogs", {
       userId: adminId, action: "deactivate", entity: "users", entityId: args.userId,
       details: `Usuário "${user.name}" desativado`, timestamp: Date.now(),
+    });
+    await ctx.scheduler.runAfter(0, internal.passwords.invalidateUserSessionsInternal, {
+      userId: args.userId,
+    });
+    await ctx.scheduler.runAfter(0, internal.passwords.invalidatePasswordResetsForUserInternal, {
+      userId: args.userId,
     });
     return true;
   },

@@ -59,13 +59,16 @@ export function suggestAreaByCategory(
 }
 
 /** Rótulo de exibição quando a entrada não possui área definida. */
-export const NO_AREA_LABEL = "Sem área (estoque geral)";
+export const NO_AREA_LABEL = "Sem área/local — classificação pendente";
 
 /** Área/subestoque de referência: estoque geral da Secretaria. */
 export const AREA_TI_GERAL = "TI Geral";
 
 /** Área/subestoque de referência: suprimentos e materiais de impressão. */
 export const AREA_IMPRESSORAS = "Impressoras";
+export const AREA_LIMPEZA = "Limpeza";
+export const AREA_COPA_COZINHA = "Copa e Cozinha";
+export const AREA_AGUA_MINERAL = "Água Mineral";
 
 /**
  * Áreas de referência da estrutura oficial.
@@ -83,4 +86,7 @@ export const BASELINE_STOCK_AREAS: Array<{ name: string; description: string }> 
     description:
       "Suprimentos e materiais de impressão. A área não pertence a nenhum fornecedor: o fornecedor de cada entrada permanece no histórico.",
   },
+  { name: AREA_LIMPEZA, description: "Materiais de limpeza e higiene, com unidade de medida e validade quando aplicável." },
+  { name: AREA_COPA_COZINHA, description: "Alimentos, bebidas, descartáveis e utensílios de copa e cozinha." },
+  { name: AREA_AGUA_MINERAL, description: "Controle físico e financeiro de água mineral, com compras, galões cheios e vazios e rateio próprio." },
 ];

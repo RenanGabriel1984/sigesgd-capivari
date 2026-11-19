@@ -111,6 +111,9 @@ export default function StorageLocations() {
                       {loc.active ? "Ativo" : "Inativo"}
                     </Badge>
                   </div>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    Uso físico: independente da área/subestoque
+                  </p>
                   {loc.description && (
                     <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{loc.description}</p>
                   )}
@@ -145,6 +148,9 @@ export default function StorageLocations() {
                 className="mt-1"
               />
             </div>
+            <p className="text-xs text-muted-foreground">
+              O local físico pode armazenar materiais de diferentes áreas/subestoques.
+            </p>
             <div>
               <Label>Descrição</Label>
               <Textarea

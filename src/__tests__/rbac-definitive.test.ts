@@ -167,9 +167,9 @@ describe("RBAC-05 technician — interface simplificada", () => {
 /* ═══ RBAC-18/19 — consolidação de papéis ═══════════════════════════════════ */
 
 describe("RBAC-18/19 — papéis existentes cobertos pela matriz", () => {
-  it("os 5 papéis esperados existem e nenhum papel antigo fica sem permissões", () => {
+  it("os 6 papéis esperados existem e nenhum papel fica sem permissões", () => {
     expect(APP_ROLES).toEqual([
-      "admin", "stock_manager", "director", "secretary", "technician",
+      "admin", "stock_manager", "director", "secretary", "technician", "patrimony_manager",
     ]);
     for (const r of APP_ROLES) {
       expect(ROLE_PERMISSIONS[r].length).toBeGreaterThan(0);
@@ -361,5 +361,43 @@ describe("integridade da matriz central", () => {
     // Satisfies garante em compile-time; o teste documenta a garantia.
     const flags = Object.keys(PERMISSIONS.admin);
     expect(flags.length).toBeGreaterThanOrEqual(21);
+  });
+});
+
+
+describe("RBAC — gestão de usuários respeita a matriz central", () => {
+  it("administração de usuários exige users.manage, sem exigir role literal admin", () => {
+    const src = read("src/convex/users.ts");
+    const start = src.indexOf("async function requireUserManager");
+    const end = src.indexOf("// ─── Bootstrap", start);
+    const guard = src.slice(start, end);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(guard).toContain('requirePermission(ctx, "users.manage"');
+    expect(guard).not.toContain('user.role !== "admin"');
+    expect(roleHasPermission("secretary", "users.manage")).toBe(true);
+  });
+});
+
+
+describe("RBAC — proteção do último administrador ativo", () => {
+  it("updateUser protege o último administrador ou secretário com acesso integral", () => {
+    const src = read("src/convex/users.ts");
+    const start = src.indexOf("export const updateUser");
+    const end = src.indexOf("export const activateUser", start);
+    const update = src.slice(start, end);
+    expect(update).toContain("removesActiveAdmin");
+    expect(update).toContain('targetUser.role === "secretary"');
+    expect(update).toContain('q.eq("role", "secretary")');
+    expect(update).toContain("activeUserManagers.length <= 1");
+  });
+
+  it("deactivateUser protege o último administrador ou secretário com acesso integral", () => {
+    const src = read("src/convex/users.ts");
+    const start = src.indexOf("export const deactivateUser");
+    const end = src.indexOf("export const recordLogin", start);
+    const deactivate = src.slice(start, end);
+    expect(deactivate).toContain('user.role === "secretary"');
+    expect(deactivate).toContain('q.eq("role", "secretary")');
+    expect(deactivate).toContain("activeUserManagers.length <= 1");
   });
 });

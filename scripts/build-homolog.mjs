@@ -11,10 +11,12 @@
  *   VITE_APP_ENV=homologacao \
  *   bun scripts/build-homolog.mjs [--dry-run]
  *
+ * Backend permitido (allowlist fixa):
+ *   tame-alligator-797.convex.cloud — projeto sigesgd-capivari-homologacao.
+ *
  * Variáveis opcionais:
  *   HOMOLOG_OUT_DIR          pasta de saída (padrão: dist-homolog)
- *   PRODUCTION_CONVEX_HOSTS  hosts proibidos, separados por espaço
- *                            (padrão: first-herring-264.convex.cloud)
+ *   BLOCKED_CONVEX_HOSTS     hosts adicionais proibidos, separados por espaço
  *
  * O script NÃO publica, NÃO faz deploy de funções e NÃO executa mutações no
  * banco: apenas valida a configuração e compila o frontend.
@@ -27,8 +29,16 @@ const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const ROOT = resolve(import.meta.dir, "..");
 
-const PRODUCTION_HOSTS = (
-  process.env.PRODUCTION_CONVEX_HOSTS ?? "first-herring-264.convex.cloud"
+const HOMOLOG_CONVEX_HOST = "tame-alligator-797.convex.cloud";
+const BLOCKED_CONVEX_HOSTS = (
+  process.env.BLOCKED_CONVEX_HOSTS ??
+  [
+    "savory-sockeye-292.convex.cloud",
+    "first-herring-264.convex.cloud",
+    "first-starling-943.convex.cloud",
+    "brilliant-bullfrog-982.convex.cloud",
+    "first-dinosaur-625.convex.cloud",
+  ].join(" ")
 )
   .split(/\s+/)
   .filter(Boolean);
@@ -69,10 +79,19 @@ try {
 
 const host = url.host;
 
-if (PRODUCTION_HOSTS.some((prod) => host === prod || host.endsWith(`.${prod}`))) {
+if (
+  BLOCKED_CONVEX_HOSTS.some(
+    (blocked) => host === blocked || host.endsWith(`.${blocked}`),
+  )
+) {
   fail(
-    `backend ${host} está na lista de hosts PROIBIDOS (${PRODUCTION_HOSTS.join(", ")}) — ` +
-      "homologação não pode reutilizar o backend em uso.",
+    `backend ${host} está na lista de hosts bloqueados (${BLOCKED_CONVEX_HOSTS.join(", ")}).`,
+  );
+}
+
+if (host !== HOMOLOG_CONVEX_HOST) {
+  fail(
+    `destino de homologação recusado: ${host}. O único host permitido é ${HOMOLOG_CONVEX_HOST}.`,
   );
 }
 
@@ -101,7 +120,8 @@ console.log(`backend   : ${host}`);
 console.log(`ambiente  : homologacao`);
 console.log(`versão app: ${APP_VERSION}`);
 console.log(`saída     : ${OUT_DIR}`);
-console.log(`proibidos : ${PRODUCTION_HOSTS.join(", ")}`);
+console.log(`bloqueados: ${BLOCKED_CONVEX_HOSTS.join(", ")}`);
+console.log(`allowlist : ${HOMOLOG_CONVEX_HOST}`);
 
 if (dryRun) {
   console.log("\nDRY RUN — configuração válida; nada compilado, nada publicado.");

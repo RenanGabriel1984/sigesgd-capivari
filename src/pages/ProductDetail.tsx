@@ -27,7 +27,14 @@ type ProductDetailView = Doc<"products"> & {
   stock: { physicalQuantity: number; reservedQuantity: number };
   recentMovements: Array<Doc<"stockMovements"> & { user: Doc<"users"> | null }>;
   lots: Array<Doc<"lots"> & { entry: Doc<"entries"> | null; supplier: Doc<"suppliers"> | null }>;
-  locations: Array<{ location: Doc<"storageLocations"> | null; quantity: number }>;
+  locations: Array<{
+    location: Doc<"storageLocations"> | null;
+    area: Doc<"stockAreas"> | null;
+    areaId: string | null;
+    quantity: number;
+    reservedQuantity: number;
+    availableQuantity: number;
+  }>;
 };
 
 export default function ProductDetail() {
@@ -140,8 +147,11 @@ export default function ProductDetail() {
           ) : (
             <div className="space-y-2">
               {(product.locations ?? []).map((l, idx) => (
-                <div key={idx} className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm">
-                  <span className="font-medium">{l.location?.name ?? "Local removido"}</span>
+                <div key={`${l.areaId ?? "sem-area"}::${l.location?._id ?? idx}`} className="flex items-center justify-between border rounded-lg px-3 py-2 text-sm gap-3">
+                  <span className="min-w-0">
+                    <span className="font-medium block">{l.area?.name ?? "Sem área"}</span>
+                    <span className="text-xs text-muted-foreground">{l.location?.name ?? "Local removido"}</span>
+                  </span>
                   <span className="font-mono font-semibold">{l.quantity}</span>
                 </div>
               ))}

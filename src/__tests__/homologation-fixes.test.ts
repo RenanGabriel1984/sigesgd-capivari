@@ -239,7 +239,7 @@ describe("Entrega autenticada e autoaprovação", () => {
 
   it("a entrega exige confirmação por senha (assinatura eletrônica)", () => {
     expect(reqSrc).toMatch(/confirmationPassword: v\.string\(\)/);
-    expect(reqSrc).toMatch(/verifyPassword\(args\.confirmationPassword/);
+    expect(reqSrc).toMatch(/verifyPassword\(\s*args\.confirmationPassword/);
     expect(reqSrc).toMatch(/Assinado eletronicamente por/);
   });
 
@@ -249,8 +249,8 @@ describe("Entrega autenticada e autoaprovação", () => {
   });
 
   it("a entrega baixa físico e reservado juntos (FIFO por lote)", () => {
-    expect(reqSrc).toMatch(/newPhysical = freshStock\.physicalQuantity - input\.quantityDelivered/);
-    expect(reqSrc).toMatch(/newReserved = freshStock\.reservedQuantity - input\.quantityDelivered/);
+    expect(reqSrc).toMatch(/newPhysical = stock\.physicalQuantity - input\.quantityDelivered/);
+    expect(reqSrc).toMatch(/newReserved = stock\.reservedQuantity - input\.quantityDelivered/);
     expect(reqSrc).toMatch(/requestItemLots/);
   });
 

@@ -1,4 +1,4 @@
-import { useQuery } from "convex/react";
+import { usePaginatedQuery } from "convex/react";
 import { useNavigate } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -28,25 +28,25 @@ function LoadingSkeleton() {
 }
 
 export default function Movements() {
-  const movements = useQuery(api.stockMovements.list);
+  const { results: movements, status: movementsStatus, loadMore: loadMoreMovements } = usePaginatedQuery(api.stockMovements.listPaginated, {}, { initialNumItems: 50 });
   const navigate = useNavigate();
 
   // Ação "Devolver" — abre o MESMO fluxo de devolução vinculado à saída original
   const goReturn = (movementId: string) => navigate(`/returns?exit=${movementId}`);
 
-  if (movements === undefined) return <LoadingSkeleton />;
+  if (movementsStatus === "LoadingFirstPage") return <LoadingSkeleton />;
 
   return (
     <AppShell>
       <div className="space-y-6 max-w-7xl mx-auto">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Movimentações</h1>
-          <p className="text-sm text-muted-foreground">Histórico de movimentações de estoque — {movements.length} registro(s)</p>
+          <p className="text-sm text-muted-foreground">Histórico de movimentações de estoque — {movements.length} registro(s) carregado(s)</p>
         </div>
 
         {/* Desktop Table */}
         <Card className="border-border/50 hidden sm:block"><CardContent className="p-0"><div className="overflow-x-auto"><Table>
-          <TableHeader><TableRow><TableHead>Data/Hora</TableHead><TableHead>Produto</TableHead><TableHead>Tipo</TableHead><TableHead className="text-center">Qtd</TableHead><TableHead className="text-center">Est. Anterior</TableHead><TableHead className="text-center">Est. Novo</TableHead><TableHead>Usuário</TableHead><TableHead>Observação</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Data/Hora</TableHead><TableHead>Produto</TableHead><TableHead>Tipo</TableHead><TableHead className="text-center">Qtd</TableHead><TableHead className="text-center">Est. Anterior</TableHead><TableHead className="text-center">Est. Novo</TableHead><TableHead>Usuário</TableHead><TableHead>Área / Local</TableHead><TableHead>Observação</TableHead></TableRow></TableHeader>
           <TableBody>
             {movements.map((m) => (<TableRow key={m._id} className={m.canceled ? "opacity-50" : ""}>
               <TableCell className="text-xs whitespace-nowrap">{new Date(m.timestamp).toLocaleString("pt-BR")}</TableCell>
@@ -56,6 +56,11 @@ export default function Movements() {
               <TableCell className="text-center font-mono text-xs text-muted-foreground">{m.previousPhysical}</TableCell>
               <TableCell className="text-center font-mono text-xs">{m.newPhysical}</TableCell>
               <TableCell className="text-sm">{m.user?.name ?? "—"}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">
+                {m.area?.name ?? "Sem área"}
+                {m.location?.name ? ` / ${m.location.name}` : ""}
+                {m.toLocation?.name ? ` → ${m.toArea?.name ? `${m.toArea.name} / ` : ""}${m.toLocation.name}` : ""}
+              </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground max-w-[170px] truncate">{m.observation ?? "—"}</span>
@@ -67,13 +72,13 @@ export default function Movements() {
                 </div>
               </TableCell>
             </TableRow>))}
-            {movements.length === 0 && (<TableRow><TableCell colSpan={8}><div className="empty-state py-12"><ArrowLeftRight className="empty-state-icon" /><p className="empty-state-title">Nenhuma movimentação registrada</p><p className="empty-state-desc">As movimentações aparecerão aqui após entradas, saídas e transferências</p></div></TableCell></TableRow>)}
+            {movements.length === 0 && (<TableRow><TableCell colSpan={9}><div className="empty-state py-12"><ArrowLeftRight className="empty-state-icon" /><p className="empty-state-title">Nenhuma movimentação registrada</p><p className="empty-state-desc">As movimentações aparecerão aqui após entradas, saídas e transferências</p></div></TableCell></TableRow>)}
           </TableBody>
         </Table></div></CardContent></Card>
 
         {/* Mobile Cards */}
         <div className="sm:hidden space-y-3">
-          {movements.slice(0, 100).map((m) => (
+          {movements.map((m) => (
             <Card key={m._id} className={`border-border/50 ${m.canceled ? "opacity-50" : ""}`}>
               <CardContent className="p-3">
                 <div className="flex items-start justify-between mb-2">
@@ -98,6 +103,13 @@ export default function Movements() {
                     <p className="text-muted-foreground">Depois</p>
                   </div>
                 </div>
+                {(m.area || m.location || m.toLocation) && (
+                  <p className="text-[10px] text-muted-foreground mt-2">
+                    {m.area?.name ?? "Sem área"}
+                    {m.location?.name ? ` / ${m.location.name}` : ""}
+                    {m.toLocation?.name ? ` → ${m.toArea?.name ? `${m.toArea.name} / ` : ""}${m.toLocation.name}` : ""}
+                  </p>
+                )}
                 <div className="flex items-center justify-between mt-2 gap-2">
                   <p className="text-[10px] text-muted-foreground">
                     {new Date(m.timestamp).toLocaleString("pt-BR")} • {m.user?.name ?? "—"}
@@ -111,7 +123,7 @@ export default function Movements() {
               </CardContent>
             </Card>
           ))}
-          {movements.length === 0 && (
+          {movements.length === 0 && movementsStatus === "Exhausted" && (
             <div className="empty-state py-12">
               <ArrowLeftRight className="empty-state-icon" />
               <p className="empty-state-title">Nenhuma movimentação registrada</p>
@@ -119,6 +131,13 @@ export default function Movements() {
             </div>
           )}
         </div>
+        {movementsStatus !== "Exhausted" && (
+          <div className="flex justify-center py-3">
+            <Button variant="outline" onClick={() => loadMoreMovements(50)} disabled={movementsStatus === "LoadingMore"}>
+              {movementsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais movimentações"}
+            </Button>
+          </div>
+        )}
       </div>
     </AppShell>
   );

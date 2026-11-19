@@ -32,13 +32,15 @@ export const stats = query({
       .withIndex("by_active", (q) => q.eq("active", true))
       .collect();
 
+    // Carrega os saldos uma única vez: evita duas consultas por produto
+    // no dashboard e mantém o mesmo fallback para produtos sem saldo.
+    const stockRows = await ctx.db.query("stock").collect();
+    const stockByProduct = new Map(stockRows.map((row: any) => [row.productId, row]));
+
     // Critical stock count
     let criticalStock = 0;
     for (const p of products) {
-      const stock = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
+      const stock: any = stockByProduct.get(p._id);
       const qty = stock?.physicalQuantity ?? 0;
       // `?? 0` preserva exatamente o comportamento anterior (o campo passou a
       // ser anulável; produto sem mínimo configurado continua com mínimo 0).
@@ -99,10 +101,7 @@ export const stats = query({
     // Urgent alerts (items at or below minimum)
     const urgentAlerts = [];
     for (const p of products) {
-      const stock = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
+      const stock: any = stockByProduct.get(p._id);
       const qty = stock?.physicalQuantity ?? 0;
       if (qty <= (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
@@ -132,8 +131,11 @@ export const stats = query({
     // GOMAQ: exchanges this month
     let gomaqExchangesThisMonth = 0;
     try {
-      const gomaqExchanges = await ctx.db.query("gomaQExchanges").order("desc").take(500);
-      gomaqExchangesThisMonth = gomaqExchanges.filter((e: any) => e.exchangedAt >= monthStartMs).length;
+      const gomaqExchanges = await ctx.db
+        .query("gomaQExchanges")
+        .withIndex("by_date", (q) => q.gte("exchangedAt", monthStartMs).lte("exchangedAt", Date.now()))
+        .collect();
+      gomaqExchangesThisMonth = gomaqExchanges.length;
     } catch { /* table may not exist yet */ }
 
     // Assets in maintenance
@@ -181,7 +183,7 @@ export const stats = query({
 export const stockPosition = query({
   args: {},
   handler: async (ctx) => {
-    await requireUser(ctx);
+    await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "stockPosition" });
     const products = await ctx.db.query("products").collect();
     return Promise.all(
       products.map(async (p) => {
@@ -217,6 +219,72 @@ export const stockPosition = query({
 });
 
 /**
+ * Posição física detalhada por produto × área × local.
+ * Usa stockByLocation como fonte operacional; registros legados sem área
+ * permanecem visíveis como "Sem área (legado)" e nunca são inferidos pelo armário.
+ */
+export const stockPositionByArea = query({
+  args: {},
+  handler: async (ctx) => {
+    await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "stockPositionByArea" });
+    const [balances, reservations] = await Promise.all([
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("requestItemReservations").collect(),
+    ]);
+
+    const reservationTotals = new Map<string, number>();
+    for (const reservation of reservations) {
+      const remaining = Number(reservation.quantityRemaining ?? 0);
+      if (!Number.isFinite(remaining) || remaining <= 0) continue;
+      const key = [reservation.productId, reservation.areaId, reservation.locationId].join("|");
+      reservationTotals.set(key, (reservationTotals.get(key) ?? 0) + remaining);
+    }
+
+    const grouped = new Map<string, { productId: any; areaId?: any; locationId: any; physicalQuantity: number; sourceRows: number }>();
+    for (const balance of balances) {
+      const key = [balance.productId, balance.areaId ?? "legacy", balance.locationId].join("|");
+      const current = grouped.get(key) ?? {
+        productId: balance.productId,
+        areaId: balance.areaId,
+        locationId: balance.locationId,
+        physicalQuantity: 0,
+        sourceRows: 0,
+      };
+      current.physicalQuantity += Number(balance.quantity ?? 0);
+      current.sourceRows += 1;
+      grouped.set(key, current);
+    }
+
+    return Promise.all(Array.from(grouped.values()).map(async (row) => {
+      const product: any = await ctx.db.get(row.productId);
+      const area: any = row.areaId ? await ctx.db.get(row.areaId) : null;
+      const location: any = await ctx.db.get(row.locationId);
+      const key = [row.productId, row.areaId ?? "legacy", row.locationId].join("|");
+      const reservedQuantity = reservationTotals.get(key) ?? 0;
+      const physicalQuantity = row.physicalQuantity;
+      return {
+        _id: key,
+        productId: row.productId,
+        productName: product?.name ?? "Produto não encontrado",
+        internalCode: product?.internalCode ?? "",
+        unitOfMeasure: product?.unitOfMeasure ?? "",
+        areaName: area?.name ?? (row.areaId ? "Área não encontrada" : "Sem área (legado)"),
+        locationName: location?.name ?? "Local não encontrado",
+        physicalQuantity,
+        reservedQuantity,
+        availableQuantity: physicalQuantity - reservedQuantity,
+        duplicateRows: row.sourceRows,
+        inconsistent: !Number.isFinite(physicalQuantity) || physicalQuantity < 0 || reservedQuantity > physicalQuantity || row.sourceRows > 1,
+      };
+    })).then((rows) => rows.sort((a, b) =>
+      a.productName.localeCompare(b.productName, "pt-BR") ||
+      a.areaName.localeCompare(b.areaName, "pt-BR") ||
+      a.locationName.localeCompare(b.locationName, "pt-BR")
+    ));
+  },
+});
+
+/**
  * Movement Report: all movements with full info
  */
 export const movementReport = query({
@@ -225,23 +293,37 @@ export const movementReport = query({
     endDate: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireUser(ctx);
-    let q = ctx.db.query("stockMovements").withIndex("by_timestamp").order("desc");
-    if (args.startDate) {
-      q = ctx.db.query("stockMovements").withIndex("by_timestamp", (idx) =>
-        idx.gte("timestamp", args.startDate!)
-      ).order("desc");
+    await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "movementReport" });
+    const startDate = args.startDate;
+    const endDate = args.endDate;
+    if (startDate !== undefined && !Number.isSafeInteger(startDate)) {
+      throw new Error("A data inicial do relatório é inválida.");
     }
-    const movements = await q.take(500);
-    let filtered = movements;
-    if (args.endDate) {
-      filtered = movements.filter((m) => m.timestamp <= args.endDate!);
+    if (endDate !== undefined && !Number.isSafeInteger(endDate)) {
+      throw new Error("A data final do relatório é inválida.");
     }
+    if (startDate !== undefined && endDate !== undefined && startDate > endDate) {
+      throw new Error("A data inicial não pode ser posterior à data final.");
+    }
+    const movements = await ctx.db
+      .query("stockMovements")
+      .withIndex("by_timestamp", (idx) => {
+        if (startDate !== undefined && endDate !== undefined) {
+          return idx.gte("timestamp", startDate).lte("timestamp", endDate);
+        }
+        if (startDate !== undefined) return idx.gte("timestamp", startDate);
+        if (endDate !== undefined) return idx.lte("timestamp", endDate);
+        return idx;
+      })
+      .order("desc")
+      .take(501);
     return Promise.all(
-      filtered.map(async (m) => {
+      movements.map(async (m) => {
         const product = await ctx.db.get(m.productId);
         const user = await ctx.db.get(m.userId);
         const supplier = m.supplierId ? await ctx.db.get(m.supplierId) : null;
+        const area = m.areaId ? await ctx.db.get(m.areaId) : null;
+        const location = m.locationId ? await ctx.db.get(m.locationId) : null;
         return {
           _id: m._id,
           type: m.type,
@@ -254,6 +336,8 @@ export const movementReport = query({
           timestamp: m.timestamp,
           productName: product?.name ?? "",
           productCode: product?.internalCode ?? "",
+          areaName: area?.name ?? (m.areaId ? "Área não encontrada" : "Sem área (legado)"),
+          locationName: location?.name ?? (m.locationId ? "Local não encontrado" : "Sem local registrado"),
           userName: user?.name ?? "",
           supplierName: supplier?.legalName ?? "",
           supplierTrade: supplier?.tradeName ?? "",
@@ -269,7 +353,7 @@ export const movementReport = query({
 export const consumptionByOrg = query({
   args: { organizationId: v.id("organizations") },
   handler: async (ctx, args) => {
-    await requireUser(ctx);
+    await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "consumptionByOrg" });
     const delivered = await ctx.db
       .query("requests")
       .withIndex("by_secretaria", (q) => q.eq("secretariaId", args.organizationId))

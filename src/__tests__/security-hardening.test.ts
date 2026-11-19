@@ -412,15 +412,18 @@ describe("RESET-BF — limite de tentativas na recuperação de senha (§8)", ()
     expect(src).toMatch(/RESET_MAX_ATTEMPTS\s*=\s*\d+/);
   });
 
-  it("RESET-BF-02: o token registra tentativas e é invalidado ao exceder o limite", () => {
+  it("RESET-BF-02: toda tentativa inválida consome o limite e invalida o token ao esgotar", () => {
     expect(src).toMatch(/attempts:\s*0/);
-    expect(src).toMatch(/usedAt:\s*attempts\s*>=\s*RESET_MAX_ATTEMPTS\s*\?\s*Date\.now\(\)/);
+    expect(src).toContain("const activeToken = tokens");
+    expect(src).toContain("nextResetAttempt(");
+    expect(src).toContain("await ctx.db.patch(activeToken._id, attemptUpdate)");
+    expect(src).not.toMatch(/matching\.token === args\.code/);
   });
 
   it("RESET-BF-03: token usado/expirado/esgotado nunca é aceito", () => {
-    expect(src).toMatch(/!t\.usedAt/);
-    expect(src).toMatch(/t\.expiresAt\s*>\s*Date\.now\(\)/);
-    expect(src).toMatch(/\(t\.attempts\s*\?\?\s*0\)\s*<\s*RESET_MAX_ATTEMPTS/);
+    expect(src).toMatch(/!token\.usedAt/);
+    expect(src).toMatch(/token\.expiresAt\s*>\s*now/);
+    expect(src).toMatch(/\(token\.attempts\s*\?\?\s*0\)\s*<\s*RESET_MAX_ATTEMPTS/);
   });
 
   it("RESET-BF-04: cooldown impede inundação de e-mail e a resposta é genérica", () => {
@@ -485,9 +488,10 @@ describe("SEC — contabilidade de falhas de login (§9/§10) e enumeração (§
     expect(pwSrc).not.toMatch(/export const recordFailedLogin = mutation\(/);
   });
 
-  it("SEC-BF-02: o bloqueio é reavaliado quando a janela expira", () => {
-    expect(pwSrc).toMatch(/lockExpired/);
-    expect(pwSrc).toMatch(/!existing\.lockedUntil\s*\|\|\s*lockExpired/);
+  it("SEC-BF-02: tentativas inválidas são auditadas sem bloqueio remoto por e-mail", () => {
+    expect(pwSrc).not.toMatch(/lockExpired|LOGIN_MAX_ATTEMPTS|LOGIN_LOCK_MINUTES/);
+    expect(pwSrc).toMatch(/attempts: newAttempts/);
+    expect(pwSrc).toMatch(/lockedUntil: undefined/);
   });
 
   it("SEC-BF-03: login bem-sucedido zera o contador de tentativas", () => {
@@ -505,10 +509,13 @@ describe("SEC — contabilidade de falhas de login (§9/§10) e enumeração (§
     expect(verifyBlock).not.toMatch(/Usuário não encontrado/);
     expect(verifyBlock).not.toMatch(/Usuário inativo/);
     expect(verifyBlock).not.toMatch(/Senha não configurada/);
-    // Nenhum caminho de falha devolve uma mensagem diferente.
-    const failures = verifyBlock.match(/return \{ success: false, error: ([^}]+)\}/g) ?? [];
+    // Contas sem perfil executam o mesmo PBKDF2 fictício; senha incorreta
+    // usa o mesmo erro genérico após a verificação real.
+    const failures = verifyBlock.match(/return await rejectCredentials\(args\.password\)/g) ?? [];
     expect(failures.length).toBeGreaterThan(3);
-    for (const f of failures) expect(f).toContain("GENERIC_AUTH_ERROR");
+    expect(pwSrc).toMatch(/async function rejectCredentials\(password: string\)/);
+    expect(pwSrc).toMatch(/verifyPassword\(password, DUMMY_PASSWORD_HASH, DUMMY_PASSWORD_SALT\)/);
+    expect(verifyBlock).toMatch(/return \{ success: false, error: GENERIC_AUTH_ERROR \}/);
   });
 
   it("SEC-ENUM-02: verifyCredentials recusa identidade anônima e sem role", () => {
@@ -553,13 +560,16 @@ describe("SEC — segredos (B-07)", () => {
     expect(emailSrc).toMatch(/email_not_configured/);
   });
 
-  it("SEC-SECRET-03: sendFirstAccessEmail é protegido e não relay público", () => {
+  it("SEC-SECRET-03: sendFirstAccessEmail é action autenticada e não relay público", () => {
     const emailSrc = stripComments(read("src/convex/email.ts"));
-    expect(emailSrc).toMatch(/export const sendFirstAccessEmail = mutation\(/);
-    expect(emailSrc).toMatch(/requirePermission\(ctx,\s*"users\.manage"/);
+    expect(emailSrc).toMatch(/export const sendFirstAccessEmail = action\(/);
+    expect(emailSrc).toMatch(/getAuthUserId\(ctx\)/);
+    expect(emailSrc).toMatch(/getFirstAccessRecipientInternal/);
+    expect(emailSrc).toMatch(/roleHasPermission\(admin\.role as AppRole, "users\.manage"\)/);
     // O destinatário precisa existir como usuário SIGESGD.
     expect(emailSrc).toMatch(/withIndex\("email"/);
-    // Nenhuma senha em log.
+    // A senha é conferida contra o hash e nunca é gravada em auditoria/log.
+    expect(emailSrc).toMatch(/verifyPassword\(\s*args\.temporaryPassword/);
     expect(emailSrc).not.toMatch(/console\.(log|info|warn|error)\([^)]*temporaryPassword/);
   });
 });
@@ -567,7 +577,7 @@ describe("SEC — segredos (B-07)", () => {
 describe("SEC — integridade numérica e campos livres (§14/§17)", () => {
   it("SEC-NAN-01: requests rejeita valores não finitos em aprovação e entrega", () => {
     const reqSrc = stripComments(read("src/convex/requests.ts"));
-    expect(reqSrc).toMatch(/Number\.isFinite\(item\.quantityApproved\)/);
+    expect(reqSrc).toMatch(/Number\.isFinite\(input\.quantityApproved\)/);
     expect(reqSrc).toMatch(/Number\.isFinite\(input\.quantityDelivered\)/);
   });
 
@@ -620,10 +630,12 @@ describe("SEC — storage de documentos (§16)", () => {
   it("SEC-STORAGE-02: toda função de storage exige permissão de servidor", () => {
     const storageSrc = stripComments(read("src/convex/storage.ts"));
     const required = storageSrc.match(/requirePermission\(ctx,\s*"[a-z_.]+"/g) ?? [];
-    // generateUploadUrl, getUrl, getUrls = 3 chamadas; canUpload valida sessão.
-    expect(required.length).toBeGreaterThanOrEqual(3);
+    // generateUploadUrl e registerUpload exigem a permissão de estoque diretamente;
+    // getUrl/getUrls usam getStorageViewer + effectiveRole para autorizar pelo dono.
+    expect(required.length).toBeGreaterThanOrEqual(2);
     expect(storageSrc).toMatch(/isAnonymous === true/);
-    expect(storageSrc).toMatch(/if \(!user\.role\)/);
+    expect(storageSrc).toMatch(/effectiveRole\(user\)/);
+    expect(storageSrc).toMatch(/getStorageViewer/);
   });
 });
 
@@ -639,5 +651,244 @@ describe("SEC — anti-autoaprovação (§4) preservada", () => {
     const reqSrc = stripComments(read("src/convex/requests.ts"));
     expect(reqSrc).toMatch(/requireRequestAction\(ctx,\s*"requests\.approve"/);
     expect(reqSrc).toMatch(/requireRequestAction\(ctx,\s*"requests\.reject"/);
+  });
+});
+
+describe("AUTH-RESET — proteção adicional de recuperação", () => {
+  it("AUTH-RESET-01: confirmação rejeita contas inativas, anônimas ou sem papel válido", () => {
+    const passwordSrc = stripComments(read("src/convex/passwords.ts"));
+    const confirmBlock = passwordSrc.slice(
+      passwordSrc.indexOf("export const confirmPasswordReset"),
+      passwordSrc.indexOf("export const recordFailedLogin"),
+    );
+    expect(confirmBlock).toMatch(/user\.active === false/);
+    expect(confirmBlock).toMatch(/isAnonymous === true/);
+    expect(confirmBlock).toMatch(/VALID_ROLE_SET\.has/);
+    const emailSrc = stripComments(read("src/convex/email.ts"));
+    expect(emailSrc).toMatch(/roleHasPermission\(user\.role as AppRole, "settings\.view"\)/);
+  });
+
+  it("AUTH-RESET-02: valores dinâmicos do e-mail de primeiro acesso são escapados no HTML", () => {
+    const emailSrc = stripComments(read("src/convex/email.ts"));
+    expect(emailSrc).toMatch(/function escapeHtml\(value: string\)/);
+    expect(emailSrc).toMatch(/htmlSafeName = escapeHtml\(safeName\)/);
+    expect(emailSrc).toMatch(/htmlSafeTemporaryPassword = escapeHtml\(args\.temporaryPassword\)/);
+    expect(emailSrc).toMatch(/Bem-vindo, \$\{htmlSafeName\}/);
+    expect(emailSrc).toMatch(/\$\{htmlSafeTemporaryPassword\}/);
+  });
+});
+
+describe("RESET-HASH — códigos de recuperação protegidos em repouso", () => {
+  it("RESET-HASH-01: novos registros não persistem o código em texto", () => {
+    const passwordSrc = stripComments(read("src/convex/passwords.ts"));
+    const schemaSrc = stripComments(read("src/convex/schema.ts"));
+    const requestBlock = passwordSrc.slice(
+      passwordSrc.indexOf("export const requestPasswordReset"),
+      passwordSrc.indexOf("export const confirmPasswordReset"),
+    );
+    expect(schemaSrc).toMatch(/token:\s*v\.optional\(v\.string\(\)\)/);
+    expect(schemaSrc).toMatch(/tokenHash:\s*v\.optional\(v\.string\(\)\)/);
+    expect(schemaSrc).toMatch(/tokenSalt:\s*v\.optional\(v\.string\(\)\)/);
+    expect(requestBlock).not.toMatch(/token:\s*code/);
+    expect(requestBlock).toMatch(/runAfter\(0,\s*internal\.email\.sendPasswordResetEmailInternal/);
+  });
+
+  it("RESET-HASH-02: envio gera hash antes de persistir e envia o código sem armazená-lo", () => {
+    const emailSrc = stripComments(read("src/convex/email.ts"));
+    const actionBlock = emailSrc.slice(
+      emailSrc.indexOf("export const sendPasswordResetEmailInternal"),
+      emailSrc.indexOf("E-mail de primeiro acesso"),
+    );
+    expect(actionBlock).toMatch(/generateSecureNumericCode\(\)/);
+    expect(actionBlock).toMatch(/hashResetCode\(code\)/);
+    expect(actionBlock).toMatch(/storePasswordResetHashInternal/);
+    expect(actionBlock).toMatch(/sendOtpEmail\(payload\.email,\s*code\)/);
+    expect(actionBlock).not.toMatch(/token:\s*code/);
+  });
+
+  it("RESET-INPUT-01: solicitações de recuperação limitam e normalizam e-mails sem enumerar contas", () => {
+    const passwordSrc = stripComments(read("src/convex/passwords.ts"));
+    const requestBlock = passwordSrc.slice(
+      passwordSrc.indexOf("export const requestPasswordReset"),
+      passwordSrc.indexOf("export const confirmPasswordReset"),
+    );
+    expect(requestBlock).toMatch(/email\.length > 254/);
+    expect(requestBlock).toContain("isValidRecoveryEmail(email)");
+    const emailValidation = stripComments(read("src/convex/auth/passwords.ts"));
+    expect(emailValidation).toMatch(/function isValidRecoveryEmail/);
+    expect(emailValidation).toContain(String.raw`/^[^\s@]+@[^\s@]+\.[^\s@]+$/`);
+    expect(requestBlock).toMatch(/return \{ message: RESET_GENERIC_MESSAGE \}/);
+    expect(requestBlock).not.toMatch(/Number\.isFinite\(args\.email\.length\)/);
+  });
+
+  it("RESET-INPUT-02: confirmação rejeita e-mail fora do limite com erro genérico", () => {
+    const passwordSrc = stripComments(read("src/convex/passwords.ts"));
+    const confirmBlock = passwordSrc.slice(
+      passwordSrc.indexOf("export const confirmPasswordReset"),
+      passwordSrc.indexOf("export const recordFailedLogin"),
+    );
+    expect(confirmBlock).toMatch(/email\.length > 254/);
+    expect(confirmBlock).toMatch(/throw new Error\("Código inválido ou expirado"\)/);
+  });
+
+  it("RESET-HASH-03: confirmação aceita hash novo e somente legado plaintext ainda válido", () => {
+    const passwordSrc = stripComments(read("src/convex/passwords.ts"));
+    const confirmBlock = passwordSrc.slice(
+      passwordSrc.indexOf("export const confirmPasswordReset"),
+      passwordSrc.indexOf("export const recordFailedLogin"),
+    );
+    expect(confirmBlock).toMatch(/verifyResetCode\(args\.code,\s*activeToken\.tokenHash/);
+    expect(confirmBlock).toMatch(/activeToken\.token === args\.code/);
+    expect(confirmBlock).toMatch(/token\.expiresAt > now/);
+  });
+});
+
+
+describe("AUTH-SESSION — revogação e proteção contra bloqueio remoto", () => {
+  it("AUTH-SESSION-01: login não bloqueia uma conta apenas por tentativas inválidas por e-mail", () => {
+    const credentials = stripComments(read("src/convex/auth/credentials.ts"));
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    expect(credentials).not.toMatch(/passwords\.isLockedOut/);
+    expect(credentials).toMatch(/passwords\.recordFailedLogin/);
+    expect(passwords).not.toMatch(/LOGIN_MAX_ATTEMPTS|LOGIN_LOCK_MINUTES/);
+  });
+
+  it("AUTH-SESSION-02: mudança de senha preserva a sessão atual e revoga as demais", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    expect(passwords).toMatch(/getAuthSessionId\(ctx\)/);
+    expect(passwords).toMatch(/exceptSessionId: currentSessionId/);
+    expect(passwords).toMatch(/invalidateUserSessionsInternal/);
+    expect(passwords).toMatch(/invalidateSessions\(ctx/);
+  });
+
+  it("AUTH-SESSION-03: reset administrativo e recuperação revogam todas as sessões", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    expect(passwords).toMatch(/userId: args\.userId,[\s\S]{0,100}\n\s*\}\);/);
+    expect(passwords).toMatch(/userId: user\.\_id,[\s\S]{0,100}\n\s*\}\);/);
+  });
+
+  it("AUTH-SESSION-04: desativação ou mudança de perfil revoga sessões do usuário", () => {
+    const users = stripComments(read("src/convex/users.ts"));
+    expect(users).toMatch(/securityProfileChanged/);
+    expect(users).toMatch(/internal\.passwords\.invalidateUserSessionsInternal/);
+  });
+});
+
+
+describe("EMAIL-FIRST-ACCESS — envio externo fora de mutation", () => {
+  it("EMAIL-FIRST-ACCESS-01: envio usa action autenticada, valida o administrador e confere a senha armazenada", () => {
+    const emailSrc = stripComments(read("src/convex/email.ts"));
+    const actionBlock = emailSrc.slice(emailSrc.indexOf("export const sendFirstAccessEmail"));
+    expect(actionBlock).toMatch(/sendFirstAccessEmail = action\(/);
+    expect(actionBlock).toMatch(/getAuthUserId\(ctx\)/);
+    expect(actionBlock).toMatch(/getFirstAccessRecipientInternal/);
+    expect(actionBlock).toMatch(/verifyPassword\(\s*args\.temporaryPassword/);
+    expect(actionBlock).toMatch(/fetch\("https:\/\/api\.resend\.com\/emails"/);
+    expect(actionBlock).toMatch(/readResendApiKey\(\)/);
+    expect(actionBlock).not.toMatch(/readEmailApiKey\(\)/);
+    expect(emailSrc).toMatch(/RESEND_API_KEY_ENV = "RESEND_API_KEY"/);
+    expect(emailSrc).toMatch(/EMAIL_API_KEY_ENV = "FREEBUFF_EMAIL_API_KEY"/);
+    expect(emailSrc).toMatch(/roleHasPermission\(admin\.role as AppRole, "users\.manage"\)/);
+  });
+
+  it("EMAIL-FIRST-ACCESS-02: senha temporária não é persistida no agendador nem em logs de auditoria", () => {
+    const emailSrc = stripComments(read("src/convex/email.ts"));
+    const auditBlock = emailSrc.slice(
+      emailSrc.indexOf("export const recordFirstAccessEmailAuditInternal"),
+      emailSrc.indexOf("export const sendFirstAccessEmail"),
+    );
+    expect(auditBlock).not.toMatch(/temporaryPassword|passwordHash|salt/);
+    expect(emailSrc).not.toMatch(/scheduler\.runAfter[\s\S]{0,100}temporaryPassword/);
+  });
+});
+
+describe("AUTH-TIMING — anti-enumeração por tempo de resposta", () => {
+  it("AUTH-TIMING-01: contas inexistentes, inativas, inválidas ou sem senha executam PBKDF2 fictício", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    const verifyBlock = passwords.slice(
+      passwords.indexOf("export const verifyCredentials"),
+      passwords.indexOf("/** Check if a user has a password configured."),
+    );
+    expect(passwords).toMatch(/const DUMMY_PASSWORD_HASH/);
+    expect(passwords).toMatch(/const DUMMY_PASSWORD_SALT/);
+    expect(passwords).toMatch(/async function rejectCredentials\(password: string\)/);
+    expect(verifyBlock.match(/return await rejectCredentials\(args\.password\)/g)?.length).toBe(5);
+    expect(verifyBlock).toMatch(/if \(!valid\)\s*\{\s*return \{ success: false, error: GENERIC_AUTH_ERROR \};/);
+  });
+
+  it("AUTH-TIMING-02: entradas excessivamente longas são rejeitadas antes da derivação", () => {
+    const credentials = stripComments(read("src/convex/auth/credentials.ts"));
+    expect(credentials).toMatch(/email\.length > 254 \|\| password\.length > 200/);
+  });
+});
+
+
+describe("STORAGE-UPLOAD — autorização e limite no servidor", () => {
+  it("STORAGE-UPLOAD-01: geração e registro exigem permissão de mutação e validam metadados", () => {
+    const storage = stripComments(read("src/convex/storage.ts"));
+    const uploadStart = storage.indexOf("export const generateUploadUrl");
+    const uploadEnd = storage.indexOf("export const getUrl", uploadStart);
+    const registerStart = storage.indexOf("export const registerUpload");
+    const registerEnd = storage.indexOf("export async function attachStorageFile", registerStart);
+    const generateBlock = storage.slice(uploadStart, uploadEnd);
+    const registerBlock = storage.slice(registerStart, registerEnd);
+    expect(generateBlock).toMatch(/requirePermission\(ctx, "stock\.mutate"\)/);
+    expect(registerBlock).toMatch(/requirePermission\(ctx, "stock\.mutate"\)/);
+    expect(registerBlock).toMatch(/ctx\.db\.system\.get\("_storage"/);
+    expect(registerBlock).toMatch(/isStorageUploadSizeAllowed\(metadata\.size\)/);
+    expect(registerBlock).toMatch(/ctx\.storage\.delete/);
+    expect(registerBlock).toMatch(/return \{ ok: false as const, reason: "invalid-size" as const \}/);
+    expect(registerBlock.indexOf('withIndex("by_storageId"')).toBeLessThan(
+      registerBlock.indexOf('ctx.db.system.get("_storage"'),
+    );
+    expect(registerBlock.indexOf("resolveStorageOwners(ctx, [storageId])")).toBeLessThan(
+      registerBlock.indexOf("ctx.storage.delete"),
+    );
+    const uploadUi = stripComments(read("src/components/FileUpload.tsx"));
+    expect(uploadUi).toMatch(/if \(!registration\.ok\)/);
+  });
+});
+
+describe("AUTH-RESET-REVOCATION — códigos antigos após mudança de acesso", () => {
+  it("AUTH-RESET-REVOCATION-01: mudança de senha invalida todos os códigos pendentes", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    expect(passwords).toMatch(/async function invalidatePendingPasswordResets/);
+    expect(passwords).toMatch(/invalidatePendingPasswordResets\(ctx, userId\)/);
+    expect(passwords).toMatch(/invalidatePendingPasswordResets\(ctx, args\.userId\)/);
+    expect(passwords).toMatch(/invalidatePendingPasswordResets\(ctx, user\.\_id\)/);
+  });
+
+  it("AUTH-RESET-REVOCATION-02: desativação e alteração de perfil invalidam códigos pendentes", () => {
+    const users = stripComments(read("src/convex/users.ts"));
+    expect(users).toMatch(/internal\.passwords\.invalidatePasswordResetsForUserInternal/);
+  });
+
+  it("AUTH-RESET-REVOCATION-03: força de troca só é aceita quando o primeiro acesso está pendente", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    const forceBlock = passwords.slice(
+      passwords.indexOf("export const forceChangePassword"),
+      passwords.indexOf("/** Verify email and password"),
+    );
+    expect(forceBlock).toMatch(/user\.requiresPasswordReset !== true && passwordRecord\.requiresReset !== true/);
+  });
+});
+
+describe("AUTH-FAILURE-AUDIT — contenção de abuso no login", () => {
+  it("não persiste tentativas para e-mails inexistentes e limita logs por conta", () => {
+    const passwords = stripComments(read("src/convex/passwords.ts"));
+    const start = passwords.indexOf("export const recordFailedLogin");
+    const end = passwords.indexOf("export const recordSuccessfulLogin", start);
+    const block = passwords.slice(start, end);
+    expect(block).toMatch(/const account = await ctx\.db[\s\S]*?\.withIndex\("email"/);
+    expect(block).toMatch(/if \(!account\) return/);
+    expect(block).toMatch(/auditIntervalMs = 15 \* 60 \* 1000/);
+    expect(block).toMatch(/lastAuditAt/);
+    expect(block).toMatch(/if \(shouldAudit\)/);
+    expect(block).not.toMatch(/entityId: account\?\._id \? String\(account\._id\) : email/);
+    const successful = passwords.slice(
+      passwords.indexOf("export const recordSuccessfulLogin"),
+      passwords.indexOf("export const recordLogout"),
+    );
+    expect(successful).toContain("lastAuditAt: undefined");
   });
 });

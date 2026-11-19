@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "convex/react";
+import { usePaginatedQuery, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,6 +39,7 @@ import {
 import { UNIT_LABELS } from "@/types/constants";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { serializeSemicolonCsv } from "@/lib/csv-export";
 
 function LoadingSkeleton() {
   return (
@@ -65,130 +66,116 @@ function downloadCSV(filename: string, csvContent: string) {
 }
 
 function exportStockPositionCSV(data: any[]) {
-  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade";
-  const rows = data.map((r) =>
-    [
-      r.internalCode,
-      r.name,
-      r.categoryName,
-      r.brand ?? "",
-      r.model ?? "",
-      r.currentStock,
-      r.minimumStock,
-      r.idealStock,
-      r.maximumStock,
-      r.status,
-      UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure,
-    ].join(";")
-  );
-  downloadCSV("posicao_estoque.csv", [header, ...rows].join("\n"));
+  const header = ["Código", "Nome", "Categoria", "Marca", "Modelo", "Saldo Atual", "Mínimo", "Ideal", "Máximo", "Status", "Unidade"];
+  const rows = data.map((r) => [
+    r.internalCode, r.name, r.categoryName, r.brand ?? "", r.model ?? "",
+    r.currentStock, r.minimumStock, r.idealStock, r.maximumStock, r.status,
+    UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure,
+  ]);
+  downloadCSV("posicao_estoque.csv", serializeSemicolonCsv(header, rows));
+}
+
+function exportStockPositionByAreaCSV(data: any[]) {
+  const header = ["Produto", "Código", "Área", "Local físico", "Saldo físico", "Reservado", "Disponível", "Unidade", "Linhas de saldo"];
+  const rows = data.map((r) => [r.productName, r.internalCode, r.areaName, r.locationName, r.physicalQuantity, r.reservedQuantity, r.availableQuantity, UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure, r.duplicateRows]);
+  downloadCSV("posicao_estoque_por_area_local.csv", serializeSemicolonCsv(header, rows));
 }
 
 function exportMovementCSV(data: any[]) {
-  const header = "Data;Tipo;Produto;Quantidade;Usuário;Fornecedor;Documento;Observação;Cancelada";
-  const rows = data.map((r) =>
-    [
-      new Date(r.timestamp).toLocaleString("pt-BR"),
-      r.type === "entry" ? "Entrada" : r.type === "exit" ? "Saída" : r.type,
-      r.productName,
-      r.quantity,
-      r.userName,
-      r.supplierTrade || r.supplierName,
-      r.documentNumber,
-      r.observation,
-      r.canceled ? "Sim" : "Não",
-    ].join(";")
-  );
-  downloadCSV("movimentacoes.csv", [header, ...rows].join("\n"));
+  const header = ["Data", "Tipo", "Produto", "Quantidade", "Área", "Local físico", "Usuário", "Fornecedor", "Documento", "Observação", "Cancelada"];
+  const rows = data.map((r) => [
+    new Date(r.timestamp).toLocaleString("pt-BR"),
+    r.type === "entry" ? "Entrada" : r.type === "exit" ? "Saída" : r.type,
+    r.productName, r.quantity, r.areaName, r.locationName, r.userName, r.supplierTrade || r.supplierName,
+    r.documentNumber, r.observation, r.canceled ? "Sim" : "Não",
+  ]);
+  downloadCSV("movimentacoes.csv", serializeSemicolonCsv(header, rows));
 }
 
 function exportConsumptionCSV(data: any[]) {
-  const header = "Data;Solicitante;Motivo;Itens;Qtd Total";
-  const rows = data.map((r) =>
-    [
-      new Date(r.deliveredAt).toLocaleString("pt-BR"),
-      r.requesterName,
-      r.reason,
-      r.items.map((i: any) => `${i.name} (${i.quantityDelivered})`).join(", "),
-      r.totalItems,
-    ].join(";")
-  );
-  downloadCSV("consumo_por_secretaria.csv", [header, ...rows].join("\n"));
+  const header = ["Data", "Solicitante", "Motivo", "Itens", "Qtd Total"];
+  const rows = data.map((r) => [
+    new Date(r.deliveredAt).toLocaleString("pt-BR"), r.requesterName, r.reason,
+    r.items.map((i: any) => `${i.name} (${i.quantityDelivered})`).join(", "), r.totalItems,
+  ]);
+  downloadCSV("consumo_por_secretaria.csv", serializeSemicolonCsv(header, rows));
 }
 
 function exportRequestsCSV(data: any[]) {
-  const header = "Nº;Data;Solicitante;Secretaria;Status;Itens;Qtd Total";
-  const rows = data.map((r) =>
-    [
-      r._id.slice(-6),
-      new Date(r.createdAt).toLocaleString("pt-BR"),
-      r.requesterName,
-      r.secretariaName,
-      r.status,
-      r.itemCount,
-      r.totalItems,
-    ].join(";")
-  );
-  downloadCSV("solicitacoes.csv", [header, ...rows].join("\n"));
+  const header = ["Nº", "Data", "Solicitante", "Secretaria", "Status", "Itens", "Qtd Total"];
+  const rows = data.map((r) => [
+    r._id.slice(-6), new Date(r.createdAt).toLocaleString("pt-BR"),
+    r.requesterName, r.secretariaName, r.status, r.itemCount, r.totalItems,
+  ]);
+  downloadCSV("solicitacoes.csv", serializeSemicolonCsv(header, rows));
 }
 
 function exportAssetsCSV(data: any[]) {
-  const header = "Patrimônio;Série;Tipo;Fabricante;Modelo;Usuário;Secretaria;Status";
-  const rows = data.map((a) =>
-    [
-      a.patrimonyNumber ?? "",
-      a.serialNumber ?? "",
-      a.assetType,
-      a.manufacturer ?? "",
-      a.model ?? "",
-      a.responsible?.name ?? "",
-      a.organization?.name ?? "",
-      a.status,
-    ].join(";")
-  );
-  downloadCSV("equipamentos.csv", [header, ...rows].join("\n"));
+  const header = ["Patrimônio", "Série", "Tipo", "Fabricante", "Modelo", "Usuário", "Secretaria", "Status"];
+  const rows = data.map((a) => [
+    a.patrimonyNumber ?? "", a.serialNumber ?? "", a.assetType, a.manufacturer ?? "",
+    a.model ?? "", a.responsible?.name ?? "", a.organization?.name ?? "", a.status,
+  ]);
+  downloadCSV("equipamentos.csv", serializeSemicolonCsv(header, rows));
 }
 
 function exportGomaqCSV(exchanges: any[]) {
-  const header = "Data;Nº;Produto;Qtd Entregue;Carcaças;Impressora";
-  const rows = exchanges.map((e) =>
-    [
-      new Date(e.exchangedAt).toLocaleDateString("pt-BR"),
-      e.exchangeNumber,
-      e.product?.name ?? "",
-      e.quantityDelivered,
-      e.quantityEmptyReceived,
-      e.printer?.name ?? "",
-    ].join(";")
-  );
-  downloadCSV("trocas_gomaq.csv", [header, ...rows].join("\n"));
+  const header = ["Data", "Nº", "Produto", "Qtd Entregue", "Carcaças", "Impressora"];
+  const rows = exchanges.map((e) => [
+    new Date(e.exchangedAt).toLocaleDateString("pt-BR"), e.exchangeNumber,
+    e.product?.name ?? "", e.quantityDelivered, e.quantityEmptyReceived, e.printer?.name ?? "",
+  ]);
+  downloadCSV("trocas_gomaq.csv", serializeSemicolonCsv(header, rows));
 }
 
 export default function Reports() {
   // ─── Stock Position ───
   const stockPosition = useQuery(api.dashboard.stockPosition);
+  const stockPositionByArea = useQuery(api.dashboard.stockPositionByArea);
   const tonerMetrics = useQuery(api.printers.tonerMetrics);
 
   // ─── Requests Report ───
   const [reqStartDate, setReqStartDate] = useState("");
   const [reqEndDate, setReqEndDate] = useState("");
-  const allRequests = useQuery(api.requests.list, {});
+  const {
+    results: allRequests,
+    status: requestReportStatus,
+    loadMore: loadMoreRequests,
+  } = usePaginatedQuery(api.requests.listPaginated, {}, { initialNumItems: 50 });
+  const requestReportComplete = requestReportStatus === "Exhausted";
+  const filteredRequests = allRequests.filter((r: any) => {
+    if (reqStartDate && r.createdAt < new Date(reqStartDate).getTime()) return false;
+    if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59.999").getTime()) return false;
+    return true;
+  });
 
   // ─── Assets Report ───
   const allAssets = useQuery(api.assets.list, {});
+  const assetReportTruncated = (allAssets?.length ?? 0) > 500;
+  const displayedAssets = allAssets?.slice(0, 500);
 
   // ─── GomaQ Report ───
   const gomaqExchanges = useQuery(api.gomaQ.listExchanges, {});
   const gomaqCartridges = useQuery(api.gomaQ.listEmptyCartridges, {});
   const gomaqCollections = useQuery(api.gomaQ.listCollections);
+  const gomaqExchangesTruncated = (gomaqExchanges?.length ?? 0) > 500;
+  const gomaqCartridgesTruncated = (gomaqCartridges?.length ?? 0) > 500;
+  const gomaqCollectionsTruncated = (gomaqCollections?.length ?? 0) > 100;
+  const displayedGomaqExchanges = gomaqExchanges?.slice(0, 500);
+  const displayedGomaqCartridges = gomaqCartridges?.slice(0, 500);
+  const displayedGomaqCollections = gomaqCollections?.slice(0, 100);
 
   // ─── Movement Report ───
   const [movStartDate, setMovStartDate] = useState("");
   const [movEndDate, setMovEndDate] = useState("");
   const movements = useQuery(api.dashboard.movementReport, {
     startDate: movStartDate ? new Date(movStartDate).getTime() : undefined,
-    endDate: movEndDate ? new Date(movEndDate + "T23:59:59").getTime() : undefined,
+    endDate: movEndDate ? new Date(movEndDate + "T23:59:59.999").getTime() : undefined,
   });
+  // A consulta busca um registro além do limite visível para sinalizar
+  // explicitamente quando o período contém mais de 500 movimentações.
+  const movementReportTruncated = (movements?.length ?? 0) > 500;
+  const displayedMovements = movements?.slice(0, 500);
 
   // ─── Consumption Report ───
   const organizations = useQuery(api.organizations.list);
@@ -342,7 +329,7 @@ export default function Reports() {
                       ))}
                       {!stockPosition && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={11} className="text-center py-8 text-muted-foreground text-sm">
                             Carregando…
                           </TableCell>
                         </TableRow>
@@ -352,6 +339,36 @@ export default function Reports() {
                 </div>
               </CardContent>
             </Card>
+          <Card className="border-border/50">
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">Posição por área e local físico</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">Saldo físico separado por produto, área e armário. Reservas são exibidas à parte.</p>
+              </div>
+              <Button variant="outline" size="sm" className="gap-1.5 shrink-0" onClick={() => {
+                if (!stockPositionByArea || stockPositionByArea.length === 0) { toast.error("Nenhum saldo por área/local para exportar"); return; }
+                exportStockPositionByAreaCSV(stockPositionByArea);
+                toast.success("CSV por área/local exportado");
+              }}><Download className="h-3.5 w-3.5" /> CSV detalhado</Button>
+            </CardHeader>
+            <CardContent className="p-0"><div className="overflow-x-auto"><Table>
+              <TableHeader><TableRow>
+                <TableHead className="text-xs">Produto</TableHead>
+                <TableHead className="text-xs">Área</TableHead><TableHead className="text-xs">Local físico</TableHead>
+                <TableHead className="text-xs text-right">Físico</TableHead><TableHead className="text-xs text-right">Reservado</TableHead><TableHead className="text-xs text-right">Disponível</TableHead><TableHead className="text-xs">Integridade</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {stockPositionByArea?.map((item) => <TableRow key={item._id}>
+                  <TableCell className="text-sm font-medium"><div>{item.productName}</div><div className="text-[10px] text-muted-foreground font-mono">{item.internalCode || "—"}</div></TableCell>
+                  <TableCell className="text-xs">{item.areaName}</TableCell><TableCell className="text-xs">{item.locationName}</TableCell>
+                  <TableCell className="text-sm text-right font-mono">{item.physicalQuantity}</TableCell><TableCell className="text-sm text-right font-mono">{item.reservedQuantity}</TableCell><TableCell className="text-sm text-right font-mono">{item.availableQuantity}</TableCell>
+                  <TableCell>{item.inconsistent ? <Badge variant="destructive" className="text-[10px]">Revisar {item.duplicateRows > 1 ? "(" + item.duplicateRows + " linhas)" : ""}</Badge> : <Badge variant="outline" className="text-[10px]">OK</Badge>}</TableCell>
+                </TableRow>)}
+                {!stockPositionByArea && <TableRow><TableCell colSpan={7} className="text-center py-6 text-muted-foreground text-sm">Carregando…</TableCell></TableRow>}
+                {stockPositionByArea?.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-6 text-muted-foreground text-sm">Nenhum saldo por área/local registrado.</TableCell></TableRow>}
+              </TableBody>
+            </Table></div></CardContent>
+          </Card>
           </TabsContent>
 
           {/* ═══ RELATÓRIO 2: MOVIMENTAÇÕES POR PERÍODO ═══ */}
@@ -393,7 +410,7 @@ export default function Reports() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex flex-wrap gap-2">
                 <Badge variant="outline" className="text-xs">
-                  {movements?.length ?? 0} movimentações
+                  {movementReportTruncated ? "500+ movimentações (exibição limitada)" : `${movements?.length ?? 0} movimentações`}
                 </Badge>
               </div>
               <div className="flex gap-2">
@@ -402,11 +419,11 @@ export default function Reports() {
                   size="sm"
                   className="gap-1.5"
                   onClick={() => {
-                    if (!movements || movements.length === 0) {
+                    if (!displayedMovements || displayedMovements.length === 0) {
                       toast.error("Nenhum dado para exportar");
                       return;
                     }
-                    exportMovementCSV(movements);
+                    exportMovementCSV(displayedMovements);
                     toast.success("CSV exportado com sucesso");
                   }}
                 >
@@ -418,6 +435,12 @@ export default function Reports() {
               </div>
             </div>
 
+            {movementReportTruncated && (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                O período contém mais de 500 movimentações. A tela e o CSV mostram somente as 500 mais recentes; reduza o intervalo para consultar o restante.
+              </p>
+            )}
+
             <Card className="border-border/50">
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
@@ -427,6 +450,8 @@ export default function Reports() {
                         <TableHead className="text-xs">Data/Hora</TableHead>
                         <TableHead className="text-xs">Tipo</TableHead>
                         <TableHead className="text-xs">Produto</TableHead>
+                        <TableHead className="text-xs">Área</TableHead>
+                        <TableHead className="text-xs">Local físico</TableHead>
                         <TableHead className="text-xs text-right">Qtd</TableHead>
                         <TableHead className="text-xs">Usuário</TableHead>
                         <TableHead className="text-xs">Fornecedor</TableHead>
@@ -436,7 +461,7 @@ export default function Reports() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {movements?.map((m) => (
+                      {displayedMovements?.map((m) => (
                         <TableRow key={m._id} className={m.canceled ? "opacity-50" : ""}>
                           <TableCell className="text-xs whitespace-nowrap">
                             {new Date(m.timestamp).toLocaleString("pt-BR")}
@@ -456,6 +481,8 @@ export default function Reports() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-sm">{m.productName}</TableCell>
+                          <TableCell className="text-xs">{m.areaName}</TableCell>
+                          <TableCell className="text-xs">{m.locationName}</TableCell>
                           <TableCell className="text-sm text-right font-mono">{m.quantity}</TableCell>
                           <TableCell className="text-xs">{m.userName}</TableCell>
                           <TableCell className="text-xs">{m.supplierTrade || m.supplierName || "—"}</TableCell>
@@ -468,14 +495,14 @@ export default function Reports() {
                       ))}
                       {!movements && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={11} className="text-center py-8 text-muted-foreground text-sm">
                             Carregando…
                           </TableCell>
                         </TableRow>
                       )}
                       {movements && movements.length === 0 && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={11} className="text-center py-8 text-muted-foreground text-sm">
                             Nenhuma movimentação encontrada
                           </TableCell>
                         </TableRow>
@@ -711,30 +738,31 @@ export default function Reports() {
                 </div>
               </CardContent>
             </Card>
-            {!allRequests ? <p className="text-muted-foreground text-sm">Carregando...</p> : (
+            {requestReportStatus === "LoadingFirstPage" ? <p className="text-muted-foreground text-sm">Carregando solicitações...</p> : (
               <>
-                <div className="flex gap-2 mb-3">
-                  <Badge variant="outline" className="text-xs">{allRequests.length} solicitação(ões)</Badge>
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => {
-                    const filtered = allRequests.filter((r: any) => {
-                      if (reqStartDate && r.createdAt < new Date(reqStartDate).getTime()) return false;
-                      if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59").getTime()) return false;
-                      return true;
-                    });
-                    exportRequestsCSV(filtered.map((r: any) => ({ ...r, requesterName: r.requester?.name ?? "—", secretariaName: r.secretaria?.name ?? "—", itemCount: r.items?.length ?? 0, totalItems: (r.items ?? []).reduce((s: number, i: any) => s + (i.quantityDelivered ?? 0), 0) })));
-                    toast.success("CSV exportado");
-                  }}><Download className="h-3.5 w-3.5" /> CSV</Button>
+                {!requestReportComplete && (
+                  <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-3">
+                    Histórico paginado: {allRequests.length} registro(s) carregado(s). Carregue as próximas páginas para completar o período e habilitar a exportação integral.
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <Badge variant="outline" className="text-xs">{allRequests.length} solicitação(ões) carregada(s)</Badge>
+                  <Button variant="outline" size="sm" className="gap-1.5" disabled={!requestReportComplete || filteredRequests.length === 0} onClick={() => {
+                    exportRequestsCSV(filteredRequests.map((r: any) => ({ ...r, requesterName: r.requester?.name ?? "—", secretariaName: r.secretaria?.name ?? "—", itemCount: r.items?.length ?? 0, totalItems: (r.items ?? []).reduce((s: number, i: any) => s + (i.quantityDelivered ?? 0), 0) })));
+                    toast.success("CSV integral exportado");
+                  }}><Download className="h-3.5 w-3.5" /> CSV integral</Button>
+                  {(requestReportStatus === "CanLoadMore" || requestReportStatus === "LoadingMore") && (
+                    <Button variant="outline" size="sm" disabled={requestReportStatus === "LoadingMore"} onClick={() => loadMoreRequests(50)}>
+                      {requestReportStatus === "LoadingMore" ? "Carregando..." : "Carregar mais 50"}
+                    </Button>
+                  )}
                 </div>
                 <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table>
                   <TableHeader><TableRow>
                     <TableHead className="text-xs">Data</TableHead><TableHead className="text-xs">Solicitante</TableHead><TableHead className="text-xs">Secretaria</TableHead><TableHead className="text-xs">Motivo</TableHead><TableHead className="text-xs">Status</TableHead><TableHead className="text-xs text-right">Itens</TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
-                    {allRequests.filter((r: any) => {
-                      if (reqStartDate && r.createdAt < new Date(reqStartDate).getTime()) return false;
-                      if (reqEndDate && r.createdAt > new Date(reqEndDate + "T23:59:59").getTime()) return false;
-                      return true;
-                    }).map((r: any) => (
+                    {filteredRequests.map((r: any) => (
                       <TableRow key={r._id}>
                         <TableCell className="text-xs">{new Date(r.createdAt).toLocaleDateString("pt-BR")}</TableCell>
                         <TableCell className="text-sm">{r.requester?.name ?? "—"}</TableCell>
@@ -755,15 +783,16 @@ export default function Reports() {
             {!allAssets ? <p className="text-muted-foreground text-sm">Carregando...</p> : (
               <>
                 <div className="flex gap-2 mb-3">
-                  <Badge variant="outline" className="text-xs">{allAssets.length} equipamento(s)</Badge>
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { exportAssetsCSV(allAssets); toast.success("CSV exportado"); }}><Download className="h-3.5 w-3.5" /> CSV</Button>
+                  <Badge variant="outline" className="text-xs">{displayedAssets?.length ?? 0}{assetReportTruncated ? "+" : ""} equipamento(s)</Badge>
+                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { exportAssetsCSV(displayedAssets ?? []); toast.success(assetReportTruncated ? "CSV dos 500 equipamentos mais recentes exportado" : "CSV exportado"); }}><Download className="h-3.5 w-3.5" /> CSV até 500</Button>
                 </div>
+                {assetReportTruncated && <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">Este relatório está limitado aos 500 equipamentos mais recentes. A listagem e o CSV não representam o histórico completo.</p>}
                 <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table>
                   <TableHeader><TableRow>
                     <TableHead className="text-xs">Patrimônio</TableHead><TableHead className="text-xs">Série</TableHead><TableHead className="text-xs">Tipo</TableHead><TableHead className="text-xs">Fabricante / Modelo</TableHead><TableHead className="text-xs">Usuário</TableHead><TableHead className="text-xs">Secretaria</TableHead><TableHead className="text-xs">Status</TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
-                    {allAssets.map((a: any) => (
+                    {displayedAssets?.map((a: any) => (
                       <TableRow key={a._id}>
                         <TableCell className="text-xs font-mono">{a.patrimonyNumber ?? "—"}</TableCell>
                         <TableCell className="text-xs">{a.serialNumber ?? "—"}</TableCell>
@@ -783,21 +812,24 @@ export default function Reports() {
           {/* ═══ RELATÓRIO 7: GOMAQ ═══ */}
           <TabsContent value="gomaq" className="space-y-4 mt-4">
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total de Trocas</p><p className="text-2xl font-bold">{gomaqExchanges?.length ?? 0}</p></CardContent></Card>
-              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Carcaças Aguardando</p><p className="text-2xl font-bold text-orange-600">{gomaqCartridges?.filter((c: any) => c.status === "awaiting_collection").length ?? 0}</p></CardContent></Card>
-              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Coletas Realizadas</p><p className="text-2xl font-bold">{gomaqCollections?.length ?? 0}</p></CardContent></Card>
-              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Coletado</p><p className="text-2xl font-bold">{gomaqCollections?.reduce((s: number, c: any) => s + c.totalCartridges, 0) ?? 0}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total de Trocas</p><p className="text-2xl font-bold">{displayedGomaqExchanges?.length ?? 0}{gomaqExchangesTruncated ? "+" : ""}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Carcaças Aguardando</p><p className="text-2xl font-bold text-orange-600">{displayedGomaqCartridges?.filter((c: any) => c.status === "awaiting_collection").length ?? 0}{gomaqCartridgesTruncated ? "+" : ""}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Coletas Realizadas</p><p className="text-2xl font-bold">{displayedGomaqCollections?.length ?? 0}{gomaqCollectionsTruncated ? "+" : ""}</p></CardContent></Card>
+              <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Coletado</p><p className="text-2xl font-bold">{displayedGomaqCollections?.reduce((s: number, c: any) => s + c.totalCartridges, 0) ?? 0}{gomaqCollectionsTruncated ? "+" : ""}</p></CardContent></Card>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { if (gomaqExchanges) { exportGomaqCSV(gomaqExchanges); toast.success("CSV exportado"); } }}><Download className="h-3.5 w-3.5" /> CSV Trocas</Button>
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { if (displayedGomaqExchanges) { exportGomaqCSV(displayedGomaqExchanges); toast.success(gomaqExchangesTruncated ? "CSV das 500 trocas mais recentes exportado" : "CSV exportado"); } }}><Download className="h-3.5 w-3.5" /> CSV até 500 Trocas</Button>
             </div>
+            {(gomaqExchangesTruncated || gomaqCartridgesTruncated || gomaqCollectionsTruncated) && <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">Dados limitados aos registros mais recentes: até 500 trocas e carcaças, e até 100 coletas. Os indicadores e o CSV não representam o histórico completo quando houver limite excedido.</p>}
             {gomaqExchanges && gomaqExchanges.length > 0 && (
+              <>
+              <p className="text-xs text-muted-foreground">A tabela exibe até 100 trocas mais recentes; o CSV exporta até 500.</p>
               <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table>
                 <TableHeader><TableRow>
                   <TableHead className="text-xs">Data</TableHead><TableHead className="text-xs">Nº</TableHead><TableHead className="text-xs">Produto</TableHead><TableHead className="text-xs text-right">Qtd</TableHead><TableHead className="text-xs">Impressora</TableHead><TableHead className="text-xs text-right">Carcaças</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
-                  {gomaqExchanges.slice(0, 100).map((e: any) => (
+                  {displayedGomaqExchanges?.slice(0, 100).map((e: any) => (
                     <TableRow key={e._id}>
                       <TableCell className="text-xs">{new Date(e.exchangedAt).toLocaleDateString("pt-BR")}</TableCell>
                       <TableCell className="text-xs font-mono">{e.exchangeNumber}</TableCell>
@@ -809,6 +841,7 @@ export default function Reports() {
                   ))}
                 </TableBody>
               </Table></div></CardContent></Card>
+              </>
             )}
           </TabsContent>
         </Tabs>

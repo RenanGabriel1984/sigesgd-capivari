@@ -1,43 +1,66 @@
 import { v } from "convex/values";
-import { action, internalAction, internalQuery, mutation } from "./_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
+import { action, internalAction, internalQuery, internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { requirePermission } from "./rbac";
+import { roleHasPermission, type AppRole } from "../lib/rbac";
+import { generateSecureNumericCode, hashResetCode, verifyPassword } from "./auth/passwords";
 
 /**
  * Gestão de Estoque SGGD — Transporte de e-mail.
  *
  * ─── Hardening B-07 (segredos) ───────────────────────────────────────────────
- * A credencial do serviço de e-mail NÃO vive mais no código-fonte. Ela é lida
- * de `FREEBUFF_EMAIL_API_KEY` (variável de ambiente/secret do deployment).
+ * As credenciais de e-mail NÃO vivem no código-fonte:
+ * - `FREEBUFF_EMAIL_API_KEY`: endpoint Freebuff usado na recuperação por OTP;
+ * - `RESEND_API_KEY`: API Resend usada no envio de primeiro acesso.
  *
- * A chave que estava versionada (`fb_email_...`) deve ser considerada
- * COMPROMETIDA e ROTACIONADA no provedor. Sem a variável configurada, o
- * envio falha FECHADO: nenhuma requisição sai, nenhum segredo é escrito em
- * log e nenhum dado do usuário vaza.
+ * A chave antiga que estava versionada (`fb_email_...`) deve ser considerada
+ * COMPROMETIDA e ROTACIONADA no provedor. Sem a credencial específica, o
+ * respectivo envio falha FECHADO: nenhuma requisição sai, nenhum segredo é
+ * escrito em log e nenhum dado do usuário vaza.
  *
  * ─── Recuperação de senha ───────────────────────────────────────────────────
  * (`passwords.requestPasswordReset`)
- *  - o código numérico de 6 dígitos continua sendo gerado e gravado em
- *    `passwordResets` (token, expiresAt 15 min, usedAt, attempts, userId);
  *  - a mutation agenda esta ação INTERNA passando apenas o `resetId`;
- *  - o código é lido AQUI, no servidor, direto da tabela `passwordResets`
- *    — nunca trafega em args públicos, não é retornado pela mutation e
- *    não é impresso em logs de produção;
+ *  - esta ação gera o código em memória, deriva um hash PBKDF2 com salt
+ *    aleatório e persiste somente hash/salt em `passwordResets`;
+ *  - o código em texto segue diretamente ao provedor de e-mail, sem ser
+ *    gravado na tabela, no payload agendado, em resposta pública ou em logs;
  *  - se o registro já foi consumido (`usedAt`), expirou ou esgotou as
  *    tentativas, nada é enviado.
  */
 
 const SEND_OTP_ENDPOINT = "https://auth.freebuff.app/send_otp";
 
+/** Escape dynamic values before embedding them in transactional HTML. */
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character];
+  });
+}
+
 /** Nome da variável de ambiente que guarda a chave do serviço de e-mail. */
 export const EMAIL_API_KEY_ENV = "FREEBUFF_EMAIL_API_KEY";
+export const RESEND_API_KEY_ENV = "RESEND_API_KEY";
 
 /**
- * Lê a credencial do ambiente. Ausente/vazia ⇒ `null` (falha fechada).
+ * Lê uma credencial de e-mail do ambiente. Ausente/vazia ⇒ `null` (falha fechada).
  * O valor NUNCA é retornado, logado ou incluído em mensagens de erro.
  */
 function readEmailApiKey(): string | null {
   const key = process.env[EMAIL_API_KEY_ENV];
+  return typeof key === "string" && key.trim().length > 0 ? key.trim() : null;
+}
+
+/** Resend is a separate provider and must use its own API credential. */
+function readResendApiKey(): string | null {
+  const key = process.env[RESEND_API_KEY_ENV];
   return typeof key === "string" && key.trim().length > 0 ? key.trim() : null;
 }
 
@@ -86,12 +109,12 @@ export const getPasswordResetForEmailInternal = internalQuery({
     if ((reset.attempts ?? 0) >= 5) return null;
 
     const user = await ctx.db.get(reset.userId);
-    if (!user?.email) return null;
+    if (!user?.email || user.active === false) return null;
     // B-01: identidade anônima ou sem perfil válido nunca recebe recuperação.
     if ((user as { isAnonymous?: boolean }).isAnonymous === true) return null;
-    if (!user.role) return null;
+    if (!roleHasPermission(user.role as AppRole, "settings.view")) return null;
 
-    return { email: user.email, code: reset.token };
+    return { email: user.email };
   },
 });
 
@@ -114,11 +137,27 @@ export const sendPasswordResetEmailInternal = internalAction({
       return { sent: false, reason: "reset-not-found" };
     }
 
+    // Generate the OTP inside this internal action. It exists only in memory
+    // and is passed to an internal mutation as a salted hash, never as a DB value.
+    const code = generateSecureNumericCode();
+    const { hash, salt } = await hashResetCode(code);
+    const stored = await ctx.runMutation(
+      internal.passwords.storePasswordResetHashInternal,
+      { resetId: args.resetId, tokenHash: hash, tokenSalt: salt },
+    );
+    if (!stored) {
+      return { sent: false, reason: "reset-not-active" };
+    }
+
     try {
-      await sendOtpEmail(payload.email, payload.code);
+      await sendOtpEmail(payload.email, code);
       return { sent: true };
     } catch (error: any) {
-      // NUNCA logar o código nem o corpo do erro (poderia conter dados sensíveis).
+      // Invalidate the code if delivery fails; never log the code or payload.
+      await ctx.runMutation(
+        internal.passwords.invalidatePasswordResetInternal,
+        { resetId: args.resetId },
+      );
       console.error(
         "[Estoque SGGD] Falha no envio do e-mail de recuperação:",
         error?.response?.status ?? error?.code ?? error?.message ?? "erro-desconhecido",
@@ -129,75 +168,139 @@ export const sendPasswordResetEmailInternal = internalAction({
 });
 
 /**
- * E-mail de primeiro acesso com senha temporária.
- *
- * Hardening B-06: antes isto era uma ACTION PÚBLICA sem autenticação que
- * aceitava destinatário e conteúdo ARBITRÁRIOS — um relay de e-mail aberto
- * usando a identidade do município, e que escrevia a senha temporária em
- * `console.log` quando o serviço não estava configurado.
- *
- * Agora:
- *  - é uma MUTATION protegida por `users.manage` (admin/secretary);
- *  - o destinatário (`to`) DEVE corresponder ao e-mail de um usuário SIGESGD
- *    existente e ativo — não há envio para destinatário arbitrário;
- *  - a senha temporária NUNCA é logada, nunca aparece em exceção, nunca é
- *    devolvida ao cliente e nunca é gravada em `auditLogs`;
- *  - a operação é auditada apenas com identificadores (usuário e e-mail).
+ * Confere a identidade administrativa e o destinatário antes do envio.
+ * O hash da senha temporária é retornado somente à action interna para
+ * validação; nunca é exposto ao cliente.
  */
-export const sendFirstAccessEmail = mutation({
+export const getFirstAccessRecipientInternal = internalQuery({
+  args: {
+    adminUserId: v.id("users"),
+    to: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const admin = await ctx.db.get(args.adminUserId);
+    if (
+      !admin ||
+      admin.active === false ||
+      (admin as { isAnonymous?: boolean }).isAnonymous === true ||
+      !roleHasPermission(admin.role as AppRole, "users.manage")
+    ) {
+      throw new Error("Acesso negado.");
+    }
+
+    const to = args.to.trim().toLowerCase();
+    if (!to) throw new Error("E-mail do destinatário é obrigatório");
+
+    const target = await ctx.db
+      .query("users")
+      .withIndex("email", (q) => q.eq("email", to))
+      .first();
+    if (!target || target.active === false) {
+      throw new Error("Destinatário não encontrado ou inativo.");
+    }
+    if (
+      (target as { isAnonymous?: boolean }).isAnonymous === true ||
+      !roleHasPermission(target.role as AppRole, "settings.view") ||
+      target.requiresPasswordReset !== true
+    ) {
+      throw new Error("Usuário sem primeiro acesso pendente.");
+    }
+
+    const passwordRecord = await ctx.db
+      .query("passwords")
+      .withIndex("by_user", (q) => q.eq("userId", target._id))
+      .first();
+    if (!passwordRecord || passwordRecord.requiresReset !== true) {
+      throw new Error("Credencial temporária não encontrada.");
+    }
+
+    return {
+      userId: target._id,
+      email: target.email ?? to,
+      name: target.name ?? "Servidor",
+      passwordHash: passwordRecord.passwordHash,
+      salt: passwordRecord.salt,
+    };
+  },
+});
+
+/** Registra somente metadados do envio; nunca registra a senha temporária. */
+export const recordFirstAccessEmailAuditInternal = internalMutation({
+  args: {
+    adminUserId: v.id("users"),
+    targetUserId: v.id("users"),
+    delivered: v.boolean(),
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const target = await ctx.db.get(args.targetUserId);
+    await ctx.db.insert("auditLogs", {
+      userId: args.adminUserId,
+      action: "create",
+      entity: "passwords",
+      entityId: args.targetUserId,
+      details: args.delivered
+        ? `Acesso inicial enviado para "${target?.name ?? String(args.targetUserId)}" pelo administrador.`
+        : `Envio de acesso inicial para "${target?.name ?? String(args.targetUserId)}" não realizado: ${args.reason ?? "falha no envio"}.`,
+      timestamp: Date.now(),
+    });
+    return true;
+  },
+});
+
+/**
+ * Envia a senha temporária em uma ACTION (mutations Convex não podem fazer
+ * chamadas HTTP). A identidade do administrador é obtida da sessão autenticada
+ * e o destinatário/senha são conferidos no backend antes do envio.
+ */
+export const sendFirstAccessEmail = action({
   args: {
     to: v.string(),
     name: v.optional(v.string()),
     temporaryPassword: v.string(),
   },
   handler: async (ctx, args) => {
-    const { userId: adminId } = await requirePermission(ctx, "users.manage", {
-      entity: "users",
-    });
+    const adminId = await getAuthUserId(ctx);
+    if (!adminId) throw new Error("Não autenticado");
 
     const to = args.to.trim().toLowerCase();
     if (!to) throw new Error("E-mail do destinatário é obrigatório");
-
-    // O destinatário precisa ser um usuário real do SIGESGD.
-    const target = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", to))
-      .first();
-    if (!target) {
-      throw new Error(
-        "E-mail não pertence a nenhum usuário cadastrado. Crie o usuário antes de enviar o acesso inicial.",
-      );
-    }
-    if (target.active === false) {
-      throw new Error("Não é possível enviar acesso inicial para usuário inativo.");
-    }
-    if ((target as { isAnonymous?: boolean }).isAnonymous === true || !target.role) {
-      throw new Error("Usuário sem perfil de acesso válido no SIGESGD.");
+    if (args.temporaryPassword.length < 8 || args.temporaryPassword.length > 200) {
+      throw new Error("Senha temporária inválida.");
     }
 
-    const apiKey = readEmailApiKey();
+    const target = await ctx.runQuery(internal.email.getFirstAccessRecipientInternal, {
+      adminUserId: adminId,
+      to,
+    });
+    const passwordMatches = await verifyPassword(
+      args.temporaryPassword,
+      target.passwordHash,
+      target.salt,
+    );
+    if (!passwordMatches) {
+      throw new Error("A senha temporária informada não corresponde à credencial atual.");
+    }
+
+    const apiKey = readResendApiKey();
     const fromEmail =
       process.env.EMAIL_FROM || "Gestão de Estoque SGGD <noreply@capivari.sp.gov.br>";
 
     if (!apiKey) {
-      // Sem credencial: nada é enviado e a senha temporária NÃO é logada.
-      await ctx.db.insert("auditLogs", {
-        userId: adminId,
-        action: "create",
-        entity: "passwords",
-        entityId: target._id,
-        details:
-          `Envio de acesso inicial para "${target.name ?? to}" NÃO realizado: ` +
-          `serviço de e-mail não configurado (${EMAIL_API_KEY_ENV}).`,
-        timestamp: Date.now(),
+      await ctx.runMutation(internal.email.recordFirstAccessEmailAuditInternal, {
+        adminUserId: adminId,
+        targetUserId: target.userId,
+        delivered: false,
+        reason: `serviço de primeiro acesso não configurado (${RESEND_API_KEY_ENV})`,
       });
       throw new Error(
-        `Serviço de e-mail não configurado (${EMAIL_API_KEY_ENV}). Configure a credencial antes de enviar acessos iniciais.`,
+        `Serviço de primeiro acesso não configurado (${RESEND_API_KEY_ENV}). Configure a credencial Resend antes de enviar acessos iniciais.`,
       );
     }
 
-    const displayName = (args.name ?? target.name ?? "").toString();
-    const safeName = displayName || target.name || "Servidor";
+    const safeName = target.name || args.name?.trim() || "Servidor";
+    const htmlSafeName = escapeHtml(safeName);
+    const htmlSafeTemporaryPassword = escapeHtml(args.temporaryPassword);
 
     try {
       const response = await fetch("https://api.resend.com/emails", {
@@ -208,7 +311,7 @@ export const sendFirstAccessEmail = mutation({
         },
         body: JSON.stringify({
           from: fromEmail,
-          to: [to],
+          to: [target.email],
           subject: "Bem-vindo ao Gestão de Estoque SGGD — Acesso Inicial",
           html: `
             <!DOCTYPE html>
@@ -219,8 +322,7 @@ export const sendFirstAccessEmail = mutation({
                 <div style="text-align:center;margin-bottom:24px;">
                   <div style="display:inline-block;background:#1a5632;color:white;font-weight:bold;font-size:14px;padding:8px 12px;border-radius:8px;">SG</div>
                 </div>
-                <h1 style="color:#1a5632;font-size:18px;text-align:center;">Bem-vindo, ${safeName}!</h1>
-
+                <h1 style="color:#1a5632;font-size:18px;text-align:center;">Bem-vindo, ${htmlSafeName}!</h1>
                 <div style="background:white;border:1px solid #e5e7eb;border-radius:12px;padding:24px;margin:24px 0;">
                   <p style="color:#444;font-size:14px;line-height:1.5;">
                     Você foi cadastrado no sistema <strong>Gestão de Estoque SGGD</strong> — Secretaria de Gestão e Governo Digital.
@@ -230,14 +332,13 @@ export const sendFirstAccessEmail = mutation({
                   </p>
                   <div style="text-align:center;margin:16px 0;">
                     <span style="display:inline-block;background:#fff7ed;border:2px solid #C8A84E;border-radius:8px;padding:12px 24px;font-size:20px;font-weight:bold;letter-spacing:3px;color:#8B6914;font-family:monospace;">
-                      ${args.temporaryPassword}
+                      ${htmlSafeTemporaryPassword}
                     </span>
                   </div>
                   <p style="color:#888;font-size:12px;text-align:center;">
                     Ao fazer login pela primeira vez, você será obrigado a criar uma nova senha pessoal.
                   </p>
                 </div>
-
                 <div style="text-align:center;margin-top:24px;padding-top:16px;border-top:1px solid #e5e7eb;">
                   <p style="color:#bbb;font-size:10px;">
                     Prefeitura Municipal de Capivari — SP<br>
@@ -253,27 +354,27 @@ export const sendFirstAccessEmail = mutation({
       });
 
       if (!response.ok) {
-        // Somente status — nunca o corpo (pode conter conteúdo do fornecedor).
-        console.error(`[Estoque SGGD] Envio de acesso inicial falhou: status ${response.status}`);
-        throw new Error(`Falha no envio do e-mail de acesso inicial (status ${response.status}).`);
+        throw new Error(`provider-status-${response.status}`);
       }
 
-      await ctx.db.insert("auditLogs", {
-        userId: adminId,
-        action: "create",
-        entity: "passwords",
-        entityId: target._id,
-        details: `Acesso inicial enviado para "${target.name ?? to}" pelo administrador.`,
-        timestamp: Date.now(),
+      await ctx.runMutation(internal.email.recordFirstAccessEmailAuditInternal, {
+        adminUserId: adminId,
+        targetUserId: target.userId,
+        delivered: true,
       });
-
       return { sent: true };
-    } catch (error: any) {
-      // Sem credencial, corpo do fornecedor ou qualquer senha temporária.
-      console.error(
-        "[Estoque SGGD] Erro no envio do e-mail de acesso inicial:",
-        error?.message ?? "erro-desconhecido",
-      );
+    } catch (error) {
+      const reason =
+        error instanceof Error && /^provider-status-\d+$/.test(error.message)
+          ? `falha no provedor (${error.message.slice("provider-status-".length)})`
+          : "falha no envio";
+      await ctx.runMutation(internal.email.recordFirstAccessEmailAuditInternal, {
+        adminUserId: adminId,
+        targetUserId: target.userId,
+        delivered: false,
+        reason,
+      });
+      console.error("[Estoque SGGD] Falha no envio de acesso inicial.");
       throw new Error("Não foi possível enviar o e-mail de acesso inicial.");
     }
   },

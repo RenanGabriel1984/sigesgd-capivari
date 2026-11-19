@@ -1,3 +1,23 @@
+describe("resumo GomaQ sem truncamento das listas de histórico", () => {
+  it("calcula totais com consultas completas e intervalo indexado do mês", () => {
+    const backend = readFileSync(resolve(__dirname, "../convex/gomaQ.ts"), "utf8");
+    const summary = backend.slice(backend.indexOf("export const dashboardSummary"), backend.indexOf("export const lastCollection"));
+    expect(summary).toContain('.withIndex("by_date"');
+    expect(summary).toContain('q.gte("exchangedAt", args.startDate).lt("exchangedAt", args.endDate)');
+    expect(summary).toContain("awaitingCollectionQuantity");
+    expect(summary).toContain("collectionsCount");
+    expect(summary).not.toContain(".take(");
+  });
+
+  it("os cards usam os totais independentes das listas limitadas", () => {
+    const page = readFileSync(resolve(__dirname, "../pages/GomaQ.tsx"), "utf8");
+    expect(page).toContain("api.gomaQ.dashboardSummary");
+    expect(page).toContain("summary?.awaitingCollectionQuantity");
+    expect(page).toContain("summary?.exchangesThisMonth");
+    expect(page).toContain("summary?.collectionsCount");
+  });
+});
+
 /**
  * Gestão de Estoque SGGD — SOLICITAÇÃO MENSAL DE SUPRIMENTOS (GOMAQ-01..06).
  *
@@ -383,5 +403,34 @@ describe("GOMAQ — RBAC da solicitação mensal", () => {
     for (const name of MUTATIONS) {
       expect(code(name)).toContain('requirePermission(ctx, "supply_requests.manage"');
     }
+  });
+});
+
+
+describe("GOMAQ — consultas enxutas de atividade recente", () => {
+  it("o painel busca somente seis trocas e seis coletas recentes", () => {
+    const backend = read("src/convex/gomaQ.ts");
+    const page = read("src/pages/GomaQ.tsx");
+    const exchanges = backend.slice(backend.indexOf("export const listRecentExchanges"), backend.indexOf("export const listRecentCollections"));
+    const collections = backend.slice(backend.indexOf("export const listRecentCollections"), backend.indexOf("export const monthlyOrder"));
+    expect(exchanges).toContain('.order("desc").take(6)');
+    expect(collections).toContain('.order("desc").take(6)');
+    expect(page).toContain("api.gomaQ.listRecentExchanges");
+    expect(page).toContain("api.gomaQ.listRecentCollections");
+    expect(page).not.toContain("api.gomaQ.listExchanges, {}");
+    expect(page).not.toContain("api.gomaQ.listCollections, {}");
+  });
+});
+
+
+describe("coleta de carcaças GomaQ", () => {
+  it("rejeita IDs duplicados antes de criar a coleta ou alterar carcaças", () => {
+    const source = readFileSync(resolve(__dirname, "../convex/gomaQ.ts"), "utf8");
+    const start = source.indexOf("export const createCollection =");
+    const end = source.indexOf("\nexport const ", start + 1);
+    const mutation = source.slice(start, end === -1 ? undefined : end);
+    expect(mutation).toContain("new Set(args.cartridgeIds).size !== args.cartridgeIds.length");
+    expect(mutation.indexOf("new Set(args.cartridgeIds)")).toBeLessThan(mutation.indexOf('ctx.db.insert("gomaQCollections"'));
+    expect(mutation).toContain("A seleção contém carcaças duplicadas");
   });
 });

@@ -69,16 +69,16 @@ export interface PatrimonyUnitDraft {
  * Regras:
  *  - Material de consumo: NÃO exige patrimônio e NÃO aceita unidades
  *    patrimoniais registradas.
- *  - Material permanente: exige EXATAMENTE uma unidade por quantidade
- *    recebida, e cada unidade precisa de número de patrimônio
- *    (ou, no mínimo, número de série quando o patrimônio for atribuído
- *    posteriormente — aqui exigimos patrimônio).
+ *  - Material permanente: exige EXATAMENTE uma unidade de identificação por
+ *    quantidade recebida. O número oficial do patrimônio é atribuído
+ *    posteriormente pelo setor de Patrimônio e não bloqueia o recebimento.
  */
 export function validateEntryUnits(input: {
   materialType?: MaterialType | null;
   quantity: number;
   units: PatrimonyUnitDraft[];
   productName?: string;
+  requireSerial?: boolean;
 }): string | null {
   const label = input.productName ? ` (${input.productName})` : "";
   const units = input.units ?? [];
@@ -87,28 +87,33 @@ export function validateEntryUnits(input: {
     if (units.length > 0) {
       return (
         `Material de consumo não possui unidades patrimoniais${label}. ` +
-        `Classifique a entrada como "Material permanente" para registrar patrimônios.`
+        `Classifique a entrada como "Material permanente" para registrar as unidades.`
       );
     }
     return null;
   }
 
+  if (!Number.isSafeInteger(input.quantity) || input.quantity <= 0) {
+    return `Material permanente${label}: a quantidade recebida deve ser um número inteiro positivo.`;
+  }
+
   if (units.length !== input.quantity) {
     return (
-      `Material permanente${label}: informe uma unidade patrimonial por unidade recebida. ` +
+      `Material permanente${label}: informe uma identificação provisória por unidade recebida. ` +
       `Recebido: ${input.quantity}, unidades registradas: ${units.length}.`
     );
   }
 
-  for (let i = 0; i < units.length; i++) {
-    const u = units[i];
-    const hasPatrimony = !!(u.patrimonyNumber && u.patrimonyNumber.trim());
-    if (!hasPatrimony) {
-      return (
-        `Material permanente${label}: a unidade ${i + 1} precisa do número de patrimônio.`
-      );
+  if (input.requireSerial) {
+    for (let index = 0; index < units.length; index++) {
+      if (!units[index].serialNumber?.trim()) {
+        return `Material permanente${label}: a unidade ${index + 1} exige número de série no recebimento.`;
+      }
     }
   }
+
+  // O número oficial de patrimônio é atribuído pelo setor de Patrimônio após
+  // o recebimento. Quando o produto exige série, ela é registrada no ato.
   return null;
 }
 

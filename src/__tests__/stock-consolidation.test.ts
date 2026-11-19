@@ -335,6 +335,7 @@ describe("Initial sheet import", () => {
       brand: "Exbom",
       quantity: 8,
       unitOfMeasure: "un",
+      areaName: "",
       observation: "Caixa original",
     });
     expect(rows[1].productName).toBe("Mouse óptico");

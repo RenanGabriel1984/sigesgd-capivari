@@ -1,0 +1,102 @@
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import {
+  calculateWaterContainerBalance,
+  summarizeWaterFinances,
+  splitWaterCostCents,
+} from "../lib/water-control";
+
+const ROOT = resolve(__dirname, "../..");
+const read = (path: string) => readFileSync(resolve(ROOT, path), "utf-8");
+const backend = read("src/convex/water.ts");
+const page = read("src/pages/Water.tsx");
+
+describe("implantação inicial do módulo Água Mineral (sem histórico prévio)", () => {
+  it("apresenta saldos físicos zerados quando ainda não existem lançamentos", () => {
+    expect(calculateWaterContainerBalance([], [])).toEqual({
+      fullGallons: 0,
+      emptyGallons: 0,
+    });
+  });
+
+  it("apresenta resumo financeiro vazio sem criar dívidas ou valores fictícios", () => {
+    expect(summarizeWaterFinances([], [], [])).toMatchObject({
+      totalPurchasedCents: 0,
+      totalAllocatedCents: 0,
+      totalPaidCents: 0,
+      totalOutstandingCents: 0,
+      pendingAllocationCents: 0,
+      unallocatedOverageCents: 0,
+      totalOverpaidCents: 0,
+      unmatchedPaymentCount: 0,
+      participants: [],
+    });
+  });
+
+  it("permite implantar o saldo físico inicial por ajuste explícito, sem exigir recebimento ou período", () => {
+    expect(backend).toContain('v.literal("adjustment")');
+    expect(backend).toContain('if (args.type === "adjustment" && args.fullDelta === 0 && args.emptyDelta === 0)');
+    expect(backend).toContain('entity: "waterContainerMovements"');
+    expect(backend).toContain("validateWaterContainerLedger(");
+    expect(backend).toContain("if (ledgerError) throw new Error(ledgerError);");
+  });
+
+  it("exige justificativa auditável para implantação do saldo físico inicial", () => {
+    expect(backend).toContain('if (args.type === "adjustment" && (args.observation?.trim().length ?? 0) < 8)');
+    expect(page).toContain("Justificativa da contagem / ajuste");
+    expect(page).toContain("Informe uma justificativa de pelo menos 8 caracteres para o ajuste de saldo.");
+  });
+
+  it("não permite fechar período sem compra válida e participantes", () => {
+    expect(backend).toContain("if (activeReceipts.length === 0) throw new Error");
+    expect(backend).toContain("if (participants.length === 0) throw new Error");
+  });
+
+  it("rejeita recebimento com valor zero e limita campos descritivos", () => {
+    expect(backend).toContain('if (!Number.isSafeInteger(args.totalValueCents) || args.totalValueCents <= 0)');
+    expect(backend).toContain("Fornecedor e responsável pelo pagamento devem ter no máximo 120 caracteres.");
+    expect(backend).toContain("A observação deve ter no máximo 500 caracteres.");
+    expect(page).toContain("Informe um valor total maior que zero.");
+  });
+
+  it("limita meio de pagamento e observação para preservar registros e auditoria", () => {
+    expect(backend).toContain("Meio de pagamento deve ter até 80 caracteres e observação até 500 caracteres.");
+  });
+
+  it("não permite registrar pagamento sem uma parcela de rateio existente", () => {
+    expect(backend).toContain('const share = await ctx.db.get(args.shareId)');
+    expect(backend).toContain('if (!share) throw new Error("Parcela de rateio não encontrada.")');
+  });
+
+  it("distribui centavos de forma exata no primeiro rateio", () => {
+    const shares = splitWaterCostCents(1001, ["p2", "p1", "p3"]);
+    expect(shares.reduce((sum, share) => sum + share.amountDueCents, 0)).toBe(1001);
+    expect(shares.map((share) => share.amountDueCents)).toEqual([334, 334, 333]);
+  });
+
+  it("orienta o usuário quando ainda não há rateios, recebimentos ou movimentações", () => {
+    expect(page).toContain("Ainda não há rateios fechados");
+    expect(page).toContain("Nenhuma movimentação de consumo, devolução ou ajuste registrada.");
+    expect(page).toContain("Abra um período de rateio para registrar recebimentos.");
+    expect(page).toContain("Ajuste de saldo / implantação");
+  });
+
+  it("exibe orientação sequencial de implantação somente quando o módulo está vazio", () => {
+    expect(page).toContain("Primeira configuração do controle de água");
+    expect(page).toContain("Cadastre os participantes");
+    expect(page).toContain("Faça a contagem física");
+    expect(page).toContain("Abra o período");
+    expect(page).toContain("Registre cada recebimento");
+    expect(page).toContain("Feche o período");
+    expect(page).toContain("canManage && periods.length === 0 && dashboard.receipts.length === 0 && dashboard.movements.length === 0 && dashboard.participants.length === 0");
+    expect(page).toContain("O ajuste inicial altera somente o saldo físico de galões");
+  });
+
+  it("mantém estornos inativos quando não há lançamentos, sem criar registros artificiais", () => {
+    expect(backend).toContain("export const reverseReceipt = mutation");
+    expect(backend).toContain("export const reverseContainerMovement = mutation");
+    expect(backend).toContain("export const reversePayment = mutation");
+    expect(calculateWaterContainerBalance([], [])).toEqual({ fullGallons: 0, emptyGallons: 0 });
+  });
+});

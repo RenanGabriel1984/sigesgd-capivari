@@ -4,7 +4,7 @@ import { requirePermission } from "./rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { isValidCnpj, normalizePhone, digitsOnly } from "../lib/br-validators";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: fornecedores exigem permissão de visualização.

@@ -1,8 +1,9 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { assertShortTextLimits, assertTextLimits } from "../lib/text-limits";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // RBAC central: visualização de locais físicos.
@@ -18,7 +19,10 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    return await ctx.db.query("storageLocations").collect();
+    const locations = await ctx.db.query("storageLocations").collect();
+    return Promise.all(locations.map(async (location: any) => ({
+      ...location, area: location.areaId ? await ctx.db.get(location.areaId) : null,
+    })));
   },
 });
 
@@ -26,10 +30,11 @@ export const listActive = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    return await ctx.db
-      .query("storageLocations")
-      .withIndex("by_active", (q) => q.eq("active", true))
-      .collect();
+    const locations = await ctx.db.query("storageLocations")
+      .withIndex("by_active", (q) => q.eq("active", true)).collect();
+    return Promise.all(locations.map(async (location: any) => ({
+      ...location, area: location.areaId ? await ctx.db.get(location.areaId) : null,
+    })));
   },
 });
 
@@ -37,20 +42,26 @@ export const create = mutation({
   args: {
     name: v.string(),
     description: v.optional(v.string()),
+    // Mantido opcional para compatibilidade com clientes antigos; novos locais
+    // não recebem área. A área pertence ao lote/saldo, não ao armário.
+    areaId: v.optional(v.id("stockAreas")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    if (!args.name.trim()) throw new Error("Nome do local é obrigatório");
+    const name = args.name.trim();
+    if (!name) throw new Error("Nome do local é obrigatório");
+    assertShortTextLimits({ name });
+    assertTextLimits({ description: args.description?.trim() });
 
     // Check for duplicate name
     const existing = await ctx.db.query("storageLocations").collect();
-    if (existing.some((l: any) => l.name.toLowerCase() === args.name.trim().toLowerCase())) {
+    if (existing.some((l: any) => l.name.toLowerCase() === name.toLowerCase())) {
       throw new Error("Já existe um local de armazenamento com este nome");
     }
 
     const id = await ctx.db.insert("storageLocations", {
-      name: args.name.trim(),
-      description: args.description || undefined,
+      name,
+      description: args.description?.trim() || undefined,
       active: true,
     });
 
@@ -68,15 +79,43 @@ export const update = mutation({
     name: v.optional(v.string()),
     description: v.optional(v.string()),
     active: v.optional(v.boolean()),
+    areaId: v.optional(v.id("stockAreas")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    const { id, ...updates } = args;
+    const { id } = args;
     const location = await ctx.db.get(id);
     if (!location) throw new Error("Local não encontrado");
 
-    if (updates.name) {
-      updates.name = updates.name.trim();
+    // areaId é aceito apenas para compatibilidade com clientes antigos e
+    // deliberadamente ignorado: uma localização física não pertence a uma área.
+    const updates: Record<string, any> = {};
+    if (args.name !== undefined) {
+      const name = args.name.trim();
+      if (!name) throw new Error("Nome do local é obrigatório");
+      assertShortTextLimits({ name });
+      updates.name = name;
+    }
+    if (args.description !== undefined) {
+      assertTextLimits({ description: args.description.trim() });
+      updates.description = args.description.trim() || undefined;
+    }
+    if (args.active !== undefined) updates.active = args.active;
+
+    if (updates.active === false) {
+      const lotsAtLocation = await ctx.db.query("lots")
+        .withIndex("by_location", (q: any) => q.eq("locationId", id)).collect();
+      if (lotsAtLocation.some((lot: any) => lot.active && lot.quantityAvailable > 0)) {
+        throw new Error("Não é possível desativar um local que ainda possui lotes com saldo. Transfira ou regularize o estoque primeiro.");
+      }
+      const balancesAtLocation = await ctx.db.query("stockByLocation")
+        .withIndex("by_location", (q: any) => q.eq("locationId", id)).collect();
+      if (balancesAtLocation.some((row: any) => row.quantity > 0)) {
+        throw new Error("Não é possível desativar um local que ainda possui saldo por localização.");
+      }
+    }
+
+    if (updates.name !== undefined) {
       const all = await ctx.db.query("storageLocations").collect();
       if (all.some((l: any) => l._id !== id && l.name.toLowerCase() === updates.name!.toLowerCase())) {
         throw new Error("Já existe outro local com este nome");

@@ -24,8 +24,11 @@ import type { AuthConfig } from "convex/server";
 //
 // RECOMENDAÇÃO (W-01 pendente): avaliar a remoção deste provider em um
 // go-live posterior, mantendo então apenas o primeiro bloco (domínio próprio).
-const freebuffIssuer =
-  process.env.VLY_CONVEX_AUTH_ISSUER ?? "https://freebuff.com";
+// Mantém o issuer federado determinístico também em deployments Preview.
+ // Se um ambiente precisar de issuer diferente, a mudança deve ser explícita
+ // no código/configuração revisada, evitando falha de deploy por variável
+ // opcional ausente em branches de homologação.
+const freebuffIssuer = "https://freebuff.com";
 
 export default {
   providers: [
