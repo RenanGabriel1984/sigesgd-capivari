@@ -30,7 +30,7 @@ describe("peças instaladas — limites de observação", () => {
   for (const name of ["installPart", "removePart"]) {
     it(`valida a observação em ${name} antes de qualquer gravação`, () => {
       const start = source.indexOf(`export const ${name} = mutation({`);
-      const end = source.indexOf("\\nexport const ", start + 1);
+      const end = source.indexOf("\nexport const ", start + 1);
       const mutation = source.slice(start, end === -1 ? undefined : end);
       const validation = mutation.indexOf("assertTextLimits({ observation: args.observation }, MAX_OBSERVATION)");
       const firstWrite = mutation.search(/ctx\\.db\\.(insert|patch)\\(/);
