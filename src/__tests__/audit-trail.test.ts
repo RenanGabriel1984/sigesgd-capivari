@@ -61,4 +61,10 @@ describe("consulta e navegação do histórico de auditoria", () => {
     expect(auditBackend).toContain("_id: user._id, name: user.name, email: user.email, role: user.role");
     expect(auditBackend).not.toContain("return { ...log, user };");
   });
+  it("não trunca o histórico de auditoria associado a uma entidade", () => {
+    const byEntity = auditBackend.slice(auditBackend.indexOf("export const byEntity"), auditBackend.indexOf("export const listFiltered"));
+    expect(byEntity).toContain('.order("desc")\n          .collect();');
+    expect(byEntity).not.toContain(".take(100)");
+  });
+
 });
