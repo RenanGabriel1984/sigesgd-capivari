@@ -1038,10 +1038,6 @@ type Exchange = {
   _id: string; exchangeNumber: string; productId: string;
   quantityDelivered: number; quantityEmptyReceived: number; exchangedAt: number;
 };
-type Cartridge = {
-  _id: string; productId: string; quantity: number;
-  status: "awaiting_collection" | "collected"; generatedAt: number;
-};
 type Collection = {
   _id: string; collectionNumber: string; collectedAt: number; items?: Array<{ productLabel?: string; quantity?: number }>;
 };
@@ -1052,7 +1048,6 @@ type OrderItem = {
 
 function ReversaTab() {
   const exchanges = useQuery(api.gomaQ.listExchanges, {}) as Exchange[] | undefined;
-  const cartridges = useQuery(api.gomaQ.listEmptyCartridges, {}) as Cartridge[] | undefined;
   const collections = useQuery(api.gomaQ.listCollections, {}) as Collection[] | undefined;
   const order = useQuery(api.gomaQ.monthlyOrder, {}) as OrderItem[] | undefined;
   const { user } = useAuth();
