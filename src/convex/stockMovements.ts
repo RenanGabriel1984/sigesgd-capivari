@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
@@ -29,6 +30,25 @@ export const list = query({
       const toArea = m.toAreaId ? await ctx.db.get(m.toAreaId) : null;
       return { ...m, product, user, supplier, area, location, toLocation, toArea };
     }));
+  },
+});
+
+export const listPaginated = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    const result = await ctx.db.query("stockMovements").withIndex("by_timestamp").order("desc").paginate(args.paginationOpts);
+    const enriched = await Promise.all(result.page.map(async (movement) => {
+      const product = await ctx.db.get(movement.productId);
+      const user = await ctx.db.get(movement.userId);
+      const supplier = movement.supplierId ? await ctx.db.get(movement.supplierId) : null;
+      const area = movement.areaId ? await ctx.db.get(movement.areaId) : null;
+      const location = movement.locationId ? await ctx.db.get(movement.locationId) : null;
+      const toLocation = movement.toLocationId ? await ctx.db.get(movement.toLocationId) : null;
+      const toArea = movement.toAreaId ? await ctx.db.get(movement.toAreaId) : null;
+      return { ...movement, product, user, supplier, area, location, toLocation, toArea };
+    }));
+    return { ...result, page: enriched };
   },
 });
 
