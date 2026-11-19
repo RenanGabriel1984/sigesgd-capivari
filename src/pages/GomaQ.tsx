@@ -1047,8 +1047,8 @@ type OrderItem = {
 };
 
 function ReversaTab() {
-  const exchanges = useQuery(api.gomaQ.listExchanges, {}) as Exchange[] | undefined;
-  const collections = useQuery(api.gomaQ.listCollections, {}) as Collection[] | undefined;
+  const exchanges = useQuery(api.gomaQ.listRecentExchanges, {}) as Exchange[] | undefined;
+  const collections = useQuery(api.gomaQ.listRecentCollections, {}) as Collection[] | undefined;
   const order = useQuery(api.gomaQ.monthlyOrder, {}) as OrderItem[] | undefined;
   const { user } = useAuth();
   const permissions = getPermissions((user?.role ?? "technician") as UserRole);
