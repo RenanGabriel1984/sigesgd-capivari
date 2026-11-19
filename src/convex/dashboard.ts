@@ -225,37 +225,61 @@ export const stockPosition = query({
   args: {},
   handler: async (ctx) => {
     await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "stockPosition" });
-    const products = await ctx.db.query("products").collect();
-    return Promise.all(
-      products.map(async (p) => {
-        const category = await ctx.db.get(p.categoryId);
-        const stock = await ctx.db
-          .query("stock")
-          .withIndex("by_product", (q) => q.eq("productId", p._id))
-          .first();
-        const qty = stock?.physicalQuantity ?? 0;
-        let status: string = "Normal";
-        if (qty === 0) status = "Zerado";
-        else if (qty <= (p.minimumStock ?? 0)) status = "Crítico";
-        else if (qty <= (p.idealStock ?? 0)) status = "Baixo";
-        return {
-          _id: p._id,
-          name: p.name,
-          internalCode: p.internalCode ?? "",
-          categoryName: category?.name ?? "",
-          unitOfMeasure: p.unitOfMeasure,
-          currentStock: qty,
-          reservedQuantity: stock?.reservedQuantity ?? 0,
-          minimumStock: p.minimumStock ?? 0,
-          idealStock: p.idealStock ?? 0,
-          maximumStock: p.maximumStock,
-          status,
-          brand: p.brand,
-          model: p.model,
-          active: p.active,
-        };
-      })
-    );
+    const [products, stockRows, locationRows, lots] = await Promise.all([
+      ctx.db.query("products").collect(),
+      ctx.db.query("stock").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("lots").collect(),
+    ]);
+
+    const groupByProduct = <T extends { productId: any }>(rows: T[]) => {
+      const grouped = new Map<string, T[]>();
+      for (const row of rows) {
+        const key = String(row.productId);
+        const current = grouped.get(key) ?? [];
+        current.push(row);
+        grouped.set(key, current);
+      }
+      return grouped;
+    };
+    const stocksByProduct = groupByProduct(stockRows);
+    const locationsByProduct = groupByProduct(locationRows);
+    const lotsByProduct = groupByProduct(lots);
+
+    return Promise.all(products.map(async (product) => {
+      const category = await ctx.db.get(product.categoryId);
+      const integrity = inspectProductStockIntegrity(
+        stocksByProduct.get(String(product._id)) ?? [],
+        locationsByProduct.get(String(product._id)) ?? [],
+        lotsByProduct.get(String(product._id)) ?? [],
+        product.name,
+      );
+      const validStock = integrity.consistent ? integrity.globalStock : null;
+      const qty = validStock?.physicalQuantity ?? (integrity.consistent ? 0 : null);
+      let status = "Normal";
+      if (!integrity.consistent) status = "Inconsistente";
+      else if (qty === 0) status = "Zerado";
+      else if (qty !== null && qty <= (product.minimumStock ?? 0)) status = "Crítico";
+      else if (qty !== null && qty <= (product.idealStock ?? 0)) status = "Baixo";
+      return {
+        _id: product._id,
+        name: product.name,
+        internalCode: product.internalCode ?? "",
+        categoryName: category?.name ?? "",
+        unitOfMeasure: product.unitOfMeasure,
+        currentStock: qty,
+        reservedQuantity: validStock?.reservedQuantity ?? (integrity.consistent ? 0 : null),
+        minimumStock: product.minimumStock ?? 0,
+        idealStock: product.idealStock ?? 0,
+        maximumStock: product.maximumStock,
+        status,
+        integrityIssues: integrity.issues,
+        integrityLimitations: integrity.limitations,
+        brand: product.brand,
+        model: product.model,
+        active: product.active,
+      };
+    }));
   },
 });
 
