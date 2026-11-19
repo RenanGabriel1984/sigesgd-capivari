@@ -96,6 +96,36 @@ export const awaitingCollectionCount = query({
   },
 });
 
+/** Totais do painel sem depender das listas históricas limitadas para exibição. */
+export const dashboardSummary = query({
+  args: {
+    startDate: v.number(),
+    endDate: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    if (!Number.isFinite(args.startDate) || !Number.isFinite(args.endDate) || args.startDate < 0 || args.startDate >= args.endDate) {
+      throw new Error("Intervalo mensal inválido.");
+    }
+
+    const [awaiting, exchanges, collections] = await Promise.all([
+      ctx.db.query("gomaQEmptyCartridges")
+        .withIndex("by_status", (q) => q.eq("status", "awaiting_collection"))
+        .collect(),
+      ctx.db.query("gomaQExchanges")
+        .withIndex("by_date", (q) => q.gte("exchangedAt", args.startDate).lt("exchangedAt", args.endDate))
+        .collect(),
+      ctx.db.query("gomaQCollections").withIndex("by_date").collect(),
+    ]);
+
+    return {
+      awaitingCollectionQuantity: awaiting.reduce((total: number, item: any) => total + item.quantity, 0),
+      exchangesThisMonth: exchanges.length,
+      collectionsCount: collections.length,
+    };
+  },
+});
+
 export const lastCollection = query({
   args: {},
   handler: async (ctx) => {
