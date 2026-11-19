@@ -6,6 +6,7 @@ on:
       - codex/entry-item-area-classification
   pull_request:
     branches:
+      - main
       - codex/historical-stock-location-maintenance
 
 permissions:
