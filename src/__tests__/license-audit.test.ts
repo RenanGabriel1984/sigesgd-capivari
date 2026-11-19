@@ -1,3 +1,13 @@
+describe("listagem de licenças sem truncamento silencioso", () => {
+  it("carrega o conjunto completo de licenças antes de aplicar os filtros e mascarar chaves", () => {
+    const backend = read("src/convex/licenses.ts");
+    const list = backend.slice(backend.indexOf("export const list = query"), backend.indexOf("export const get = query"));
+    expect(list).toContain('.order("desc").collect()');
+    expect(list).not.toContain(".take(500)");
+    expect(list).toContain("maskLicenseKey");
+  });
+});
+
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
