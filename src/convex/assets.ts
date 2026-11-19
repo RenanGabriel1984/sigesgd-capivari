@@ -112,6 +112,7 @@ export const list = query({
         (a.patrimonyNumber ?? "").toLowerCase().includes(s) ||
         (a.serialNumber ?? "").toLowerCase().includes(s) ||
         (a.hostname ?? "").toLowerCase().includes(s) ||
+        (a.macAddress ?? "").toLowerCase().includes(s) ||
         (a.manufacturer ?? "").toLowerCase().includes(s) ||
         (a.model ?? "").toLowerCase().includes(s)
       );
@@ -194,7 +195,7 @@ export const listPaginated = query({
       if (args.organizationId && asset.organizationId !== args.organizationId) return false;
       if (args.responsibleUserId && asset.responsibleUserId !== args.responsibleUserId) return false;
       if (search && ![
-        asset.patrimonyNumber, asset.serialNumber, asset.hostname, asset.manufacturer, asset.model,
+        asset.patrimonyNumber, asset.serialNumber, asset.hostname, asset.macAddress, asset.manufacturer, asset.model,
       ].some((value) => String(value ?? "").toLocaleLowerCase("pt-BR").includes(search))) return false;
       return true;
     });
