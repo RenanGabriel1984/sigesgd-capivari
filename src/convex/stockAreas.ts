@@ -4,6 +4,7 @@ import { BASELINE_STOCK_AREAS, NO_AREA_LABEL } from "../lib/stock-areas";
 import { requirePermission } from "./rbac";
 import { requireSingleValidGlobalStock } from "../lib/stock-quantity-rules";
 import { setLotLocationBalanceLocation } from "../lib/lot-location-balance";
+import { assertShortTextLimits, assertTextLimits } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -446,6 +447,8 @@ export const create = mutation({
     const { userId } = await requireStockManagerOrAdmin(ctx);
     const name = args.name.trim();
     if (!name) throw new Error("Nome da área é obrigatório");
+    assertShortTextLimits({ name });
+    assertTextLimits({ description: args.description?.trim() });
 
     const existing = await ctx.db
       .query("stockAreas")
@@ -486,6 +489,7 @@ export const update = mutation({
     if (args.name !== undefined) {
       const name = args.name.trim();
       if (!name) throw new Error("Nome da área é obrigatório");
+      assertShortTextLimits({ name });
       if (name !== area.name) {
         const dup = await ctx.db
           .query("stockAreas")
@@ -495,7 +499,10 @@ export const update = mutation({
       }
       updates.name = name;
     }
-    if (args.description !== undefined) updates.description = args.description.trim() || undefined;
+    if (args.description !== undefined) {
+      assertTextLimits({ description: args.description.trim() });
+      updates.description = args.description.trim() || undefined;
+    }
     if (args.active !== undefined) {
       if (args.active === false) {
         const lots = await ctx.db.query("lots").collect();
