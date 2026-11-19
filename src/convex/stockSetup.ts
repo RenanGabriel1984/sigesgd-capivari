@@ -1068,10 +1068,16 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
     const area = matchingAreas[0];
     const areaId = String(area._id);
 
-    const entry: any = await ctx.db
+    const entryMatches: any[] = await ctx.db
       .query("entries")
       .withIndex("by_number", (q: any) => q.eq("entryNumber", "ENT-2026-000001"))
-      .first();
+      .collect();
+    if (entryMatches.length !== 1) {
+      throw new Error(
+        `Esperada exatamente uma entrada ENT-2026-000001; encontradas ${entryMatches.length}. Nenhuma alteração realizada.`
+      );
+    }
+    const entry: any = entryMatches[0];
     if (
       !entry ||
       entry.status !== "confirmed" ||
@@ -1823,8 +1829,13 @@ export const implementationStockStatus = query({
     const mismatches: Array<{
       productId: string;
       name: string;
-      global: number;
+      global: number | null;
       byLocation: number;
+    }> = [];
+    const duplicateGlobalStocks: Array<{
+      productId: string;
+      name: string;
+      records: number;
     }> = [];
     const initialLoadsPerProduct: Array<{
       productId: string;
@@ -1836,10 +1847,10 @@ export const implementationStockStatus = query({
     let byLocationTotal = 0;
 
     for (const productId of productIds) {
-      const stock = await ctx.db
+      const stockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q) => q.eq("productId", productId as any))
-        .first();
+        .collect();
       const sblRows = await ctx.db
         .query("stockByLocation")
         .withIndex("by_product", (q) => q.eq("productId", productId as any))
@@ -1847,20 +1858,30 @@ export const implementationStockStatus = query({
       const product = (await ctx.db.get(productId as any)) as {
         name?: string;
       } | null;
-      const physical = stock?.physicalQuantity ?? 0;
       const byLocation = sblRows.reduce((sum, row) => sum + row.quantity, 0);
+      const productName = product?.name ?? productId;
+      const physical = stockRows.length === 1 ? stockRows[0].physicalQuantity : null;
 
-      globalTotal += physical;
-      byLocationTotal += byLocation;
-
-      if (physical !== byLocation) {
-        mismatches.push({
+      if (stockRows.length > 1) {
+        duplicateGlobalStocks.push({
           productId,
-          name: product?.name ?? productId,
-          global: physical,
-          byLocation,
+          name: productName,
+          records: stockRows.length,
         });
+        mismatches.push({ productId, name: productName, global: null, byLocation });
+      } else {
+        const globalPhysical = physical ?? 0;
+        globalTotal += globalPhysical;
+        if (globalPhysical !== byLocation) {
+          mismatches.push({
+            productId,
+            name: productName,
+            global: globalPhysical,
+            byLocation,
+          });
+        }
       }
+      byLocationTotal += byLocation;
 
       const initialLots = allLots.filter(
         (l) =>
@@ -1929,11 +1950,13 @@ export const implementationStockStatus = query({
       duplicates: {
         initialLoadsPerProduct,
         duplicateProductNames,
+        duplicateGlobalStocks,
       },
       integrityOk:
         mismatches.length === 0 &&
         initialLoadsPerProduct.length === 0 &&
-        duplicateProductNames.length === 0,
+        duplicateProductNames.length === 0 &&
+        duplicateGlobalStocks.length === 0,
     };
   },
 });

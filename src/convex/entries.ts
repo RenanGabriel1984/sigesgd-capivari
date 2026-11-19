@@ -216,8 +216,16 @@ export const getByLot = query({
   args: { lotNumber: v.string() },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    const lot = await ctx.db.query("lots").withIndex("by_number", (q) => q.eq("lotNumber", args.lotNumber)).first();
-    if (!lot) return null;
+    const lotMatches = await ctx.db.query("lots")
+      .withIndex("by_number", (q) => q.eq("lotNumber", args.lotNumber))
+      .collect();
+    if (lotMatches.length === 0) return null;
+    if (lotMatches.length > 1) {
+      throw new Error(
+        `Número de lote "${args.lotNumber}" duplicado (${lotMatches.length} registros). Consulte o cadastro do lote antes de continuar.`
+      );
+    }
+    const lot = lotMatches[0];
     const product = await ctx.db.get(lot.productId);
     const entry = await ctx.db.get(lot.entryId);
     const supplier = lot.supplierId ? await ctx.db.get(lot.supplierId) : null;

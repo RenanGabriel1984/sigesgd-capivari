@@ -15,19 +15,23 @@ export const legacyGeneralAreaClassificationDiagnostic = internalQuery({
       return { readOnly: true, found: false, reason: "Produto não está no manifesto fechado." };
     }
 
-    const entry: any = await ctx.db
+    const entryMatches: any[] = await ctx.db
       .query("entries")
       .withIndex("by_number", (q: any) => q.eq("entryNumber", "ENT-2026-000001"))
-      .first();
+      .collect();
 
-    if (!entry) {
+    if (entryMatches.length !== 1) {
       return {
         readOnly: true,
         found: false,
-        reason: "Entrada ENT-2026-000001 não encontrada.",
+        reason: entryMatches.length === 0
+          ? "Entrada ENT-2026-000001 não encontrada."
+          : `Entrada ENT-2026-000001 ambígua: ${entryMatches.length} registros encontrados.`,
+        candidateIds: entryMatches.map((candidate) => String(candidate._id)),
         expected: target,
       };
     }
+    const entry: any = entryMatches[0];
 
     const [product, location, lot, localRow, entryItems, productMovements, allMovementLinks]: any[] =
       await Promise.all([

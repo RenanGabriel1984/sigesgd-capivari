@@ -44,9 +44,18 @@ function addPatch(target: Patch[], id: string, current: Record<string, any>, fie
   if (Object.keys(changed).length) target.push({ id, fields: changed });
 }
 
-function resolveLot(reference: unknown, byId: Map<string, any>, byNumber: Map<string, any>, productId?: string) {
+function resolveLot(
+  reference: unknown,
+  byId: Map<string, any>,
+  byNumber: Map<string, any[]>,
+  productId?: string
+) {
   if (typeof reference !== "string" || !reference.trim()) return null;
-  return byId.get(reference) ?? (productId ? byNumber.get(keyOf(productId, reference)) : null) ?? null;
+  const exactId = byId.get(reference);
+  if (exactId) return exactId;
+  if (!productId) return null;
+  const matches = byNumber.get(keyOf(productId, reference)) ?? [];
+  return matches.length === 1 ? matches[0] : null;
 }
 
 async function buildRegularizationPlan(ctx: any) {
@@ -55,26 +64,50 @@ async function buildRegularizationPlan(ctx: any) {
     if (!blockers.includes(message)) blockers.push(message);
   };
 
-  const areas = await ctx.db.query("stockAreas").collect();
-  const areaByName = new Map(areas.map((area: any) => [normalize(area.name), area]));
-  const generalArea: any = areaByName.get(normalize("TI Geral"));
-  const printerArea: any = areaByName.get(normalize("Impressoras"));
-  if (!generalArea?.active) addBlocker('Área ativa "TI Geral" não encontrada.');
-  if (!printerArea?.active) addBlocker('Área ativa "Impressoras" não encontrada.');
+  const areas: any[] = await ctx.db.query("stockAreas").collect();
+  const areasByName = new Map<string, any[]>();
+  for (const area of areas) {
+    const key = normalize(area.name);
+    const matches = areasByName.get(key) ?? [];
+    matches.push(area);
+    areasByName.set(key, matches);
+  }
+  const resolveUniqueArea = (name: string) => {
+    const matches = areasByName.get(normalize(name)) ?? [];
+    if (matches.length > 1) addBlocker(`Existem ${matches.length} cadastros da área "${name}"; regularize a duplicidade.`);
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const generalArea: any = resolveUniqueArea("TI Geral");
+  const printerArea: any = resolveUniqueArea("Impressoras");
+  if (!generalArea?.active) addBlocker('Área ativa "TI Geral" não encontrada ou ambígua.');
+  if (!printerArea?.active) addBlocker('Área ativa "Impressoras" não encontrada ou ambígua.');
 
-  const locations = await ctx.db.query("storageLocations").collect();
-  const locationByName = new Map(locations.map((location: any) => [normalize(location.name), location]));
-  const cabinet1: any = locationByName.get(normalize("Armário TI 01"));
-  const cabinet2: any = locationByName.get(normalize("Armário TI 02"));
-  if (!cabinet1?.active) addBlocker('Local físico ativo "Armário TI 01" não encontrado.');
-  if (!cabinet2?.active) addBlocker('Local físico ativo "Armário TI 02" não encontrado.');
+  const locations: any[] = await ctx.db.query("storageLocations").collect();
+  const locationsByName = new Map<string, any[]>();
+  for (const location of locations) {
+    const key = normalize(location.name);
+    const matches = locationsByName.get(key) ?? [];
+    matches.push(location);
+    locationsByName.set(key, matches);
+  }
+  const resolveUniqueLocation = (name: string) => {
+    const matches = locationsByName.get(normalize(name)) ?? [];
+    if (matches.length > 1) addBlocker(`Existem ${matches.length} cadastros do local "${name}"; regularize a duplicidade.`);
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const cabinet1: any = resolveUniqueLocation("Armário TI 01");
+  const cabinet2: any = resolveUniqueLocation("Armário TI 02");
+  if (!cabinet1?.active) addBlocker('Local físico ativo "Armário TI 01" não encontrado ou ambíguo.');
+  if (!cabinet2?.active) addBlocker('Local físico ativo "Armário TI 02" não encontrado ou ambíguo.');
 
-  const initialEntry: any = await ctx.db.query("entries")
-    .withIndex("by_number", (q: any) => q.eq("entryNumber", INITIAL_ENTRY_NUMBER)).first();
-  const gomaqEntry: any = await ctx.db.query("entries")
-    .withIndex("by_number", (q: any) => q.eq("entryNumber", GOMAQ_ENTRY_NUMBER)).first();
-  if (!initialEntry) addBlocker(`Entrada ${INITIAL_ENTRY_NUMBER} não encontrada.`);
-  if (!gomaqEntry) addBlocker(`Entrada ${GOMAQ_ENTRY_NUMBER} não encontrada.`);
+  const initialEntries: any[] = await ctx.db.query("entries")
+    .withIndex("by_number", (q: any) => q.eq("entryNumber", INITIAL_ENTRY_NUMBER)).collect();
+  const gomaqEntries: any[] = await ctx.db.query("entries")
+    .withIndex("by_number", (q: any) => q.eq("entryNumber", GOMAQ_ENTRY_NUMBER)).collect();
+  if (initialEntries.length !== 1) addBlocker(`Esperada exatamente uma entrada ${INITIAL_ENTRY_NUMBER}; encontradas ${initialEntries.length}.`);
+  if (gomaqEntries.length !== 1) addBlocker(`Esperada exatamente uma entrada ${GOMAQ_ENTRY_NUMBER}; encontradas ${gomaqEntries.length}.`);
+  const initialEntry: any = initialEntries.length === 1 ? initialEntries[0] : null;
+  const gomaqEntry: any = gomaqEntries.length === 1 ? gomaqEntries[0] : null;
 
   const lotPatches: Patch[] = [];
   const itemPatches: Patch[] = [];
@@ -129,7 +162,16 @@ async function buildRegularizationPlan(ctx: any) {
   const manifestByName = new Map(INITIAL_STOCK_MANIFEST.map((row) => [normalize(row.productName), row]));
   const usedManifestNames = new Set<string>();
   const initialLotById = new Map(initialLots.map((lot: any) => [lot._id as string, lot]));
-  const initialLotByNumber = new Map(initialLots.map((lot: any) => [keyOf(lot.productId as string, lot.lotNumber as string), lot]));
+  const initialLotByNumber = new Map<string, any[]>();
+  for (const lot of initialLots) {
+    const key = keyOf(lot.productId as string, lot.lotNumber as string);
+    const matches = initialLotByNumber.get(key) ?? [];
+    matches.push(lot);
+    initialLotByNumber.set(key, matches);
+    if (matches.length > 1) {
+      addBlocker(`Lote da entrada inicial duplicado para produto/número ${lot.productId}/${lot.lotNumber}; referência por número não será inferida.`);
+    }
+  }
 
   for (const item of initialItems) {
     const product: any = await ctx.db.get(item.productId);
@@ -169,9 +211,9 @@ async function buildRegularizationPlan(ctx: any) {
     }
 
     const location: any = item.locationId ? await ctx.db.get(item.locationId) : null;
-    const expectedLocation = locationByName.get(normalize(manifest.locationName)) as any;
+    const expectedLocation: any = resolveUniqueLocation(manifest.locationName);
     if (!expectedLocation?.active) {
-      addBlocker(`Local físico esperado "${manifest.locationName}" não está ativo.`);
+      addBlocker(`Local físico esperado "${manifest.locationName}" não está ativo ou é ambíguo.`);
     }
     if (!location || !location.active) {
       addBlocker(`Item "${productName}" não possui local físico válido registrado.`);
@@ -190,7 +232,11 @@ async function buildRegularizationPlan(ctx: any) {
     }
     if (!location || !expectedLocation?.active || !generalArea?.active || !printerArea?.active) continue;
 
-    const area: any = areaByName.get(normalize(manifest.areaName));
+    const area: any = resolveUniqueArea(manifest.areaName);
+    if (!area?.active) {
+      addBlocker(`Área esperada "${manifest.areaName}" não está ativa ou é ambígua.`);
+      continue;
+    }
     const target = { areaId: area._id as string, locationId: location._id as string };
     if (lot.areaId && lot.areaId !== target.areaId) {
       addBlocker(`Lote ${lot.lotNumber} já possui área diferente do manifesto.`);
@@ -236,7 +282,16 @@ async function buildRegularizationPlan(ctx: any) {
   }
 
   const gomaqLotById = new Map(gomaqLots.map((lot: any) => [lot._id as string, lot]));
-  const gomaqLotByNumber = new Map(gomaqLots.map((lot: any) => [keyOf(lot.productId as string, lot.lotNumber as string), lot]));
+  const gomaqLotByNumber = new Map<string, any[]>();
+  for (const lot of gomaqLots) {
+    const key = keyOf(lot.productId as string, lot.lotNumber as string);
+    const matches = gomaqLotByNumber.get(key) ?? [];
+    matches.push(lot);
+    gomaqLotByNumber.set(key, matches);
+    if (matches.length > 1) {
+      addBlocker(`Lote Gomaq duplicado para produto/número ${lot.productId}/${lot.lotNumber}; vínculo legado não será inferido.`);
+    }
+  }
   for (const item of gomaqItems) {
     const product: any = await ctx.db.get(item.productId);
     if (!product) {
@@ -424,11 +479,17 @@ async function buildRegularizationPlan(ctx: any) {
   }
 
   const lotById = new Map<string, any>();
-  const lotByNumber = new Map<string, any>();
+  const lotByNumber = new Map<string, any[]>();
   for (const lots of allLotsByProduct.values()) {
     for (const lot of lots) {
       lotById.set(lot._id as string, lot);
-      lotByNumber.set(keyOf(lot.productId as string, lot.lotNumber as string), lot);
+      const key = keyOf(lot.productId as string, lot.lotNumber as string);
+      const matches = lotByNumber.get(key) ?? [];
+      matches.push(lot);
+      lotByNumber.set(key, matches);
+      if (matches.length > 1) {
+        addBlocker(`Lote duplicado para produto/número ${lot.productId}/${lot.lotNumber}; referências por número ficam bloqueadas.`);
+      }
     }
   }
 
