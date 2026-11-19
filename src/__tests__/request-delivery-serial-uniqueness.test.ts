@@ -20,3 +20,12 @@ describe("entrega de solicitações — identificadores seriais", () => {
     expect(firstWrite).toBeGreaterThan(validation);
   });
 });
+
+
+describe("entrega de solicitação legada — estado do lote após consumo", () => {
+  it("atualiza active conforme o saldo remanescente do lote", () => {
+    const source = readFileSync(resolve(__dirname, "../convex/requests.ts"), "utf8");
+    expect(source).toContain("const nextLotQuantity = lot.quantityAvailable - consume");
+    expect(source).toContain("active: nextLotQuantity > 0");
+  });
+});
