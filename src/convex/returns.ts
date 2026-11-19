@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
 import { isDiscreteStockUnit, requireValidScopedStockQuantity } from "../lib/stock-quantity-rules";
 import {
@@ -56,6 +57,26 @@ export const list = query({
       const area = r.areaId ? await ctx.db.get(r.areaId) : null;
       return { ...r, product, lot, returnedBy, receivedBy, request, exit, location, area };
     }));
+  },
+});
+
+export const listPage = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    const page = await ctx.db.query("returns").order("desc").paginate(args.paginationOpts);
+    const enriched = await Promise.all(page.page.map(async (r: any) => {
+      const product = await ctx.db.get(r.productId);
+      const lot = r.lotId ? await ctx.db.get(r.lotId) : null;
+      const returnedBy = await ctx.db.get(r.returnedByUserId);
+      const receivedBy = r.receivedByUserId ? await ctx.db.get(r.receivedByUserId) : null;
+      const request = r.requestId ? await ctx.db.get(r.requestId) : null;
+      const exit = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
+      const location = r.locationId ? await ctx.db.get(r.locationId) : null;
+      const area = r.areaId ? await ctx.db.get(r.areaId) : null;
+      return { ...r, product, lot, returnedBy, receivedBy, request, exit, location, area };
+    }));
+    return { ...page, page: enriched };
   },
 });
 
