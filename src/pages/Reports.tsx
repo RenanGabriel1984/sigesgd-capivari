@@ -334,6 +334,11 @@ export default function Reports() {
                                 {item.integrityIssues.join(" ")}
                               </p>
                             )}
+                            {item.integrityLimitations?.length > 0 && (
+                              <p className="mt-1 max-w-xs whitespace-normal text-[10px] leading-snug text-amber-700">
+                                {item.integrityLimitations.join(" ")}
+                              </p>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
