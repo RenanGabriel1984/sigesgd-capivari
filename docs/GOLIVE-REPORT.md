@@ -1,5 +1,23 @@
 # SIGESGD Capivari — Relatório de Homologação Final (GO / NO-GO)
 
+> **ATENÇÃO — REGISTRO HISTÓRICO, NÃO É ATESTADO OPERACIONAL VIGENTE (19/11/2026).**
+>
+> O veredito GO abaixo foi emitido em 11/09/2026 para a versão 0.7.0 e não
+> comprova o estado atual da aplicação publicada, do backend de produção, das
+> credenciais, do envio de e-mail, do login, do domínio Freebuff ou dos fluxos
+> reais após as alterações posteriores. Não use este documento isoladamente
+> para autorizar operação ou lançamento de notas.
+>
+> **Situação operacional atual: NO-GO para atestar go-live até concluir os
+> testes autenticados e as verificações somente leitura no deployment
+> `savory-sockeye-292`.** Os testes automatizados recentes aprovam o código da
+> branch, mas não substituem os testes no ambiente publicado.
+>
+> As instruções antigas para executar `opsGoLive.registerGomaqNfe372043` ou
+> qualquer mutation não fazem parte da verificação atual e não devem ser
+> executadas sem autorização específica e conferência da nota/documentos.
+
+
 **Etapa:** Operacional 2/3 + Final 3/3 — Entrada real (NF-e Gomaq 372043) e go-live
 **Data:** 2026-09-11
 **Versão:** 0.7.0
