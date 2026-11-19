@@ -735,7 +735,7 @@ export const addItem = mutation({
     const { userId } = await requireStockManagerOrAdmin(ctx);
     assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
     assertTextLimits({ specification: args.specification }, MAX_OBSERVATION);
-    assertShortTextLimits({ brand: args.brand, model: args.model, supplierLotNumber: args.supplierLotNumber, supplierCode: args.supplierCode, ncm: args.ncm, cfop: args.cfop, ean: args.ean });
+    assertShortTextLimits({ brand: args.brand, model: args.model, supplierLotNumber: args.supplierLotNumber });
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ter itens adicionados");
@@ -808,6 +808,7 @@ export const updateItem = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
     assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
+    assertTextLimits({ specification: args.specification }, MAX_OBSERVATION);
     assertShortTextLimits({ brand: args.brand, model: args.model, supplierLotNumber: args.supplierLotNumber });
     const item = await ctx.db.get(args.itemId);
     if (!item) throw new Error("Item não encontrado");
@@ -1188,7 +1189,6 @@ export const setUnits = mutation({
     const { userId } = await requireStockManagerOrAdmin(ctx);
     for (const unit of args.units) {
       assertTextLimits({ observation: unit.observation }, MAX_OBSERVATION);
-      assertShortTextLimits({ manufacturer: unit.manufacturer, model: unit.model, serialNumber: unit.serialNumber, responsibleDestiny: unit.responsibleDestiny });
       assertShortTextLimits({ patrimony: unit.patrimonyNumber, serialNumber: unit.serialNumber, manufacturer: unit.manufacturer, model: unit.model, responsibleDestiny: unit.responsibleDestiny });
     }
     const entry = await ctx.db.get(args.entryId);
