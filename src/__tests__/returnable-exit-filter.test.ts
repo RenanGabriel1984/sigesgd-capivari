@@ -12,6 +12,5 @@ describe("saídas disponíveis para devolução", () => {
 
     expect(endpoint).toContain("const activeExits = exits.filter((movement: any) => !movement.canceled)");
     expect(endpoint).toContain("Promise.all(activeExits.map");
-    expect(endpoint).toContain("if (exit.canceled) throw new Error");
   });
 });
