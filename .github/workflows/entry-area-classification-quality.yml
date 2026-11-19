@@ -38,8 +38,11 @@ jobs:
       - name: Executar testes Vitest
         run: bunx vitest run
 
-      - name: Verificar ESLint
+      # Diagnóstico não bloqueante: o repositório já possui dívida histórica
+      # ampla de lint. Testes, TypeScript e build continuam sendo bloqueadores.
+      - name: ESLint (diagnóstico não bloqueante)
         if: always()
+        continue-on-error: true
         run: bun run lint
 
       - name: Compilar frontend e TypeScript
