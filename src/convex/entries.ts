@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { validateEntryUnits } from "../lib/material-types";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import {
@@ -162,6 +163,29 @@ export const list = query({
       const area = e.areaId ? await ctx.db.get(e.areaId) : null;
       return { ...e, responsible, supplier, area, items: itemsWithProduct };
     }));
+  },
+});
+
+export const listPage = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    const page = await ctx.db.query("entries").withIndex("by_date").order("desc").paginate(args.paginationOpts);
+    const enriched = await Promise.all(page.page.map(async (e: any) => {
+      const responsible = await ctx.db.get(e.responsibleUserId);
+      const supplier = e.supplierId ? await ctx.db.get(e.supplierId) : null;
+      const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", e._id)).collect();
+      const itemsWithProduct = await Promise.all(items.map(async (item: any) => {
+        const product = await ctx.db.get(item.productId);
+        const location = item.locationId ? await ctx.db.get(item.locationId) : null;
+        const area = item.areaId ? await ctx.db.get(item.areaId) : null;
+        const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
+        return { ...item, product, location, area, units };
+      }));
+      const area = e.areaId ? await ctx.db.get(e.areaId) : null;
+      return { ...e, responsible, supplier, area, items: itemsWithProduct };
+    }));
+    return { ...page, page: enriched };
   },
 });
 
