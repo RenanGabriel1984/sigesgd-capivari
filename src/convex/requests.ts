@@ -808,7 +808,11 @@ export const deliver = mutation({
         for(const lot of sorted){
           if(remaining<=0)break;
           const consume=Math.min(lot.quantityAvailable,remaining);
-          await ctx.db.patch(lot._id,{quantityAvailable:lot.quantityAvailable-consume});
+          const nextLotQuantity = lot.quantityAvailable - consume;
+          await ctx.db.patch(lot._id, {
+            quantityAvailable: nextLotQuantity,
+            active: nextLotQuantity > 0,
+          });
           await ctx.db.insert("requestItemLots",{requestItemId:input.itemId,lotId:lot._id,quantity:consume});
           await ctx.db.insert("stockMovementLots", {
             movementId, lotId: lot._id, quantity: consume,
