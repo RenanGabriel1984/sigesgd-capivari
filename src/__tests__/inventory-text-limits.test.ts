@@ -17,6 +17,14 @@ describe("limites de texto livre no inventário", () => {
     expect(save).toContain("assertTextLimits({ observation: args.observation }, MAX_OBSERVATION)");
   });
 
+  it("bloqueia ajuste agregado quando qualquer lote do produto é permanente", () => {
+    const closeStart = source.indexOf("export const close = mutation({");
+    const closeEnd = source.indexOf("/** Cancel an inventory", closeStart);
+    const close = source.slice(closeStart, closeEnd);
+    expect(close).toContain('(lots as any[]).some((lot: any) => lot.materialType === "permanent")');
+    expect(close).not.toContain("(lots as any[]).find((lot: any) => lot.materialType)?.materialType");
+  });
+
   it("limita justificativa antes de qualquer ajuste do fechamento", () => {
     const closeStart = source.indexOf("export const close = mutation({");
     const closeEnd = source.indexOf("/** Cancel an inventory", closeStart);
