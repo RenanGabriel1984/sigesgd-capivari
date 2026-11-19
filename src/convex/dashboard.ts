@@ -327,6 +327,17 @@ export const stockPositionByArea = query({
       const key = [row.productId, row.areaId ?? "legacy", row.locationId].join("|");
       const reservedQuantity = reservationTotals.get(key) ?? 0;
       const physicalQuantity = row.physicalQuantity;
+      const hasDuplicateRows = row.sourceRows > 1;
+      const validPhysicalQuantity = !hasDuplicateRows && Number.isFinite(physicalQuantity) && physicalQuantity >= 0;
+      const validAvailableQuantity = validPhysicalQuantity &&
+        Number.isFinite(reservedQuantity) && reservedQuantity >= 0 && reservedQuantity <= physicalQuantity;
+      const integrityIssues = [
+        ...(hasDuplicateRows ? ["Há linhas duplicadas para o mesmo produto, área e local físico; o saldo agregado não é apresentado como confiável."] : []),
+        ...(!Number.isFinite(physicalQuantity) || physicalQuantity < 0 ? ["O saldo físico está inválido."] : []),
+        ...(!Number.isFinite(reservedQuantity) || reservedQuantity < 0 ? ["O saldo reservado está inválido."] : []),
+        ...(Number.isFinite(physicalQuantity) && Number.isFinite(reservedQuantity) && reservedQuantity > physicalQuantity
+          ? ["O saldo reservado excede o saldo físico."] : []),
+      ];
       return {
         _id: key,
         productId: row.productId,
@@ -335,11 +346,12 @@ export const stockPositionByArea = query({
         unitOfMeasure: product?.unitOfMeasure ?? "",
         areaName: area?.name ?? (row.areaId ? "Área não encontrada" : "Sem área (legado)"),
         locationName: location?.name ?? "Local não encontrado",
-        physicalQuantity,
+        physicalQuantity: validPhysicalQuantity ? physicalQuantity : null,
         reservedQuantity,
-        availableQuantity: physicalQuantity - reservedQuantity,
+        availableQuantity: validAvailableQuantity ? physicalQuantity - reservedQuantity : null,
         duplicateRows: row.sourceRows,
-        inconsistent: !Number.isFinite(physicalQuantity) || physicalQuantity < 0 || reservedQuantity > physicalQuantity || row.sourceRows > 1,
+        integrityIssues,
+        inconsistent: integrityIssues.length > 0,
       };
     })).then((rows) => rows.sort((a, b) =>
       a.productName.localeCompare(b.productName, "pt-BR") ||
