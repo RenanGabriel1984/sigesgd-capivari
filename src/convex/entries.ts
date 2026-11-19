@@ -968,8 +968,6 @@ export const reverse = mutation({
     const { userId } = await requireStockManagerOrAdmin(ctx);
     const reason = args.reason.trim();
     if (!reason) throw new Error("O motivo do estorno é obrigatório");
-    const reason = args.reason.trim();
-    if (!reason) throw new Error("O motivo do estorno é obrigatório");
     assertTextLimits({ observation: reason }, MAX_OBSERVATION);
 
     const entry = await ctx.db.get(args.entryId);
