@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
 import { findEquipmentCategory, buildRelatedStockProducts } from "../lib/equipment-categories";
 import type { RelatedStockProduct } from "../lib/equipment-categories";
@@ -170,6 +171,38 @@ export const relatedStockByCategory = query({
       })),
       category
     );
+  },
+});
+
+export const listPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    status: v.optional(v.string()),
+    assetType: v.optional(v.union(...ASSET_TYPES.map((value) => v.literal(value)))),
+    organizationId: v.optional(v.id("organizations")),
+    responsibleUserId: v.optional(v.id("users")),
+    search: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    const result = await ctx.db.query("assets").order("desc").paginate(args.paginationOpts);
+    const search = args.search?.trim().toLocaleLowerCase("pt-BR");
+    const filtered = result.page.filter((asset: any) => {
+      if (args.status && asset.status !== args.status) return false;
+      if (args.assetType && asset.assetType !== args.assetType) return false;
+      if (args.organizationId && asset.organizationId !== args.organizationId) return false;
+      if (args.responsibleUserId && asset.responsibleUserId !== args.responsibleUserId) return false;
+      if (search && ![
+        asset.patrimonyNumber, asset.serialNumber, asset.hostname, asset.manufacturer, asset.model,
+      ].some((value) => String(value ?? "").toLocaleLowerCase("pt-BR").includes(search))) return false;
+      return true;
+    });
+    const enriched = await Promise.all(filtered.map(async (asset: any) => {
+      const organization = asset.organizationId ? await ctx.db.get(asset.organizationId) : null;
+      const responsible = asset.responsibleUserId ? await ctx.db.get(asset.responsibleUserId) : null;
+      return { ...asset, organization, responsible };
+    }));
+    return { ...result, page: enriched };
   },
 });
 
