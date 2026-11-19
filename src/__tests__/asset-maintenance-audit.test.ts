@@ -26,4 +26,11 @@ describe("validação e rastreabilidade de manutenções", () => {
     expect(backend).toContain('entity: "assetMaintenances"');
     expect(backend).toContain('maintenance.status + " para " + args.status');
   });
+  it("não trunca o histórico de manutenção nem o histórico do equipamento", () => {
+    expect(backend).toContain('.withIndex("by_asset", (q) => q.eq("assetId", args.assetId))\n      .order("desc")\n      .collect();');
+    const assets = readFileSync(resolve(root, "src/convex/assets.ts"), "utf8");
+    expect(assets).toContain('.query("assetHistory")\n      .withIndex("by_asset", (q) => q.eq("assetId", args.assetId))\n      .order("desc")\n      .collect();');
+    expect(assets).not.toContain('.query("assetHistory")\n      .withIndex("by_asset", (q) => q.eq("assetId", args.assetId))\n      .order("desc")\n      .take(100)');
+  });
+
 });
