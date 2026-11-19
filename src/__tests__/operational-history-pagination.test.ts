@@ -1,3 +1,24 @@
+describe("paginação do arquivo histórico de entregas", () => {
+  it("usa endpoint paginado com escopo por usuário e filtros no backend", () => {
+    const backend = read("src/convex/requests.ts");
+    const endpoint = backend.slice(backend.indexOf("export const listDeliveredPaginated"), backend.indexOf("Historico de Consumo por organizacao"));
+    expect(endpoint).toContain("paginationOptsValidator");
+    expect(endpoint).toContain("requireUser(ctx)");
+    expect(endpoint).toContain("fullVisibility");
+    expect(endpoint).toContain("enrichRequest");
+    expect(endpoint).toContain("serialSearch");
+    expect(endpoint).not.toContain(".take(500)");
+  });
+
+  it("a tela usa cursor e oferece carregamento incremental", () => {
+    const page = read("src/pages/Requests.tsx");
+    expect(page).toContain("usePaginatedQuery(");
+    expect(page).toContain("api.requests.listDeliveredPaginated");
+    expect(page).toContain("loadMoreDeliveredRequests(50)");
+    expect(page).not.toContain("allDeliveredRequests");
+  });
+});
+
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
