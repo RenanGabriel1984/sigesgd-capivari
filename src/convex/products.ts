@@ -357,6 +357,32 @@ export const update = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
     const { id, ...updates } = args;
 
+    // A edição precisa aplicar os mesmos limites de texto do cadastro; sem
+    // isso, um produto criado corretamente poderia receber campos ilimitados
+    // pela mutation de atualização.
+    assertTextLimits({
+      name: updates.name,
+      description: updates.description,
+      manufacturer: updates.manufacturer,
+      specification: updates.specification,
+    });
+    assertTextLimits({ observation: updates.observation }, MAX_OBSERVATION);
+    assertShortTextLimits({
+      internalCode: updates.internalCode,
+      brand: updates.brand,
+      model: updates.model,
+    });
+
+    for (const [field, value] of Object.entries({
+      minimumStock: updates.minimumStock,
+      idealStock: updates.idealStock,
+      maximumStock: updates.maximumStock,
+    })) {
+      if (value !== undefined && !Number.isFinite(value)) {
+        throw new Error(`Valor numérico inválido em "${field}".`);
+      }
+    }
+
     const product = await ctx.db.get(id);
     if (!product) throw new Error("Item não encontrado");
 
@@ -422,6 +448,11 @@ export const update = mutation({
     if (updates.minimumStock !== undefined && updates.minimumStock < 0) throw new Error("Estoque mínimo não pode ser negativo");
     if (updates.idealStock !== undefined && updates.idealStock < 0) throw new Error("Estoque ideal não pode ser negativo");
     if (updates.maximumStock !== undefined && updates.maximumStock < 0) throw new Error("Estoque máximo não pode ser negativo");
+    const nextIdealStock = updates.idealStock ?? product.idealStock;
+    const nextMaximumStock = updates.maximumStock ?? product.maximumStock;
+    if (nextIdealStock > nextMaximumStock && nextMaximumStock > 0) {
+      throw new Error("Estoque ideal não pode ser maior que o estoque máximo");
+    }
 
     if (updates.name !== undefined) {
       updates.name = updates.name.trim();
