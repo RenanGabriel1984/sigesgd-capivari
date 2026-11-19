@@ -33,9 +33,21 @@ describe("regularização histórica de área/local", () => {
     expect(migration).toContain("Transferência histórica da movimentação");
     expect(migration).toContain("movementLotPatches");
     expect(migration).toContain("keyOf(lot.productId as string, lot.lotNumber as string)");
-    expect(migration).toContain("return byId.get(reference) ?? (productId ? byNumber.get(keyOf(productId, reference)) : null) ?? null;");
+    expect(migration).toContain("return matches.length === 1 ? matches[0] : null;");
+    expect(migration).toContain("Lote duplicado para produto/número");
+    expect(migration).toContain("gomaqEntries.length !== 1");
+    expect(migration).toContain("initialEntries.length !== 1");
+    expect(migration).toContain("areasByName");
+    expect(migration).toContain("locationsByName");
     expect(migration).toContain("returnedByExitLot");
     expect(migration).toContain("informe/vincule o lote exato consumido pela saída original.");
+  });
+
+  it("não escolhe arbitrariamente entradas, áreas, locais ou lotes duplicados", () => {
+    expect(migration).toContain('.withIndex("by_number", (q: any) => q.eq("entryNumber", INITIAL_ENTRY_NUMBER)).collect()');
+    expect(migration).toContain('.withIndex("by_number", (q: any) => q.eq("entryNumber", GOMAQ_ENTRY_NUMBER)).collect()');
+    expect(migration).toContain("matches.length === 1 ? matches[0] : null");
+    expect(migration).toContain("Existem");
   });
 
   it("preserva saldos globais, lotes e quantidades das movimentações", () => {
