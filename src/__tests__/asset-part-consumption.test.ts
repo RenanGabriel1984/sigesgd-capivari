@@ -58,4 +58,22 @@ describe("rastreabilidade FIFO de peças instaladas", () => {
     expect(() => planAssetPartFifoConsumption(lots, 0)).toThrow(/número positivo/);
     expect(() => planAssetPartFifoConsumption(lots, Number.NaN)).toThrow(/número positivo/);
   });
+
+  it("preserva reservas por lote e consome somente a parcela livre no FIFO", () => {
+    const reservedLots: AssetPartLotCandidate[] = [
+      { id: "reserved-old", lotNumber: "A", receivedAt: 1, quantityAvailable: 5, quantityReserved: 4, locationId: "cabinet-1", areaId: "general" },
+      { id: "free-next", lotNumber: "B", receivedAt: 2, quantityAvailable: 5, quantityReserved: 0, locationId: "cabinet-1", areaId: "general" },
+    ];
+
+    expect(planAssetPartFifoConsumption(reservedLots, 2)).toEqual([
+      { lotId: "reserved-old", lotNumber: "A", quantity: 1, locationId: "cabinet-1", areaId: "general" },
+      { lotId: "free-next", lotNumber: "B", quantity: 1, locationId: "cabinet-1", areaId: "general" },
+    ]);
+  });
+
+  it("não usa lote cuja quantidade esteja integralmente reservada", () => {
+    expect(() => planAssetPartFifoConsumption([
+      { id: "fully-reserved", lotNumber: "A", receivedAt: 1, quantityAvailable: 5, quantityReserved: 5, locationId: "cabinet-1" },
+    ], 1)).toThrow(/Lotes insuficientes/);
+  });
 });
