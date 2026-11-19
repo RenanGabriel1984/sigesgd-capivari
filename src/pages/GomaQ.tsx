@@ -1058,9 +1058,11 @@ function ReversaTab() {
   const { user } = useAuth();
   const permissions = getPermissions((user?.role ?? "technician") as UserRole);
 
-  const awaiting = (cartridges ?? []).filter((c) => c.status === "awaiting_collection").length;
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
-  const exchangesThisMonth = (exchanges ?? []).filter((e) => e.exchangedAt >= monthStart).length;
+  const monthEnd = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1).getTime();
+  const summary = useQuery(api.gomaQ.dashboardSummary, { startDate: monthStart, endDate: monthEnd });
+  const awaiting = summary?.awaitingCollectionQuantity ?? 0;
+  const exchangesThisMonth = summary?.exchangesThisMonth ?? 0;
 
   const exportOrder = async () => {
     if (!order) return;
@@ -1081,7 +1083,7 @@ function ReversaTab() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card label="Carcaças p/ coleta" value={awaiting} />
         <Card label="Trocas no mês" value={exchangesThisMonth} />
-        <Card label="Coletas registradas" value={collections?.length ?? 0} />
+        <Card label="Coletas registradas" value={summary?.collectionsCount ?? 0} />
         <Card label="Itens no pedido" value={order?.length ?? 0} />
       </div>
 
