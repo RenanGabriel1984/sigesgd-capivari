@@ -55,8 +55,9 @@ async function requireAdmin(ctx: any) {
 export const environmentCheck = query({
   args: {},
   handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Não autenticado");
+    // O diagnóstico expõe contagens e a existência de registros oficiais;
+    // manter a mesma barreira administrativa das demais rotinas de diagnóstico.
+    const { userId } = await requireAdmin(ctx);
     const user = await ctx.db.get(userId);
     if (!user) throw new Error("Perfil de usuário não encontrado");
 
