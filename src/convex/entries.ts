@@ -147,7 +147,7 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    const entries = await ctx.db.query("entries").withIndex("by_date").order("desc").take(100);
+    const entries = await ctx.db.query("entries").withIndex("by_date").order("desc").collect();
     return Promise.all(entries.map(async (e: any) => {
       const responsible = await ctx.db.get(e.responsibleUserId);
       const supplier = e.supplierId ? await ctx.db.get(e.supplierId) : null;
