@@ -1,3 +1,23 @@
+describe("resumo GomaQ sem truncamento das listas de histórico", () => {
+  it("calcula totais com consultas completas e intervalo indexado do mês", () => {
+    const backend = readFileSync(resolve(__dirname, "../convex/gomaQ.ts"), "utf8");
+    const summary = backend.slice(backend.indexOf("export const dashboardSummary"), backend.indexOf("export const lastCollection"));
+    expect(summary).toContain('.withIndex("by_date"');
+    expect(summary).toContain('q.gte("exchangedAt", args.startDate).lt("exchangedAt", args.endDate)');
+    expect(summary).toContain("awaitingCollectionQuantity");
+    expect(summary).toContain("collectionsCount");
+    expect(summary).not.toContain(".take(");
+  });
+
+  it("os cards usam os totais independentes das listas limitadas", () => {
+    const page = readFileSync(resolve(__dirname, "../pages/GomaQ.tsx"), "utf8");
+    expect(page).toContain("api.gomaQ.dashboardSummary");
+    expect(page).toContain("summary?.awaitingCollectionQuantity");
+    expect(page).toContain("summary?.exchangesThisMonth");
+    expect(page).toContain("summary?.collectionsCount");
+  });
+});
+
 /**
  * Gestão de Estoque SGGD — SOLICITAÇÃO MENSAL DE SUPRIMENTOS (GOMAQ-01..06).
  *
