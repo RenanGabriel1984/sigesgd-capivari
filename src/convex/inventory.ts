@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
+import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -108,6 +109,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
 
     // Check no active inventory exists
     const allInventories = await ctx.db.query("inventories").collect();
@@ -236,6 +238,7 @@ export const saveCount = mutation({
       throw new Error(`A contagem de "${product.name}" deve ser um número inteiro para a unidade ${product.unitOfMeasure}.`);
     }
 
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
     const difference = args.countedQuantity - count.systemQuantity;
 
     await ctx.db.patch(args.countId, {
@@ -288,6 +291,7 @@ export const close = mutation({
       throw new Error("Apenas administradores e responsáveis pelo estoque podem fechar inventário");
     }
 
+    assertTextLimits({ justification: args.justification }, MAX_OBSERVATION);
     const justification = (args.justification ?? "").trim();
     if (!justification) throw new Error("A justificativa do fechamento é obrigatória (ajuste de saldo auditável)");
 
