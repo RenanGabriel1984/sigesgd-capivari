@@ -8,7 +8,9 @@ describe("busca de equipamentos", () => {
 
   it("preserva resultados encontrados pelo hostname no filtro da interface", () => {
     expect(backend).toContain("asset.hostname");
+    expect(backend).toContain("asset.macAddress");
     expect(page).toContain("a.hostname?.toLowerCase().includes(filters.search.toLowerCase())");
-    expect(page).toContain('placeholder="Buscar por patrimônio, série, hostname, marca..."');
+    expect(page).toContain("a.macAddress?.toLowerCase().includes(filters.search.toLowerCase())");
+    expect(page).toContain('placeholder="Buscar por patrimônio, série, hostname, MAC, marca..."');
   });
 });
