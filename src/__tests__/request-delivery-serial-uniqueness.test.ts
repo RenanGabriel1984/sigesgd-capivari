@@ -26,7 +26,7 @@ describe("entrega de solicitação legada — estado do lote após consumo", () 
   it("atualiza active conforme o saldo remanescente do lote", () => {
     const source = readFileSync(resolve(__dirname, "../convex/requests.ts"), "utf8");
     const start = source.indexOf("export const deliver = mutation({");
-    const end = source.indexOf("\\nexport const ", start + 1);
+    const end = source.indexOf("\nexport const ", start + 1);
     const mutation = source.slice(start, end === -1 ? undefined : end);
     expect(mutation).toContain("const nextLotQuantity = lot.quantityAvailable - consume");
     expect(mutation).toContain("active: nextLotQuantity > 0");
