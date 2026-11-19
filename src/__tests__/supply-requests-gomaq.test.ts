@@ -405,3 +405,19 @@ describe("GOMAQ — RBAC da solicitação mensal", () => {
     }
   });
 });
+
+
+describe("GOMAQ — consultas enxutas de atividade recente", () => {
+  it("o painel busca somente seis trocas e seis coletas recentes", () => {
+    const backend = read("src/convex/gomaQ.ts");
+    const page = read("src/pages/GomaQ.tsx");
+    const exchanges = backend.slice(backend.indexOf("export const listRecentExchanges"), backend.indexOf("export const listRecentCollections"));
+    const collections = backend.slice(backend.indexOf("export const listRecentCollections"), backend.indexOf("export const monthlyOrder"));
+    expect(exchanges).toContain('.order("desc").take(6)');
+    expect(collections).toContain('.order("desc").take(6)');
+    expect(page).toContain("api.gomaQ.listRecentExchanges");
+    expect(page).toContain("api.gomaQ.listRecentCollections");
+    expect(page).not.toContain("api.gomaQ.listExchanges, {}");
+    expect(page).not.toContain("api.gomaQ.listCollections, {}");
+  });
+});
