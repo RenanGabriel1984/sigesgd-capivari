@@ -181,6 +181,10 @@ export const installPart = mutation({
     ) {
       throw new Error("O saldo global do produto está inconsistente. Regularize antes de instalar a peça.");
     }
+    const reservedInLots = [...reservedByLot.values()].reduce((sum, quantity) => sum + quantity, 0);
+    if (reservedInLots > freshStock.reservedQuantity + 1e-9) {
+      throw new Error("As reservas por lote excedem o saldo reservado global. Regularize antes de instalar a peça.");
+    }
     const available = freshStock.physicalQuantity - freshStock.reservedQuantity;
     if (available < args.quantity) {
       throw new Error(
