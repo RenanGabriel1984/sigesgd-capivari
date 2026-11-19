@@ -29,7 +29,7 @@ export const listByAsset = query({
       .query("assetMaintenances")
       .withIndex("by_asset", (q) => q.eq("assetId", args.assetId))
       .order("desc")
-      .take(50);
+      .collect();
 
     return Promise.all(maintenances.map(async (m: any) => {
       const tech = await ctx.db.get(m.technicianUserId);
