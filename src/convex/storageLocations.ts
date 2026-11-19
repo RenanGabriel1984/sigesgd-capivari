@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { assertShortTextLimits, assertTextLimits } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -47,17 +48,20 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    if (!args.name.trim()) throw new Error("Nome do local é obrigatório");
+    const name = args.name.trim();
+    if (!name) throw new Error("Nome do local é obrigatório");
+    assertShortTextLimits({ name });
+    assertTextLimits({ description: args.description?.trim() });
 
     // Check for duplicate name
     const existing = await ctx.db.query("storageLocations").collect();
-    if (existing.some((l: any) => l.name.toLowerCase() === args.name.trim().toLowerCase())) {
+    if (existing.some((l: any) => l.name.toLowerCase() === name.toLowerCase())) {
       throw new Error("Já existe um local de armazenamento com este nome");
     }
 
     const id = await ctx.db.insert("storageLocations", {
-      name: args.name.trim(),
-      description: args.description || undefined,
+      name,
+      description: args.description?.trim() || undefined,
       active: true,
     });
 
@@ -86,8 +90,16 @@ export const update = mutation({
     // areaId é aceito apenas para compatibilidade com clientes antigos e
     // deliberadamente ignorado: uma localização física não pertence a uma área.
     const updates: Record<string, any> = {};
-    if (args.name !== undefined) updates.name = args.name;
-    if (args.description !== undefined) updates.description = args.description;
+    if (args.name !== undefined) {
+      const name = args.name.trim();
+      if (!name) throw new Error("Nome do local é obrigatório");
+      assertShortTextLimits({ name });
+      updates.name = name;
+    }
+    if (args.description !== undefined) {
+      assertTextLimits({ description: args.description.trim() });
+      updates.description = args.description.trim() || undefined;
+    }
     if (args.active !== undefined) updates.active = args.active;
 
     if (updates.active === false) {
@@ -103,8 +115,7 @@ export const update = mutation({
       }
     }
 
-    if (updates.name) {
-      updates.name = updates.name.trim();
+    if (updates.name !== undefined) {
       const all = await ctx.db.query("storageLocations").collect();
       if (all.some((l: any) => l._id !== id && l.name.toLowerCase() === updates.name!.toLowerCase())) {
         throw new Error("Já existe outro local com este nome");
