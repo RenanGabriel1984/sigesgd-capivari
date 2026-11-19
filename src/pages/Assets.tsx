@@ -358,27 +358,34 @@ export default function AssetsPage() {
 
         {/* Empty State */}
         {filteredAssets.length === 0 ? (
-          // Filtros ativos ≠ categoria vazia: aqui a busca é que não encontrou
-          // nada, então não se fala em "nenhum equipamento cadastrado".
-          filters.search || filters.status || filters.assetType ? (
-            <Card className="border-border/50">
-              <CardContent className="py-16">
-                <div className="empty-state">
-                  <Monitor className="empty-state-icon" />
-                  <p className="empty-state-title">Nenhum equipamento encontrado</p>
-                  <p className="empty-state-desc">
-                    {filters.search
-                      ? `Nenhum resultado para "${filters.search}"${category ? ` em ${category.label}` : ""}. Tente outro termo ou limpe a busca.`
-                      : category
-                        ? `Nenhum equipamento em ${category.label} com os filtros atuais.`
-                        : "Tente alterar os filtros aplicados."}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <EmptyCategoryCard category={category} relatedStock={category ? relatedStock : undefined} />
-          )
+          <>
+            {filters.search || filters.status || filters.assetType ? (
+              <Card className="border-border/50">
+                <CardContent className="py-16">
+                  <div className="empty-state">
+                    <Monitor className="empty-state-icon" />
+                    <p className="empty-state-title">Nenhum equipamento encontrado nesta página</p>
+                    <p className="empty-state-desc">
+                      {filters.search
+                        ? `Nenhum resultado para "${filters.search}"${category ? ` em ${category.label}` : ""} nesta página.`
+                        : category
+                          ? `Nenhum equipamento em ${category.label} nesta página.`
+                          : "Nenhum equipamento nesta página."}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <EmptyCategoryCard category={category} relatedStock={category ? relatedStock : undefined} />
+            )}
+            {assetsStatus !== "Exhausted" && (
+              <div className="flex justify-center py-3">
+                <Button variant="outline" onClick={() => loadMoreAssets(50)} disabled={assetsStatus === "LoadingMore"}>
+                  {assetsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais equipamentos"}
+                </Button>
+              </div>
+            )}
+          </>
         ) : (
           <>
             {/* Desktop Table */}
