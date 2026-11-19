@@ -265,6 +265,7 @@ export const approve = mutation({
       entity: "requests", entityId: args.requestId,
     });
     if (request.status !== "pending") throw new Error("Solicitação não está pendente.");
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
 
     const stockNeeded = new Map<string, {
       quantity: number; productName: string; hasArea: boolean; hasLegacy: boolean;
@@ -519,6 +520,7 @@ export const reject = mutation({
     if (request.status !== "pending") throw new Error("Solicitação não está pendente");
     const reason = (args.observation ?? "").trim();
     if (!reason) throw new Error("O motivo da rejeição é obrigatório");
+    assertTextLimits({ observation: reason }, MAX_OBSERVATION);
     const now = Date.now();
     await ctx.db.patch(args.requestId, { status: "rejected", approverId: userId, updatedAt: now, approvalObservation: reason });
     await ctx.db.insert("auditLogs", { userId, action: "reject", entity: "requests", entityId: args.requestId, details: `Solicitação rejeitada. Motivo: ${reason}`, timestamp: now });
