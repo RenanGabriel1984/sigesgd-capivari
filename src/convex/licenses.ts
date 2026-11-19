@@ -30,7 +30,9 @@ export const list = query({
     const role = (user.role ?? "technician") as UserRole;
     const isAdmin = role === "admin";
 
-    let licenses = await ctx.db.query("licenses").order("desc").take(500);
+    // O cadastro de licenças é uma tabela administrativa de baixo volume; não
+    // truncar silenciosamente a lista, pois isso esconde chaves/atribuições antigas.
+    let licenses = await ctx.db.query("licenses").order("desc").collect();
 
     if (args.productName) licenses = licenses.filter((l: any) => l.productName === args.productName);
     if (args.active !== undefined) licenses = licenses.filter((l: any) => l.active === args.active);
