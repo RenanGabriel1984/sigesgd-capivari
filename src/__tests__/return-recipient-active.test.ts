@@ -15,7 +15,7 @@ describe("devoluções — usuário recebedor", () => {
     expect(mutation).toContain("Usuário recebedor não encontrado ou inativo");
 
     const validation = mutation.indexOf("recipient.active === false");
-    const firstWrite = mutation.search(/ctx\\.db\\.(insert|patch)\\(/);
+    const firstWrite = mutation.search(/ctx\.db\.(insert|patch)\(/);
     expect(validation).toBeGreaterThan(-1);
     expect(firstWrite).toBeGreaterThan(validation);
   });
