@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { usePaginatedQuery, useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,7 +45,7 @@ function LoadingSkeleton() {
 export default function StockTransfersPage() {
   const { user } = useAuth();
   const canManageTransfers = roleHasPermission(user?.role as AppRole | undefined, "transfers.create");
-  const transfers = useQuery(api.stockTransfers.list);
+  const { results: transfers, status: transfersStatus, loadMore: loadMoreTransfers } = usePaginatedQuery(api.stockTransfers.listPage, {}, { initialNumItems: 50 });
   const products = useQuery(api.products.listActive);
   const locations = useQuery(api.storageLocations.listActive);
   const areas = useQuery(api.stockAreas.listActive);
@@ -151,7 +151,7 @@ export default function StockTransfersPage() {
             <CardTitle className="text-lg">Histórico de Transferências</CardTitle>
           </CardHeader>
           <CardContent>
-            {!transfers ? (
+            {transfersStatus === "LoadingFirstPage" ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Carregando transferências...
               </div>
@@ -217,6 +217,13 @@ export default function StockTransfersPage() {
                 </Table>
               </div>
             )}
+            {transfersStatus !== "LoadingFirstPage" && transfersStatus !== "Exhausted" ? (
+              <div className="flex justify-center pt-4">
+                <Button variant="outline" onClick={() => loadMoreTransfers(50)} disabled={transfersStatus === "LoadingMore"}>
+                  {transfersStatus === "LoadingMore" ? "Carregando..." : "Carregar mais transferências"}
+                </Button>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
