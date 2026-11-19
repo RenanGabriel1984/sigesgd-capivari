@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { usePaginatedQuery, useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
 import { SearchInput } from "@/components/SearchInput";
@@ -199,11 +199,11 @@ export default function AssetsPage() {
     organizationId: "", responsibleUserId: "", observation: "",
   });
 
-  const assets = useQuery(api.assets.list, {
+  const { results: assets, status: assetsStatus, loadMore: loadMoreAssets } = usePaginatedQuery(api.assets.listPaginated, {
     status: filters.status || undefined,
     assetType: filters.assetType || undefined,
     search: filters.search || undefined,
-  });
+  }, { initialNumItems: 50 });
   const organizations = useQuery(api.organizations.list);
   const createAsset = useMutation(api.assets.create);
   const navigate = useNavigate();
@@ -234,7 +234,7 @@ export default function AssetsPage() {
     }
   };
 
-  if (assets === undefined) return <AssetsSkeleton />;
+  if (assetsStatus === "LoadingFirstPage") return <AssetsSkeleton />;
 
   // A categoria de equipamento (Impressoras/Computadores/Redes/Telefonia) é
   // apenas um recorte da lista — nenhuma regra de fornecedor ou de destino de
@@ -468,6 +468,13 @@ export default function AssetsPage() {
 
             {/* Ponte para o estoque: os produtos relacionados NUNCA entram no
                 grid de equipamentos, nem quando a categoria já tem assets. */}
+            {assetsStatus !== "Exhausted" && (
+              <div className="flex justify-center py-3">
+                <Button variant="outline" onClick={() => loadMoreAssets(50)} disabled={assetsStatus === "LoadingMore"}>
+                  {assetsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais equipamentos"}
+                </Button>
+              </div>
+            )}
             {category && <RelatedStockSection category={category} relatedStock={relatedStock} />}
           </>
         )}
