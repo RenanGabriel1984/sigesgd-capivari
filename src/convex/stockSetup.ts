@@ -574,7 +574,7 @@ export const productLocationSummary = query({
         locationName: location.name,
         areaId: area ? area._id as string : null,
         areaName: area?.name ?? "Sem área — pendente de classificação",
-        quantity: row.quantity - reserved,
+        quantity: Math.max(0, row.quantity - reserved),
       });
       byProduct.set(row.productId, entries);
     }
