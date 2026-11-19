@@ -1,4 +1,4 @@
-import { useQuery } from "convex/react";
+import { usePaginatedQuery } from "convex/react";
 import { useNavigate } from "react-router";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
@@ -28,20 +28,20 @@ function LoadingSkeleton() {
 }
 
 export default function Movements() {
-  const movements = useQuery(api.stockMovements.list);
+  const { results: movements, status: movementsStatus, loadMore: loadMoreMovements } = usePaginatedQuery(api.stockMovements.listPaginated, {}, { initialNumItems: 50 });
   const navigate = useNavigate();
 
   // Ação "Devolver" — abre o MESMO fluxo de devolução vinculado à saída original
   const goReturn = (movementId: string) => navigate(`/returns?exit=${movementId}`);
 
-  if (movements === undefined) return <LoadingSkeleton />;
+  if (movementsStatus === "LoadingFirstPage") return <LoadingSkeleton />;
 
   return (
     <AppShell>
       <div className="space-y-6 max-w-7xl mx-auto">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Movimentações</h1>
-          <p className="text-sm text-muted-foreground">Histórico de movimentações de estoque — {movements.length} registro(s)</p>
+          <p className="text-sm text-muted-foreground">Histórico de movimentações de estoque — {movements.length} registro(s) carregado(s)</p>
         </div>
 
         {/* Desktop Table */}
@@ -78,7 +78,7 @@ export default function Movements() {
 
         {/* Mobile Cards */}
         <div className="sm:hidden space-y-3">
-          {movements.slice(0, 100).map((m) => (
+          {movements.map((m) => (
             <Card key={m._id} className={`border-border/50 ${m.canceled ? "opacity-50" : ""}`}>
               <CardContent className="p-3">
                 <div className="flex items-start justify-between mb-2">
@@ -123,7 +123,7 @@ export default function Movements() {
               </CardContent>
             </Card>
           ))}
-          {movements.length === 0 && (
+          {movements.length === 0 && movementsStatus === "Exhausted" && (
             <div className="empty-state py-12">
               <ArrowLeftRight className="empty-state-icon" />
               <p className="empty-state-title">Nenhuma movimentação registrada</p>
@@ -131,6 +131,13 @@ export default function Movements() {
             </div>
           )}
         </div>
+        {movementsStatus !== "Exhausted" && (
+          <div className="flex justify-center py-3">
+            <Button variant="outline" onClick={() => loadMoreMovements(50)} disabled={movementsStatus === "LoadingMore"}>
+              {movementsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais movimentações"}
+            </Button>
+          </div>
+        )}
       </div>
     </AppShell>
   );
