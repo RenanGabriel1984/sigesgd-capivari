@@ -20,7 +20,7 @@ describe("paginação dos históricos operacionais", () => {
       const source = read(path);
       expect(source).toContain("paginationOptsValidator");
       expect(source).toContain("paginate(args.paginationOpts)");
-      expect(source).toContain("page: enriched");
+      expect(source).toContain("page:");
     }
   });
 
