@@ -118,18 +118,20 @@ export default function Requests() {
   const [histSerialSearch, setHistSerialSearch] = useState("");
 
   const hasFilters = !!(histSecretariaId || histStartDate || histEndDate || histSerialSearch);
-  const deliveredRequests = useQuery(
-    api.requests.listDelivered,
-    hasFilters
-      ? {
-          secretariaId: histSecretariaId ? (histSecretariaId as any) : undefined,
-          startDate: histStartDate ? new Date(histStartDate).getTime() : undefined,
-          endDate: histEndDate ? new Date(histEndDate + "T23:59:59").getTime() : undefined,
-          serialSearch: histSerialSearch || undefined,
-        }
-      : "skip"
+  const {
+    results: deliveredRequests,
+    status: deliveredRequestsStatus,
+    loadMore: loadMoreDeliveredRequests,
+  } = usePaginatedQuery(
+    api.requests.listDeliveredPaginated,
+    {
+      secretariaId: histSecretariaId ? (histSecretariaId as any) : undefined,
+      startDate: histStartDate ? new Date(histStartDate).getTime() : undefined,
+      endDate: histEndDate ? new Date(histEndDate + "T23:59:59.999").getTime() : undefined,
+      serialSearch: histSerialSearch || undefined,
+    },
+    { initialNumItems: 50 },
   );
-  const allDeliveredRequests = useQuery(api.requests.listDelivered, {});
 
   const role = (user?.role ?? "technician") as UserRole;
   const permissions = getPermissions(role);
@@ -680,11 +682,11 @@ export default function Requests() {
               </CardContent>
             </Card>
             {(() => {
-              const list = hasFilters ? deliveredRequests : allDeliveredRequests;
-              if (list === undefined) {
+              const list = deliveredRequests;
+              if (deliveredRequestsStatus === "LoadingFirstPage") {
                 return <Card className="border-border/50"><CardContent className="py-8 text-center"><p className="text-muted-foreground text-sm">Carregando...</p></CardContent></Card>;
               }
-              if (list.length === 0) {
+              if (list.length === 0 && deliveredRequestsStatus === "Exhausted") {
                 return (
                   <Card className="border-border/50"><CardContent className="py-12 text-center">
                     <Archive className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
@@ -696,8 +698,20 @@ export default function Requests() {
               }
               return (
                 <div className="space-y-3">
-                  <p className="text-xs text-muted-foreground">{list.length} entrega(s) encontrada(s)</p>
+                  <p className="text-xs text-muted-foreground">
+                    {list.length} entrega(s) carregada(s){deliveredRequestsStatus !== "Exhausted" ? " — há mais registros" : ""}
+                  </p>
                   {list.map((r) => renderRequest(r))}
+                  {deliveredRequestsStatus === "CanLoadMore" && (
+                    <div className="flex justify-center pt-2">
+                      <Button variant="outline" onClick={() => loadMoreDeliveredRequests(50)}>
+                        Carregar mais entregas
+                      </Button>
+                    </div>
+                  )}
+                  {deliveredRequestsStatus === "LoadingMore" && (
+                    <p className="text-center text-xs text-muted-foreground">Carregando mais entregas...</p>
+                  )}
                 </div>
               );
             })()}
