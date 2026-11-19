@@ -22,7 +22,7 @@ describe("limites de texto livre no inventário", () => {
     const closeEnd = source.indexOf("/** Cancel an inventory", closeStart);
     const close = source.slice(closeStart, closeEnd);
     const validation = close.indexOf("assertTextLimits({ justification: args.justification }, MAX_OBSERVATION)");
-    const firstWrite = close.search(/ctx\\.db\\.(insert|patch|delete)\\(/);
+    const firstWrite = close.search(/ctx\.db\.(insert|patch|delete)\(/);
     expect(validation).toBeGreaterThan(-1);
     expect(firstWrite).toBeGreaterThan(validation);
   });
