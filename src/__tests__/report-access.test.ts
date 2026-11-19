@@ -25,11 +25,16 @@ describe("segurança e precisão dos relatórios", () => {
     }
   });
 
-  it("dashboard carrega os saldos de estoque uma vez e reutiliza o mapa nos indicadores", () => {
+  it("dashboard concilia saldo global, local e lotes antes de calcular indicadores", () => {
     const stats = queryBlock("stats", "export const stockPosition");
     expect(stats).toContain('ctx.db.query("stock").collect()');
-    expect(stats).toContain("const stockByProduct = new Map(stockRows.map");
-    expect(stats).toContain("stockByProduct.get(p._id)");
+    expect(stats).toContain('ctx.db.query("stockByLocation").collect()');
+    expect(stats).toContain('ctx.db.query("lots").collect()');
+    expect(stats).toContain("inspectProductStockIntegrity");
+    expect(stats).toContain("integrity.consistent");
+    expect(stats).toContain("integrity.globalStock?.physicalQuantity");
+    expect(stats).toContain("divergentStock");
+    expect(stats).toContain("integrityAlerts");
     expect(stats).not.toContain('.withIndex("by_product", (q) => q.eq("productId", p._id))');
   });
 
