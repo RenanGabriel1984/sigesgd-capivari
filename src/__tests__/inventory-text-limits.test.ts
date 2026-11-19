@@ -17,6 +17,15 @@ describe("limites de texto livre no inventário", () => {
     expect(save).toContain("assertTextLimits({ observation: args.observation }, MAX_OBSERVATION)");
   });
 
+  it("usa a permissão central para fechar inventário, incluindo secretary", () => {
+    const closeStart = source.indexOf("export const close = mutation({");
+    const closeEnd = source.indexOf("/** Cancel an inventory", closeStart);
+    const close = source.slice(closeStart, closeEnd);
+    expect(close).toContain("const { userId } = await requireStockManagerOrAdmin(ctx)");
+    expect(close).not.toContain('role !== "admin"');
+    expect(close).not.toContain('role !== "stock_manager"');
+  });
+
   it("bloqueia ajuste agregado quando qualquer lote do produto é permanente", () => {
     const closeStart = source.indexOf("export const close = mutation({");
     const closeEnd = source.indexOf("/** Cancel an inventory", closeStart);
