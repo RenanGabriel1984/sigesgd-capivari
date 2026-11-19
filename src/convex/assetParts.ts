@@ -207,8 +207,10 @@ export const installPart = mutation({
     // Debita todos os lotes consumidos e todos os subestoques correspondentes.
     for (const allocation of allocations) {
       const lot = lotById.get(allocation.lotId)!;
+      const nextLotQuantity = lot.quantityAvailable - allocation.quantity;
       await ctx.db.patch(lot._id, {
-        quantityAvailable: lot.quantityAvailable - allocation.quantity,
+        quantityAvailable: nextLotQuantity,
+        active: nextLotQuantity > 0,
       });
       await adjustLotLocationBalance(ctx, {
         lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
