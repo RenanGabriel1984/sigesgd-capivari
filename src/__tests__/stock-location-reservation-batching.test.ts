@@ -15,7 +15,7 @@ describe("saldos por local — consultas de reservas em lote", () => {
 
     const enrich = source.slice(enrichStart, listStart);
     expect(enrich).not.toContain('query("requestItemReservations")');
-    expect(enrich).toContain("reservations.filter");
+    expect(enrich).toMatch(/reservations\\s*\\.filter\\(/);
   });
 
   it.each(["listByProduct", "summary", "listByLocation"])(
