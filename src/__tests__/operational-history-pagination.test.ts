@@ -1,6 +1,6 @@
 describe("paginação do arquivo histórico de entregas", () => {
   it("usa endpoint paginado com escopo por usuário e filtros no backend", () => {
-    const backend = read("src/convex/requests.ts");
+    const backend = read("convex/requests.ts");
     const endpoint = backend.slice(backend.indexOf("export const listDeliveredPaginated"), backend.indexOf("Historico de Consumo por organizacao"));
     expect(endpoint).toContain("paginationOptsValidator");
     expect(endpoint).toContain("requireUser(ctx)");
@@ -11,7 +11,7 @@ describe("paginação do arquivo histórico de entregas", () => {
   });
 
   it("a tela usa cursor e oferece carregamento incremental", () => {
-    const page = read("src/pages/Requests.tsx");
+    const page = read("pages/Requests.tsx");
     expect(page).toContain("usePaginatedQuery(");
     expect(page).toContain("api.requests.listDeliveredPaginated");
     expect(page).toContain("loadMoreDeliveredRequests(50)");
