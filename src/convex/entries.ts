@@ -11,6 +11,7 @@ import {
   normalizeInvoiceNumber,
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
+import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { attachStorageFile } from "./storage";
 import type { Id } from "./_generated/dataModel";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
@@ -283,6 +284,8 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
+    assertShortTextLimits({ invoiceNumber: args.invoiceNumber, purchaseAuthorizationNumber: args.purchaseAuthorizationNumber, processNumber: args.processNumber, empenhoNumber: args.empenhoNumber, contractNumber: args.contractNumber });
 
     if (args.items.length === 0) throw new Error("A entrada deve ter pelo menos um item");
     assertEntryFinancialValues({ totalValue: args.totalValue }, "entrada");
@@ -728,6 +731,8 @@ export const addItem = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
+    assertShortTextLimits({ brand: args.brand, model: args.model, supplierLotNumber: args.supplierLotNumber });
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ter itens adicionados");
@@ -799,6 +804,8 @@ export const updateItem = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
+    assertShortTextLimits({ brand: args.brand, model: args.model, supplierLotNumber: args.supplierLotNumber });
     const item = await ctx.db.get(args.itemId);
     if (!item) throw new Error("Item não encontrado");
 
@@ -896,6 +903,8 @@ export const editDraft = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
+    assertShortTextLimits({ invoiceNumber: args.invoiceNumber, purchaseAuthorizationNumber: args.purchaseAuthorizationNumber, processNumber: args.processNumber, empenhoNumber: args.empenhoNumber, contractNumber: args.contractNumber });
 
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
@@ -955,6 +964,9 @@ export const reverse = mutation({
     const { userId } = await requireStockManagerOrAdmin(ctx);
     const reason = args.reason.trim();
     if (!reason) throw new Error("O motivo do estorno é obrigatório");
+    const reason = args.reason.trim();
+    if (!reason) throw new Error("O motivo do estorno é obrigatório");
+    assertTextLimits({ observation: reason }, MAX_OBSERVATION);
 
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
@@ -1171,6 +1183,10 @@ export const setUnits = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
+    for (const unit of args.units) {
+      assertTextLimits({ observation: unit.observation }, MAX_OBSERVATION);
+      assertShortTextLimits({ patrimony: unit.patrimonyNumber, serialNumber: unit.serialNumber, manufacturer: unit.manufacturer, model: unit.model, responsibleDestiny: unit.responsibleDestiny });
+    }
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem registrar unidades patrimoniais");
