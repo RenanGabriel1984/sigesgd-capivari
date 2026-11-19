@@ -1036,6 +1036,59 @@ export const listDelivered = query({
   },
 });
 
+/** Histórico de entregas com paginação cursor-based, sem limite fixo de 500 registros. */
+export const listDeliveredPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    secretariaId: v.optional(v.id("organizations")),
+    startDate: v.optional(v.number()),
+    endDate: v.optional(v.number()),
+    serialSearch: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { user } = await requireUser(ctx);
+    const role = (user.role ?? "technician") as UserRole;
+    const fullVisibility = hasFullVisibility(role);
+
+    if (args.startDate !== undefined && (!Number.isFinite(args.startDate) || args.startDate < 0)) {
+      throw new Error("Data inicial inválida.");
+    }
+    if (args.endDate !== undefined && (!Number.isFinite(args.endDate) || args.endDate < 0)) {
+      throw new Error("Data final inválida.");
+    }
+    if (args.startDate !== undefined && args.endDate !== undefined && args.startDate > args.endDate) {
+      throw new Error("Data inicial não pode ser posterior à data final.");
+    }
+    if (args.serialSearch?.trim()) assertShortTextLimits({ serialSearch: args.serialSearch });
+
+    const source = ctx.db.query("requests");
+    const query = args.startDate !== undefined || args.endDate !== undefined
+      ? source.withIndex("by_status_deliveredAt", (q: any) => {
+          let range = q.eq("status", "delivered");
+          if (args.startDate !== undefined) range = range.gte("deliveredAt", args.startDate);
+          if (args.endDate !== undefined) range = range.lte("deliveredAt", args.endDate);
+          return range;
+        }).order("desc")
+      : source.withIndex("by_status", (q: any) => q.eq("status", "delivered")).order("desc");
+
+    const page = await query.paginate(args.paginationOpts);
+    let scoped = page.page;
+    if (!fullVisibility) scoped = scoped.filter((request: any) => request.requesterId === user._id);
+    if (args.secretariaId) scoped = scoped.filter((request: any) => request.secretariaId === args.secretariaId);
+
+    let enriched = await Promise.all(scoped.map((request: any) => enrichRequest(ctx, request)));
+    if (args.serialSearch?.trim()) {
+      const term = args.serialSearch.trim().toLocaleLowerCase("pt-BR");
+      enriched = enriched.filter((request: any) =>
+        request.items?.some((item: any) =>
+          item.deliveredSerialNumbers?.some((serial: string) => serial.toLocaleLowerCase("pt-BR").includes(term)),
+        ),
+      );
+    }
+    return { ...page, page: enriched };
+  },
+});
+
 // ─── Historico de Consumo por organizacao ───────────────────────────────────
 export const listByOrganization = query({
   args: { organizationId: v.id("organizations") },
