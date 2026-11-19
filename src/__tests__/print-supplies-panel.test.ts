@@ -242,6 +242,22 @@ const META = new Map([
   ["papel", { name: "Papel térmico", brand: null, unitOfMeasure: "rl" }],
 ]);
 
+describe("PRINT-12b — consulta mensal não trunca histórico antigo", () => {
+  it("consulta movimentos diretamente no intervalo do mês, sem limite arbitrário", () => {
+    const query = backend.slice(backend.indexOf("export const getMonthlyConsumption"), backend.indexOf("type SupplyConsumedLot"));
+    expect(query).toContain('.withIndex("by_timestamp"');
+    expect(query).toContain('q.gte("timestamp", period.start).lt("timestamp", period.end)');
+    expect(query).not.toContain(".take(2000)");
+  });
+
+  it("consulta requisições entregues por status e data efetiva, sem corte nos 500 registros", () => {
+    const query = backend.slice(backend.indexOf("export const getMonthlyConsumption"), backend.indexOf("type SupplyConsumedLot"));
+    expect(query).toContain('.withIndex("by_status_deliveredAt"');
+    expect(query).toContain('q.eq("status", "delivered").gte("deliveredAt", period.start).lt("deliveredAt", period.end)');
+    expect(query).not.toContain(".take(500)");
+  });
+});
+
 describe("PRINT-12 — consumo mensal conta somente saídas operacionais", () => {
   it("isOperationalConsumption: apenas exit", () => {
     expect(isOperationalConsumption("exit")).toBe(true);
