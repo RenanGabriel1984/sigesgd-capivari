@@ -4,6 +4,7 @@ import { v } from "convex/values";
 import { isValidStockQuantity } from "../lib/stock-quantity-rules";
 import { groupAssetPartConsumptionByLocation, planAssetPartFifoConsumption } from "../lib/asset-part-consumption";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
+import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -51,6 +52,7 @@ export const installPart = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
 
@@ -288,6 +290,7 @@ export const removePart = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
     const part = await ctx.db.get(args.partId);
     if (!part) throw new Error("Peça não encontrada");
     if (part.removedAt) throw new Error("Esta peça já foi removida");
