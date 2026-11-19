@@ -172,10 +172,10 @@ jobs:
           {
             echo "### Inclusão das áreas operacionais verificada"
             echo ""
-            echo '- Deployment: `dev:first-herring-264`'
+            echo "- Deployment: `dev:first-herring-264`"
             echo "- Áreas criadas: **Limpeza, Copa e Cozinha e Água Mineral**"
             echo "- Total final: **5 áreas oficiais**"
             echo "- Logs individuais de auditoria: **3**"
             echo "- Produtos, lotes, saldos, locais e movimentos alterados: **nenhum**"
-            echo '- Produção oficial `savory-sockeye-292`: **não utilizada**'
+            echo "- Produção oficial `savory-sockeye-292`: **não utilizada**"
           } >> "${GITHUB_STEP_SUMMARY}"
