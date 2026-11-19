@@ -12,6 +12,9 @@ describe("patrimônio — limites de observação", () => {
       const mutation = source.slice(start, end === -1 ? undefined : end);
 
       expect(mutation).toContain("assertTextLimits({ observation: args.observation }, MAX_OBSERVATION)");
+      if (name === "create" || name === "update") {
+        expect(mutation).toContain("assertShortTextLimits({ patrimony: args.patrimonyNumber, serialNumber: args.serialNumber, manufacturer: args.manufacturer, model: args.model, hostname: args.hostname, macAddress: args.macAddress })");
+      }
       const validation = mutation.indexOf("assertTextLimits({ observation: args.observation }");
       const firstWrite = mutation.search(/ctx\.db\.(insert|patch)\(/);
       expect(validation).toBeGreaterThan(-1);
