@@ -5,8 +5,6 @@ import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, isDis
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
-
 async function requireUser(ctx: any) {
   // RBAC central: consultas de inventário.
   return requirePermission(ctx, "stock.view");
@@ -285,11 +283,8 @@ export const close = mutation({
     justification: v.string(),
   },
   handler: async (ctx, args) => {
-    const { userId, user } = await requireStockManagerOrAdmin(ctx);
-    const role = (user.role ?? "technician") as UserRole;
-    if (role !== "admin" && role !== "stock_manager") {
-      throw new Error("Apenas administradores e responsáveis pelo estoque podem fechar inventário");
-    }
+    // A permissão central inventory.manage já inclui admin, secretary e stock_manager.
+    const { userId } = await requireStockManagerOrAdmin(ctx);
 
     assertTextLimits({ justification: args.justification }, MAX_OBSERVATION);
     const justification = (args.justification ?? "").trim();
