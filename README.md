@@ -158,6 +158,18 @@ bun vitest
 | `RESEND_API_KEY` | Segredo separado do backend Convex para envio de e-mail de primeiro acesso via Resend |
 | `EMAIL_FROM` | Remetente verificado no Resend (opcional; usa o padrão institucional definido no código) |
 
+### Destinos Convex por ambiente
+
+| Ambiente | Deployment | Uso |
+|---|---|---|
+| Produção (build Vite) | `savory-sockeye-292` | Backend oficial |
+| Desenvolvimento local (`vite dev`) | `first-herring-264` | Desenvolvimento; não usar para publicação de produção |
+| Homologação isolada | `tame-alligator-797` | Projeto Convex separado; exige `VITE_APP_ENV=homologacao` e URL explícita |
+
+O resolvedor em `src/lib/convex-url.ts` fixa esses destinos por ambiente e recusa
+redirecionamentos para deployments diferentes. A configuração não executa migração
+nem altera dados de qualquer deployment.
+
 As credenciais `FREEBUFF_EMAIL_API_KEY` e `RESEND_API_KEY` pertencem a provedores diferentes e **não são intercambiáveis**. Todas essas variáveis são do ambiente **do backend Convex**, não variáveis `VITE_*`; nunca devem ser expostas ao frontend nem versionadas. Cada fluxo falha de forma segura quando sua própria credencial está ausente.
 
 > ⚠️ **Nunca commite arquivos `.env` ou `.env.local`.** O `.gitignore` já os exclui.
