@@ -353,8 +353,11 @@ export const create = mutation({
       parts.push({ lot: null, quantity: args.quantity });
     }
 
-    if (args.receivedByUserId && !(await ctx.db.get(args.receivedByUserId))) {
-      throw new Error("Usuário recebedor não encontrado");
+    if (args.receivedByUserId) {
+      const recipient = await ctx.db.get(args.receivedByUserId);
+      if (!recipient || recipient.active === false) {
+        throw new Error("Usuário recebedor não encontrado ou inativo");
+      }
     }
 
     const [stockRows, productLots, locationRows] = await Promise.all([
