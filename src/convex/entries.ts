@@ -313,6 +313,8 @@ export const create = mutation({
 
     // Validate each item
     for (const item of args.items) {
+      assertTextLimits({ observation: item.observation, specification: item.specification }, MAX_OBSERVATION);
+      assertShortTextLimits({ brand: item.brand, model: item.model, supplierLotNumber: item.supplierLotNumber, supplierCode: item.supplierCode, ncm: item.ncm, cfop: item.cfop, ean: item.ean });
       assertEntryFinancialValues({ unitCost: item.unitCost, totalCost: item.totalCost }, `item ${item.productId}`);
       if (item.quantity <= 0) throw new Error(`Quantidade inválida para o item ${item.productId}`);
       if (!isFinite(item.quantity)) throw new Error(`Quantidade não finita para o item ${item.productId}`);
@@ -732,7 +734,8 @@ export const addItem = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
     assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
-    assertShortTextLimits({ brand: args.brand, model: args.model, supplierLotNumber: args.supplierLotNumber });
+    assertTextLimits({ specification: args.specification }, MAX_OBSERVATION);
+    assertShortTextLimits({ brand: args.brand, model: args.model, supplierLotNumber: args.supplierLotNumber, supplierCode: args.supplierCode, ncm: args.ncm, cfop: args.cfop, ean: args.ean });
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ter itens adicionados");
@@ -1185,6 +1188,7 @@ export const setUnits = mutation({
     const { userId } = await requireStockManagerOrAdmin(ctx);
     for (const unit of args.units) {
       assertTextLimits({ observation: unit.observation }, MAX_OBSERVATION);
+      assertShortTextLimits({ manufacturer: unit.manufacturer, model: unit.model, serialNumber: unit.serialNumber, responsibleDestiny: unit.responsibleDestiny });
       assertShortTextLimits({ patrimony: unit.patrimonyNumber, serialNumber: unit.serialNumber, manufacturer: unit.manufacturer, model: unit.model, responsibleDestiny: unit.responsibleDestiny });
     }
     const entry = await ctx.db.get(args.entryId);
