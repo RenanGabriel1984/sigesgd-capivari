@@ -90,13 +90,15 @@ export const getById = query({
       return { ...l, entry, supplier };
     }));
     // ── Localizações (estoque por local) ──
-    const sbls = await ctx.db.query("stockByLocation")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
+    const [sbls, reservations] = await Promise.all([
+      ctx.db.query("stockByLocation")
+        .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect(),
+      ctx.db.query("requestItemReservations")
+        .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect(),
+    ]);
     const locations = await Promise.all(sbls.map(async (row: any) => {
       const location = await ctx.db.get(row.locationId);
       const area = row.areaId ? await ctx.db.get(row.areaId) : null;
-      const reservations = await ctx.db.query("requestItemReservations")
-        .withIndex("by_product", (q: any) => q.eq("productId", args.id)).collect();
       const reservedQuantity = reservations
         .filter((reservation: any) =>
           reservation.locationId === row.locationId &&
