@@ -150,6 +150,36 @@ export const listCollections = query({
   },
 });
 
+
+/** Pequeno resumo para o painel: não carrega centenas de linhas para exibir seis. */
+export const listRecentExchanges = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const exchanges = await ctx.db.query("gomaQExchanges").order("desc").take(6);
+    return Promise.all(exchanges.map(async (exchange: any) => {
+      const product = await ctx.db.get(exchange.productId);
+      const printer = await ctx.db.get(exchange.printerId);
+      const lot = exchange.lotId ? await ctx.db.get(exchange.lotId) : null;
+      const deliveredBy = await ctx.db.get(exchange.deliveredByUserId);
+      const receivedBy = await ctx.db.get(exchange.receivedByUserId);
+      return { ...exchange, product, printer, lot, deliveredBy, receivedBy };
+    }));
+  },
+});
+
+export const listRecentCollections = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const collections = await ctx.db.query("gomaQCollections").order("desc").take(6);
+    return Promise.all(collections.map(async (collection: any) => {
+      const responsible = await ctx.db.get(collection.responsibleUserId);
+      return { ...collection, responsible };
+    }));
+  },
+});
+
 export const monthlyOrder = query({
   args: {},
   handler: async (ctx) => {
