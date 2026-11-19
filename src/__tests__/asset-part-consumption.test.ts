@@ -93,6 +93,10 @@ describe("rastreabilidade FIFO de peças instaladas", () => {
 describe("instalação de peças — estado do lote após consumo", () => {
   it("inativa lote zerado e mantém ativo lote com saldo remanescente", () => {
     const backend = readFileSync(resolve(__dirname, "../convex/assetParts.ts"), "utf8");
-    expect(backend).toContain("active: nextLotQuantity > 0");
+    const start = backend.indexOf("export const installPart = mutation({");
+    const end = backend.indexOf("\\nexport const ", start + 1);
+    const mutation = backend.slice(start, end === -1 ? undefined : end);
+    expect(mutation).toContain("const nextLotQuantity = lot.quantityAvailable - allocation.quantity");
+    expect(mutation).toContain("active: nextLotQuantity > 0");
   });
 });
