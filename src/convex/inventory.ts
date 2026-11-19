@@ -363,8 +363,8 @@ export const close = mutation({
         }
         lotById.set(String(lot._id), lot);
       }
-      const materialType = (lots as any[]).find((lot: any) => lot.materialType)?.materialType;
-      if (product.hasSerial === true || materialType === "permanent") {
+      const hasPermanentLot = (lots as any[]).some((lot: any) => lot.materialType === "permanent");
+      if (product.hasSerial === true || hasPermanentLot) {
         throw new Error(`O produto "${product.name}" exige controle patrimonial individual. Faça a conferência/regularização pelo cadastro de equipamentos, não por ajuste agregado de estoque.`);
       }
       const lotTotal = lots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
