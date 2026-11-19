@@ -74,4 +74,14 @@ describe("paginação dos históricos operacionais", () => {
       expect(source).toContain('"LoadingMore"');
     }
   });
+  it("não limita artificialmente históricos legados de entregas e consumo por organização", () => {
+    const backend = read("convex/requests.ts");
+    const delivered = backend.slice(backend.indexOf("export const listDelivered ="), backend.indexOf("export const listDeliveredPaginated"));
+    const organization = backend.slice(backend.indexOf("export const listByOrganization ="));
+    expect(delivered).toContain('.order("desc")\n      .collect();');
+    expect(organization).toContain('.order("desc")\n      .collect();');
+    expect(delivered).not.toContain(".take(500)");
+    expect(organization).not.toContain(".take(500)");
+  });
+
 });
