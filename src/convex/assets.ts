@@ -5,7 +5,7 @@ import { requirePermission } from "./rbac";
 import { findEquipmentCategory, buildRelatedStockProducts } from "../lib/equipment-categories";
 import type { RelatedStockProduct } from "../lib/equipment-categories";
 import { maskLicenseKey } from "../lib/license-keys";
-import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -304,6 +304,7 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
     assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
+    assertShortTextLimits({ patrimony: args.patrimonyNumber, serialNumber: args.serialNumber, manufacturer: args.manufacturer, model: args.model, hostname: args.hostname, macAddress: args.macAddress });
     const patrimonyNumber = args.patrimonyNumber?.trim() || undefined;
     if (patrimonyNumber) {
       await requirePermission(ctx, "patrimony.assign", { entity: "assets" });
@@ -383,6 +384,7 @@ export const update = mutation({
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
     assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
+    assertShortTextLimits({ patrimony: args.patrimonyNumber, serialNumber: args.serialNumber, manufacturer: args.manufacturer, model: args.model, hostname: args.hostname, macAddress: args.macAddress });
     if (args.patrimonyNumber !== undefined) {
       await requirePermission(ctx, "patrimony.assign", {
         entity: "assets",
