@@ -8,6 +8,7 @@ const migration = read("src/convex/stockRegularization.ts");
 const manifest = read("src/lib/stock-regularization-manifest.ts");
 const stockSetup = read("src/convex/stockSetup.ts");
 const stockSetupDiagnostic = read("src/convex/stockSetupDiagnostics.ts");
+const entries = read("src/convex/entries.ts");
 
 describe("regularização histórica de área/local", () => {
   it("separa prévia somente leitura da mutation de aplicação", () => {
@@ -59,6 +60,9 @@ describe("regularização histórica de área/local", () => {
     expect(stockSetupDiagnostic).toContain("entryMatches.length !== 1");
     expect(stockSetupDiagnostic).toContain("candidateIds");
     expect(stockSetupDiagnostic).not.toContain(".first()");
+    expect(entries).toContain("lotMatches.length > 1");
+    expect(entries).toContain("Número de lote");
+    expect(entries).not.toContain('.withIndex("by_number", (q) => q.eq("lotNumber", args.lotNumber)).first()');
   });
 
   it("preserva saldos globais, lotes e quantidades das movimentações", () => {
