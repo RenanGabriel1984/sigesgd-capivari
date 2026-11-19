@@ -290,6 +290,9 @@ export const createCollection = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
 
     if (args.cartridgeIds.length === 0) throw new Error("Selecione ao menos uma carcaça para coleta");
+    if (new Set(args.cartridgeIds).size !== args.cartridgeIds.length) {
+      throw new Error("A seleção contém carcaças duplicadas. Remova as duplicatas e tente novamente.");
+    }
 
     const now = Date.now();
     let totalCartridges = 0;
