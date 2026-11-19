@@ -3,6 +3,7 @@ export interface AssetPartLotCandidate {
   lotNumber: string;
   receivedAt: number;
   quantityAvailable: number;
+  quantityReserved?: number;
   active?: boolean;
   locationId?: string;
   areaId?: string;
@@ -40,7 +41,10 @@ export function planAssetPartFifoConsumption(
       (lot) =>
         lot.active !== false &&
         Number.isFinite(lot.quantityAvailable) &&
-        lot.quantityAvailable > 0,
+        Number.isFinite(lot.quantityReserved ?? 0) &&
+        (lot.quantityReserved ?? 0) >= 0 &&
+        (lot.quantityReserved ?? 0) <= lot.quantityAvailable &&
+        lot.quantityAvailable - (lot.quantityReserved ?? 0) > 0,
     )
     .sort(
       (a, b) =>
@@ -54,7 +58,7 @@ export function planAssetPartFifoConsumption(
 
   for (const lot of eligible) {
     if (remaining <= 0) break;
-    const quantity = Math.min(lot.quantityAvailable, remaining);
+    const quantity = Math.min(lot.quantityAvailable - (lot.quantityReserved ?? 0), remaining);
     if (quantity <= 0) continue;
 
     if (!lot.locationId?.trim()) {
