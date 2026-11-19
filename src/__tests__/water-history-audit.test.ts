@@ -63,6 +63,11 @@ describe("histórico e auditoria do controle de água", () => {
     expect(backend).toContain("payments.filter((payment: any) => !payment.reversedAt).reduce");
   });
 
+  it("mantém todos os recebimentos visíveis no histórico, sem truncar em 30 registros", () => {
+    expect(backend).toContain("receipts: allReceipts.sort((a, b) => b.receivedAt - a.receivedAt)");
+    expect(backend).not.toContain("allReceipts.sort((a, b) => b.receivedAt - a.receivedAt).slice(0, 30)");
+  });
+
   it("mantém acessível o histórico completo de movimentações físicas de galões", () => {
     expect(backend).toContain("movements: allMovements.sort((a, b) => b.date - a.date)");
     expect(backend).not.toContain("allMovements.sort((a, b) => b.date - a.date).slice(0, 30)");
