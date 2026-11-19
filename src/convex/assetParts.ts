@@ -188,7 +188,7 @@ export const installPart = mutation({
       );
     }
 
-    const lotById = new Map(lots.map((lot) => [String(lot._id), lot]));
+
     for (const allocation of allocations) {
       const lot = lotById.get(allocation.lotId);
       if (!lot || lot.quantityAvailable < allocation.quantity) {
