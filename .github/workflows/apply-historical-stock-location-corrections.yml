@@ -198,7 +198,7 @@ jobs:
           {
             echo "### Correção histórica finalizada e verificada"
             echo ""
-            echo "- Deployment: `dev:first-herring-264`"
+            echo '- Deployment: `dev:first-herring-264`'
             echo "- Movimentos corrigidos: **61**"
             echo "- Logs de auditoria individuais: **61**"
             echo "- Movimentos preservados para revisão: **1 saída + 1 devolução**"
