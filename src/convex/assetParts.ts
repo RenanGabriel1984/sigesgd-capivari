@@ -69,11 +69,46 @@ export const installPart = mutation({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
 
-    const invalidActiveLot = lots.find(
-      (lot) => lot.active !== false && (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0),
+    const invalidLot = lots.find(
+      (lot) =>
+        !Number.isFinite(lot.quantityAvailable) ||
+        lot.quantityAvailable < 0 ||
+        (lot.active === false && lot.quantityAvailable > 0),
     );
-    if (invalidActiveLot) {
-      throw new Error("O lote " + invalidActiveLot.lotNumber + " possui saldo inválido. Regularize o lote antes de instalar a peça.");
+    if (invalidLot) {
+      throw new Error("O lote " + invalidLot.lotNumber + " possui saldo inválido ou está inativo com saldo positivo. Regularize antes de instalar a peça.");
+    }
+
+    // Reservas por lote precisam ser preservadas: o FIFO só pode consumir a
+    // parcela livre de cada lote, mesmo quando há saldo global livre em outros.
+    const reservations = await ctx.db
+      .query("requestItemReservations")
+      .withIndex("by_product", (q) => q.eq("productId", args.productId))
+      .collect();
+    const lotById = new Map(lots.map((lot) => [String(lot._id), lot]));
+    const reservedByLot = new Map<string, number>();
+    for (const reservation of reservations as any[]) {
+      const lot = lotById.get(String(reservation.lotId));
+      const remaining = Number(reservation.quantityRemaining);
+      if (
+        !lot ||
+        reservation.productId !== args.productId ||
+        !Number.isFinite(remaining) ||
+        remaining < 0 ||
+        (remaining > 0 && (
+          reservation.areaId !== lot.areaId ||
+          reservation.locationId !== lot.locationId ||
+          lot.active === false
+        ))
+      ) {
+        throw new Error("Há reserva inválida ou sem correspondência com lote/área/local. Regularize antes de instalar a peça.");
+      }
+      reservedByLot.set(String(lot._id), (reservedByLot.get(String(lot._id)) ?? 0) + remaining);
+    }
+    for (const lot of lots) {
+      if ((reservedByLot.get(String(lot._id)) ?? 0) > lot.quantityAvailable + 1e-9) {
+        throw new Error(`As reservas do lote ${lot.lotNumber} excedem o saldo físico. Regularize antes de instalar a peça.`);
+      }
     }
 
     // Monta o plano FIFO antes de gravar qualquer alteração. Cada lote deve
@@ -84,6 +119,7 @@ export const installPart = mutation({
         lotNumber: lot.lotNumber,
         receivedAt: lot.receivedAt,
         quantityAvailable: lot.quantityAvailable,
+        quantityReserved: reservedByLot.get(String(lot._id)) ?? 0,
         active: lot.active,
         locationId: lot.locationId ? String(lot.locationId) : undefined,
         areaId: lot.areaId ? String(lot.areaId) : undefined,
