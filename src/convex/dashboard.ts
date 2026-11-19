@@ -32,13 +32,15 @@ export const stats = query({
       .withIndex("by_active", (q) => q.eq("active", true))
       .collect();
 
+    // Carrega os saldos uma única vez: evita duas consultas por produto
+    // no dashboard e mantém o mesmo fallback para produtos sem saldo.
+    const stockRows = await ctx.db.query("stock").collect();
+    const stockByProduct = new Map(stockRows.map((row: any) => [row.productId, row]));
+
     // Critical stock count
     let criticalStock = 0;
     for (const p of products) {
-      const stock = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
+      const stock: any = stockByProduct.get(p._id);
       const qty = stock?.physicalQuantity ?? 0;
       // `?? 0` preserva exatamente o comportamento anterior (o campo passou a
       // ser anulável; produto sem mínimo configurado continua com mínimo 0).
@@ -99,10 +101,7 @@ export const stats = query({
     // Urgent alerts (items at or below minimum)
     const urgentAlerts = [];
     for (const p of products) {
-      const stock = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
+      const stock: any = stockByProduct.get(p._id);
       const qty = stock?.physicalQuantity ?? 0;
       if (qty <= (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
