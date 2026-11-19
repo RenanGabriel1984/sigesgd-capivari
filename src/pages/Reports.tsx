@@ -66,18 +66,19 @@ function downloadCSV(filename: string, csvContent: string) {
 }
 
 function exportStockPositionCSV(data: any[]) {
-  const header = ["Código", "Nome", "Categoria", "Marca", "Modelo", "Saldo Atual", "Mínimo", "Ideal", "Máximo", "Status", "Unidade"];
+  const header = ["Código", "Nome", "Categoria", "Marca", "Modelo", "Saldo Atual", "Mínimo", "Ideal", "Máximo", "Status", "Unidade", "Alertas de integridade", "Limitações de rastreio"];
   const rows = data.map((r) => [
     r.internalCode, r.name, r.categoryName, r.brand ?? "", r.model ?? "",
-    r.currentStock, r.minimumStock, r.idealStock, r.maximumStock, r.status,
+    r.currentStock ?? "Não confiável", r.minimumStock, r.idealStock, r.maximumStock, r.status,
     UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure,
+    (r.integrityIssues ?? []).join(" | "), (r.integrityLimitations ?? []).join(" | "),
   ]);
   downloadCSV("posicao_estoque.csv", serializeSemicolonCsv(header, rows));
 }
 
 function exportStockPositionByAreaCSV(data: any[]) {
-  const header = ["Produto", "Código", "Área", "Local físico", "Saldo físico", "Reservado", "Disponível", "Unidade", "Linhas de saldo"];
-  const rows = data.map((r) => [r.productName, r.internalCode, r.areaName, r.locationName, r.physicalQuantity, r.reservedQuantity, r.availableQuantity, UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure, r.duplicateRows]);
+  const header = ["Produto", "Código", "Área", "Local físico", "Saldo físico", "Reservado", "Disponível", "Unidade", "Linhas de saldo", "Alertas de integridade"];
+  const rows = data.map((r) => [r.productName, r.internalCode, r.areaName, r.locationName, r.physicalQuantity ?? "Não confiável", r.reservedQuantity, r.availableQuantity ?? "Não confiável", UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure, r.duplicateRows, (r.integrityIssues ?? []).join(" | ")]);
   downloadCSV("posicao_estoque_por_area_local.csv", serializeSemicolonCsv(header, rows));
 }
 
@@ -192,17 +193,18 @@ export default function Reports() {
   );
 
   const stockStatusCounts = useMemo(() => {
-    if (!stockPosition) return { normal: 0, baixo: 0, critico: 0, zerado: 0, total: 0 };
+    if (!stockPosition) return { normal: 0, baixo: 0, critico: 0, zerado: 0, inconsistente: 0, total: 0 };
     return stockPosition.reduce(
       (acc, item) => {
         acc.total++;
-        if (item.status === "Zerado") acc.zerado++;
+        if (item.status === "Inconsistente") acc.inconsistente++;
+        else if (item.status === "Zerado") acc.zerado++;
         else if (item.status === "Crítico") acc.critico++;
         else if (item.status === "Baixo") acc.baixo++;
         else acc.normal++;
         return acc;
       },
-      { normal: 0, baixo: 0, critico: 0, zerado: 0, total: 0 }
+      { normal: 0, baixo: 0, critico: 0, zerado: 0, inconsistente: 0, total: 0 }
     );
   }, [stockPosition]);
 
@@ -260,6 +262,9 @@ export default function Reports() {
                 <Badge variant="destructive" className="text-xs">
                   Zerado: {stockStatusCounts.zerado}
                 </Badge>
+                <Badge variant="destructive" className="text-xs">
+                  Inconsistente: {stockStatusCounts.inconsistente}
+                </Badge>
               </div>
               <div className="flex gap-2">
                 <Button
@@ -307,14 +312,14 @@ export default function Reports() {
                           <TableCell className="text-sm font-medium">{item.name}</TableCell>
                           <TableCell className="text-xs">{item.categoryName}</TableCell>
                           <TableCell className="text-xs">{[item.brand, item.model].filter(Boolean).join(" — ") || "—"}</TableCell>
-                          <TableCell className="text-sm text-right font-mono">{item.currentStock}</TableCell>
+                          <TableCell className="text-sm text-right font-mono">{item.currentStock ?? "—"}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.minimumStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.idealStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.maximumStock}</TableCell>
                           <TableCell>
                             <Badge
                               variant={
-                                item.status === "Crítico" || item.status === "Zerado"
+                                item.status === "Inconsistente" || item.status === "Crítico" || item.status === "Zerado"
                                   ? "destructive"
                                   : item.status === "Baixo"
                                   ? "secondary"
@@ -324,6 +329,16 @@ export default function Reports() {
                             >
                               {item.status}
                             </Badge>
+                            {item.integrityIssues?.length > 0 && (
+                              <p className="mt-1 max-w-xs whitespace-normal text-[10px] leading-snug text-destructive">
+                                {item.integrityIssues.join(" ")}
+                              </p>
+                            )}
+                            {item.integrityLimitations?.length > 0 && (
+                              <p className="mt-1 max-w-xs whitespace-normal text-[10px] leading-snug text-amber-700">
+                                {item.integrityLimitations.join(" ")}
+                              </p>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -361,8 +376,11 @@ export default function Reports() {
                 {stockPositionByArea?.map((item) => <TableRow key={item._id}>
                   <TableCell className="text-sm font-medium"><div>{item.productName}</div><div className="text-[10px] text-muted-foreground font-mono">{item.internalCode || "—"}</div></TableCell>
                   <TableCell className="text-xs">{item.areaName}</TableCell><TableCell className="text-xs">{item.locationName}</TableCell>
-                  <TableCell className="text-sm text-right font-mono">{item.physicalQuantity}</TableCell><TableCell className="text-sm text-right font-mono">{item.reservedQuantity}</TableCell><TableCell className="text-sm text-right font-mono">{item.availableQuantity}</TableCell>
-                  <TableCell>{item.inconsistent ? <Badge variant="destructive" className="text-[10px]">Revisar {item.duplicateRows > 1 ? "(" + item.duplicateRows + " linhas)" : ""}</Badge> : <Badge variant="outline" className="text-[10px]">OK</Badge>}</TableCell>
+                  <TableCell className="text-sm text-right font-mono">{item.physicalQuantity ?? "—"}</TableCell><TableCell className="text-sm text-right font-mono">{item.reservedQuantity}</TableCell><TableCell className="text-sm text-right font-mono">{item.availableQuantity ?? "—"}</TableCell>
+                  <TableCell>
+                    {item.inconsistent ? <Badge variant="destructive" className="text-[10px]">Revisar {item.duplicateRows > 1 ? "(" + item.duplicateRows + " linhas)" : ""}</Badge> : <Badge variant="outline" className="text-[10px]">OK</Badge>}
+                    {item.integrityIssues?.length > 0 && <p className="mt-1 max-w-xs whitespace-normal text-[10px] leading-snug text-destructive">{item.integrityIssues.join(" ")}</p>}
+                  </TableCell>
                 </TableRow>)}
                 {!stockPositionByArea && <TableRow><TableCell colSpan={7} className="text-center py-6 text-muted-foreground text-sm">Carregando…</TableCell></TableRow>}
                 {stockPositionByArea?.length === 0 && <TableRow><TableCell colSpan={7} className="text-center py-6 text-muted-foreground text-sm">Nenhum saldo por área/local registrado.</TableCell></TableRow>}

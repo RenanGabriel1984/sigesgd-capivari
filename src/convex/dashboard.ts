@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { inspectProductStockIntegrity } from "../lib/stock-read-integrity";
 
 async function requireUser(ctx: any) {
   // RBAC central: dashboard exige permissão de visualização.
@@ -32,20 +33,56 @@ export const stats = query({
       .withIndex("by_active", (q) => q.eq("active", true))
       .collect();
 
-    // Carrega os saldos uma única vez: evita duas consultas por produto
-    // no dashboard e mantém o mesmo fallback para produtos sem saldo.
-    const stockRows = await ctx.db.query("stock").collect();
-    const stockByProduct = new Map(stockRows.map((row: any) => [row.productId, row]));
+    // Concilia as três representações sem escolher arbitrariamente linhas
+    // duplicadas nem transformar saldos inválidos em zero.
+    const [stockRows, locationRows, lots] = await Promise.all([
+      ctx.db.query("stock").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("lots").collect(),
+    ]);
+    const byProduct = <T extends { productId: any }>(rows: T[]) => {
+      const grouped = new Map<string, T[]>();
+      for (const row of rows) {
+        const key = String(row.productId);
+        const current = grouped.get(key) ?? [];
+        current.push(row);
+        grouped.set(key, current);
+      }
+      return grouped;
+    };
+    const stockGroups = byProduct(stockRows);
+    const locationGroups = byProduct(locationRows);
+    const lotGroups = byProduct(lots);
+    const integrityByProduct = new Map<string, ReturnType<typeof inspectProductStockIntegrity>>();
+    const stockByProduct = new Map<any, any>();
+    const integrityAlerts = [];
+    for (const product of products) {
+      const integrity = inspectProductStockIntegrity(
+        stockGroups.get(String(product._id)) ?? [],
+        locationGroups.get(String(product._id)) ?? [],
+        lotGroups.get(String(product._id)) ?? [],
+        product.name,
+      );
+      integrityByProduct.set(String(product._id), integrity);
+      if (integrity.globalStock) stockByProduct.set(product._id, integrity.globalStock);
+      if (!integrity.consistent) {
+        integrityAlerts.push({
+          productId: product._id,
+          productName: product.name,
+          issues: integrity.issues,
+          limitations: integrity.limitations,
+        });
+      }
+    }
 
-    // Critical stock count
+    // Produtos com divergência não entram no cálculo de criticidade.
     let criticalStock = 0;
     for (const p of products) {
-      const stock: any = stockByProduct.get(p._id);
-      const qty = stock?.physicalQuantity ?? 0;
-      // `?? 0` preserva exatamente o comportamento anterior (o campo passou a
-      // ser anulável; produto sem mínimo configurado continua com mínimo 0).
-      if (qty <= (p.minimumStock ?? 0)) criticalStock++;
+      const integrity = integrityByProduct.get(String(p._id))!;
+      const qty = integrity.globalStock?.physicalQuantity;
+      if (integrity.consistent && qty !== undefined && qty <= (p.minimumStock ?? 0)) criticalStock++;
     }
+    const divergentStock = integrityAlerts.length;
 
     // Pending requests this month
     const allPending = await ctx.db
@@ -102,7 +139,9 @@ export const stats = query({
     const urgentAlerts = [];
     for (const p of products) {
       const stock: any = stockByProduct.get(p._id);
-      const qty = stock?.physicalQuantity ?? 0;
+      const integrity = integrityByProduct.get(String(p._id))!;
+      if (!integrity.consistent || !stock) continue;
+      const qty = stock.physicalQuantity;
       if (qty <= (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
         urgentAlerts.push({
@@ -164,6 +203,8 @@ export const stats = query({
     return {
       totalProducts: products.length,
       criticalStock,
+      divergentStock,
+      integrityAlerts,
       pendingThisMonth,
       entriesThisMonth,
       exitsThisMonth,
@@ -184,37 +225,61 @@ export const stockPosition = query({
   args: {},
   handler: async (ctx) => {
     await requirePermission(ctx, "reports.view", { entity: "reports", entityId: "stockPosition" });
-    const products = await ctx.db.query("products").collect();
-    return Promise.all(
-      products.map(async (p) => {
-        const category = await ctx.db.get(p.categoryId);
-        const stock = await ctx.db
-          .query("stock")
-          .withIndex("by_product", (q) => q.eq("productId", p._id))
-          .first();
-        const qty = stock?.physicalQuantity ?? 0;
-        let status: string = "Normal";
-        if (qty === 0) status = "Zerado";
-        else if (qty <= (p.minimumStock ?? 0)) status = "Crítico";
-        else if (qty <= (p.idealStock ?? 0)) status = "Baixo";
-        return {
-          _id: p._id,
-          name: p.name,
-          internalCode: p.internalCode ?? "",
-          categoryName: category?.name ?? "",
-          unitOfMeasure: p.unitOfMeasure,
-          currentStock: qty,
-          reservedQuantity: stock?.reservedQuantity ?? 0,
-          minimumStock: p.minimumStock ?? 0,
-          idealStock: p.idealStock ?? 0,
-          maximumStock: p.maximumStock,
-          status,
-          brand: p.brand,
-          model: p.model,
-          active: p.active,
-        };
-      })
-    );
+    const [products, stockRows, locationRows, lots] = await Promise.all([
+      ctx.db.query("products").collect(),
+      ctx.db.query("stock").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("lots").collect(),
+    ]);
+
+    const groupByProduct = <T extends { productId: any }>(rows: T[]) => {
+      const grouped = new Map<string, T[]>();
+      for (const row of rows) {
+        const key = String(row.productId);
+        const current = grouped.get(key) ?? [];
+        current.push(row);
+        grouped.set(key, current);
+      }
+      return grouped;
+    };
+    const stocksByProduct = groupByProduct(stockRows);
+    const locationsByProduct = groupByProduct(locationRows);
+    const lotsByProduct = groupByProduct(lots);
+
+    return Promise.all(products.map(async (product) => {
+      const category = await ctx.db.get(product.categoryId);
+      const integrity = inspectProductStockIntegrity(
+        stocksByProduct.get(String(product._id)) ?? [],
+        locationsByProduct.get(String(product._id)) ?? [],
+        lotsByProduct.get(String(product._id)) ?? [],
+        product.name,
+      );
+      const validStock = integrity.consistent ? integrity.globalStock : null;
+      const qty = validStock?.physicalQuantity ?? (integrity.consistent ? 0 : null);
+      let status = "Normal";
+      if (!integrity.consistent) status = "Inconsistente";
+      else if (qty === 0) status = "Zerado";
+      else if (qty !== null && qty <= (product.minimumStock ?? 0)) status = "Crítico";
+      else if (qty !== null && qty <= (product.idealStock ?? 0)) status = "Baixo";
+      return {
+        _id: product._id,
+        name: product.name,
+        internalCode: product.internalCode ?? "",
+        categoryName: category?.name ?? "",
+        unitOfMeasure: product.unitOfMeasure,
+        currentStock: qty,
+        reservedQuantity: validStock?.reservedQuantity ?? (integrity.consistent ? 0 : null),
+        minimumStock: product.minimumStock ?? 0,
+        idealStock: product.idealStock ?? 0,
+        maximumStock: product.maximumStock,
+        status,
+        integrityIssues: integrity.issues,
+        integrityLimitations: integrity.limitations,
+        brand: product.brand,
+        model: product.model,
+        active: product.active,
+      };
+    }));
   },
 });
 
@@ -262,6 +327,17 @@ export const stockPositionByArea = query({
       const key = [row.productId, row.areaId ?? "legacy", row.locationId].join("|");
       const reservedQuantity = reservationTotals.get(key) ?? 0;
       const physicalQuantity = row.physicalQuantity;
+      const hasDuplicateRows = row.sourceRows > 1;
+      const validPhysicalQuantity = !hasDuplicateRows && Number.isFinite(physicalQuantity) && physicalQuantity >= 0;
+      const validAvailableQuantity = validPhysicalQuantity &&
+        Number.isFinite(reservedQuantity) && reservedQuantity >= 0 && reservedQuantity <= physicalQuantity;
+      const integrityIssues = [
+        ...(hasDuplicateRows ? ["Há linhas duplicadas para o mesmo produto, área e local físico; o saldo agregado não é apresentado como confiável."] : []),
+        ...(!Number.isFinite(physicalQuantity) || physicalQuantity < 0 ? ["O saldo físico está inválido."] : []),
+        ...(!Number.isFinite(reservedQuantity) || reservedQuantity < 0 ? ["O saldo reservado está inválido."] : []),
+        ...(Number.isFinite(physicalQuantity) && Number.isFinite(reservedQuantity) && reservedQuantity > physicalQuantity
+          ? ["O saldo reservado excede o saldo físico."] : []),
+      ];
       return {
         _id: key,
         productId: row.productId,
@@ -270,11 +346,12 @@ export const stockPositionByArea = query({
         unitOfMeasure: product?.unitOfMeasure ?? "",
         areaName: area?.name ?? (row.areaId ? "Área não encontrada" : "Sem área (legado)"),
         locationName: location?.name ?? "Local não encontrado",
-        physicalQuantity,
+        physicalQuantity: validPhysicalQuantity ? physicalQuantity : null,
         reservedQuantity,
-        availableQuantity: physicalQuantity - reservedQuantity,
+        availableQuantity: validAvailableQuantity ? physicalQuantity - reservedQuantity : null,
         duplicateRows: row.sourceRows,
-        inconsistent: !Number.isFinite(physicalQuantity) || physicalQuantity < 0 || reservedQuantity > physicalQuantity || row.sourceRows > 1,
+        integrityIssues,
+        inconsistent: integrityIssues.length > 0,
       };
     })).then((rows) => rows.sort((a, b) =>
       a.productName.localeCompare(b.productName, "pt-BR") ||
