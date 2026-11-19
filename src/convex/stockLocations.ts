@@ -6,12 +6,19 @@ async function requireUser(ctx: any) {
   return requirePermission(ctx, "stock.view");
 }
 
-async function enrichLocationStock(ctx: any, row: any) {
+async function loadReservationsByProduct(ctx: any, productIds: string[]) {
+  const uniqueProductIds = [...new Set(productIds)];
+  const rows = await Promise.all(uniqueProductIds.map((productId) =>
+    ctx.db.query("requestItemReservations")
+      .withIndex("by_product", (q: any) => q.eq("productId", productId))
+      .collect()
+  ));
+  return new Map(uniqueProductIds.map((productId, index) => [productId, rows[index]]));
+}
+
+async function enrichLocationStock(ctx: any, row: any, reservations: any[] = []) {
   const location = await ctx.db.get(row.locationId);
   const area = row.areaId ? await ctx.db.get(row.areaId) : null;
-  const reservations = await ctx.db.query("requestItemReservations")
-    .withIndex("by_product", (q: any) => q.eq("productId", row.productId))
-    .collect();
   const reservedQuantity = reservations
     .filter((reservation: any) =>
       reservation.locationId === row.locationId &&
@@ -37,7 +44,9 @@ export const listByProduct = query({
     const entries = await ctx.db.query("stockByLocation")
       .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
       .collect();
-    return Promise.all(entries.map((entry: any) => enrichLocationStock(ctx, entry)));
+    const reservationsByProduct = await loadReservationsByProduct(ctx, [args.productId]);
+    const reservations = reservationsByProduct.get(args.productId) ?? [];
+    return Promise.all(entries.map((entry: any) => enrichLocationStock(ctx, entry, reservations)));
   },
 });
 
@@ -50,11 +59,22 @@ export const summary = query({
       .withIndex("by_active", (q: any) => q.eq("active", true))
       .collect();
 
-    return Promise.all(locations.map(async (location: any) => {
-      const entries = await ctx.db.query("stockByLocation")
+    const locationEntries = await Promise.all(locations.map(async (location: any) => ({
+      location,
+      entries: await ctx.db.query("stockByLocation")
         .withIndex("by_location", (q: any) => q.eq("locationId", location._id))
-        .collect();
-      const detailed = await Promise.all(entries.map((entry: any) => enrichLocationStock(ctx, entry)));
+        .collect(),
+    })));
+    const allEntries = locationEntries.flatMap(({ entries }: any) => entries);
+    const reservationsByProduct = await loadReservationsByProduct(
+      ctx,
+      allEntries.map((entry: any) => entry.productId as string),
+    );
+
+    return Promise.all(locationEntries.map(async ({ location, entries }: any) => {
+      const detailed = await Promise.all(entries.map((entry: any) =>
+        enrichLocationStock(ctx, entry, reservationsByProduct.get(entry.productId as string) ?? [])
+      ));
       return {
         ...location,
         area: location.areaId ? await ctx.db.get(location.areaId) : null,
@@ -78,8 +98,12 @@ export const listByLocation = query({
     const entries = await ctx.db.query("stockByLocation")
       .withIndex("by_location", (q: any) => q.eq("locationId", args.locationId))
       .collect();
+    const reservationsByProduct = await loadReservationsByProduct(
+      ctx,
+      entries.map((entry: any) => entry.productId as string),
+    );
     return Promise.all(entries.map(async (entry: any) => ({
-      ...await enrichLocationStock(ctx, entry),
+      ...await enrichLocationStock(ctx, entry, reservationsByProduct.get(entry.productId as string) ?? []),
       product: await ctx.db.get(entry.productId),
     })));
   },
