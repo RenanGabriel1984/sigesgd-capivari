@@ -94,7 +94,7 @@ async function findExistingInvoice(
       .query("entries")
       .withIndex("by_date")
       .order("desc")
-      .take(400);
+      .collect();
     candidates.push(...recent);
   }
 
