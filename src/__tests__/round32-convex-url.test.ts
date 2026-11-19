@@ -48,6 +48,13 @@ describe("ambientes Convex oficiais", () => {
     })).toThrow(/desenvolvimento só pode usar/i);
   });
 
+  it("bloqueia VITE_APP_ENV=development em build de produção", () => {
+    expect(() => resolveConvexUrl({
+      MODE: "production",
+      VITE_APP_ENV: "development",
+    })).toThrow(/Build de produção não pode usar o backend de desenvolvimento/i);
+  });
+
   it("ignora override de URL em produção", () => {
     expect(resolveConvexUrl({
       MODE: "production",
