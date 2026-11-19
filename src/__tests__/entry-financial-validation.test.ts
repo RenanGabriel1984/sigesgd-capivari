@@ -26,4 +26,10 @@ describe("integridade financeira das entradas", () => {
   it("rejeita valores negativos, infinitos e não numéricos", () => {
     expect(source).toContain("!Number.isFinite(value) || value < 0");
   });
+  it("verifica duplicidade de nota fiscal em todo o histórico, sem janela arbitrária de 400 entradas", () => {
+    const duplicateCheck = source.slice(source.indexOf("async function findExistingInvoice"), source.indexOf("Generate sequential entry number"));
+    expect(duplicateCheck).toContain('.withIndex("by_date")\n      .order("desc")\n      .collect();');
+    expect(duplicateCheck).not.toContain(".take(400)");
+  });
+
 });
