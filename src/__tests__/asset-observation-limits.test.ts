@@ -33,7 +33,7 @@ describe("peças instaladas — limites de observação", () => {
       const end = source.indexOf("\nexport const ", start + 1);
       const mutation = source.slice(start, end === -1 ? undefined : end);
       const validation = mutation.indexOf("assertTextLimits({ observation: args.observation }, MAX_OBSERVATION)");
-      const firstWrite = mutation.search(/ctx\\.db\\.(insert|patch)\\(/);
+      const firstWrite = mutation.search(/ctx\.db\.(insert|patch)\(/);
 
       expect(validation).toBeGreaterThan(-1);
       expect(firstWrite).toBeGreaterThan(validation);
