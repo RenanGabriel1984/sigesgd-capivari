@@ -312,9 +312,16 @@ export const getMonthlyConsumption = query({
   handler: async (ctx, args) => {
     await requirePermission(ctx, "stock.view");
 
+    const period = monthWindow(args.year, args.month);
     const [products, movements, stock] = await Promise.all([
       ctx.db.query("products").collect(),
-      ctx.db.query("stockMovements").withIndex("by_timestamp").order("desc").take(2000).then((r) => r.reverse()),
+      ctx.db
+        .query("stockMovements")
+        .withIndex("by_timestamp", (q) =>
+          q.gte("timestamp", period.start).lt("timestamp", period.end),
+        )
+        .order("asc")
+        .collect(),
       ctx.db.query("stock").collect(),
     ]);
 
@@ -339,19 +346,17 @@ export const getMonthlyConsumption = query({
       })),
       meta,
       currentStock,
-      monthWindow(args.year, args.month),
+      period,
     );
 
     // Consumo por organização (secretaria/departamento/unidade) a partir das
     // requisições entregues no período (origem real do consumo operacional).
-    const requests = await ctx.db
+    const delivered = await ctx.db
       .query("requests")
-      .withIndex("by_created")
-      .order("desc")
-      .take(500)
-      .then((r) => r.reverse());
-
-    const delivered = requests.filter((r) => r.status === "delivered" && r.deliveredAt != null && r.deliveredAt >= monthWindow(args.year, args.month).start && r.deliveredAt < monthWindow(args.year, args.month).end);
+      .withIndex("by_status_deliveredAt", (q) =>
+        q.eq("status", "delivered").gte("deliveredAt", period.start).lt("deliveredAt", period.end),
+      )
+      .collect();
 
     const byOrg: Array<{ orgName: string; productLabel: string; type: string; quantity: number }> = [];
     for (const r of delivered) {
@@ -370,7 +375,7 @@ export const getMonthlyConsumption = query({
       }
     }
 
-    return { lines, byOrg, period: monthWindow(args.year, args.month) };
+    return { lines, byOrg, period };
   },
 });
 
