@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { PRINT_AREA_ID } from "./printSupplies";
 import { attachStorageFile } from "./storage";
+import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -288,6 +289,7 @@ export const createCollection = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
 
     if (args.cartridgeIds.length === 0) throw new Error("Selecione ao menos uma carcaça para coleta");
     if (new Set(args.cartridgeIds).size !== args.cartridgeIds.length) {
