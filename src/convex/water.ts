@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { assertTextLimits } from "../lib/text-limits";
 import {
   splitWaterCostCents,
   validateWaterPeriodRange,
@@ -100,6 +101,7 @@ export const createParticipant = mutation({
   args: { name: v.string(), observation: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterParticipants" });
+    assertTextLimits({ observation: args.observation }, 500);
     const name = args.name.trim();
     if (!name) throw new Error("Informe o nome da pessoa.");
     if (name.length > 120) throw new Error("O nome deve ter no máximo 120 caracteres.");
@@ -125,6 +127,7 @@ export const updateParticipant = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requirePermission(ctx, "water.manage", { entity: "waterParticipants", entityId: args.participantId });
+    assertTextLimits({ observation: args.observation }, 500);
     const participant = await ctx.db.get(args.participantId);
     if (!participant) throw new Error("Participante não encontrado.");
     const updates: Record<string, unknown> = { updatedAt: Date.now() };
