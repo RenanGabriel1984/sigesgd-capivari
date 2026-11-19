@@ -38,6 +38,18 @@ describe("segurança e precisão dos relatórios", () => {
     expect(stats).not.toContain('.withIndex("by_product", (q) => q.eq("productId", p._id))');
   });
 
+  it("posição geral não escolhe arbitrariamente o primeiro saldo e sinaliza divergências", () => {
+    const block = queryBlock("stockPosition", "export const stockPositionByArea");
+    expect(block).toContain('ctx.db.query("stock").collect()');
+    expect(block).toContain('ctx.db.query("stockByLocation").collect()');
+    expect(block).toContain('ctx.db.query("lots").collect()');
+    expect(block).toContain("inspectProductStockIntegrity");
+    expect(block).toContain('status = "Inconsistente"');
+    expect(block).toContain("currentStock: qty");
+    expect(block).toContain("integrityIssues: integrity.issues");
+    expect(block).not.toContain(".first()");
+  });
+
   it("dashboard conta todas as trocas GomaQ da competência pelo índice de data, sem limite arbitrário", () => {
     expect(dashboard).toContain('.withIndex("by_date", (q) => q.gte("exchangedAt", monthStartMs).lte("exchangedAt", Date.now()))');
     expect(dashboard).toContain("gomaqExchangesThisMonth = gomaqExchanges.length");
