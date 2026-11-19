@@ -10,11 +10,12 @@ import {
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
-  // RBAC central: entradas exigem sessão com visão de estoque.
-  return requirePermission(ctx, "stock.view");
+  // Consultar entradas é distinto de consultar o saldo do estoque.
+  // Somente perfis com entries.view podem ler notas, fornecedores e itens recebidos.
+  return requirePermission(ctx, "entries.view", { entity: "entries" });
 }
 
 async function requireStockManagerOrAdmin(ctx: any) {
@@ -156,7 +157,21 @@ export const get = query({
       const product = await ctx.db.get(item.productId);
       const location = item.locationId ? await ctx.db.get(item.locationId) : null;
       const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
-      return { ...item, product, location, units };
+      const unitsWithAssets = await Promise.all(units.map(async (unit: any) => {
+        const asset: any = unit.assetId ? await ctx.db.get(unit.assetId) : null;
+        return {
+          ...unit,
+          asset: asset ? {
+            _id: asset._id,
+            assetType: asset.assetType,
+            patrimonyNumber: asset.patrimonyNumber ?? null,
+            serialNumber: asset.serialNumber ?? null,
+            manufacturer: asset.manufacturer ?? null,
+            model: asset.model ?? null,
+          } : null,
+        };
+      }));
+      return { ...item, product, location, units: unitsWithAssets };
     }));
     const lots = await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", entry._id)).collect();
     const area = entry.areaId ? await ctx.db.get(entry.areaId) : null;
@@ -405,6 +420,7 @@ export const confirm = mutation({
           quantity: item.quantity,
           units: itemUnits,
           productName: product?.name,
+          requireSerial: product?.hasSerial === true,
         });
         if (unitError) throw new Error(unitError);
       }
@@ -868,7 +884,7 @@ export const setUnits = mutation({
       responsibleDestiny: v.optional(v.string()),
       patrimonyStatus: v.optional(v.union(
         v.literal("in_stock"), v.literal("in_use"), v.literal("maintenance"), v.literal("idle"),
-        v.literal("transferred"), v.literal("disposal_pending"), v.literal("unserviceable"), v.literal("disposed")
+        v.literal("transferred")
       )),
       observation: v.optional(v.string()),
     })),
@@ -895,13 +911,32 @@ export const setUnits = mutation({
       }
     }
 
-    // Patrimônio não pode se repetir dentro da mesma entrada
+    // O número patrimonial é apenas um identificador opcional informado
+    // quando já consta no documento/equipamento. A TI não atribui tombamento.
     const seen = new Set<string>();
     for (const u of args.units) {
-      const p = (u.patrimonyNumber ?? "").trim();
-      if (!p) continue;
-      if (seen.has(p)) throw new Error(`Patrimônio duplicado na entrada: ${p}`);
-      seen.add(p);
+      const number = (u.patrimonyNumber ?? "").trim().toLocaleUpperCase("pt-BR");
+      if (!number) continue;
+      if (seen.has(number)) throw new Error(`Número patrimonial duplicado na entrada: ${u.patrimonyNumber}`);
+      seen.add(number);
+    }
+
+    // Evita cadastrar um identificador já associado a outro bem. Unidades da
+    // própria entrada são excluídas porque setUnits substitui esse conjunto.
+    const [knownUnits, knownAssets] = await Promise.all([
+      ctx.db.query("entryItemUnits").collect(),
+      ctx.db.query("assets").collect(),
+    ]);
+    for (const number of seen) {
+      const unitOwner = knownUnits.find((row: any) =>
+        row.entryId !== args.entryId &&
+        row.patrimonyNumber?.trim().toLocaleUpperCase("pt-BR") === number
+      );
+      if (unitOwner) throw new Error(`O número patrimonial ${number} já está associado a outra unidade recebida.`);
+      const assetOwner = knownAssets.find((row: any) =>
+        row.patrimonyNumber?.trim().toLocaleUpperCase("pt-BR") === number
+      );
+      if (assetOwner) throw new Error(`O número patrimonial ${number} já consta no cadastro de equipamentos.`);
     }
 
     // Substitui as unidades da entrada (rascunho)

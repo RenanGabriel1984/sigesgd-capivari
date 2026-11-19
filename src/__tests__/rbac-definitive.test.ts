@@ -2,7 +2,7 @@
  * Gestão de Estoque SGGD — RBAC DEFINITIVO (testes da matriz e do enforcement).
  *
  * Cobertura RBAC-01..20 do prompt de produção:
- *  • RBAC-01..05 / 18 / 19 → comportamento da MATRIZ CENTRAL (5 papéis);
+ *  • RBAC-01..05 / 18 / 19 → comportamento da MATRIZ CENTRAL (6 papéis);
  *  • RBAC-06..17           → contratos de ENFORCEMENT no backend (fonte real):
  *    cada arquivo sensível precisa chamar requirePermission com a permissão
  *    correta, e approve/reject precisam do bloqueio incondicional de
@@ -34,6 +34,7 @@ const PERMS = {
   stock_manager: PERMISSIONS.stock_manager,
   director: PERMISSIONS.director,
   technician: PERMISSIONS.technician,
+  patrimony_manager: PERMISSIONS.patrimony_manager,
 };
 
 /* ═══ RBAC-01..05 — matriz por perfil ═══════════════════════════════════════ */
@@ -131,6 +132,27 @@ describe("RBAC-04 director — decisão/aprovação, sem mutação de estoque", 
   });
 });
 
+describe("RBAC-05A patrimony_manager — tombamento sem acesso ao estoque", () => {
+  it("pode consultar pendências, atribuir patrimônio e acessar configurações pessoais", () => {
+    expect(roleHasPermission("patrimony_manager", "patrimony.view")).toBe(true);
+    expect(roleHasPermission("patrimony_manager", "patrimony.assign")).toBe(true);
+    expect(roleHasPermission("patrimony_manager", "settings.view")).toBe(true);
+    expect(PERMS.patrimony_manager.canViewPatrimony).toBe(true);
+    expect(PERMS.patrimony_manager.canViewRequests).toBe(false);
+    expect(PERMS.patrimony_manager.canViewProducts).toBe(false);
+  });
+
+  it("não recebe dashboard, estoque, equipamentos, usuários ou auditoria", () => {
+    for (const permission of [
+      "dashboard.view", "stock.view", "stock.mutate", "entries.view",
+      "entries.create", "equipment.view", "equipment.manage",
+      "users.view", "users.manage", "roles.manage", "audit.view",
+    ] as const) {
+      expect(roleHasPermission("patrimony_manager", permission), permission).toBe(false);
+    }
+  });
+});
+
 describe("RBAC-05 technician — interface simplificada", () => {
   it("pode consultar estoque/produtos e criar as PRÓPRIAS requisições", () => {
     expect(roleHasPermission("technician", "dashboard.view")).toBe(true);
@@ -167,9 +189,9 @@ describe("RBAC-05 technician — interface simplificada", () => {
 /* ═══ RBAC-18/19 — consolidação de papéis ═══════════════════════════════════ */
 
 describe("RBAC-18/19 — papéis existentes cobertos pela matriz", () => {
-  it("os 5 papéis esperados existem e nenhum papel antigo fica sem permissões", () => {
+  it("os 6 papéis esperados existem e nenhum papel fica sem permissões", () => {
     expect(APP_ROLES).toEqual([
-      "admin", "stock_manager", "director", "secretary", "technician",
+      "admin", "stock_manager", "director", "secretary", "technician", "patrimony_manager",
     ]);
     for (const r of APP_ROLES) {
       expect(ROLE_PERMISSIONS[r].length).toBeGreaterThan(0);
@@ -201,7 +223,61 @@ describe("RBAC-06 — técnico bloqueado em users (backend)", () => {
   });
 });
 
+describe("VALIDAÇÃO — quantidades finitas em operações de estoque", () => {
+  it("protege saída rápida, contagem, transferência e troca GomaQ contra NaN/Infinity", () => {
+    const quickExit = read("src/convex/stockSetup.ts");
+    const quickStart = quickExit.indexOf("export const quickExit = mutation({");
+    const quickEnd = quickExit.indexOf("\n});", quickStart);
+    expect(quickExit.slice(quickStart, quickEnd)).toContain("Number.isFinite(args.quantity)");
+
+    const inventory = read("src/convex/inventory.ts");
+    const countStart = inventory.indexOf("export const saveCount = mutation({");
+    const countEnd = inventory.indexOf("\n});", countStart);
+    expect(inventory.slice(countStart, countEnd)).toContain("Number.isFinite(args.countedQuantity)");
+
+    const transfers = read("src/convex/stockTransfers.ts");
+    const transferStart = transfers.indexOf("export const create = mutation({");
+    const transferEnd = transfers.indexOf("\n});", transferStart);
+    expect(transfers.slice(transferStart, transferEnd)).toContain("Number.isFinite(args.quantity)");
+
+    const gomaq = read("src/convex/gomaQ.ts");
+    const exchangeStart = gomaq.indexOf("export const createExchange = mutation({");
+    const exchangeEnd = gomaq.indexOf("\n});", exchangeStart);
+    const exchange = gomaq.slice(exchangeStart, exchangeEnd);
+    expect(exchange).toContain("Number.isFinite(args.quantityDelivered)");
+    expect(exchange).toContain("Number.isFinite(args.quantityEmptyReceived)");
+  });
+});
+
+describe("SEGURANÇA — limpeza destrutiva de dados de teste", () => {
+  it("não expõe cleanupTestData como mutation pública", () => {
+    const src = read("src/convex/stockSetup.ts");
+    expect(src).toContain('import { internalMutation, mutation, query } from "./_generated/server";');
+    expect(src).toContain("export const cleanupTestData = internalMutation({");
+    expect(src).not.toContain("export const cleanupTestData = mutation({");
+  });
+});
+
+describe("RBAC-07B — reserva de estoque protegida no backend", () => {
+  it("não usa movements.view para reservar e valida solicitação/quantidade", () => {
+    const src = read("src/convex/stockMovements.ts");
+    const start = src.indexOf("export const reserveStock = mutation({");
+    const end = src.indexOf("\n});", start);
+    const handler = src.slice(start, end);
+    expect(handler).toContain('requireStockManagerOrAdmin(ctx)');
+    expect(handler).toContain("Number.isFinite(args.quantity)");
+    expect(roleHasPermission("director", "stock.mutate")).toBe(false);
+    expect(roleHasPermission("technician", "stock.mutate")).toBe(false);
+  });
+});
+
 describe("RBAC-07 — técnico bloqueado em entries (backend)", () => {
+  it("consultas de entradas exigem entries.view, não apenas stock.view", () => {
+    expect(backendRequires("src/convex/entries.ts", "entries.view")).toBe(true);
+    expect(roleHasPermission("technician", "entries.view")).toBe(false);
+    expect(roleHasPermission("director", "entries.view")).toBe(false);
+    expect(roleHasPermission("stock_manager", "entries.view")).toBe(true);
+  });
   it("entries.ts (criar/confirmar/estornar) exige entries.create", () => {
     expect(backendRequires("src/convex/entries.ts", "entries.create")).toBe(true);
   });
@@ -307,6 +383,7 @@ describe("RBAC-20 — rotas protegidas por permissão", () => {
     expect(permissionForRoute("/organization")).toBe("organizations.view");
     expect(permissionForRoute("/audit")).toBe("audit.view");
     expect(permissionForRoute("/settings")).toBe("settings.view");
+    expect(permissionForRoute("/patrimony")).toBe("equipment.manage");
     expect(permissionForRoute("/entries")).toBe("entries.view");
     expect(permissionForRoute("/suppliers")).toBe("suppliers.view");
   });

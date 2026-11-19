@@ -9,6 +9,7 @@ export const ROLES = {
   DIRECTOR: "director",
   SECRETARY: "secretary",
   TECHNICIAN: "technician",
+  PATRIMONY_MANAGER: "patrimony_manager",
 } as const;
 
 export const roleValidator = v.union(
@@ -17,6 +18,7 @@ export const roleValidator = v.union(
   v.literal(ROLES.DIRECTOR),
   v.literal(ROLES.SECRETARY),
   v.literal(ROLES.TECHNICIAN),
+  v.literal(ROLES.PATRIMONY_MANAGER),
 );
 
 // ─── Organization Types ──────────────────────────────────────────────────────
@@ -704,14 +706,18 @@ const schema = defineSchema(
     }).index("by_active", ["active"])
       .index("by_name", ["name"]),
 
-    // ── Entry Item Units (Unidades patrimoniais por item de entrada) ──
-    // Produto → Unidade patrimonial → Patrimônio/Serial.
-    // Só existe para entrada classificada como Material PERMANENTE.
+    // ── Entry Item Units (Identificação individual por item de entrada) ──
+    // Produto → Unidade de equipamento → identificadores conhecidos (patrimônio/série).
+    // Só existe para entrada classificada como Material PERMANENTE; não atribui tombamento.
     entryItemUnits: defineTable({
       entryId: v.id("entries"),
       entryItemId: v.id("entryItems"),
       productId: v.id("products"),
       patrimonyNumber: v.optional(v.string()),
+      patrimonyRegistrationStatus: v.optional(v.union(v.literal("pending"), v.literal("registered"))),
+      patrimonyAssignedAt: v.optional(v.number()),
+      patrimonyAssignedByUserId: v.optional(v.id("users")),
+      assetId: v.optional(v.id("assets")),
       serialNumber: v.optional(v.string()),
       manufacturer: v.optional(v.string()),
       model: v.optional(v.string()),
@@ -732,7 +738,9 @@ const schema = defineSchema(
       createdAt: v.number(),
     }).index("by_entry", ["entryId"])
       .index("by_entryItem", ["entryItemId"])
-      .index("by_product", ["productId"]),
+      .index("by_product", ["productId"])
+      .index("by_asset", ["assetId"])
+      .index("by_registration_status", ["patrimonyRegistrationStatus"]),
 
     // ── Stock by Location (Estoque por Local de Armazenamento) ──
     stockByLocation: defineTable({
@@ -809,6 +817,10 @@ const schema = defineSchema(
     assets: defineTable({
       patrimonyNumber: v.optional(v.string()),
       serialNumber: v.optional(v.string()),
+      // Origem patrimonial rastreável até a unidade e documento de recebimento.
+      entryId: v.optional(v.id("entries")),
+      entryItemId: v.optional(v.id("entryItems")),
+      entryItemUnitId: v.optional(v.id("entryItemUnits")),
       // Inclui "phone" (categoria Telefonia). Ampliação ADITIVA: registros
       // existentes continuam válidos; nenhuma migração de dados é necessária.
       assetType: v.union(
@@ -826,7 +838,8 @@ const schema = defineSchema(
       storageLocationId: v.optional(v.id("storageLocations")),
       status: v.union(
         v.literal("active"), v.literal("maintenance"), v.literal("inactive"),
-        v.literal("disposal_pending"), v.literal("disposed"), v.literal("lost")
+        v.literal("disposal_pending"), v.literal("disposal_authorized"),
+        v.literal("sent_to_warehouse"), v.literal("disposed"), v.literal("lost")
       ),
       acquisitionDate: v.optional(v.string()),
       observation: v.optional(v.string()),
@@ -837,7 +850,36 @@ const schema = defineSchema(
       .index("by_type", ["assetType"])
       .index("by_organization", ["organizationId"])
       .index("by_responsible", ["responsibleUserId"])
-      .index("by_patrimony", ["patrimonyNumber"]),
+      .index("by_patrimony", ["patrimonyNumber"])
+      .index("by_serial", ["serialNumber"]),
+
+    // ── Solicitações de baixa operacional de equipamentos ──
+    // A TI solicita a baixa; o Departamento de Patrimônio confirma a baixa
+    // oficial; somente depois a TI registra o encaminhamento ao barracão.
+    disposalRequests: defineTable({
+      assetId: v.id("assets"),
+      requestedByUserId: v.id("users"),
+      reason: v.string(),
+      status: v.union(
+        v.literal("sent_to_patrimony"),
+        v.literal("confirmed_by_patrimony"),
+        v.literal("sent_to_warehouse")
+      ),
+      patrimonyNumberSnapshot: v.optional(v.string()),
+      serialNumberSnapshot: v.optional(v.string()),
+      equipmentDescription: v.string(),
+      confirmationReference: v.optional(v.string()),
+      confirmationDate: v.optional(v.string()),
+      confirmationRecordedByUserId: v.optional(v.id("users")),
+      confirmedAt: v.optional(v.number()),
+      warehouseSentDate: v.optional(v.string()),
+      warehouseRecordedByUserId: v.optional(v.id("users")),
+      observation: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_asset", ["assetId"])
+      .index("by_status", ["status"])
+      .index("by_created", ["createdAt"]),
 
     // ── Asset History (Histórico de Equipamentos) ──
     assetHistory: defineTable({
@@ -845,7 +887,9 @@ const schema = defineSchema(
       eventType: v.union(
         v.literal("created"), v.literal("assigned"), v.literal("relocated"),
         v.literal("maintenance"), v.literal("returned"), v.literal("status_changed"),
-        v.literal("part_installed"), v.literal("part_removed"), v.literal("disposed")
+        v.literal("part_installed"), v.literal("part_removed"), v.literal("disposed"),
+        v.literal("disposal_requested"), v.literal("disposal_confirmed"),
+        v.literal("sent_to_warehouse"), v.literal("linked_from_entry")
       ),
       userId: v.id("users"),
       previousOrganizationId: v.optional(v.id("organizations")),

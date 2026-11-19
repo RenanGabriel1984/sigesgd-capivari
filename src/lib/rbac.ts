@@ -23,6 +23,7 @@ export const APP_ROLES = [
   "director",
   "secretary",
   "technician",
+  "patrimony_manager",
 ] as const;
 
 export type AppRole = (typeof APP_ROLES)[number];
@@ -100,6 +101,9 @@ export const APP_PERMISSIONS = [
 
   "equipment.view",
   "equipment.manage",
+
+  "patrimony.view",
+  "patrimony.assign",
 
   "printers.view",
   "printers.manage",
@@ -201,6 +205,13 @@ const DIRECTOR_ACCESS: readonly AppPermission[] = [
   "settings.view",
 ];
 
+const PATRIMONY_MANAGER_ACCESS: readonly AppPermission[] = [
+  "patrimony.view",
+  "patrimony.assign",
+  // Permite apenas acesso às configurações pessoais, como troca de senha.
+  "settings.view",
+];
+
 const TECHNICIAN_ACCESS: readonly AppPermission[] = [
   "dashboard.view",
   "stock.view",
@@ -223,6 +234,7 @@ export const ROLE_PERMISSIONS: Record<AppRole, readonly AppPermission[]> = {
   stock_manager: STOCK_MANAGER_ACCESS,
   director: DIRECTOR_ACCESS,
   technician: TECHNICIAN_ACCESS,
+  patrimony_manager: PATRIMONY_MANAGER_ACCESS,
 };
 
 /* ─── API de consulta ───────────────────────────────────────────────────────── */
@@ -286,6 +298,7 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
   "/transfers": "transfers.view",
   "/gomaq": "gomaq.view",
   "/assets": "equipment.view",
+  "/patrimony": "equipment.manage",
   "/licenses": "licenses.view",
   "/movements": "movements.view",
   "/organization": "organizations.view",

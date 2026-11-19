@@ -22,11 +22,12 @@ import type { Id } from "@/convex/_generated/dataModel";
 
 const ASSET_STATUS_LABELS: Record<string, string> = {
   active: "Ativo", maintenance: "Manutenção", inactive: "Inativo",
-  disposal_pending: "Descarte Pendente", disposed: "Descartado", lost: "Perdido",
+  disposal_pending: "Solicitação enviada ao Patrimônio", disposal_authorized: "Baixa oficial confirmada", sent_to_warehouse: "Encaminhado ao barracão", disposed: "Baixado (legado)", lost: "Perdido",
 };
 const ASSET_STATUS_COLORS: Record<string, string> = {
   active: "text-emerald-600 bg-emerald-50", maintenance: "text-amber-600 bg-amber-50",
   inactive: "text-gray-600 bg-gray-50", disposal_pending: "text-orange-600 bg-orange-50",
+  disposal_authorized: "text-amber-700 bg-amber-50", sent_to_warehouse: "text-rose-600 bg-rose-50",
   disposed: "text-rose-600 bg-rose-50", lost: "text-rose-600 bg-rose-50",
 };
 const ASSET_TYPE_LABELS: Record<string, string> = {
@@ -38,7 +39,7 @@ const ASSET_TYPE_LABELS: Record<string, string> = {
 const HISTORY_LABELS: Record<string, string> = {
   created: "Criado", assigned: "Atribuído", relocated: "Transferido",
   maintenance: "Manutenção", returned: "Retornado", status_changed: "Status Alterado",
-  part_installed: "Peça Instalada", part_removed: "Peça Removida", disposed: "Descartado",
+  part_installed: "Peça Instalada", part_removed: "Peça Removida", disposed: "Descartado", linked_from_entry: "Vinculado ao recebimento",
 };
 
 export default function AssetDetailPage() {
@@ -127,6 +128,16 @@ export default function AssetDetailPage() {
                   <div><p className="text-xs text-muted-foreground">Responsável</p><p className="text-sm">{asset.responsible?.name ?? "—"}</p></div>
                   <div><p className="text-xs text-muted-foreground">Secretaria</p><p className="text-sm">{asset.organization?.name ?? "—"}</p></div>
                   <div><p className="text-xs text-muted-foreground">Localização</p><p className="text-sm">{asset.location?.name ?? "—"}</p></div>
+                  {asset.sourceEntry && <div className="md:col-span-3 rounded-md border bg-muted/20 p-3">
+                    <p className="text-xs font-medium text-muted-foreground">Origem do recebimento</p>
+                    <p className="text-sm font-medium">Entrada {asset.sourceEntry.entryNumber}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {asset.sourceEntry.invoiceNumber ? `NF ${asset.sourceEntry.invoiceNumber}` : "Sem número de NF"}
+                      {asset.sourceEntry.invoiceDate ? ` · Emissão ${asset.sourceEntry.invoiceDate}` : ""}
+                      {asset.sourceEntry.receivedAt ? ` · Recebimento ${new Date(asset.sourceEntry.receivedAt).toLocaleDateString("pt-BR")}` : ""}
+                    </p>
+                    <p className="text-xs text-muted-foreground">O vínculo identifica a origem do equipamento e não representa tombamento oficial.</p>
+                  </div>}
                   {asset.observation && <div className="md:col-span-3"><p className="text-xs text-muted-foreground">Observação</p><p className="text-sm">{asset.observation}</p></div>}
                 </div>
               </CardContent>
@@ -237,7 +248,7 @@ export default function AssetDetailPage() {
                 <Label>Novo Status</Label>
                 <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={newStatus} onChange={(e) => setNewStatus(e.target.value)}>
                   <option value="">Selecione...</option>
-                  {Object.entries(ASSET_STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  {Object.entries(ASSET_STATUS_LABELS).filter(([key]) => ["active", "maintenance", "inactive", "lost"].includes(key)).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>
               </div>
               <div><Label>Observação</Label><Textarea className="mt-1" value={statusObs} onChange={(e) => setStatusObs(e.target.value)} /></div>

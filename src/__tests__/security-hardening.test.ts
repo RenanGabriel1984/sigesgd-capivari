@@ -282,6 +282,17 @@ describe("SEC — fail closed na autorização (B-01)", () => {
     expect(roleHasPermission(null, "stock.view")).toBe(false);
     expect(roleHasPermission("root" as any, "stock.view")).toBe(false);
   });
+
+  it("SEC-AUTH-16: patrimony_manager só acessa tombamento e configurações pessoais", async () => {
+    const { requirePermission } = await loadRbac();
+    const ctx = await ctxFor({ _id: "u1", role: "patrimony_manager", active: true });
+    await expect(requirePermission(ctx, "patrimony.view")).resolves.toMatchObject({ role: "patrimony_manager" });
+    await expect(requirePermission(ctx, "patrimony.assign")).resolves.toMatchObject({ role: "patrimony_manager" });
+    await expect(requirePermission(ctx, "settings.view")).resolves.toMatchObject({ role: "patrimony_manager" });
+    for (const permission of ["dashboard.view", "stock.view", "stock.mutate", "equipment.manage", "users.manage", "audit.view"]) {
+      await expect(requirePermission(ctx, permission as any), permission).rejects.toThrow(/ACESSO NEGADO/i);
+    }
+  });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════

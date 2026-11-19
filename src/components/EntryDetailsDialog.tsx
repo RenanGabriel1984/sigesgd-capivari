@@ -5,6 +5,7 @@ import { FileUpload } from "@/components/FileUpload";
 import { MATERIAL_TYPE_LABELS, PATRIMONY_STATUS_LABELS, type MaterialType, type PatrimonyStatus } from "@/lib/material-types";
 import { NO_AREA_LABEL } from "@/lib/stock-areas";
 import { formatCurrency } from "@/lib/br-validators";
+import { Link } from "react-router";
 
 export function EntryDetailsDialog({ entry, statusLabels, statusColors, originLabels, onClose }: {
   entry: any;
@@ -57,15 +58,17 @@ export function EntryDetailsDialog({ entry, statusLabels, statusColors, originLa
           </div>
           {entry.lots?.length > 0 && <div><h4 className="font-medium text-sm mb-2">Lotes Gerados</h4><div className="flex flex-wrap gap-2">{entry.lots.map((lot: any) => <Badge key={lot._id} variant={lot.active ? "default" : "secondary"} className="text-[10px] font-mono">{lot.lotNumber} — {lot.quantityAvailable}/{lot.quantityReceived} disp.</Badge>)}</div></div>}
           {entry.items?.some((item: any) => (item.units?.length ?? 0) > 0) && <div>
-            <h4 className="font-medium text-sm mb-2">Unidades patrimoniais</h4>
+            <h4 className="font-medium text-sm mb-2">Unidades identificadas</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{entry.items.flatMap((item: any) => (item.units ?? []).map((unit: any) => <div key={unit._id} className="rounded-md border p-3 text-xs space-y-1">
               <p className="font-medium">{item.product?.name ?? "—"}</p>
               <p className="font-mono">Patrimônio: {unit.patrimonyNumber ?? "—"} · Série: {unit.serialNumber ?? "—"}</p>
               <p>{unit.manufacturer ?? "—"} {unit.model ?? ""}</p>
-              <p>Aquisição: {unit.acquisitionDate ?? "—"} · Tombamento: {unit.incorporationDate ?? "—"}</p>
+              <p>Aquisição: {unit.acquisitionDate ?? "—"} · Data de incorporação: {unit.incorporationDate ?? "—"}</p>
               <p>Valor aquisição: {unit.acquisitionValue ?? "—"} · Contábil: {unit.accountingValue ?? "—"} · Residual: {unit.residualValue ?? "—"}</p>
               <p>Depreciação acumulada: {unit.accumulatedDepreciation ?? "—"} · Valor líquido: {unit.netBookValue ?? "—"}</p>
               <p>Situação: {PATRIMONY_STATUS_LABELS[(unit.patrimonyStatus ?? "in_stock") as PatrimonyStatus]}</p>
+              {unit.asset?._id && <p className="pt-1"><Link className="text-primary underline" to={`/assets/${unit.asset._id}`}>Abrir cadastro do equipamento</Link></p>}
+              {!unit.asset?._id && entry.status === "confirmed" && <p className="pt-1 text-muted-foreground">Ainda não vinculado ao cadastro de equipamentos.</p>}
             </div>))}</div>
           </div>}
         </div>}
