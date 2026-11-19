@@ -572,6 +572,7 @@ export const deliver = mutation({
     const byId = new Map(requestItems.map((item: any) => [item._id as string, item]));
     const deliveredByItem = new Map<string, number>();
     const seen = new Set<string>();
+    const seenSerialNumbers = new Set<string>();
 
     // Validação completa antes das primeiras escritas.
     for (const input of inputItems) {
@@ -595,6 +596,13 @@ export const deliver = mutation({
         const serials = input.serialNumbers ?? [];
         if (serials.length !== input.quantityDelivered || serials.some((value: string) => !value.trim())) {
           throw new Error(`Informe exatamente ${input.quantityDelivered} número(s) de patrimônio/série para "${product.name}".`);
+        }
+        for (const serial of serials) {
+          const normalized = serial.trim().toLocaleLowerCase("pt-BR");
+          if (seenSerialNumbers.has(normalized)) {
+            throw new Error(`O número de série/patrimônio "${serial.trim()}" está duplicado nesta entrega.`);
+          }
+          seenSerialNumbers.add(normalized);
         }
       }
 
