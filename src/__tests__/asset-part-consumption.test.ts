@@ -85,5 +85,6 @@ describe("rastreabilidade FIFO de peças instaladas", () => {
     expect(backend).toContain("quantityReserved: reservedByLot.get(String(lot._id)) ?? 0");
     expect(backend).toContain("reservation.areaId !== lot.areaId");
     expect(backend).toContain("reservation.locationId !== lot.locationId");
+    expect(backend).toContain("reservedInLots > freshStock.reservedQuantity + 1e-9");
   });
 });
