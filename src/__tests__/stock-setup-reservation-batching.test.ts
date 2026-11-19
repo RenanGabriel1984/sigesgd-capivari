@@ -15,4 +15,8 @@ describe("resumo de saldo por local — consultas de reservas em lote", () => {
     expect(block).toContain("reservationsByProduct.get(String(row.productId))");
     expect(block).not.toContain('.withIndex("by_product", (q: any) => q.eq("productId", row.productId))');
   });
+
+  it("não expõe saldo disponível negativo quando reservas excedem o saldo físico", () => {
+    expect(source).toContain("quantity: Math.max(0, row.quantity - reserved)");
+  });
 });
