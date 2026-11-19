@@ -77,11 +77,11 @@ export const byEntity = query({
             q.eq("entity", args.entity).eq("entityId", args.entityId),
           )
           .order("desc")
-          .take(100)
+          .collect();
       : await base
           .withIndex("by_entity", (q: any) => q.eq("entity", args.entity))
           .order("desc")
-          .take(100);
+          .collect();;
     return attachMinimalUser(ctx, logs);
   },
 });
