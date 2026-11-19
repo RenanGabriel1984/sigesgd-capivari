@@ -530,6 +530,49 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* ─── Integridade do estoque ─── */}
+        {!loading && (s!.divergentStock ?? 0) > 0 && (
+          <Card className="border-amber-300/70 bg-amber-50/40">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base text-amber-800">
+                <AlertTriangle className="h-4 w-4" />
+                Divergências na integridade do estoque
+                <Badge variant="destructive" className="text-[10px]">
+                  {s!.divergentStock}
+                </Badge>
+              </CardTitle>
+              <p className="text-xs text-amber-900/80">
+                Estes produtos foram excluídos dos indicadores de estoque crítico até que os saldos sejam conferidos.
+                O painel não corrige nem altera os registros.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {s!.integrityAlerts.slice(0, 10).map((alert: any) => (
+                <div key={alert.productId} className="rounded-lg border border-amber-200 bg-background/80 p-3">
+                  <p className="text-sm font-semibold">{alert.productName}</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                    {alert.issues.map((issue: string, index: number) => (
+                      <li key={index}>{issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {s!.divergentStock > 10 && (
+                <p className="text-xs text-muted-foreground">
+                  Exibindo 10 de {s!.divergentStock} produtos com divergência.
+                </p>
+              )}
+              {permissions.canViewMovements && (
+                <div className="flex justify-end">
+                  <Button asChild variant="outline" size="sm">
+                    <Link to="/reports">Abrir relatórios</Link>
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {/* ─── Charts Row ─── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Consumption by Secretaria */}
