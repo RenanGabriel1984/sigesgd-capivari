@@ -421,3 +421,16 @@ describe("GOMAQ — consultas enxutas de atividade recente", () => {
     expect(page).not.toContain("api.gomaQ.listCollections, {}");
   });
 });
+
+
+describe("coleta de carcaças GomaQ", () => {
+  it("rejeita IDs duplicados antes de criar a coleta ou alterar carcaças", () => {
+    const source = readFileSync(resolve(__dirname, "../convex/gomaQ.ts"), "utf8");
+    const start = source.indexOf("export const createCollection =");
+    const end = source.indexOf("\nexport const ", start + 1);
+    const mutation = source.slice(start, end === -1 ? undefined : end);
+    expect(mutation).toContain("new Set(args.cartridgeIds).size !== args.cartridgeIds.length");
+    expect(mutation.indexOf("new Set(args.cartridgeIds)")).toBeLessThan(mutation.indexOf('ctx.db.insert("gomaQCollections"'));
+    expect(mutation).toContain("A seleção contém carcaças duplicadas");
+  });
+});
