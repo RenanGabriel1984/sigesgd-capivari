@@ -251,7 +251,7 @@ export const get = query({
       .query("assetMaintenances")
       .withIndex("by_asset", (q) => q.eq("assetId", args.assetId))
       .order("desc")
-      .take(50);
+      .collect();
     const maintWithDetails = await Promise.all(maintenances.map(async (m: any) => {
       const tech = await ctx.db.get(m.technicianUserId);
       return { ...m, technician: tech };
@@ -262,7 +262,7 @@ export const get = query({
       .query("assetHistory")
       .withIndex("by_asset", (q) => q.eq("assetId", args.assetId))
       .order("desc")
-      .take(100);
+      .collect();
     const histWithDetails = await Promise.all(history.map(async (h: any) => {
       const user = await ctx.db.get(h.userId);
       return { ...h, user };
@@ -598,7 +598,7 @@ export const history = query({
       .query("assetHistory")
       .withIndex("by_asset", (q) => q.eq("assetId", args.assetId))
       .order("desc")
-      .take(100);
+      .collect();
 
     return Promise.all(entries.map(async (h: any) => {
       const user = await ctx.db.get(h.userId);
