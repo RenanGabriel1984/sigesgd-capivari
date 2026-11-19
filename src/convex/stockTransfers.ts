@@ -5,6 +5,7 @@ import { requirePermission } from "./rbac";
 import type { Id } from "./_generated/dataModel";
 import { isDiscreteStockUnit, requireValidScopedStockQuantity } from "../lib/stock-quantity-rules";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
+import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -90,6 +91,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requirePermission(ctx, "transfers.create", { entity: "stockTransfers" });
+    assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
     if (!Number.isFinite(args.quantity) || args.quantity <= 0) throw new Error("Quantidade deve ser um número válido maior que zero");
     const fromLocation = await ctx.db.get(args.fromLocationId);
     const toLocation = await ctx.db.get(args.toLocationId);
@@ -357,6 +359,7 @@ export const reverse = mutation({
     const { userId } = await requirePermission(ctx, "transfers.create", { entity: "stockTransfers" });
     const reason = args.reason.trim();
     if (!reason) throw new Error("O motivo do estorno é obrigatório");
+    assertTextLimits({ observation: reason }, MAX_OBSERVATION);
 
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) throw new Error("Transferência não encontrada");
