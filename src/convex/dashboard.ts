@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { inspectProductStockIntegrity } from "../lib/stock-read-integrity";
 
 async function requireUser(ctx: any) {
   // RBAC central: dashboard exige permissão de visualização.
@@ -32,20 +33,56 @@ export const stats = query({
       .withIndex("by_active", (q) => q.eq("active", true))
       .collect();
 
-    // Carrega os saldos uma única vez: evita duas consultas por produto
-    // no dashboard e mantém o mesmo fallback para produtos sem saldo.
-    const stockRows = await ctx.db.query("stock").collect();
-    const stockByProduct = new Map(stockRows.map((row: any) => [row.productId, row]));
+    // Concilia as três representações sem escolher arbitrariamente linhas
+    // duplicadas nem transformar saldos inválidos em zero.
+    const [stockRows, locationRows, lots] = await Promise.all([
+      ctx.db.query("stock").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("lots").collect(),
+    ]);
+    const byProduct = <T extends { productId: any }>(rows: T[]) => {
+      const grouped = new Map<string, T[]>();
+      for (const row of rows) {
+        const key = String(row.productId);
+        const current = grouped.get(key) ?? [];
+        current.push(row);
+        grouped.set(key, current);
+      }
+      return grouped;
+    };
+    const stockGroups = byProduct(stockRows);
+    const locationGroups = byProduct(locationRows);
+    const lotGroups = byProduct(lots);
+    const integrityByProduct = new Map<string, ReturnType<typeof inspectProductStockIntegrity>>();
+    const stockByProduct = new Map<any, any>();
+    const integrityAlerts = [];
+    for (const product of products) {
+      const integrity = inspectProductStockIntegrity(
+        stockGroups.get(String(product._id)) ?? [],
+        locationGroups.get(String(product._id)) ?? [],
+        lotGroups.get(String(product._id)) ?? [],
+        product.name,
+      );
+      integrityByProduct.set(String(product._id), integrity);
+      if (integrity.globalStock) stockByProduct.set(product._id, integrity.globalStock);
+      if (!integrity.consistent) {
+        integrityAlerts.push({
+          productId: product._id,
+          productName: product.name,
+          issues: integrity.issues,
+          limitations: integrity.limitations,
+        });
+      }
+    }
 
-    // Critical stock count
+    // Produtos com divergência não entram no cálculo de criticidade.
     let criticalStock = 0;
     for (const p of products) {
-      const stock: any = stockByProduct.get(p._id);
-      const qty = stock?.physicalQuantity ?? 0;
-      // `?? 0` preserva exatamente o comportamento anterior (o campo passou a
-      // ser anulável; produto sem mínimo configurado continua com mínimo 0).
-      if (qty <= (p.minimumStock ?? 0)) criticalStock++;
+      const integrity = integrityByProduct.get(String(p._id))!;
+      const qty = integrity.globalStock?.physicalQuantity;
+      if (integrity.consistent && qty !== undefined && qty <= (p.minimumStock ?? 0)) criticalStock++;
     }
+    const divergentStock = integrityAlerts.length;
 
     // Pending requests this month
     const allPending = await ctx.db
@@ -102,7 +139,9 @@ export const stats = query({
     const urgentAlerts = [];
     for (const p of products) {
       const stock: any = stockByProduct.get(p._id);
-      const qty = stock?.physicalQuantity ?? 0;
+      const integrity = integrityByProduct.get(String(p._id))!;
+      if (!integrity.consistent || !stock) continue;
+      const qty = stock.physicalQuantity;
       if (qty <= (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
         urgentAlerts.push({
@@ -164,6 +203,8 @@ export const stats = query({
     return {
       totalProducts: products.length,
       criticalStock,
+      divergentStock,
+      integrityAlerts,
       pendingThisMonth,
       entriesThisMonth,
       exitsThisMonth,
