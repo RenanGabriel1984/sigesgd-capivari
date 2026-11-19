@@ -4,6 +4,7 @@ import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import { resolveScopedInventoryQuantity } from "../lib/stock-read-integrity";
 
 async function requireUser(ctx: any) {
   // RBAC central: consultas de inventário.
@@ -169,10 +170,21 @@ export const create = mutation({
       const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
       let systemQuantity = stock?.physicalQuantity ?? 0;
       if (args.locationId) {
-        const sbls = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", product._id)).collect();
-        systemQuantity = sbls
-          .filter((s: any) => s.locationId === args.locationId && s.areaId === args.areaId)
-          .reduce((sum: number, s: any) => sum + s.quantity, 0);
+        const [sbls, scopedLots] = await Promise.all([
+          ctx.db.query("stockByLocation")
+            .withIndex("by_product", (q: any) => q.eq("productId", product._id))
+            .collect(),
+          ctx.db.query("lots")
+            .withIndex("by_product", (q: any) => q.eq("productId", product._id))
+            .collect(),
+        ]);
+        systemQuantity = resolveScopedInventoryQuantity(
+          sbls,
+          scopedLots,
+          String(args.areaId),
+          String(args.locationId),
+          product.name,
+        );
       }
       await ctx.db.insert("inventoryCounts", {
         inventoryId,
