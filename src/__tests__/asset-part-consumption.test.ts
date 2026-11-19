@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   groupAssetPartConsumptionByLocation,
   planAssetPartFifoConsumption,
@@ -75,5 +77,13 @@ describe("rastreabilidade FIFO de peças instaladas", () => {
     expect(() => planAssetPartFifoConsumption([
       { id: "fully-reserved", lotNumber: "A", receivedAt: 1, quantityAvailable: 5, quantityReserved: 5, locationId: "cabinet-1" },
     ], 1)).toThrow(/Lotes insuficientes/);
+  });
+
+  it("valida reservas do backend antes de montar o plano FIFO", () => {
+    const backend = readFileSync(resolve(__dirname, "../convex/assetParts.ts"), "utf8");
+    expect(backend).toContain('ctx.db.query("requestItemReservations")');
+    expect(backend).toContain("quantityReserved: reservedByLot.get(String(lot._id)) ?? 0");
+    expect(backend).toContain("reservation.areaId !== lot.areaId");
+    expect(backend).toContain("reservation.locationId !== lot.locationId");
   });
 });
