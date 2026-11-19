@@ -66,11 +66,12 @@ function downloadCSV(filename: string, csvContent: string) {
 }
 
 function exportStockPositionCSV(data: any[]) {
-  const header = ["Código", "Nome", "Categoria", "Marca", "Modelo", "Saldo Atual", "Mínimo", "Ideal", "Máximo", "Status", "Unidade"];
+  const header = ["Código", "Nome", "Categoria", "Marca", "Modelo", "Saldo Atual", "Mínimo", "Ideal", "Máximo", "Status", "Unidade", "Alertas de integridade", "Limitações de rastreio"];
   const rows = data.map((r) => [
     r.internalCode, r.name, r.categoryName, r.brand ?? "", r.model ?? "",
-    r.currentStock, r.minimumStock, r.idealStock, r.maximumStock, r.status,
+    r.currentStock ?? "Não confiável", r.minimumStock, r.idealStock, r.maximumStock, r.status,
     UNIT_LABELS[r.unitOfMeasure] ?? r.unitOfMeasure,
+    (r.integrityIssues ?? []).join(" | "), (r.integrityLimitations ?? []).join(" | "),
   ]);
   downloadCSV("posicao_estoque.csv", serializeSemicolonCsv(header, rows));
 }
@@ -192,17 +193,18 @@ export default function Reports() {
   );
 
   const stockStatusCounts = useMemo(() => {
-    if (!stockPosition) return { normal: 0, baixo: 0, critico: 0, zerado: 0, total: 0 };
+    if (!stockPosition) return { normal: 0, baixo: 0, critico: 0, zerado: 0, inconsistente: 0, total: 0 };
     return stockPosition.reduce(
       (acc, item) => {
         acc.total++;
-        if (item.status === "Zerado") acc.zerado++;
+        if (item.status === "Inconsistente") acc.inconsistente++;
+        else if (item.status === "Zerado") acc.zerado++;
         else if (item.status === "Crítico") acc.critico++;
         else if (item.status === "Baixo") acc.baixo++;
         else acc.normal++;
         return acc;
       },
-      { normal: 0, baixo: 0, critico: 0, zerado: 0, total: 0 }
+      { normal: 0, baixo: 0, critico: 0, zerado: 0, inconsistente: 0, total: 0 }
     );
   }, [stockPosition]);
 
@@ -260,6 +262,9 @@ export default function Reports() {
                 <Badge variant="destructive" className="text-xs">
                   Zerado: {stockStatusCounts.zerado}
                 </Badge>
+                <Badge variant="destructive" className="text-xs">
+                  Inconsistente: {stockStatusCounts.inconsistente}
+                </Badge>
               </div>
               <div className="flex gap-2">
                 <Button
@@ -307,14 +312,14 @@ export default function Reports() {
                           <TableCell className="text-sm font-medium">{item.name}</TableCell>
                           <TableCell className="text-xs">{item.categoryName}</TableCell>
                           <TableCell className="text-xs">{[item.brand, item.model].filter(Boolean).join(" — ") || "—"}</TableCell>
-                          <TableCell className="text-sm text-right font-mono">{item.currentStock}</TableCell>
+                          <TableCell className="text-sm text-right font-mono">{item.currentStock ?? "—"}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.minimumStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.idealStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.maximumStock}</TableCell>
                           <TableCell>
                             <Badge
                               variant={
-                                item.status === "Crítico" || item.status === "Zerado"
+                                item.status === "Inconsistente" || item.status === "Crítico" || item.status === "Zerado"
                                   ? "destructive"
                                   : item.status === "Baixo"
                                   ? "secondary"
@@ -324,6 +329,11 @@ export default function Reports() {
                             >
                               {item.status}
                             </Badge>
+                            {item.integrityIssues?.length > 0 && (
+                              <p className="mt-1 max-w-xs whitespace-normal text-[10px] leading-snug text-destructive">
+                                {item.integrityIssues.join(" ")}
+                              </p>
+                            )}
                           </TableCell>
                         </TableRow>
                       ))}
