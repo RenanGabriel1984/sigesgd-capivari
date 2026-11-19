@@ -221,3 +221,58 @@ export function inspectProductStockIntegrity(
     consistent: issues.length === 0,
   };
 }
+
+
+/**
+ * Resolve o saldo de abertura de um inventário localizado sem somar buckets
+ * duplicados nem aceitar divergência entre o saldo físico e os lotes do escopo.
+ * Lotes sem localização atual não são atribuídos por inferência ao armário.
+ */
+export function resolveScopedInventoryQuantity(
+  rows: readonly ScopedStockBalance[],
+  lots: readonly LotStockBalance[],
+  areaId: string,
+  locationId: string,
+  productLabel: string,
+): number {
+  const matchingRows = rows.filter(
+    (row) => row.areaId === areaId && row.locationId === locationId,
+  );
+  if (matchingRows.length > 1) {
+    throw new Error(`Há saldos duplicados para "${productLabel}" na área/local selecionado.`);
+  }
+  const row = matchingRows[0];
+  if (row && (
+    typeof row.quantity !== "number" ||
+    !Number.isFinite(row.quantity) ||
+    row.quantity < 0
+  )) {
+    throw new Error(`O saldo físico de "${productLabel}" na área/local selecionado é inválido.`);
+  }
+
+  const matchingLots = lots.filter(
+    (lot) => lot.areaId === areaId && lot.locationId === locationId,
+  );
+  let lotTotal = 0;
+  for (const lot of matchingLots) {
+    if (
+      typeof lot.quantityAvailable !== "number" ||
+      !Number.isFinite(lot.quantityAvailable) ||
+      lot.quantityAvailable < 0
+    ) {
+      throw new Error(`O lote ${lot.lotNumber ?? "(sem número)"} de "${productLabel}" possui saldo inválido.`);
+    }
+    if (lot.active === false && lot.quantityAvailable > TOLERANCE) {
+      throw new Error(`O lote ${lot.lotNumber ?? "(sem número)"} de "${productLabel}" está inativo com saldo positivo.`);
+    }
+    lotTotal += lot.quantityAvailable;
+  }
+
+  const physicalQuantity = row?.quantity ?? 0;
+  if (Math.abs(physicalQuantity - lotTotal) > TOLERANCE) {
+    throw new Error(
+      `O saldo de abertura de "${productLabel}" na área/local diverge dos lotes (físico: ${physicalQuantity}; lotes: ${lotTotal}). Regularize antes de abrir o inventário.`,
+    );
+  }
+  return physicalQuantity;
+}

@@ -26,3 +26,18 @@ describe("segurança da entrega de solicitações", () => {
     expect(deliver).toContain("recipient.active === false");
   });
 });
+
+
+describe("confirmação de entrega — unicidade do registro de senha", () => {
+  it("bloqueia registros de senha duplicados antes de verificar a senha ou movimentar estoque", () => {
+    const start = requests.indexOf("export const deliver = mutation({");
+    const end = requests.indexOf("export const cancel = mutation({", start);
+    const deliver = requests.slice(start, end);
+    expect(deliver).toContain('withIndex("by_user", (q: any) => q.eq("userId", userId)).collect()');
+    expect(deliver).toContain("passwordRecords.length !== 1");
+    expect(deliver).toContain("const passwordRecord = passwordRecords[0]");
+    expect(deliver.indexOf("passwordRecords.length !== 1")).toBeLessThan(deliver.indexOf("verifyPassword"));
+    expect(deliver.indexOf("passwordRecords.length !== 1")).toBeLessThan(deliver.indexOf('ctx.db.patch(stock._id'));
+    expect(deliver).not.toContain('withIndex("by_user", (q: any) => q.eq("userId", userId)).first()');
+  });
+});

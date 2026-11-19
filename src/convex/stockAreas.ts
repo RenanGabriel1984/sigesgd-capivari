@@ -415,11 +415,14 @@ export const ensureBaselineAreas = mutation({
     const skipped: string[] = [];
 
     for (const area of BASELINE_STOCK_AREAS) {
-      const existing = await ctx.db
+      const existingRows = await ctx.db
         .query("stockAreas")
         .withIndex("by_name", (q: any) => q.eq("name", area.name))
-        .first();
-      if (existing) {
+        .collect();
+      if (existingRows.length > 1) {
+        throw new Error(`Há mais de uma área chamada "${area.name}". Regularize a duplicidade antes de garantir as áreas padrão.`);
+      }
+      if (existingRows.length === 1) {
         skipped.push(area.name);
         continue;
       }
@@ -455,11 +458,14 @@ export const create = mutation({
     assertShortTextLimits({ name });
     assertTextLimits({ description: args.description?.trim() });
 
-    const existing = await ctx.db
+    const existingRows = await ctx.db
       .query("stockAreas")
       .withIndex("by_name", (q: any) => q.eq("name", name))
-      .first();
-    if (existing) throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
+      .collect();
+    if (existingRows.length > 1) {
+      throw new Error(`Há áreas duplicadas chamadas "${name}". Regularize antes de criar outra.`);
+    }
+    if (existingRows.length === 1) throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
 
     const id = await ctx.db.insert("stockAreas", {
       name,
@@ -496,11 +502,14 @@ export const update = mutation({
       if (!name) throw new Error("Nome da área é obrigatório");
       assertShortTextLimits({ name });
       if (name !== area.name) {
-        const dup = await ctx.db
+        const duplicates = await ctx.db
           .query("stockAreas")
           .withIndex("by_name", (q: any) => q.eq("name", name))
-          .first();
-        if (dup) throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
+          .collect();
+        if (duplicates.length > 1) {
+          throw new Error(`Há áreas duplicadas chamadas "${name}". Regularize antes de renomear.`);
+        }
+        if (duplicates.length === 1) throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
       }
       updates.name = name;
     }

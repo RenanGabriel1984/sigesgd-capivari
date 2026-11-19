@@ -229,3 +229,24 @@ describe("estoque por área e local físico — regressões de segurança", () =
     }
   });
 });
+
+
+describe("unicidade operacional de áreas de estoque", () => {
+  it("garante áreas padrão somente quando não há duplicidade pelo nome", () => {
+    const ensure = mutationBlock(stockAreas, "ensureBaselineAreas");
+    expect(ensure).toContain('.withIndex("by_name", (q: any) => q.eq("name", area.name))');
+    expect(ensure).toContain(".collect()");
+    expect(ensure).toContain("existingRows.length > 1");
+    expect(ensure).toContain("existingRows.length === 1");
+    expect(ensure).not.toContain(".first()");
+  });
+
+  it("não cria nem renomeia áreas quando já há nomes duplicados", () => {
+    const create = mutationBlock(stockAreas, "create");
+    const update = mutationBlock(stockAreas, "update");
+    expect(create).toContain("existingRows.length > 1");
+    expect(update).toContain("duplicates.length > 1");
+    expect(create).toContain(".collect()");
+    expect(update).toContain(".collect()");
+  });
+});

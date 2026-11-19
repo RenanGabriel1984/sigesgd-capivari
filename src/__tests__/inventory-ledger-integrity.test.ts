@@ -55,3 +55,16 @@ describe("integridade do fechamento de inventário", () => {
     expect(close).toContain("Ajuste via inventário");
   });
 });
+
+
+describe("integridade da abertura de inventário", () => {
+  it("concilia área/local com lotes em vez de somar buckets físicos", () => {
+    const createStart = inventory.indexOf("export const create = mutation({");
+    const closeStart = inventory.indexOf("export const close = mutation({", createStart);
+    const create = inventory.slice(createStart, closeStart);
+    expect(create).toContain("resolveScopedInventoryQuantity(");
+    expect(create).toContain('ctx.db.query("stockByLocation")');
+    expect(create).toContain('ctx.db.query("lots")');
+    expect(create).not.toContain(".reduce((sum: number, s: any) => sum + s.quantity, 0)");
+  });
+});
