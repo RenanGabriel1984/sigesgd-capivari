@@ -49,7 +49,7 @@ export const dashboard = query({
       participants: sortedParticipants,
       periods,
       openPeriod: periods.find((period) => period.status === "open") ?? null,
-      receipts: allReceipts.sort((a, b) => b.receivedAt - a.receivedAt).slice(0, 30),
+      receipts: allReceipts.sort((a, b) => b.receivedAt - a.receivedAt),
       movements: allMovements.sort((a, b) => b.date - a.date),
       balance: calculateWaterContainerBalance(allReceipts.filter((receipt: any) => !receipt.reversedAt), allMovements.filter((movement: any) => !movement.reversedAt)),
       financialSummary,
