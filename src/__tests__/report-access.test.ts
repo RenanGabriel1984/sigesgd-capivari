@@ -50,6 +50,16 @@ describe("segurança e precisão dos relatórios", () => {
     expect(block).not.toContain(".first()");
   });
 
+  it("relatório de posição distingue saldo não confiável e limitações de rastreabilidade", () => {
+    const page = readFileSync(resolve(root, "src/pages/Reports.tsx"), "utf8");
+    expect(page).toContain('item.currentStock ?? "—"');
+    expect(page).toContain('item.status === "Inconsistente"');
+    expect(page).toContain("item.integrityIssues.join");
+    expect(page).toContain("item.integrityLimitations.join");
+    expect(page).toContain("Alertas de integridade");
+    expect(page).toContain("Limitações de rastreio");
+  });
+
   it("dashboard conta todas as trocas GomaQ da competência pelo índice de data, sem limite arbitrário", () => {
     expect(dashboard).toContain('.withIndex("by_date", (q) => q.gte("exchangedAt", monthStartMs).lte("exchangedAt", Date.now()))');
     expect(dashboard).toContain("gomaqExchangesThisMonth = gomaqExchanges.length");
