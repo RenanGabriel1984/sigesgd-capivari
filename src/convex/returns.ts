@@ -97,7 +97,11 @@ export const returnable = query({
       .collect();
     const allReturns = await loadReturns(ctx);
 
-    const rows = await Promise.all(exits.map(async (m: any) => {
+    // Saídas canceladas não representam retirada válida e nunca podem aparecer
+    // como disponíveis para devolução. A mutation já as rejeita; filtrá-las
+    // aqui mantém a lista coerente e evita oferecer uma ação impossível.
+    const activeExits = exits.filter((movement: any) => !movement.canceled);
+    const rows = await Promise.all(activeExits.map(async (m: any) => {
       const product: any = await ctx.db.get(m.productId);
       const user: any = await ctx.db.get(m.userId);
       const request: any = m.requestId ? await ctx.db.get(m.requestId) : null;
