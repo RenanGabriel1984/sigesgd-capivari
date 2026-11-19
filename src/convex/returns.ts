@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
+import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { isDiscreteStockUnit, requireValidScopedStockQuantity } from "../lib/stock-quantity-rules";
 import {
   validateReturnQuantity,
@@ -175,6 +176,7 @@ export const create = mutation({
     const { userId } = await requireReturnCreate(ctx);
     const reason = args.reason.trim();
     if (!reason) throw new Error("O motivo da devolução é obrigatório");
+    assertTextLimits({ observation: reason, description: args.observation }, MAX_OBSERVATION);
 
     const exit: any = await ctx.db.get(args.exitMovementId);
     if (!exit) throw new Error("Saída original não encontrada");
