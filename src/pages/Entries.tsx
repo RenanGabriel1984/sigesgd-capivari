@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, usePaginatedQuery, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { Copy, Plus, RotateCcw } from "lucide-react";
 
@@ -313,7 +313,7 @@ function EntriesPageSkeleton() {
 function EntriesPage() {
   useAuth();
 
-  const entries = useQuery(api.entries.list);
+  const { results: entries, status: entriesStatus, loadMore: loadMoreEntries } = usePaginatedQuery(api.entries.listPage, {}, { initialNumItems: 50 });
   const suppliers = useQuery(api.suppliers.list);
   const locations = useQuery(api.storageLocations.listActive);
   const areas = useQuery(api.stockAreas.listActive);
@@ -1175,7 +1175,7 @@ function EntriesPage() {
     );
   };
 
-  if (entries === undefined) return <EntriesPageSkeleton />;
+  if (entriesStatus === "LoadingFirstPage") return <EntriesPageSkeleton />;
 
   const searchTerm = search.trim().toLowerCase();
   const filteredEntries = (entries ?? []).filter((entry) => {
@@ -1196,7 +1196,7 @@ function EntriesPage() {
           <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight">Entradas</h1>
             <p className="text-sm text-muted-foreground">
-              {entries.length} entrada(s) — XML, DANFE/OCR ou manual, sempre com
+              Exibindo {entries.length} entrada(s) carregadas — XML, DANFE/OCR ou manual, sempre com
               conferência antes de afetar o estoque
             </p>
           </div>
@@ -1381,6 +1381,13 @@ function EntriesPage() {
             ) : null}
           </TableBody>
         </Table>
+        {entriesStatus !== "Exhausted" ? (
+          <div className="flex justify-center py-3">
+            <Button variant="outline" onClick={() => loadMoreEntries(50)} disabled={entriesStatus === "LoadingMore"}>
+              {entriesStatus === "LoadingMore" ? "Carregando..." : "Carregar mais entradas"}
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       {/* ── Estorno de entrada confirmada ── */}
