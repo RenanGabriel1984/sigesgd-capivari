@@ -497,6 +497,7 @@ const schema = defineSchema(
       updatedAt: v.number(),
     }).index("by_requester", ["requesterId"])
       .index("by_status", ["status"])
+      .index("by_status_deliveredAt", ["status", "deliveredAt"])
       .index("by_approver", ["approverId"])
       .index("by_created", ["createdAt"])
       .index("by_secretaria", ["secretariaId"]),
