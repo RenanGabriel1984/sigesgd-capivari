@@ -58,14 +58,19 @@ export const summary = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    const areas = await ctx.db.query("stockAreas").collect();
-    const lots = await ctx.db.query("lots").collect();
+    const [areas, lots, reservations] = await Promise.all([
+      ctx.db.query("stockAreas").collect(),
+      ctx.db.query("lots").collect(),
+      ctx.db.query("requestItemReservations").collect(),
+    ]);
+    // Uma única leitura de reservas evita uma consulta por lote no resumo.
     const reservationsByLot = new Map<string, number>();
-    for (const lot of lots) {
-      const reservations = await ctx.db.query("requestItemReservations")
-        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
-      reservationsByLot.set(lot._id as string,
-        reservations.reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0));
+    for (const reservation of reservations) {
+      const lotId = String(reservation.lotId);
+      reservationsByLot.set(
+        lotId,
+        (reservationsByLot.get(lotId) ?? 0) + reservation.quantityRemaining,
+      );
     }
 
     const buckets = new Map<
