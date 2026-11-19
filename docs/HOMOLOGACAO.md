@@ -1,30 +1,31 @@
 # Homologação da Fase de Entradas — R32.0
 
-Documento operacional do ambiente isolado do SIGESGD Capivari.
-Regra mestra: **nada de produção** — sem deploy de funções para o backend em uso,
-sem mutação de dados oficiais, sem confirmação de notas reais.
+Documento operacional dos ambientes do SIGESGD Capivari.
+Regra mestra: **não executar operações em produção durante homologação** — sem
+deploy de funções, mutations, migração ou confirmação de notas reais.
 
-> **Mapa atualizado em 12/11/2026, confirmado pelo proprietário do SIGESGD.**
-> Esta seção prevalece sobre referências históricas a previews antigos mais abaixo.
+> **Mapa corrigido em 19/11/2026 conforme confirmação mais recente do proprietário.**
+> Esta tabela substitui o mapa anterior de 12/11; as seções datadas abaixo são
+> registros históricos e não devem prevalecer sobre esta configuração.
 
 ## Mapa correto dos ambientes
 
 | Projeto Convex | Ambiente no painel | Deployment | Papel atual |
 |---|---|---|---|
-| `sigesgd-capivari-homologacao` | Production | `tame-alligator-797` | **Backend persistente de homologação**; destino único para o Preview isolado |
+| `sigesgd-capivari` | Production | `savory-sockeye-292` | **Backend de produção oficial** |
+| `sigesgd-capivari` | Development (Cloud) | `first-herring-264` | **Backend de desenvolvimento**; não é o destino padrão de produção |
+| `sigesgd-capivari` | Preview — `codex/stabilizacao-seguranca` | `first-starling-943` | Preview de branch; não é produção nem homologação persistente |
+| `sigesgd-capivari` | Preview — `codex/stock-areas-phase1` | `brilliant-bullfrog-982` | Preview antigo de outra branch |
+| `sigesgd-capivari-homologacao` | Production | `tame-alligator-797` | **Backend persistente de homologação**; destino único do Preview isolado |
 | `sigesgd-capivari-homologacao` | Development (Cloud) | `first-dinosaur-625` | Desenvolvimento separado; não usar como backend do Preview atual |
-| `sigesgd-capivari` | Production | `savory-sockeye-292` | Slot Production do projeto principal; não presumir que contém os dados operacionais atuais |
-| `sigesgd-capivari` | Development (Cloud) | `first-herring-264` | **Banco operacional atual**: o Freebuff carrega os dados utilizados pelo SIGESGD aqui. Preservar integralmente |
-| `sigesgd-capivari` | Preview — `codex/stabilizacao-seguranca` | `first-starling-943` | Preview de branch do projeto principal; não é a homologação persistente |
-| `sigesgd-capivari` | Preview — `codex/stock-areas-phase1` | `brilliant-bullfrog-982` | Preview antigo de outra branch; não é a homologação atual |
 
 ### Regras de proteção
 
-- O nome/tipo `Development` do Convex não significa que o deployment esteja sem dados ou possa ser descartado. `first-herring-264` é a base operacional atual confirmada pelo proprietário.
-- Não trocar automaticamente o app para `savory-sockeye-292`. Uma eventual migração do banco operacional para o slot Production exige plano, reconciliação, backup/restauração e autorização específica.
-- O frontend de homologação deste projeto Vercel deve usar somente `tame-alligator-797.convex.cloud`.
-- Builds de homologação devem recusar `savory-sockeye-292`, `first-herring-264`, `first-starling-943`, `brilliant-bullfrog-982` e `first-dinosaur-625`.
-- Nenhum dos deployments do projeto principal pode ser usado como atalho para homologação.
+- O deployment de produção oficial é `savory-sockeye-292`; o deployment de desenvolvimento é `first-herring-264`.
+- Builds de produção devem resolver para `savory-sockeye-292.convex.cloud`; execução local em modo Vite development deve resolver para `first-herring-264.convex.cloud`.
+- Homologação persistente permanece isolada em `tame-alligator-797.convex.cloud`; builds de homologação devem recusar todos os deployments do projeto principal e `first-dinosaur-625`.
+- Não copiar, migrar, reconciliar ou modificar dados entre esses deployments sem plano e autorização específica.
+- Nenhum deployment do projeto principal pode ser usado como atalho para homologação.
 
 ---
 
@@ -40,9 +41,10 @@ sem mutação de dados oficiais, sem confirmação de notas reais.
 | Build R31.9 (produção) | entry `index-BHZdxdWF.js` (após R32), `Entries-*` em chunk próprio |
 | Criação de deployment pela CLI | **bloqueada**: `Creating a deployment isn't supported with a deploy key` |
 
-O backend atual é um deployment de **desenvolvimento** que, na prática, guarda a
-carga oficial (produtos, entradas, organizações). Por isso ele é tratado aqui
-como **produção operacional**: nenhuma escrita foi feita nele.
+Naquele registro histórico de 03/11, o deployment de desenvolvimento era tratado
+como backend operacional. Essa identificação foi posteriormente corrigida pelo
+proprietário em 19/11: produção oficial é `savory-sockeye-292` e desenvolvimento
+é `first-herring-264`. Não use a conclusão antiga como configuração atual.
 
 ### Achado que bloqueava a homologação (corrigido no R32.0)
 
@@ -54,7 +56,8 @@ homologação continuaria lendo/gravando no backend oficial.
 
 Correção mínima (sem mudar fluxos): `src/lib/convex-url.ts` resolve a URL.
 
-- produção (padrão): sempre o deployment oficial — `VITE_CONVEX_URL` é ignorado;
+- produção (build Vite production): sempre `savory-sockeye-292` — `VITE_CONVEX_URL` é ignorado;
+- desenvolvimento (modo Vite development): `first-herring-264`, aceitando somente esse host;
 - homologação (`VITE_APP_ENV=homologacao`): `VITE_CONVEX_URL` é **obrigatória**,
   precisa ser `https://*.convex.cloud` e **não pode** ser o host oficial;
   sem isso a build falha fechada (erro explícito, sem tocar no banco oficial).
@@ -193,7 +196,11 @@ associação manual).
 
 ---
 
-## 5. Estado da entrega R32.0
+## 5. Estado histórico da entrega R32.0 (12/11/2026)
+
+> Os estados e a identificação do backend operacional nesta seção refletem a
+> fotografia de 12/11. O mapa de ambientes corrigido em 19/11, no início deste
+> documento, é a referência vigente.
 
 - **Ambiente Convex de homologação existe?** Sim: projeto separado
   `sigesgd-capivari-homologacao`, com Production `tame-alligator-797` e
@@ -214,7 +221,7 @@ associação manual).
   integrado após a publicação.
 - **Produção/projeto principal modificados?** Não: nenhum deploy de funções,
   mutação, limpeza, migração ou confirmação de nota foi executado em
-  `savory-sockeye-292` ou no backend operacional `first-herring-264`.
+  `savory-sockeye-292` ou no backend de desenvolvimento `first-herring-264`.
 
 
 ---
