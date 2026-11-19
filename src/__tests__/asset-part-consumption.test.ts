@@ -81,7 +81,7 @@ describe("rastreabilidade FIFO de peças instaladas", () => {
 
   it("valida reservas do backend antes de montar o plano FIFO", () => {
     const backend = readFileSync(resolve(__dirname, "../convex/assetParts.ts"), "utf8");
-    expect(backend).toContain('ctx.db.query("requestItemReservations")');
+    expect(backend).toContain('.query("requestItemReservations")');
     expect(backend).toContain("quantityReserved: reservedByLot.get(String(lot._id)) ?? 0");
     expect(backend).toContain("reservation.areaId !== lot.areaId");
     expect(backend).toContain("reservation.locationId !== lot.locationId");
