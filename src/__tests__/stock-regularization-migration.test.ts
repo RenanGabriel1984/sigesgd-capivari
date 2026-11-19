@@ -6,6 +6,8 @@ const ROOT = resolve(__dirname, "../..");
 const read = (path: string) => readFileSync(resolve(ROOT, path), "utf-8");
 const migration = read("src/convex/stockRegularization.ts");
 const manifest = read("src/lib/stock-regularization-manifest.ts");
+const stockSetup = read("src/convex/stockSetup.ts");
+const stockSetupDiagnostic = read("src/convex/stockSetupDiagnostics.ts");
 
 describe("regularização histórica de área/local", () => {
   it("separa prévia somente leitura da mutation de aplicação", () => {
@@ -48,6 +50,15 @@ describe("regularização histórica de área/local", () => {
     expect(migration).toContain('.withIndex("by_number", (q: any) => q.eq("entryNumber", GOMAQ_ENTRY_NUMBER)).collect()');
     expect(migration).toContain("matches.length === 1 ? matches[0] : null");
     expect(migration).toContain("Existem");
+  });
+
+  it("diagnósticos e classificação não escolhem registros globais ou entradas duplicadas", () => {
+    expect(stockSetup).toContain("entryMatches.length !== 1");
+    expect(stockSetup).toContain("duplicateGlobalStocks");
+    expect(stockSetup).toContain("stockRows.length > 1");
+    expect(stockSetupDiagnostic).toContain("entryMatches.length !== 1");
+    expect(stockSetupDiagnostic).toContain("candidateIds");
+    expect(stockSetupDiagnostic).not.toContain(".first()");
   });
 
   it("preserva saldos globais, lotes e quantidades das movimentações", () => {
