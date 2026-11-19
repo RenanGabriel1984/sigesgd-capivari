@@ -25,6 +25,14 @@ describe("segurança e precisão dos relatórios", () => {
     }
   });
 
+  it("dashboard carrega os saldos de estoque uma vez e reutiliza o mapa nos indicadores", () => {
+    const stats = queryBlock("stats", "export const stockPosition");
+    expect(stats).toContain('ctx.db.query("stock").collect()');
+    expect(stats).toContain("const stockByProduct = new Map(stockRows.map");
+    expect(stats).toContain("stockByProduct.get(p._id)");
+    expect(stats).not.toContain('.withIndex("by_product", (q) => q.eq("productId", p._id))');
+  });
+
   it("dashboard conta todas as trocas GomaQ da competência pelo índice de data, sem limite arbitrário", () => {
     expect(dashboard).toContain('.withIndex("by_date", (q) => q.gte("exchangedAt", monthStartMs).lte("exchangedAt", Date.now()))');
     expect(dashboard).toContain("gomaqExchangesThisMonth = gomaqExchanges.length");
