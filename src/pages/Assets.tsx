@@ -247,6 +247,7 @@ export default function AssetsPage() {
     !filters.search ||
     a.patrimonyNumber?.toLowerCase().includes(filters.search.toLowerCase()) ||
     a.serialNumber?.toLowerCase().includes(filters.search.toLowerCase()) ||
+    a.hostname?.toLowerCase().includes(filters.search.toLowerCase()) ||
     a.manufacturer?.toLowerCase().includes(filters.search.toLowerCase()) ||
     a.model?.toLowerCase().includes(filters.search.toLowerCase())
   );
@@ -329,7 +330,7 @@ export default function AssetsPage() {
         <div className="flex flex-wrap gap-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <SearchInput
-              placeholder="Buscar por patrimônio, série, marca..."
+              placeholder="Buscar por patrimônio, série, hostname, marca..."
               value={filters.search}
               onChange={(e) => setFilters({ ...filters, search: e.target.value })}
             />
