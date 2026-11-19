@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
 import type { Id } from "./_generated/dataModel";
 import { isDiscreteStockUnit, requireValidScopedStockQuantity } from "../lib/stock-quantity-rules";
@@ -52,6 +53,27 @@ export const listByProduct = query({
         .withIndex("by_transfer", (q: any) => q.eq("transferId", t._id)).collect();
       return { ...t, fromLocation, toLocation, fromArea, toArea, lotLinks };
     }));
+  },
+});
+
+export const listPage = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    const page = await ctx.db.query("stockTransfers").order("desc").paginate(args.paginationOpts);
+    const enriched = await Promise.all(page.page.map(async (t: any) => {
+      const product = await ctx.db.get(t.productId);
+      const lot = t.lotId ? await ctx.db.get(t.lotId) : null;
+      const fromLocation = await ctx.db.get(t.fromLocationId);
+      const toLocation = await ctx.db.get(t.toLocationId);
+      const fromArea = t.fromAreaId ? await ctx.db.get(t.fromAreaId) : null;
+      const toArea = t.toAreaId ? await ctx.db.get(t.toAreaId) : null;
+      const responsible = await ctx.db.get(t.responsibleUserId);
+      const lotLinks = await ctx.db.query("stockTransferLots")
+        .withIndex("by_transfer", (q: any) => q.eq("transferId", t._id)).collect();
+      return { ...t, product, lot, fromLocation, toLocation, fromArea, toArea, lotLinks, responsible };
+    }));
+    return { ...page, page: enriched };
   },
 });
 
