@@ -541,7 +541,17 @@ export const productLocationSummary = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    const rows = await ctx.db.query("stockByLocation").collect();
+    const [rows, allReservations] = await Promise.all([
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("requestItemReservations").collect(),
+    ]);
+    const reservationsByProduct = new Map<string, any[]>();
+    for (const reservation of allReservations as any[]) {
+      const key = String(reservation.productId);
+      const grouped = reservationsByProduct.get(key) ?? [];
+      grouped.push(reservation);
+      reservationsByProduct.set(key, grouped);
+    }
     const byProduct = new Map<string, Array<{
       locationId: string; locationName: string; areaId: string | null;
       areaName: string; quantity: number;
@@ -551,9 +561,7 @@ export const productLocationSummary = query({
       const location = await ctx.db.get(row.locationId);
       if (!location) continue;
       const area = row.areaId ? await ctx.db.get(row.areaId) : null;
-      const reservations = await ctx.db.query("requestItemReservations")
-        .withIndex("by_product", (q: any) => q.eq("productId", row.productId))
-        .collect();
+      const reservations = reservationsByProduct.get(String(row.productId)) ?? [];
       const reserved = reservations
         .filter((reservation: any) =>
           reservation.locationId === row.locationId &&
