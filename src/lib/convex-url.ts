@@ -62,6 +62,11 @@ export function resolveConvexUrl(env: ConvexUrlEnv): string {
     throw new Error(`VITE_APP_ENV desconhecido: ${appEnv}`);
   }
 
+  const viteMode = String(env.MODE ?? "").trim().toLowerCase();
+  if (viteMode === "production" && appEnv === "development") {
+    throw new Error("Build de produção não pode usar o backend de desenvolvimento.");
+  }
+
   if (appEnv === HOMOLOGACAO_APP_ENV) {
     const raw = String(env.VITE_CONVEX_URL ?? "").trim();
     if (!raw) {
