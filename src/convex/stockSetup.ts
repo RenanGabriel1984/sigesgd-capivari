@@ -488,7 +488,15 @@ export const importInitialSheet = mutation({
           details: `Produto criado pela importação da planilha inicial: ${name}`,
           timestamp: Date.now(),
         });
-        products.push({ _id: id } as any);
+        // Manter o produto recém-criado no catálogo local com os campos
+        // usados pela busca por nome. Sem isso, uma segunda linha da mesma
+        // planilha não o encontra e cria um produto duplicado.
+        products.push({
+          _id: id,
+          name,
+          unitOfMeasure: row.unitOfMeasure ?? "un",
+          brand: row.brand || undefined,
+        } as any);
         productId = id;
         created++;
       }
