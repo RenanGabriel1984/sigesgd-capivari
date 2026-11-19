@@ -81,6 +81,19 @@ describe("segurança e precisão dos relatórios", () => {
     expect(page).toContain("CSV detalhado");
   });
 
+  it("posição por área/local não apresenta soma ambígua de linhas duplicadas", () => {
+    const block = queryBlock("stockPositionByArea", "export const movementReport");
+    const page = readFileSync(resolve(root, "src/pages/Reports.tsx"), "utf8");
+    expect(block).toContain("hasDuplicateRows");
+    expect(block).toContain("validPhysicalQuantity ? physicalQuantity : null");
+    expect(block).toContain("validAvailableQuantity ? physicalQuantity - reservedQuantity : null");
+    expect(block).toContain("integrityIssues");
+    expect(page).toContain('item.physicalQuantity ?? "—"');
+    expect(page).toContain('item.availableQuantity ?? "—"');
+    expect(page).toContain("item.integrityIssues.join");
+    expect(page).toContain("Não confiável");
+  });
+
   it("filtra as duas extremidades no índice antes do limite de registros", () => {
     const block = queryBlock("movementReport", "export const consumptionByOrg");
     expect(block).toContain('.gte("timestamp", startDate)');
