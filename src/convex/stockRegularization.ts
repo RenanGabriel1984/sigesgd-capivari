@@ -162,7 +162,16 @@ async function buildRegularizationPlan(ctx: any) {
   const manifestByName = new Map(INITIAL_STOCK_MANIFEST.map((row) => [normalize(row.productName), row]));
   const usedManifestNames = new Set<string>();
   const initialLotById = new Map(initialLots.map((lot: any) => [lot._id as string, lot]));
-  const initialLotByNumber = new Map(initialLots.map((lot: any) => [keyOf(lot.productId as string, lot.lotNumber as string), lot]));
+  const initialLotByNumber = new Map<string, any[]>();
+  for (const lot of initialLots) {
+    const key = keyOf(lot.productId as string, lot.lotNumber as string);
+    const matches = initialLotByNumber.get(key) ?? [];
+    matches.push(lot);
+    initialLotByNumber.set(key, matches);
+    if (matches.length > 1) {
+      addBlocker(`Lote da entrada inicial duplicado para produto/número ${lot.productId}/${lot.lotNumber}; referência por número não será inferida.`);
+    }
+  }
 
   for (const item of initialItems) {
     const product: any = await ctx.db.get(item.productId);
@@ -202,9 +211,9 @@ async function buildRegularizationPlan(ctx: any) {
     }
 
     const location: any = item.locationId ? await ctx.db.get(item.locationId) : null;
-    const expectedLocation = locationByName.get(normalize(manifest.locationName)) as any;
+    const expectedLocation: any = resolveUniqueLocation(manifest.locationName);
     if (!expectedLocation?.active) {
-      addBlocker(`Local físico esperado "${manifest.locationName}" não está ativo.`);
+      addBlocker(`Local físico esperado "${manifest.locationName}" não está ativo ou é ambíguo.`);
     }
     if (!location || !location.active) {
       addBlocker(`Item "${productName}" não possui local físico válido registrado.`);
@@ -223,7 +232,11 @@ async function buildRegularizationPlan(ctx: any) {
     }
     if (!location || !expectedLocation?.active || !generalArea?.active || !printerArea?.active) continue;
 
-    const area: any = areaByName.get(normalize(manifest.areaName));
+    const area: any = resolveUniqueArea(manifest.areaName);
+    if (!area?.active) {
+      addBlocker(`Área esperada "${manifest.areaName}" não está ativa ou é ambígua.`);
+      continue;
+    }
     const target = { areaId: area._id as string, locationId: location._id as string };
     if (lot.areaId && lot.areaId !== target.areaId) {
       addBlocker(`Lote ${lot.lotNumber} já possui área diferente do manifesto.`);
