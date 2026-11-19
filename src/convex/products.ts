@@ -448,8 +448,8 @@ export const update = mutation({
     if (updates.minimumStock !== undefined && updates.minimumStock < 0) throw new Error("Estoque mínimo não pode ser negativo");
     if (updates.idealStock !== undefined && updates.idealStock < 0) throw new Error("Estoque ideal não pode ser negativo");
     if (updates.maximumStock !== undefined && updates.maximumStock < 0) throw new Error("Estoque máximo não pode ser negativo");
-    const nextIdealStock = updates.idealStock ?? product.idealStock;
-    const nextMaximumStock = updates.maximumStock ?? product.maximumStock;
+    const nextIdealStock = Number(updates.idealStock ?? product.idealStock ?? 0);
+    const nextMaximumStock = Number(updates.maximumStock ?? product.maximumStock ?? 0);
     if (nextIdealStock > nextMaximumStock && nextMaximumStock > 0) {
       throw new Error("Estoque ideal não pode ser maior que o estoque máximo");
     }
