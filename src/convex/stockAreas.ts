@@ -5,6 +5,7 @@ import { v } from "convex/values";
 import { BASELINE_STOCK_AREAS, NO_AREA_LABEL } from "../lib/stock-areas";
 import { requirePermission } from "./rbac";
 import { requireSingleValidGlobalStock } from "../lib/stock-quantity-rules";
+import { getUniqueAreaLocationBuckets } from "../lib/stock-read-integrity";
 import { setLotLocationBalanceLocation } from "../lib/lot-location-balance";
 import { assertShortTextLimits, assertTextLimits } from "../lib/text-limits";
 
@@ -292,24 +293,12 @@ export const classifyLot = mutation({
 
     const rows = await ctx.db.query("stockByLocation")
       .withIndex("by_product", (q) => q.eq("productId", lot.productId)).collect();
-    const targetRows = rows.filter((row) =>
-      row.locationId === args.locationId && row.areaId === args.areaId
+    const { targetRow, legacyRows } = getUniqueAreaLocationBuckets(
+      rows,
+      args.areaId,
+      args.locationId,
+      lot.lotNumber,
     );
-    const legacyRows = rows.filter((row) =>
-      row.locationId === args.locationId && !row.areaId
-    );
-    if (targetRows.length > 1) {
-      throw new Error("Há buckets físicos duplicados para a área/local selecionado. Classificação bloqueada.");
-    }
-    if (legacyRows.length > 1) {
-      throw new Error("Há buckets físicos legados duplicados neste local. Regularize a duplicidade antes de classificar o lote.");
-    }
-    for (const row of [...targetRows, ...legacyRows]) {
-      if (!Number.isFinite(row.quantity) || row.quantity < 0) {
-        throw new Error("Há quantidade física inválida neste produto/local. Classificação bloqueada.");
-      }
-    }
-    const targetRow = targetRows[0] ?? null;
     const alreadyClassifiedRow = lot.areaId === args.areaId ? targetRow : undefined;
     const legacyQuantity = legacyRows.reduce((sum: number, row) => sum + row.quantity, 0);
 
