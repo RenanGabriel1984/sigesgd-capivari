@@ -5,8 +5,8 @@ import { resolve } from "node:path";
 const water = readFileSync(resolve(__dirname, "../convex/water.ts"), "utf-8");
 
 function mutationBlock(name: string): string {
-  const start = water.indexOf(\`export const \${name} = mutation({\`);
-  expect(start, \`mutation \${name} ausente\`).toBeGreaterThan(-1);
+  const start = water.indexOf("export const " + name + " = mutation({");
+  expect(start, "mutation " + name + " ausente").toBeGreaterThan(-1);
   const next = water.indexOf("\nexport const ", start + 1);
   return water.slice(start, next < 0 ? undefined : next);
 }
