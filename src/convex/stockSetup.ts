@@ -259,7 +259,7 @@ async function performInitialLoad(
         .withIndex("by_product", (q) => q.eq("productId", item.productId))
         .collect();
       const sblForLocation = existingSbl.find(
-        (s: any) => s.locationId === item.locationId &&
+        (s) => s.locationId === item.locationId &&
           (s.areaId ?? undefined) === (areaId ?? undefined)
       );
 
@@ -282,7 +282,7 @@ async function performInitialLoad(
         .withIndex("by_product", (q) => q.eq("productId", item.productId))
         .collect();
       const productForLabel = await ctx.db.get(item.productId);
-      const existingStock = getOptionalSingleValidGlobalStock<any>(existingStockRows, productForLabel?.name ?? String(item.productId));
+      const existingStock = getOptionalSingleValidGlobalStock(existingStockRows, productForLabel?.name ?? String(item.productId));
 
       const previousGlobal = existingStock?.physicalQuantity ?? 0;
       // Em produtos existentes, somar a carga ao saldo global preserva estoque
@@ -294,7 +294,7 @@ async function performInitialLoad(
             .query("stockByLocation")
             .withIndex("by_product", (q) => q.eq("productId", item.productId))
             .collect())
-            .reduce((sum: number, row: any) => sum + row.quantity, 0);
+            .reduce((sum: number, row) => sum + row.quantity, 0);
 
       if (existingStock) {
         await ctx.db.patch(existingStock._id, {
