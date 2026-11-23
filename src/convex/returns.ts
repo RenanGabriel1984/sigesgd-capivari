@@ -1,4 +1,6 @@
 import { query, mutation } from "./_generated/server";
+import type { QueryCtx, MutationCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
@@ -37,25 +39,31 @@ async function requireReturnCreate(ctx: any) {
  * O índice por saída atende registros atuais; o índice por solicitação cobre
  * o legado sem exitMovementId, limitado à solicitação e ao produto.
  */
-async function loadReturnsForExit(ctx: any, exit: any) {
+async function loadReturnsForExit(
+  ctx: QueryCtx | MutationCtx,
+  exit: Doc<"stockMovements">,
+): Promise<Doc<"returns">[]> {
   const [directReturns, requestReturns] = await Promise.all([
     ctx.db.query("returns")
-      .withIndex("by_exitMovement", (q: any) => q.eq("exitMovementId", exit._id))
+      .withIndex("by_exitMovement", (q) => q.eq("exitMovementId", exit._id))
       .collect(),
     exit.requestId
       ? ctx.db.query("returns")
-          .withIndex("by_request", (q: any) => q.eq("requestId", exit.requestId))
+          .withIndex("by_request", (q) => q.eq("requestId", exit.requestId))
           .collect()
       : Promise.resolve([]),
   ]);
-  const legacyReturns = requestReturns.filter((record: any) =>
+  const legacyReturns = requestReturns.filter((record) =>
     !record.exitMovementId &&
     (!record.productId || record.productId === exit.productId)
   );
   return [...directReturns, ...legacyReturns];
 }
 
-async function buildReturnableExitRow(ctx: any, movement: any) {
+async function buildReturnableExitRow(
+  ctx: QueryCtx | MutationCtx,
+  movement: Doc<"stockMovements">,
+) {
   if (movement.type !== "exit" || movement.canceled) return null;
   const [product, user, request, area, location, relatedReturns] = await Promise.all([
     ctx.db.get(movement.productId),
@@ -118,11 +126,11 @@ export const returnablePage = query({
   handler: async (ctx, args) => {
     await requireUser(ctx);
     const page = await ctx.db.query("stockMovements")
-      .withIndex("by_type", (q: any) => q.eq("type", "exit"))
+      .withIndex("by_type", (q) => q.eq("type", "exit"))
       .order("desc")
       .paginate(args.paginationOpts);
     const rows = await Promise.all(
-      page.page.map((movement: any) => buildReturnableExitRow(ctx, movement))
+      page.page.map((movement) => buildReturnableExitRow(ctx, movement))
     );
     return { ...page, page: rows.filter((row): row is NonNullable<typeof row> => row !== null) };
   },
