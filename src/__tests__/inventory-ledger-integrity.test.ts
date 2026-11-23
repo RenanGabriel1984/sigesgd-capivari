@@ -93,3 +93,16 @@ describe("trilha de auditoria do ciclo de inventário", () => {
     expect(review.indexOf("if (uncounted.length > 0)")).toBeLessThan(review.indexOf('ctx.db.insert("auditLogs", {'));
   });
 });
+
+describe("escalabilidade da abertura de inventário", () => {
+  it("verifica inventários ativos pelo índice de status sem varrer o histórico", () => {
+    const createStart = inventory.indexOf("export const create = mutation({");
+    const closeStart = inventory.indexOf("export const startCounting = mutation({", createStart);
+    const create = inventory.slice(createStart, closeStart);
+    expect(create).toContain('const activeStatuses = ["draft", "counting", "review"] as const;');
+    expect(create).toContain('.withIndex("by_status", (q) => q.eq("status", status))');
+    expect(create).toContain(".take(1)");
+    expect(create).toContain("activeInventoryRows.some((rows) => rows.length > 0)");
+    expect(create).not.toContain('ctx.db.query("inventories").collect()');
+  });
+});
