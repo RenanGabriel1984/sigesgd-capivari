@@ -315,7 +315,7 @@ export default function Inventory() {
     if (!npName.trim()) { toast.error("Informe o nome do produto"); return; }
     if (!npCatId) { toast.error("Selecione ou crie uma categoria"); return; }
     try {
-      const id = await createProduct({
+      await createProduct({
         name: npName.trim(),
         categoryId: npCatId as any,
         unitOfMeasure: npUnit,
@@ -543,7 +543,6 @@ export default function Inventory() {
                               </TableHeader>
                               <TableBody>
                                 {counts.map((c) => {
-                                  const isEditing = countEdits[c._id] !== undefined;
                                   const diff = c.difference;
                                   return (
                                     <TableRow key={c._id}>
