@@ -1,6 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { BASELINE_STOCK_AREAS, NO_AREA_LABEL } from "../lib/stock-areas";
 import { requirePermission } from "./rbac";
