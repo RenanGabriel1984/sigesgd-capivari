@@ -630,7 +630,7 @@ export const confirm = mutation({
       });
       await adjustLotLocationBalance(ctx, {
         lotId, productId: item.productId, locationId: item.locationId,
-        delta: item.quantity, allowCreate: true,
+        delta: item.quantity, expectedQuantityBefore: 0, allowCreate: true,
       });
       if (item.photoStorageId) {
         await attachStorageFile(ctx, item.photoStorageId, "lot", String(lotId), String(userId));
