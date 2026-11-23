@@ -79,6 +79,8 @@ describe("integridade do estoque global nos suprimentos de impressão", () => {
     expect(monthlyOrder).toContain("getOptionalSingleValidGlobalStock(stockRows, product.name)");
     expect(monthlyOrder).toContain("lotsPhysical");
     expect(monthlyOrder).toContain("reservationsTotal");
+    expect(monthlyOrder).toContain("reservationTotalsByLot");
+    expect(monthlyOrder).toContain("reservedForLot > Number(lot.quantityAvailable)");
     expect(monthlyOrder).toContain("reservation.areaId !== lot.areaId");
     expect(monthlyOrder).toContain("reservation.locationId !== lot.locationId");
     expect(monthlyOrder).toContain("reservationsTotal - reserved");
