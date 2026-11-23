@@ -113,7 +113,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   const handleConfirmReset = async () => {
     if (!resetCode.trim()) { toast.error("Informe o código"); return; }
-    if (!newPassword.trim() || newPassword.length < 6) { toast.error("A nova senha deve ter pelo menos 6 caracteres"); return; }
+    if (!newPassword.trim() || newPassword.trim().length < 8) { toast.error("A nova senha deve ter pelo menos 8 caracteres"); return; }
     setForgotLoading(true);
     try {
       await confirmPasswordReset({
@@ -134,7 +134,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   };
 
   const handleFirstAccess = async () => {
-    if (!faNewPassword.trim() || faNewPassword.length < 6) {
+    if (!faNewPassword.trim() || faNewPassword.trim().length < 8) {
       toast.error("A nova senha deve ter pelo menos 6 caracteres");
       return;
     }
@@ -346,7 +346,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder="Mínimo 8 caracteres"
                   className="mt-1"
                   disabled={forgotLoading}
                 />
@@ -433,7 +433,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             <Button
               className="w-full bg-[var(--capivari-green)] hover:bg-[var(--capivari-green-dark)]"
               onClick={handleFirstAccess}
-              disabled={faLoading || !faNewPassword || !faConfirmPassword || faNewPassword !== faConfirmPassword || faNewPassword.length < 6}
+              disabled={faLoading || !faNewPassword || !faConfirmPassword || faNewPassword !== faConfirmPassword || faNewPassword.trim().length < 8}
             >
               {faLoading ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Salvando...</>
