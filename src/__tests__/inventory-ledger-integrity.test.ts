@@ -78,9 +78,9 @@ describe("trilha de auditoria do ciclo de inventário", () => {
     expect(review).toContain('if (inv.status !== "counting")');
     expect(review).toContain("assertUniqueInventoryProductCounts(counts)");
     expect(review).toContain("const uncounted = counts.filter");
-    const closeStart = inventory.indexOf("export const close = mutation({");
-    const closeEnd = inventory.indexOf("export const cancel = mutation({", closeStart);
-    const close = inventory.slice(closeStart, closeEnd);
+    const closeMutationStart = inventory.indexOf("export const close = mutation({");
+    const closeEnd = inventory.indexOf("export const cancel = mutation({", closeMutationStart);
+    const close = inventory.slice(closeMutationStart, closeEnd);
     expect(close).toContain("assertUniqueInventoryProductCounts(counts)");
     expect(review).toContain('status: "review", updatedAt: now');
     expect(review).toContain('ctx.db.insert("auditLogs", {');
@@ -90,6 +90,6 @@ describe("trilha de auditoria do ciclo de inventário", () => {
     expect(review).toContain("userId,");
     expect(review).toContain("contagem concluída e encaminhada para revisão");
     expect(review).toContain("timestamp: now");
-    expect(review.indexOf("if (uncounted.length > 0)")).toBeLessThan(review.indexOf('ctx.db.insert("auditLogs")'));
+    expect(review.indexOf("if (uncounted.length > 0)")).toBeLessThan(review.indexOf('ctx.db.insert("auditLogs", {'));
   });
 });
