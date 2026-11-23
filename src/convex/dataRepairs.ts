@@ -196,6 +196,7 @@ export const repairCoolerLotAvailability = internalMutation({
     await adjustLotLocationBalance(ctx, {
       lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
       delta: COOLER_LOT_EXPECTED_AVAILABLE - Number(lot.quantityAvailable),
+      expectedQuantityBefore: Number(lot.quantityAvailable),
     });
 
     // Auditoria uma única vez (idempotente no histórico também).
