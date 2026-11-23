@@ -59,6 +59,17 @@ describe("integridade do estoque global nos suprimentos de impressão", () => {
     expect(preview).not.toContain('.withIndex("by_product", (q: any) => q.eq("productId", productId)).first()');
   });
 
+  it("retirada por família exige exatamente um produto fechado e um avulso", () => {
+    const withdrawal = blockBetween(
+      printSupplies,
+      "export const withdrawFamily = mutation({",
+      "/* ═══ Integridade global",
+    );
+    expect(withdrawal).toContain("closedMembers.length !== 1");
+    expect(withdrawal).toContain("looseMembers.length !== 1");
+    expect(withdrawal).toContain("Família ambígua");
+  });
+
   it("pedido mensal Gomaq bloqueia duplicidade e concilia saldos, lotes e reservas", () => {
     const monthlyOrder = blockBetween(
       gomaq,
