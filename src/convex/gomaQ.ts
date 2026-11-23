@@ -223,6 +223,7 @@ export const monthlyOrder = query({
       }
 
       const lotById = new Map<string, any>(lots.map((lot: any) => [String(lot._id), lot]));
+      const reservationTotalsByLot = new Map<string, number>();
       let reservationsTotal = 0;
       for (const reservation of reservations as any[]) {
         const remaining = Number(reservation.quantityRemaining);
@@ -236,6 +237,12 @@ export const monthlyOrder = query({
             remaining > Number(lot.quantityAvailable)) {
           throw new Error(`Reserva do produto "${product.name}" não corresponde ao lote/área/local ou excede o saldo. Pedido Gomaq bloqueado.`);
         }
+        const lotId = String(reservation.lotId);
+        const reservedForLot = (reservationTotalsByLot.get(lotId) ?? 0) + remaining;
+        if (reservedForLot > Number(lot.quantityAvailable) + 1e-9) {
+          throw new Error(`Reservas acumuladas do lote ${lot.lotNumber} excedem o saldo físico. Pedido Gomaq bloqueado.`);
+        }
+        reservationTotalsByLot.set(lotId, reservedForLot);
         reservationsTotal += remaining;
       }
       if (Math.abs(reservationsTotal - reserved) > 1e-9) {
