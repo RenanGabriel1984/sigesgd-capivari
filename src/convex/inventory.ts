@@ -165,10 +165,16 @@ export const create = mutation({
     const { userId } = await requireStockManagerOrAdmin(ctx);
     assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
 
-    // Check no active inventory exists
-    const allInventories = await ctx.db.query("inventories").collect();
-    const nonClosed = allInventories.filter((i) => i.status !== "cancelled" && i.status !== "closed");
-    if (nonClosed.length > 0) {
+    // Check active inventory through the status index; avoid scanning all history.
+    const activeStatuses = ["draft", "counting", "review"] as const;
+    const activeInventoryRows = await Promise.all(
+      activeStatuses.map((status) =>
+        ctx.db.query("inventories")
+          .withIndex("by_status", (q) => q.eq("status", status))
+          .take(1)
+      )
+    );
+    if (activeInventoryRows.some((rows) => rows.length > 0)) {
       throw new Error("Já existe um inventário ativo. Finalize ou cancele o inventário anterior antes de criar um novo.");
     }
 
