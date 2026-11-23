@@ -4,7 +4,7 @@ import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
-import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
+import { getOptionalSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { resolveScopedInventoryQuantity } from "../lib/stock-read-integrity";
