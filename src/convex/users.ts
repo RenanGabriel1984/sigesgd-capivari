@@ -125,7 +125,7 @@ export const listUsers = query({
       return {
         ...user,
         organization,
-        hasPassword: passwordRecordCount === 1,
+        hasPassword: passwordRecordCount > 0,
         passwordRecordCount,
       };
     }));
