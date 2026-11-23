@@ -114,7 +114,7 @@ export const listFiltered = query({
         .withIndex("by_user", (q) => q.eq("userId", args.userId))
         .order("desc");
     } else if (args.action !== undefined) {
-      const action = args.action;
+      const action = args.action as Doc<"auditLogs">["action"];
       orderedQuery = base
         .withIndex("by_action", (q) => q.eq("action", action))
         .order("desc");
