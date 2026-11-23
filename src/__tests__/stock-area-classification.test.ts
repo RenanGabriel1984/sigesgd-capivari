@@ -83,8 +83,14 @@ describe("classificação histórica de áreas por evidência documental", () =>
     const already = initialLot({ areaId: "area-ti" });
     const plan = buildHistoricalAreaClassificationPlan([conflict, already], areas);
     expect(plan.patches).toHaveLength(0);
-    expect(plan.alreadyClassified).toBe(1);
-    expect(plan.blockers).toHaveLength(1);
+    expect(plan.alreadyClassified).toBe(2);
+    expect(plan.blockers).toHaveLength(0);
+  });
+
+  it("bloqueia área previamente atribuída que não existe ou está inativa", () => {
+    const plan = buildHistoricalAreaClassificationPlan([initialLot({ areaId: "missing-area" })], areas);
+    expect(plan.patches).toHaveLength(0);
+    expect(plan.blockers[0]?.reason).toMatch(/inexistente ou inativa/i);
   });
 
   it("bloqueia quando a área de destino não está ativa", () => {
