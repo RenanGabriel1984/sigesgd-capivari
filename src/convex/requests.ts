@@ -5,6 +5,7 @@ import { generateExitNumber } from "./stockHelpers";
 import { requirePermission, requireRequestAction } from "./rbac";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import { assertUniqueApprovalItemIds } from "../lib/request-approval-validation";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -234,6 +235,10 @@ export const approve = mutation({
     // Group by productId to handle multiple request items for the same product
     const stockNeeded: Record<string, { requestItemId: string; quantity: number; productName: string }> = {};
     let totalItemsToApprove = 0;
+
+    // A mesma linha não pode aparecer duas vezes: a fase de gravação reserva
+    // cada ocorrência, mas quantityApproved é armazenada em um único registro.
+    assertUniqueApprovalItemIds(args.items);
 
     for (const item of args.items) {
       const requestItem = await ctx.db.get(item.itemId);
