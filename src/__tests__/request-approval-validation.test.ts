@@ -94,3 +94,28 @@ describe("ajuste de estoque em entrega parcial concluída", () => {
     )).toThrow(/mesma linha/i);
   });
 });
+
+
+describe("integração da entrega parcial com liberação de reserva", () => {
+  const start = requestsSource.indexOf("export const deliver = mutation({");
+  const end = requestsSource.indexOf("export const cancel = mutation({", start);
+  const block = requestsSource.slice(start, end);
+
+  it("exige todas as linhas aprovadas antes de qualquer escrita", () => {
+    const guard = block.indexOf("assertCompleteDeliveryItemIds(");
+    const firstWrite = Math.min(
+      ...["ctx.db.patch(", "ctx.db.insert("]
+        .map((needle) => block.indexOf(needle))
+        .filter((index) => index >= 0),
+    );
+    expect(guard).toBeGreaterThan(-1);
+    expect(firstWrite).toBeGreaterThan(guard);
+  });
+
+  it("remove do físico a quantidade entregue e da reserva a quantidade aprovada", () => {
+    expect(block).toContain("getDeliveryStockAdjustment(requestItem.quantityApproved, input.quantityDelivered)");
+    expect(block).toContain("freshStock.physicalQuantity - adjustment.physicalToRemove");
+    expect(block).toContain("freshStock.reservedQuantity - adjustment.reservedToRelease");
+    expect(block).toContain("Reserva não utilizada liberada");
+  });
+});
