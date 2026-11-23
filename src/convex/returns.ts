@@ -87,25 +87,6 @@ async function buildReturnableExitRow(ctx: any, movement: any) {
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
-export const list = query({
-  args: {},
-  handler: async (ctx) => {
-    await requireUser(ctx);
-    const returns = await ctx.db.query("returns").order("desc").collect();
-    return Promise.all(returns.map(async (r: any) => {
-      const product = await ctx.db.get(r.productId);
-      const lot = r.lotId ? await ctx.db.get(r.lotId) : null;
-      const returnedBy = await ctx.db.get(r.returnedByUserId);
-      const receivedBy = r.receivedByUserId ? await ctx.db.get(r.receivedByUserId) : null;
-      const request = r.requestId ? await ctx.db.get(r.requestId) : null;
-      const exit = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
-      const location = r.locationId ? await ctx.db.get(r.locationId) : null;
-      const area = r.areaId ? await ctx.db.get(r.areaId) : null;
-      return { ...r, product, lot, returnedBy, receivedBy, request, exit, location, area };
-    }));
-  },
-});
-
 export const listPage = query({
   args: { paginationOpts: paginationOptsValidator },
   handler: async (ctx, args) => {
