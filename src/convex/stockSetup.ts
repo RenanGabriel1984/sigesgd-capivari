@@ -33,7 +33,7 @@ async function requireAdmin(ctx: any) {
 /**
  * Generate lot number: LOT-YYYY-NNNNNN
  */
-async function generateLotNumber(ctx: any, _productId: string): Promise<string> {
+async function generateLotNumber(ctx: any): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `LOT-${year}-`;
   const existingLots = await ctx.db
@@ -213,7 +213,7 @@ async function performInitialLoad(
       if (!area || !area.active) throw new Error("A área da carga inicial não existe ou está inativa.");
 
       // ── 1. Create lot for traceability ──
-      const lotNumber = await generateLotNumber(ctx, item.productId);
+      const lotNumber = await generateLotNumber(ctx);
       const lotId = await ctx.db.insert("lots", {
         lotNumber,
         productId: item.productId,
@@ -1681,7 +1681,7 @@ export const cleanupTestData = internalMutation({
   args: {
     confirm: v.literal(true),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     const { userId } = await requireAdmin(ctx);
     const deleted: Record<string, number> = {};
 
