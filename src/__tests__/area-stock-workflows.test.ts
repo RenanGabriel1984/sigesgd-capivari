@@ -60,7 +60,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(approve).toContain('ctx.db.query("requestItems")');
     expect(approve).toContain('q.eq("requestId", args.requestId)');
     expect(approve).toContain("seenItems.size !== requestItems.length");
-    expect(approve).toContain("requestItems.some((item: any) => !seenItems.has(item._id as string))");
+    expect(approve).toContain("requestItems.some((item) => !seenItems.has(item._id))");
   });
 
   it("registra na auditoria da entrega usuário, item, quantidade, área, local, lotes e séries", () => {
