@@ -285,15 +285,18 @@ export const verifyCredentials = internalQuery({
       return { success: false, error: GENERIC_AUTH_ERROR };
     }
 
-    // Find password record
-    const passwordRecord = await ctx.db
+    // A user must have exactly one credential record. Choosing .first()
+    // silently authenticates against an arbitrary hash if historical duplicate
+    // rows exist; fail closed until an authorized reset consolidates them.
+    const passwordRecords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
+      .collect();
 
-    if (!passwordRecord) {
+    if (passwordRecords.length !== 1) {
       return { success: false, error: GENERIC_AUTH_ERROR };
     }
+    const passwordRecord = passwordRecords[0];
 
     // Verify password
     const valid = await verifyPassword(
