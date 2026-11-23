@@ -6,6 +6,10 @@ import { hashPassword, verifyPassword, nextResetAttempt, verifyResetCode, isVali
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
+import {
+  describeDuplicateCredential,
+  resolveUniqueRecord,
+} from "../lib/credential-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -88,12 +92,17 @@ export const createPassword = mutation({
     if (!user) throw new Error("Usuário não encontrado");
 
     // Check if password already exists
-    const existing = await ctx.db
+    const existingRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .first();
-
-    if (existing) throw new Error("Usuário já possui senha definida. Use alteração de senha.");
+      .collect();
+    const existing = resolveUniqueRecord(existingRows);
+    if (existing.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(existing.count));
+    }
+    if (existing.status === "unique") {
+      throw new Error("Usuário já possui senha definida. Use alteração de senha.");
+    }
 
     assertPasswordPolicy(args.password);
 
@@ -141,12 +150,18 @@ export const changePassword = mutation({
       throw new Error("A nova senha deve ser diferente da atual");
     }
 
-    const passwordRecord = await ctx.db
+    const passwordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", userId))
-      .first();
-
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRows);
+    if (passwordResolution.status === "missing") {
+      throw new Error("Senha não configurada. Contate o administrador.");
+    }
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(passwordResolution.count));
+    }
+    const passwordRecord = passwordResolution.record;
 
     const valid = await verifyPassword(
       args.currentPassword,
@@ -199,10 +214,17 @@ export const adminResetPassword = mutation({
 
     assertPasswordPolicy(args.newPassword);
 
-    const passwordRecord = await ctx.db
+    const passwordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .first();
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRows);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(passwordResolution.count));
+    }
+    const passwordRecord = passwordResolution.status === "unique"
+      ? passwordResolution.record
+      : null;
 
     const { hash, salt } = await hashPassword(args.newPassword);
 
@@ -252,12 +274,18 @@ export const forceChangePassword = mutation({
 
     assertPasswordPolicy(args.newPassword);
 
-    const passwordRecord = await ctx.db
+    const passwordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", userId))
-      .first();
-
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRows);
+    if (passwordResolution.status === "missing") {
+      throw new Error("Senha não configurada. Contate o administrador.");
+    }
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(passwordResolution.count));
+    }
+    const passwordRecord = passwordResolution.record;
     if (user.requiresPasswordReset !== true && passwordRecord.requiresReset !== true) {
       throw new Error("A troca obrigatória de senha não está pendente. Use a opção Alterar Senha.");
     }
@@ -301,10 +329,15 @@ export const verifyCredentials = internalQuery({
   },
   handler: async (ctx, args) => {
     // Find user by email
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", args.email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
+    if (userResolution.status !== "unique") {
+      return await rejectCredentials(args.password);
+    }
+    const user = userResolution.record;
 
     // ── ANTI-ENUMERAÇÃO (§11) ────────────────────────────────────────────
     // TODOS os caminhos de falha devolvem EXATAMENTE a mesma mensagem, com a
@@ -328,14 +361,15 @@ export const verifyCredentials = internalQuery({
     }
 
     // Find password record
-    const passwordRecord = await ctx.db
+    const passwordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
-
-    if (!passwordRecord) {
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRows);
+    if (passwordResolution.status !== "unique") {
       return await rejectCredentials(args.password);
     }
+    const passwordRecord = passwordResolution.record;
 
     // Verify password
     const valid = await verifyPassword(
@@ -362,11 +396,11 @@ export const verifyCredentials = internalQuery({
 export const hasPassword = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
-    const record = await ctx.db
+    const records = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .first();
-    return !!record;
+      .collect();
+    return records.length === 1;
   },
 });
 
