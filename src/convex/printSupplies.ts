@@ -1085,7 +1085,7 @@ export const withdrawFamily = mutation({
         });
         await adjustLotLocationBalance(ctx, {
           lotId: reclassifiedLotId, productId: looseMember._id,
-          locationId: source.locationId, delta: reclassifiedQuantity,
+          locationId: source.locationId as Id<"storageLocations">, delta: reclassifiedQuantity,
           expectedQuantityBefore: 0, allowCreate: true,
         });
         await changeSupplyLocationQuantity(
