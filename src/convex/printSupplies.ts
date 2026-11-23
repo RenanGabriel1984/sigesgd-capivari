@@ -184,7 +184,7 @@ async function migrateTIGeralToImpressorasImpl(
     }
 
     await ctx.db.insert("auditLogs", {
-      userId,
+      userId: userId ?? undefined,
       action: "transfer_stock",
       entity: "lots",
       entityId: PRINT_AREA_ID,
@@ -896,10 +896,7 @@ async function configurePackagingImpl(
 export const configureBadgeProtectorPackaging = internalMutation({
   args: {},
   handler: async (ctx) => {
-    const products = (await ctx.db.query("products").collect()) as Array<{
-      _id: string; name: string; brand?: string | null; categoryId: string;
-      baseUnit?: string | null; packagingUnit?: string | null; conversionFactor?: number | null;
-    }>;
+    const products = await ctx.db.query("products").collect();
     const targets = products.filter(
       (p) => p.categoryId === SUPPLY_CATEGORY_ID &&
         (p.brand ?? "").toLowerCase() === "reflex" &&
@@ -1162,7 +1159,7 @@ export const withdrawFamily = mutation({
     if (looseUnitsToConsume > 0) {
       const loosePreviousPhysical = looseBefore.physical + openedUnits;
       const movementId = await insertSupplyMovement(ctx, {
-        productId: String(looseMember._id),
+        productId: looseMember._id,
         type: "exit",
         quantity: looseUnitsToConsume,
         previousPhysical: loosePreviousPhysical,
