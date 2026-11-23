@@ -3,6 +3,7 @@ import { query, mutation, internalMutation, QueryCtx } from "./_generated/server
 import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
 import { requirePermission } from "./rbac";
+import { normalizeLoginEmail } from "../lib/credential-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -121,12 +122,14 @@ export const createUser = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireAdmin(ctx);
-    const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", args.email.toLowerCase())).first();
-    if (existing) throw new Error("Já existe um usuário com este e-mail");
+    const email = normalizeLoginEmail(args.email);
+    if (!email) throw new Error("E-mail é obrigatório");
+    const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).collect();
+    if (existing.length > 0) throw new Error("Já existe um usuário com este e-mail");
 
     const now = Date.now();
     const newUserId = await ctx.db.insert("users", {
-      name: args.name, email: args.email.toLowerCase(), role: args.role,
+      name: args.name.trim(), email, role: args.role,
       organizationId: args.organizationId, active: true,
       createdAt: now, updatedAt: now,
     });
@@ -158,10 +161,14 @@ export const updateUser = mutation({
         if (admins.length <= 1) throw new Error("Não é possível alterar o perfil do único administrador");
       }
     }
-    if (updates.email) {
-      const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", updates.email!.toLowerCase())).first();
-      if (existing && existing._id !== userId) throw new Error("Já existe outro usuário com este e-mail");
-      updates.email = updates.email.toLowerCase();
+    if (updates.email !== undefined) {
+      const email = normalizeLoginEmail(updates.email);
+      if (!email) throw new Error("E-mail é obrigatório");
+      const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).collect();
+      if (existing.some((record: any) => record._id !== userId)) {
+        throw new Error("Já existe outro usuário com este e-mail");
+      }
+      updates.email = email;
     }
 
     await ctx.db.patch(userId, { ...updates, updatedAt: Date.now() });
