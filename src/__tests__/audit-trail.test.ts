@@ -63,7 +63,12 @@ describe("consulta e navegação do histórico de auditoria", () => {
   });
   it("não trunca o histórico de auditoria associado a uma entidade", () => {
     const byEntity = auditBackend.slice(auditBackend.indexOf("export const byEntity"), auditBackend.indexOf("export const listFiltered"));
-    expect(byEntity).toContain('.order("desc")\n          .collect();');
+    expect(byEntity).toContain("paginationOptsValidator");
+    expect(byEntity).toContain('.withIndex("by_entity_entityId"');
+    expect(byEntity).toContain('.withIndex("by_entity"');
+    expect(byEntity).toContain(".paginate(args.paginationOpts)");
+    expect(byEntity).toContain("attachMinimalUser(ctx, page.page)");
+    expect(byEntity).not.toContain(".collect()");
     expect(byEntity).not.toContain(".take(100)");
   });
 
