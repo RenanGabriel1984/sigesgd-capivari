@@ -172,7 +172,7 @@ describe("PRINT-09 — retirada registra lotId", () => {
     expect(backend).toContain('ctx.db.insert("stockMovementLots"');
   });
   it("consome lotes FIFO por recebimento e registra todos na observation", () => {
-    expect(backend).toMatch(/sort\(\(a: any, b: any\) => a\.receivedAt - b\.receivedAt\)/);
+    expect(backend).toMatch(/sort\(\(a, b\) => a\.receivedAt - b\.receivedAt\)/);
     expect(backend).toContain("consumedLots.map((lot) => `${lot.lotNumber}(${lot.qty})`)");
   });
 });
@@ -193,10 +193,10 @@ describe("PRINT-10 — retirada maior que estoque é bloqueada", () => {
 describe("PRINT-11 — transferência não altera estoque global", () => {
   it("migração faz patch SOMENTE de areaId no lote (nunca de quantidades)", () => {
     const migrate = backend.slice(backend.indexOf("export const migrateTIGeralToImpressoras"), backend.indexOf("export const getSupplyDashboard"));
-    expect(migrate).toContain("areaId: PRINT_AREA_ID as never");
+    expect(migrate).toContain("areaId: PRINT_AREA_ID");
     // A única escrita na migration é o patch de área:
     expect(migrate.match(/ctx\.db\.patch\(/g) ?? []).toHaveLength(1);
-    expect(migrate).toContain("ctx.db.patch(lot._id, { areaId: PRINT_AREA_ID as never })");
+    expect(migrate).toContain("ctx.db.patch(lot._id, { areaId: PRINT_AREA_ID })");
   });
   it("a guarda de saldo usa quantityAvailable apenas para CONFERIR, nunca para escrever", () => {
     const migrate = backend.slice(backend.indexOf("export const migrateTIGeralToImpressoras"), backend.indexOf("export const getSupplyDashboard"));
