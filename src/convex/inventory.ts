@@ -559,7 +559,7 @@ export const close = mutation({
         });
         await adjustLotLocationBalance(ctx, {
           lotId: adjustmentLotId, productId: count.productId,
-          locationId: inv.locationId, delta, allowCreate: true,
+          locationId: inv.locationId, delta, expectedQuantityBefore: 0, allowCreate: true,
         });
         const itemId = await ctx.db.insert("entryItems", {
           entryId: adjustmentEntryId,
@@ -592,6 +592,7 @@ export const close = mutation({
           await adjustLotLocationBalance(ctx, {
             lotId: reduction.lot._id, productId: reduction.lot.productId,
             locationId: reduction.lot.locationId, delta: -reduction.quantity,
+            expectedQuantityBefore: Number(reduction.lot.quantityAvailable),
           });
         }
       }
