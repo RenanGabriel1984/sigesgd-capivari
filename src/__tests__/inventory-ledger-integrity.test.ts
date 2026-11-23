@@ -76,7 +76,12 @@ describe("trilha de auditoria do ciclo de inventário", () => {
     const review = inventory.slice(reviewStart, closeStart);
     expect(review).toContain("const { userId } = await requireStockManagerOrAdmin(ctx)");
     expect(review).toContain('if (inv.status !== "counting")');
+    expect(review).toContain("assertUniqueInventoryProductCounts(counts)");
     expect(review).toContain("const uncounted = counts.filter");
+    const closeStart = inventory.indexOf("export const close = mutation({");
+    const closeEnd = inventory.indexOf("export const cancel = mutation({", closeStart);
+    const close = inventory.slice(closeStart, closeEnd);
+    expect(close).toContain("assertUniqueInventoryProductCounts(counts)");
     expect(review).toContain('status: "review", updatedAt: now');
     expect(review).toContain('ctx.db.insert("auditLogs", {');
     expect(review).toContain('action: "count_inventory"');
