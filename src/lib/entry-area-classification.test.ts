@@ -52,7 +52,7 @@ describe("integração da classificação com entries.confirm", () => {
     expect(entries).toContain("if (!effectiveAreaId)");
     expect(entries).toContain("if (!area || !area.active)");
     expect(entries).toContain("areaId: itemAreaId,");
-    expect(entries).toContain('await ctx.db.patch(item._id, {\n        lotId: lotId as string,\n        undefined');
+    expect(entries).toContain('await ctx.db.patch(item._id, {\n        lotId: lotId as string,\n        areaId: itemAreaId,');
   });
 
   it("grava a área efetiva no saldo por local e na movimentação", () => {
