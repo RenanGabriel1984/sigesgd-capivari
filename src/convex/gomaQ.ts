@@ -54,7 +54,7 @@ export const listExchanges = query({
       const printer = await ctx.db.get(e.printerId);
       const lot = e.lotId ? await ctx.db.get(e.lotId) : null;
       const deliveredBy = await ctx.db.get(e.deliveredByUserId);
-      const receivedBy = await ctx.db.get(e.receivedByUserId);
+      const receivedBy = e.receivedByUserId ? await ctx.db.get(e.receivedByUserId) : null;
       return { ...e, product, printer, lot, deliveredBy, receivedBy };
     }));
   },
@@ -146,8 +146,8 @@ export const listCollections = query({
     await requireUser(ctx);
     const collections = await ctx.db.query("gomaQCollections").order("desc").take(101);
     return Promise.all(collections.map(async (collection) => {
-      const responsible = await ctx.db.get(c.responsibleUserId);
-      return { ...c, responsible };
+      const responsible = await ctx.db.get(collection.responsibleUserId);
+      return { ...collection, responsible };
     }));
   },
 });
@@ -164,7 +164,7 @@ export const listRecentExchanges = query({
       const printer = await ctx.db.get(exchange.printerId);
       const lot = exchange.lotId ? await ctx.db.get(exchange.lotId) : null;
       const deliveredBy = await ctx.db.get(exchange.deliveredByUserId);
-      const receivedBy = await ctx.db.get(exchange.receivedByUserId);
+      const receivedBy = exchange.receivedByUserId ? await ctx.db.get(exchange.receivedByUserId) : null;
       return { ...exchange, product, printer, lot, deliveredBy, receivedBy };
     }));
   },
@@ -269,7 +269,7 @@ export const monthlyOrder = query({
       }
 
       return {
-        productId: pid,
+        productId,
         productName: product.name,
         brand: product.brand,
         model: product.model,
