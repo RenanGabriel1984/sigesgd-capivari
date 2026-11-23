@@ -23,7 +23,7 @@ async function generateInventoryNumber(ctx: any): Promise<string> {
   const prefix = `INV-${year}-`;
   const nextPrefix = `INV-${year + 1}-`;
   const existing = await ctx.db.query("inventories")
-    .withIndex("by_inventoryNumber", (q: any) =>
+    .withIndex("by_inventoryNumber", (q) =>
       q.gte("inventoryNumber", prefix).lt("inventoryNumber", nextPrefix),
     )
     .collect();
