@@ -724,20 +724,25 @@ export const confirmPasswordReset = mutation({
       throw new Error("Código inválido ou expirado");
     }
 
-    // Mark token as used
+    // Resolve credentials before consuming the one-time token. If historical
+    // duplicates exist, fail closed and preserve the token for controlled repair.
+    const existingPasswordRecords = await ctx.db
+      .query("passwords")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+    const passwordResolution = resolveUniqueRecord(existingPasswordRecords);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error("Não foi possível redefinir a senha; cadastro de credenciais duplicado precisa ser regularizado.");
+    }
+
+    // Mark token as used only after identity and credential integrity checks.
     await ctx.db.patch(validToken._id, { usedAt: Date.now() });
 
     // Hash new password
     const { hash, salt } = await hashPassword(args.newPassword);
 
-    // Update or create password record
-    const existingPw = await ctx.db
-      .query("passwords")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
-
-    if (existingPw) {
-      await ctx.db.patch(existingPw._id, {
+    if (passwordResolution.status === "unique") {
+      await ctx.db.patch(passwordResolution.record._id, {
         passwordHash: hash,
         salt,
         requiresReset: false,
