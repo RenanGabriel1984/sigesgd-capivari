@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { usePaginatedQuery, useQuery, useMutation } from "convex/react";
 import { useSearchParams } from "react-router";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -80,7 +81,7 @@ export default function ReturnsPage() {
   );
   const exitFromLink = useQuery(
     api.returns.returnableByExit,
-    exitParam ? { exitMovementId: exitParam as any } : "skip",
+    exitParam ? { exitMovementId: exitParam as Id<"stockMovements"> } : "skip",
   );
   const { results: returns, status: returnsStatus, loadMore: loadMoreReturns } = usePaginatedQuery(api.returns.listPage, {}, { initialNumItems: 50 });
   const locations = useQuery(api.storageLocations.listActive);
