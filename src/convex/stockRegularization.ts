@@ -172,7 +172,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
   const initialLotById = new Map(initialLots.map((lot) => [String(lot._id), lot] as const));
   const initialLotByNumber = new Map<string, Doc<"lots">[]>();
   for (const lot of initialLots) {
-    const key = keyOf(lot.productId as string, lot.lotNumber as string);
+    const key = keyOf(lot.productId, lot.lotNumber);
     const matches = initialLotByNumber.get(key) ?? [];
     matches.push(lot);
     initialLotByNumber.set(key, matches);
@@ -229,7 +229,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
       addBlocker(`Local físico de "${productName}" diverge da planilha (${location.name} / ${manifest.locationName}).`);
     }
 
-    const lot = resolveLot(item.lotId, initialLotById, initialLotByNumber, item.productId as string);
+    const lot = resolveLot(item.lotId, initialLotById, initialLotByNumber, item.productId);
     if (!lot) {
       addBlocker(`Item "${productName}" não aponta para lote verificável.`);
       continue;
@@ -292,7 +292,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
   const gomaqLotById = new Map(gomaqLots.map((lot) => [String(lot._id), lot] as const));
   const gomaqLotByNumber = new Map<string, Doc<"lots">[]>();
   for (const lot of gomaqLots) {
-    const key = keyOf(lot.productId as string, lot.lotNumber as string);
+    const key = keyOf(lot.productId, lot.lotNumber);
     const matches = gomaqLotByNumber.get(key) ?? [];
     matches.push(lot);
     gomaqLotByNumber.set(key, matches);
@@ -310,7 +310,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
     if (!location || !location.active || normalize(location.name) !== normalize("Armário TI 02")) {
       addBlocker(`Item Gomaq "${product.name}" não aponta para o Armário TI 02 ativo.`);
     }
-    const lot = resolveLot(item.lotId, gomaqLotById, gomaqLotByNumber, item.productId as string);
+    const lot = resolveLot(item.lotId, gomaqLotById, gomaqLotByNumber, item.productId);
     if (!lot) {
       addBlocker(`Item Gomaq "${product.name}" não aponta para lote verificável.`);
       continue;
@@ -365,7 +365,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
       .withIndex("by_request", (q) => q.eq("requestId", request._id)).collect();
     for (const item of requestItems) {
       if (
-        allTouchedProductIds.has(item.productId as string) &&
+        allTouchedProductIds.has(item.productId) &&
         Number(item.quantityApproved) > Number(item.quantityDelivered ?? 0)
       ) {
         addBlocker(`Há solicitação aprovada ${request._id} com entrega pendente do produto ${item.productId}; conclua/cancele antes da regularização.`);
@@ -382,16 +382,16 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
     allLotsByProduct.set(productId, lots);
     for (const lot of lots) {
       if (!lot.active || Number(lot.quantityAvailable) <= 0) continue;
-      const override = targetLotMeta.get(lot._id as string);
+      const override = targetLotMeta.get(String(lot._id));
       const areaId = override?.areaId ?? lot.areaId;
       const locationId = override?.locationId ?? lot.locationId;
       if (!areaId || !locationId) {
         addBlocker(`Produto ${productId}: lote ativo ${lot.lotNumber} com saldo ${lot.quantityAvailable} sem área/local; conciliação cancelada.`);
         continue;
       }
-      const k = keyOf(productId, locationId as string, areaId as string);
+      const k = keyOf(productId, locationId, areaId);
       const group = expectedGroups.get(k) ?? {
-        productId, locationId: locationId as string, areaId: areaId as string, quantity: 0,
+        productId, locationId, areaId, quantity: 0,
       };
       group.quantity += Number(lot.quantityAvailable);
       expectedGroups.set(k, group);
@@ -411,7 +411,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
     }
   }
 
-  const expectedPairs = new Map<string, Array<{ productId: string; locationId: string; areaId: string; quantity: number }>>();
+  const expectedPairs = new Map<string, Array<{ productId: Id<"products">; locationId: Id<"storageLocations">; areaId: Id<"stockAreas">; quantity: number }>>();
   for (const group of expectedGroups.values()) {
     const pair = keyOf(group.productId, group.locationId);
     const values = expectedPairs.get(pair) ?? [];
@@ -471,7 +471,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
       for (const group of groups) {
         let row = assigned.get(String(group.areaId));
         if (!row && unassigned.length) {
-          row = unassigned.shift();
+          row = unassigned.shift()!;
           assigned.set(String(group.areaId), row);
         }
         if (row) {
@@ -491,7 +491,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
   for (const lots of allLotsByProduct.values()) {
     for (const lot of lots) {
       lotById.set(String(lot._id), lot);
-      const key = keyOf(lot.productId as string, lot.lotNumber as string);
+      const key = keyOf(lot.productId, lot.lotNumber);
       const matches = lotByNumber.get(key) ?? [];
       matches.push(lot);
       lotByNumber.set(key, matches);
@@ -524,7 +524,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
   }
 
   for (const movement of movements) {
-    if (!allTouchedProductIds.has(movement.productId as string)) continue;
+    if (!allTouchedProductIds.has(movement.productId)) continue;
     const links = linksByMovement.get(String(movement._id)) ?? [];
     const sources: Array<{ lot: Doc<"lots">; link?: Doc<"stockMovementLots"> }> = [];
 
@@ -605,7 +605,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
         }
         addPatch(movementLotPatches, source.link._id, source.link, { areaId, locationId });
       }
-      pairs.push({ areaId: String(areaId), locationId: String(locationId) });
+      pairs.push({ areaId, locationId });
     }
 
     const uniquePairs = new Map(pairs.map((pair) => [keyOf(pair.areaId, pair.locationId), pair]));
@@ -629,7 +629,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
   const returnedByExit = new Map<string, number>();
   const returnedByExitLot = new Map<string, { exitId: string; lotId: string; quantity: number }>();
   for (const returnRow of returns) {
-    if (!allTouchedProductIds.has(returnRow.productId as string)) continue;
+    if (!allTouchedProductIds.has(returnRow.productId)) continue;
     if (!returnRow.exitMovementId) {
       addBlocker(`Devolução ${returnRow._id} não possui vínculo com a saída original.`);
       continue;
@@ -641,7 +641,7 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
     }
     const exitLinks = linksByMovement.get(String(exit._id)) ?? [];
     const exitLots = exitLinks
-      .map((link) => resolveLot(link.lotId, lotById, lotByNumber, exit.productId as string))
+      .map((link) => resolveLot(link.lotId, lotById, lotByNumber, exit.productId))
       .filter((lot): lot is Doc<"lots"> => lot !== null && lot.productId === exit.productId);
     if (exitLinks.length > 0 && exitLots.length !== exitLinks.length) {
       addBlocker(`Devolução ${returnRow._id}: a trilha multi-lote da saída original está incompleta.`);
@@ -649,15 +649,15 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
     }
     const candidateLots = exitLots.length > 0
       ? exitLots
-      : [resolveLot(exit.lotId, lotById, lotByNumber, exit.productId as string)].filter(Boolean);
+      : [resolveLot(exit.lotId, lotById, lotByNumber, exit.productId)].filter((candidate): candidate is Doc<"lots"> => candidate !== null);
     const lot = returnRow.lotId
-      ? resolveLot(returnRow.lotId, lotById, lotByNumber, returnRow.productId as string)
+      ? resolveLot(returnRow.lotId, lotById, lotByNumber, returnRow.productId)
       : candidateLots.length === 1 ? candidateLots[0] : null;
     if (!lot || lot.productId !== exit.productId || !candidateLots.some((candidate) => candidate._id === lot._id)) {
       addBlocker(`Devolução ${returnRow._id}: informe/vincule o lote exato consumido pela saída original.`);
       continue;
     }
-    const override = targetLotMeta.get(lot._id as string);
+    const override = targetLotMeta.get(String(lot._id));
     const areaId = override?.areaId ?? lot.areaId;
     const locationId = override?.locationId ?? lot.locationId;
     if (!areaId || !locationId) {
@@ -686,6 +686,10 @@ async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
   }
   for (const [exitId, returned] of returnedByExit) {
     const exit = movementById.get(exitId);
+    if (!exit) {
+      addBlocker(`Saída ${exitId} referenciada por devolução não foi encontrada.`);
+      continue;
+    }
     if (returned > Number(exit.quantity)) {
       addBlocker(`Devoluções vinculadas à saída ${exitId} (${returned}) excedem a quantidade da saída (${exit.quantity}).`);
     }
