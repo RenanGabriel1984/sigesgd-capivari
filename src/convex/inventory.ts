@@ -21,7 +21,12 @@ async function requireStockManagerOrAdmin(ctx: any) {
 async function generateInventoryNumber(ctx: any): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `INV-${year}-`;
-  const existing = await ctx.db.query("inventories").collect();
+  const nextPrefix = `INV-${year + 1}-`;
+  const existing = await ctx.db.query("inventories")
+    .withIndex("by_inventoryNumber", (q: any) =>
+      q.gte("inventoryNumber", prefix).lt("inventoryNumber", nextPrefix),
+    )
+    .collect();
   const maxNum = existing.reduce((max: number, inv: any) => {
     const match = inv.inventoryNumber.match(/^INV-\d{4}-(\d+)$/);
     if (match) {
