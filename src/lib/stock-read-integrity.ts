@@ -246,6 +246,34 @@ export function inspectProductStockIntegrity(
 
 
 /**
+ * Seleciona buckets da área/local sem escolher silenciosamente uma linha
+ * quando existem duplicidades ou quantidades inválidas.
+ */
+export function getUniqueAreaLocationBuckets<T extends ScopedStockBalance>(
+  rows: readonly T[],
+  areaId: string,
+  locationId: string,
+  productLabel: string,
+): { targetRow: T | null; legacyRows: T[] } {
+  const localRows = rows.filter((row) => row.locationId === locationId);
+  const targetRows = localRows.filter((row) => row.areaId === areaId);
+  const legacyRows = localRows.filter((row) => !row.areaId);
+
+  if (targetRows.length > 1) {
+    throw new Error(`Há buckets físicos duplicados para "${productLabel}" na área/local selecionado.`);
+  }
+  if (legacyRows.length > 1) {
+    throw new Error(`Há buckets físicos legados duplicados para "${productLabel}" neste local.`);
+  }
+  for (const row of [...targetRows, ...legacyRows]) {
+    if (typeof row.quantity !== "number" || !Number.isFinite(row.quantity) || row.quantity < 0) {
+      throw new Error(`Há quantidade física inválida de "${productLabel}" neste local.`);
+    }
+  }
+  return { targetRow: targetRows[0] ?? null, legacyRows };
+}
+
+/**
  * Resolve o saldo de abertura de um inventário localizado sem somar buckets
  * duplicados nem aceitar divergência entre o saldo físico e os lotes do escopo.
  * Lotes sem localização atual não são atribuídos por inferência ao armário.
