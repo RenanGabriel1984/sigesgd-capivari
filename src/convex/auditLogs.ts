@@ -74,12 +74,12 @@ export const byEntity = query({
     const base = ctx.db.query("auditLogs");
     const orderedQuery = args.entityId
       ? base
-          .withIndex("by_entity_entityId", (q: any) =>
+          .withIndex("by_entity_entityId", (q) =>
             q.eq("entity", args.entity).eq("entityId", args.entityId),
           )
           .order("desc")
       : base
-          .withIndex("by_entity", (q: any) => q.eq("entity", args.entity))
+          .withIndex("by_entity", (q) => q.eq("entity", args.entity))
           .order("desc");
     const page = await orderedQuery.paginate(args.paginationOpts);
     return { ...page, page: await attachMinimalUser(ctx, page.page) };
