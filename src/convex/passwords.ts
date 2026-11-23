@@ -1,17 +1,15 @@
-import { getAuthUserId, getAuthSessionId, invalidateSessions } from "@convex-dev/auth/server";
+import { getAuthSessionId, invalidateSessions } from "@convex-dev/auth/server";
 import { requirePermission } from "./rbac";
 import { mutation, internalQuery, internalMutation, internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword, verifyPassword, nextResetAttempt, verifyResetCode, isValidRecoveryEmail } from "./auth/passwords";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
 import {
   describeDuplicateCredential,
   resolveUniqueRecord,
 } from "../lib/credential-integrity";
-
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 /** Política de senha (§12). Todas as cinco ACTIONS de definição exigem este mínimo. */
 export const MIN_PASSWORD_LENGTH = 8;
