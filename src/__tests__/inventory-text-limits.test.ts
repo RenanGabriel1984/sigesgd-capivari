@@ -30,8 +30,8 @@ describe("limites de texto livre no inventário", () => {
     const closeStart = source.indexOf("export const close = mutation({");
     const closeEnd = source.indexOf("/** Cancel an inventory", closeStart);
     const close = source.slice(closeStart, closeEnd);
-    expect(close).toContain('(lots as any[]).some((lot: any) => lot.materialType === "permanent")');
-    expect(close).not.toContain("(lots as any[]).find((lot: any) => lot.materialType)?.materialType");
+    expect(close).toContain('lots.some((lot) => lot.materialType === "permanent")');
+    expect(close).toContain("materialType: lots.find((lot) => lot.materialType)?.materialType");
   });
 
   it("limita justificativa antes de qualquer ajuste do fechamento", () => {
