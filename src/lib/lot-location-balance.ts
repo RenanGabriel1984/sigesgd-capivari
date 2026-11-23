@@ -56,6 +56,39 @@ export function planLotLocationBalanceChange(input: {
   return { kind: "patch", rowId: current._id, quantityAvailable: Math.max(0, next) };
 }
 
+/**
+ * Confere o saldo derivado antes da alteração do lote.
+ * expectedQuantityBefore é capturado do documento do lote antes da escrita,
+ * mesmo quando a mutation já aplicou o patch ao documento antes desta chamada.
+ */
+export function assertLotLocationBalanceMatchesExpected(input: {
+  rows: Array<LotLocationBalanceRow & { _id: string }>;
+  lotId: string;
+  expectedQuantityBefore: number;
+}): void {
+  const { rows, lotId, expectedQuantityBefore } = input;
+  if (!Number.isFinite(expectedQuantityBefore) || expectedQuantityBefore < 0) {
+    throw new Error("O saldo esperado do lote antes da movimentação é inválido.");
+  }
+  const matching = rows.filter((row) => String(row.lotId) === lotId);
+  if (matching.length > 1) {
+    throw new Error("Há saldos lote × armário duplicados para este lote. Operação bloqueada.");
+  }
+  if (matching.length === 0) {
+    if (expectedQuantityBefore > 1e-9) {
+      throw new Error("O lote já possui saldo, mas não tem saldo lote × armário correspondente. Operação bloqueada.");
+    }
+    return;
+  }
+  const current = matching[0];
+  if (!Number.isFinite(current.quantityAvailable) || current.quantityAvailable < 0) {
+    throw new Error("O saldo lote × armário atual é inválido.");
+  }
+  if (Math.abs(current.quantityAvailable - expectedQuantityBefore) > 1e-9) {
+    throw new Error("O saldo lote × armário diverge do saldo do lote antes da movimentação.");
+  }
+}
+
 /** Aplica a variação dentro da mesma mutation Convex da movimentação de estoque. */
 export async function adjustLotLocationBalance(
   ctx: any,
@@ -64,6 +97,7 @@ export async function adjustLotLocationBalance(
     productId: any;
     locationId?: any;
     delta: number;
+    expectedQuantityBefore: number;
     allowCreate?: boolean;
   },
 ): Promise<void> {
@@ -80,6 +114,11 @@ export async function adjustLotLocationBalance(
   // possuam o vínculo conciliado na tabela nova. Nesse caso, usa-se o vínculo.
   const locationId = input.locationId ?? rows[0]?.locationId;
   if (!locationId) return;
+  assertLotLocationBalanceMatchesExpected({
+    rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
+    lotId: String(input.lotId),
+    expectedQuantityBefore: input.expectedQuantityBefore,
+  });
   const plan = planLotLocationBalanceChange({
     rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
     lotId: String(input.lotId),
