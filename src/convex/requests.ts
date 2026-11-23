@@ -388,6 +388,9 @@ export const deliver = mutation({
     if (request.status !== "approved") throw new Error("Solicitação deve estar aprovada");
     const inputItems = args.items ?? [];
     if (inputItems.length === 0) throw new Error("Informe ao menos um item para entrega");
+    // Uma linha duplicada poderia gerar duas saídas/lotes consumidos, mas
+    // gravar somente a última quantidade entregue no mesmo requestItem.
+    assertUniqueApprovalItemIds(inputItems);
 
     // Validate receiver
     if (args.receivedByUserId) {
