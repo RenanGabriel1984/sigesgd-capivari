@@ -17,6 +17,7 @@ import { query, mutation, internalMutation, internalQuery } from "./_generated/s
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { getOptionalSingleValidGlobalStock } from "../lib/stock-quantity-rules";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import { generateExitNumber } from "./stockHelpers";
 import {
@@ -241,10 +242,34 @@ export const getSupplyDashboard = query({
     }
 
     // Estoque global por produto (o recorte é sobre lotes; o saldo exibido
-    // permanece o estoque real do produto).
+    // permanece o estoque real do produto). Duplicidades não podem ser
+    // resolvidas pela ordem de leitura: bloqueamos em vez de mostrar saldo arbitrário.
+    const stockRowsByProduct = new Map<string, any[]>();
+    for (const row of stock) {
+      if (!supplyIds.has(String(row.productId))) continue;
+      const matches = stockRowsByProduct.get(String(row.productId)) ?? [];
+      matches.push(row);
+      stockRowsByProduct.set(String(row.productId), matches);
+    }
     const stockByProduct = new Map<string, { physical: number; reserved: number }>();
-    for (const s of stock) {
-      stockByProduct.set(s.productId, { physical: s.physicalQuantity, reserved: s.reservedQuantity });
+    for (const product of supplyProducts) {
+      const globalStock = getOptionalSingleValidGlobalStock(
+        stockRowsByProduct.get(String(product._id)) ?? [],
+        product.name,
+      );
+      const physical = Number(globalStock?.physicalQuantity ?? 0);
+      const reserved = Number(globalStock?.reservedQuantity ?? 0);
+      const productLots = lots.filter((lot: any) => lot.productId === product._id);
+      if (productLots.some((lot: any) =>
+        !Number.isFinite(Number(lot.quantityAvailable)) || Number(lot.quantityAvailable) < 0
+      )) {
+        throw new Error(`Há lote com saldo inválido para "${product.name}". Consulta Gomaq bloqueada.`);
+      }
+      const lotsPhysical = productLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+      if (Math.abs(physical - lotsPhysical) > 1e-9) {
+        throw new Error(`Saldo global de "${product.name}" (${physical}) diverge dos lotes (${lotsPhysical}). Regularize antes de consultar suprimentos.`);
+      }
+      stockByProduct.set(String(product._id), { physical, reserved });
     }
 
     const rows = supplyProducts
@@ -410,15 +435,28 @@ type SupplyAreaLedger = {
 };
 
 async function readSupplyAreaLedger(ctx: any, productId: string): Promise<SupplyAreaLedger> {
-  const [stock, lots, locationRows, reservations] = await Promise.all([
-    ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId)).first(),
+  const [stockRows, lots, locationRows, reservations] = await Promise.all([
+    ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
     ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
     ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
     ctx.db.query("requestItemReservations").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
   ]);
+  const stock = getOptionalSingleValidGlobalStock(stockRows, productId);
 
   const physical = Number(stock?.physicalQuantity ?? 0);
   const reserved = Number(stock?.reservedQuantity ?? 0);
+  if (lots.some((lot: any) =>
+    !Number.isFinite(Number(lot.quantityAvailable)) ||
+    Number(lot.quantityAvailable) < 0 ||
+    (lot.active === false && Number(lot.quantityAvailable) > 0)
+  )) {
+    throw new Error(`Há lote com saldo inválido ou inativo com saldo positivo no produto ${productId}. Retirada bloqueada.`);
+  }
+  if (locationRows.some((row: any) =>
+    !Number.isFinite(Number(row.quantity)) || Number(row.quantity) < 0
+  )) {
+    throw new Error(`Há saldo físico por localização inválido no produto ${productId}. Retirada bloqueada.`);
+  }
   const lotsPhysical = lots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
   const locationsPhysical = locationRows.reduce((sum: number, row: any) => sum + Number(row.quantity), 0);
   if (Math.abs(physical - lotsPhysical) > 1e-9) {
@@ -441,7 +479,18 @@ async function readSupplyAreaLedger(ctx: any, productId: string): Promise<Supply
     if (!lot || lot.productId !== productId) {
       throw new Error(`Reserva aponta para lote inexistente ou de outro produto (${reservation.lotId}). Retirada bloqueada.`);
     }
-    reservedByLot.set(String(reservation.lotId), (reservedByLot.get(String(reservation.lotId)) ?? 0) + quantity);
+    if (
+      reservation.areaId !== lot.areaId ||
+      reservation.locationId !== lot.locationId ||
+      quantity > Number(lot.quantityAvailable)
+    ) {
+      throw new Error(`Reserva do lote ${lot.lotNumber} não corresponde à área/local ou excede o saldo. Retirada bloqueada.`);
+    }
+    const nextReserved = (reservedByLot.get(String(reservation.lotId)) ?? 0) + quantity;
+    if (nextReserved > Number(lot.quantityAvailable) + 1e-9) {
+      throw new Error(`Reservas do lote ${lot.lotNumber} excedem o saldo físico. Retirada bloqueada.`);
+    }
+    reservedByLot.set(String(reservation.lotId), nextReserved);
     reservationTotal += quantity;
   }
   if (Math.abs(reservationTotal - reserved) > 1e-9) {
@@ -1132,10 +1181,14 @@ async function previewFamilyWithdrawalImpl(ctx: any, args: { productId: string; 
     const closedMember = members.find((p) => !!readPackagingConversion(p));
     const looseMember = members.find((p) => !readPackagingConversion(p));
 
-    const stockOf = async (productId: string) =>
-      ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId)).first();
-    const closedStock = closedMember ? await stockOf(closedMember._id) : null;
-    const looseStock = looseMember ? await stockOf(looseMember._id) : null;
+    const stockOf = async (productId: string, productName: string) => {
+      const rows = await ctx.db.query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", productId))
+        .collect();
+      return getOptionalSingleValidGlobalStock(rows, productName);
+    };
+    const closedStock = closedMember ? await stockOf(closedMember._id, closedMember.name) : null;
+    const looseStock = looseMember ? await stockOf(looseMember._id, looseMember.name) : null;
     const closedAvailable = (closedStock?.physicalQuantity ?? 0) - (closedStock?.reservedQuantity ?? 0);
     const looseAvailable = (looseStock?.physicalQuantity ?? 0) - (looseStock?.reservedQuantity ?? 0);
     const familyAvailable = closedAvailable * conv.factor + looseAvailable;
