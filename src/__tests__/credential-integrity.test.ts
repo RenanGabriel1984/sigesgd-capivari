@@ -58,3 +58,25 @@ describe("password management rejects ambiguous credentials", () => {
     }
   });
 });
+
+
+describe("user creation enforces backend password policy before writing the account", () => {
+  it("validates temporary password length before calling createUser", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(resolve(__dirname, "../pages/Users.tsx"), "utf8");
+    const validation = source.indexOf("tempPassword.trim().length < 8");
+    const create = source.indexOf("await createUser(");
+    expect(validation).toBeGreaterThan(-1);
+    expect(create).toBeGreaterThan(validation);
+  });
+
+  it("uses the same eight-character minimum in all password assignment forms", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(resolve(__dirname, "../pages/Users.tsx"), "utf8");
+    expect(source).toContain("password.trim().length < 8");
+    expect(source).toContain("disabled={password.trim().length < 8}");
+    expect(source).not.toContain("Mínimo 6 caracteres");
+  });
+});
