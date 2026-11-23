@@ -781,7 +781,7 @@ export const deliver = mutation({
           });
           await adjustLotLocationBalance(ctx, {
             lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
-            delta: -consume,
+            delta: -consume, expectedQuantityBefore: Number(lot.quantityAvailable),
           });
           await ctx.db.patch(reservation._id, {
             quantityRemaining: reservation.quantityRemaining - consume,
