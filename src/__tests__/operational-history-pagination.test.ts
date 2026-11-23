@@ -85,3 +85,51 @@ describe("paginação dos históricos operacionais", () => {
   });
 
 });
+
+describe("paginação e escopo do histórico de devoluções", () => {
+  it("pagina saídas devolvíveis em vez de carregar o histórico completo", () => {
+    const backend = read("convex/returns.ts");
+    const page = backend.slice(
+      backend.indexOf("export const returnablePage = query({"),
+      backend.indexOf("export const returnableByExit = query({"),
+    );
+    expect(page).toContain("paginationOptsValidator");
+    expect(page).toContain('.withIndex("by_type"');
+    expect(page).toContain(".paginate(args.paginationOpts)");
+    expect(page).toContain("buildReturnableExitRow");
+    expect(page).not.toContain(".collect()");
+  });
+
+  it("calcula devolução com consultas indexadas à saída e à solicitação, sem varrer todas as devoluções", () => {
+    const backend = read("convex/returns.ts");
+    const helper = backend.slice(
+      backend.indexOf("async function loadReturnsForExit"),
+      backend.indexOf("async function buildReturnableExitRow"),
+    );
+    expect(helper).toContain('.withIndex("by_exitMovement"');
+    expect(helper).toContain('.withIndex("by_request"');
+    expect(helper).toContain("!record.exitMovementId");
+    expect(helper).toContain("record.productId === exit.productId");
+    expect(helper).not.toContain('query("returns").collect()');
+    const create = backend.slice(backend.indexOf("export const create = mutation({"));
+    expect(create).toContain("loadReturnsForExit(ctx, exit)");
+    expect(create).not.toContain("loadReturns(ctx)");
+  });
+
+  it("preserva acesso direto a uma saída antiga sem carregar todas as páginas", () => {
+    const backend = read("convex/returns.ts");
+    const byExit = backend.slice(backend.indexOf("export const returnableByExit = query({"));
+    expect(byExit).toContain('v.id("stockMovements")');
+    expect(byExit).toContain("ctx.db.get(args.exitMovementId)");
+    expect(byExit).toContain("buildReturnableExitRow(ctx, movement)");
+  });
+
+  it("a interface carrega as saídas em páginas e mantém o deep-link por ID", () => {
+    const page = read("pages/Returns.tsx");
+    expect(page).toContain("api.returns.returnablePage");
+    expect(page).toContain("loadMoreExits(50)");
+    expect(page).toContain("api.returns.returnableByExit");
+    expect(page).toContain('exitParam ? { exitMovementId: exitParam as any } : "skip"');
+    expect(page).toContain("Carregar mais saídas");
+  });
+});
