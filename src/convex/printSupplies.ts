@@ -241,6 +241,7 @@ export const getSupplyDashboard = query({
     }
     const areaReserved = new Map<string, number>();
     const reservationTotalsByProduct = new Map<string, number>();
+    const reservationTotalsByLot = new Map<string, number>();
     for (const reservation of reservations as any[]) {
       const productId = String(reservation.productId);
       if (!supplyIds.has(productId)) continue;
@@ -256,11 +257,13 @@ export const getSupplyDashboard = query({
           quantity > Number(lot.quantityAvailable)) {
         throw new Error("Há reserva sem correspondência exata com lote/área/local ou acima do saldo. Consulta Gomaq bloqueada.");
       }
-      const nextTotal = (reservationTotalsByProduct.get(productId) ?? 0) + quantity;
-      if (nextTotal > Number(lot.quantityAvailable) + 1e-9 &&
-          [...(reservationTotalsByProduct.get(productId) !== undefined ? [1] : [])].length < 0) {
-        throw new Error("Reservas de suprimento excedem o saldo físico.");
+      const lotId = String(reservation.lotId);
+      const nextLotTotal = (reservationTotalsByLot.get(lotId) ?? 0) + quantity;
+      if (nextLotTotal > Number(lot.quantityAvailable) + 1e-9) {
+        throw new Error(`Reservas do lote ${lot.lotNumber} excedem o saldo físico.`);
       }
+      reservationTotalsByLot.set(lotId, nextLotTotal);
+      const nextTotal = (reservationTotalsByProduct.get(productId) ?? 0) + quantity;
       reservationTotalsByProduct.set(productId, nextTotal);
       if (lot.areaId === PRINT_AREA_ID) {
         areaReserved.set(productId, (areaReserved.get(productId) ?? 0) + quantity);
@@ -1215,8 +1218,15 @@ async function previewFamilyWithdrawalImpl(ctx: any, args: { productId: string; 
     const members = all.filter(
       (p) => p.categoryId === SUPPLY_CATEGORY_ID && deriveFamilyKey(p.name, p.brand ?? null) === familyKey,
     );
-    const closedMember = members.find((p) => !!readPackagingConversion(p));
-    const looseMember = members.find((p) => !readPackagingConversion(p));
+    const closedMembers = members.filter((p) => !!readPackagingConversion(p));
+    const looseMembers = members.filter((p) => !readPackagingConversion(p));
+    if (closedMembers.length !== 1 || looseMembers.length !== 1) {
+      throw new Error(
+        `Família ambígua: esperado um produto de embalagem fechada e um de unidade avulsa; encontrados ${closedMembers.length} e ${looseMembers.length}.`
+      );
+    }
+    const closedMember = closedMembers[0];
+    const looseMember = looseMembers[0];
 
     const stockOf = async (productId: string, productName: string) => {
       const rows = await ctx.db.query("stock")
