@@ -26,6 +26,8 @@ describe("integridade da entrega de solicitações", () => {
       [{ itemId: "a" }],
       [{ itemId: "x" }],
     )).toThrow(/todas as linhas aprovadas/i);
+    expect(() => assertCompleteDeliveryItemIds([], [])).not.toThrow();
+    expect(() => assertCompleteDeliveryItemIds([], [{ itemId: "x" }])).toThrow(/todas as linhas aprovadas/i);
   });
 
   it("baixa do físico o entregue e libera toda a reserva aprovada", () => {
