@@ -108,20 +108,15 @@ export const listUsers = query({
     // (admin/secretary). Consumidores operacionais que só precisam de
     // nome/ID para pickers usam `listUserOptions`.
     await requirePermission(ctx, "users.manage", { entity: "users" });
-    const [users, passwordRecords] = await Promise.all([
-      ctx.db.query("users").collect(),
-      ctx.db.query("passwords").collect(),
-    ]);
-    const passwordCounts = new Map<string, number>();
-    for (const record of passwordRecords) {
-      const key = String(record.userId);
-      passwordCounts.set(key, (passwordCounts.get(key) ?? 0) + 1);
-    }
+    const users = await ctx.db.query("users").collect();
     return Promise.all(users.map(async (user) => {
-      const organization = user.organizationId
-        ? await ctx.db.get(user.organizationId)
-        : null;
-      const passwordRecordCount = passwordCounts.get(String(user._id)) ?? 0;
+      const [organization, passwordRecords] = await Promise.all([
+        user.organizationId ? ctx.db.get(user.organizationId) : Promise.resolve(null),
+        ctx.db.query("passwords")
+          .withIndex("by_user", (q: any) => q.eq("userId", user._id))
+          .collect(),
+      ]);
+      const passwordRecordCount = passwordRecords.length;
       return {
         ...user,
         organization,
