@@ -211,11 +211,12 @@ export const getSupplyDashboard = query({
     // stock.mutate — nenhum ganho de permissão por esta tela.
     await requirePermission(ctx, "stock.view");
 
-    const [products, stock, lots, reservations] = await Promise.all([
+    const [products, stock, lots, reservations, stockByLocation] = await Promise.all([
       ctx.db.query("products").collect(),
       ctx.db.query("stock").collect(),
       ctx.db.query("lots").collect(),
       ctx.db.query("requestItemReservations").collect(),
+      ctx.db.query("stockByLocation").collect(),
     ]);
 
     const supplyProducts = products.filter((p) => p.categoryId === SUPPLY_CATEGORY_ID);
@@ -223,6 +224,7 @@ export const getSupplyDashboard = query({
 
     // Lotes da área Impressoras por produto (recorte operacional).
     const areaLots = new Map<string, number>();
+    const areaLotsByLocation = new Map<string, Map<string, number>>();
     const supplyLotsById = new Map<string, any>();
     for (const lot of lots as any[]) {
       const productId = String(lot.productId);
@@ -238,7 +240,47 @@ export const getSupplyDashboard = query({
         throw new Error("Há lote da área Impressoras sem local físico. Classifique o local antes da consulta.");
       }
       areaLots.set(productId, (areaLots.get(productId) ?? 0) + Number(lot.quantityAvailable));
+      const locationId = String(lot.locationId);
+      const perLocation = areaLotsByLocation.get(productId) ?? new Map<string, number>();
+      perLocation.set(locationId, (perLocation.get(locationId) ?? 0) + Number(lot.quantityAvailable));
+      areaLotsByLocation.set(productId, perLocation);
     }
+
+    // O painel mostra saldo por lotes, mas precisa confirmar que cada lote da
+    // área Impressoras está refletido no bucket físico correspondente.
+    const areaRowsByProduct = new Map<string, Map<string, any>>();
+    for (const row of stockByLocation as any[]) {
+      const productId = String(row.productId);
+      if (!supplyIds.has(productId)) continue;
+      if (!Number.isFinite(Number(row.quantity)) || Number(row.quantity) < 0) {
+        throw new Error("Há saldo por localização inválido em suprimento de impressão. Consulta bloqueada.");
+      }
+      if (row.areaId !== PRINT_AREA_ID) continue;
+      const locationId = String(row.locationId);
+      const perLocation = areaRowsByProduct.get(productId) ?? new Map<string, any>();
+      if (perLocation.has(locationId)) {
+        throw new Error("Há buckets duplicados de área/local na área Impressoras. Consulta bloqueada.");
+      }
+      perLocation.set(locationId, row);
+      areaRowsByProduct.set(productId, perLocation);
+    }
+    for (const productId of supplyIds) {
+      const expectedByLocation = areaLotsByLocation.get(productId) ?? new Map<string, number>();
+      const actualByLocation = areaRowsByProduct.get(productId) ?? new Map<string, any>();
+      for (const [locationId, quantity] of expectedByLocation) {
+        const row = actualByLocation.get(locationId);
+        if (!row || Math.abs(Number(row.quantity) - quantity) > 1e-9) {
+          throw new Error("Saldo dos lotes diverge do bucket físico da área Impressoras. Consulta bloqueada.");
+        }
+      }
+      for (const [locationId, row] of actualByLocation) {
+        const expected = expectedByLocation.get(locationId) ?? 0;
+        if (Math.abs(Number(row.quantity) - expected) > 1e-9) {
+          throw new Error("Bucket físico sem correspondência nos lotes da área Impressoras. Consulta bloqueada.");
+        }
+      }
+    }
+
     const areaReserved = new Map<string, number>();
     const reservationTotalsByProduct = new Map<string, number>();
     const reservationTotalsByLot = new Map<string, number>();
