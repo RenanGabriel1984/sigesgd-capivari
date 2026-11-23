@@ -69,6 +69,8 @@ describe("integração de entrega com o livro-razão lote/local", () => {
     expect(block).toContain("freshStock.reservedQuantity - adjustment.reservedToRelease");
     expect(block).toContain("consumeLotLocationStock(ctx");
     expect(block).toContain("Reserva não utilizada liberada");
+    expect(block).toContain("const approvedRequestItems = allRequestItems.filter((item: any) => item.quantityApproved > 0)");
+    expect(block).toContain("return total + approved - input.quantityDelivered");
   });
 });
 
