@@ -1,26 +1,30 @@
 /**
  * RESOLUÇÃO DA URL DO BACKEND CONVEX.
  *
- * Ambientes confirmados do SIGESGD Capivari:
- *  • produção: savory-sockeye-292;
- *  • desenvolvimento: first-herring-264;
- *  • homologação isolada: tame-alligator-797 (projeto Convex separado).
+ * Ambiente operacional confirmado pelo responsável do SIGESGD Capivari:
+ *   first-herring-264.convex.cloud
  *
- * O modo do Vite determina o destino padrão: `vite dev` usa desenvolvimento;
- * builds de produção usam o deployment de produção. Homologação exige
- * VITE_APP_ENV=homologacao e URL explicitamente permitida.
+ * Esse é o backend que contém o inventário, as entradas de notas fiscais e os
+ * demais registros operacionais. Não trocar esse destino por inferência de
+ * nomes de deployments ou por configuração herdada de outro ambiente.
  *
- * Nenhum valor de VITE_CONVEX_URL pode redirecionar silenciosamente uma build
- * de produção para um deployment de desenvolvimento ou vice-versa.
+ * O alias DEVELOPMENT_CONVEX_URL mantém o comportamento anterior do projeto
+ * até que exista uma implantação de desenvolvimento distinta, expressamente
+ * confirmada. A homologação usa exclusivamente tame-alligator-797.
  */
 export const PRODUCTION_CONVEX_URL =
-  "https://savory-sockeye-292.convex.cloud";
-export const DEVELOPMENT_CONVEX_URL =
   "https://first-herring-264.convex.cloud";
+
+/**
+ * Compatibilidade operacional: não existe, neste momento, um backend de
+ * desenvolvimento distinto confirmado para este repositório.
+ * Portanto, preserva-se o destino já utilizado, sem inventar outro ambiente.
+ */
+export const DEVELOPMENT_CONVEX_URL = PRODUCTION_CONVEX_URL;
+
 export const HOMOLOGATION_CONVEX_URL =
   "https://tame-alligator-797.convex.cloud";
 
-/** Compatibilidade com imports antigos: URL oficial de produção. */
 export const ACTIVE_OPERATIONAL_CONVEX_URL = PRODUCTION_CONVEX_URL;
 /** @deprecated Use PRODUCTION_CONVEX_URL. */
 export const OFFICIAL_CONVEX_URL = PRODUCTION_CONVEX_URL;
@@ -77,15 +81,13 @@ export function resolveConvexUrl(env: ConvexUrlEnv): string {
     return requireExactDeploymentUrl(raw, HOMOLOGATION_CONVEX_URL, "homologação");
   }
 
-  const isDevelopment = appEnv === "development" ||
-    (!appEnv && String(env.MODE ?? "").trim().toLowerCase() === "development");
-  if (isDevelopment) {
+  // Mantém o backend operacional confirmado. Overrides não podem redirecionar
+  // produção ou desenvolvimento para deployments desconhecidos.
+  if (appEnv === "development" || viteMode === "development") {
     const raw = String(env.VITE_CONVEX_URL ?? DEVELOPMENT_CONVEX_URL).trim();
     return requireExactDeploymentUrl(raw, DEVELOPMENT_CONVEX_URL, "desenvolvimento");
   }
 
-  // Produção é o padrão para builds de distribuição e nunca aceita override
-  // por VITE_CONVEX_URL; isso impede apontamento acidental ao backend de dev.
   return PRODUCTION_CONVEX_URL;
 }
 
