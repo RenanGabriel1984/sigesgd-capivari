@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/entry-item-area-classification
+      - codex/stock-integrity-audit-finalization
   pull_request:
     branches:
       - main
