@@ -61,7 +61,7 @@ async function loadReturnsForExit(
 }
 
 async function buildReturnableExitRow(
-  ctx: QueryCtx | MutationCtx,
+  ctx: QueryCtx,
   movement: Doc<"stockMovements">,
 ) {
   if (movement.type !== "exit" || movement.canceled) return null;
@@ -328,7 +328,7 @@ export const create = mutation({
     // Distribuir a quantidade a devolver entre os mesmos lotes consumidos,
     // abatendo devoluções anteriores lote a lote.
     const returnedByLot = new Map<string, number>();
-    for (const record of relatedReturns as any[]) {
+    for (const record of relatedReturns) {
       if (record.lotId && (record.exitMovementId === exit._id ||
         (!record.exitMovementId && !!exit.requestId && record.requestId === exit.requestId &&
           record.productId === exit.productId))) {
@@ -343,11 +343,11 @@ export const create = mutation({
     // Registros históricos de devolução podem não ter exitMovementId nem lotId.
     // Sua quantidade já reduz o total devolvível; abatemos conservadoramente
     // essa parte dos primeiros lotes FIFO para não restaurar saldo em duplicidade.
-    let unassignedLegacyReturned = (relatedReturns as any[])
+    let unassignedLegacyReturned = relatedReturns
       .filter((record) => !record.exitMovementId && !record.lotId &&
         !!exit.requestId && record.requestId === exit.requestId &&
         record.productId === exit.productId)
-      .reduce((sum: number, record: any) => sum + record.quantity, 0);
+      .reduce((sum, record) => sum + record.quantity, 0);
     const legacyReturnedByLot = new Map<string, number>();
     for (const source of orderedSources) {
       const assignedLegacyReturn = Math.min(source.quantity, unassignedLegacyReturned);
