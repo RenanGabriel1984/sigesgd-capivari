@@ -1384,9 +1384,9 @@ export const applyLotLocationMetadataBackfill = internalMutation({
       ctx.db.query("lotLocationBalances").collect(),
       ctx.db.query("storageLocations").collect(),
     ]);
-    const lotById = new Map<string, any>(lots.map((lot) => [String(lot._id), lot] as const));
-    const locationById = new Map<string, any>(locations.map((location: any) => [String(location._id), location] as const));
-    const rowsByLot = new Map<string, any[]>();
+    const lotById = new Map<string, (typeof lots)[number]>(lots.map((lot) => [String(lot._id), lot] as const));
+    const locationById = new Map<string, (typeof locations)[number]>(locations.map((location) => [String(location._id), location] as const));
+    const rowsByLot = new Map<string, (typeof balances)[number][]>();
     for (const row of balances) {
       const key = String(row.lotId);
       const current = rowsByLot.get(key) ?? [];
@@ -1396,7 +1396,7 @@ export const applyLotLocationMetadataBackfill = internalMutation({
 
     const problems: string[] = [];
     for (const [lotId, rows] of rowsByLot) {
-      const lot: any = lotById.get(lotId);
+      const lot = lotById.get(lotId);
       if (!lot) {
         problems.push(`saldo sem lote correspondente: ${lotId}`);
         continue;
@@ -1433,7 +1433,7 @@ export const applyLotLocationMetadataBackfill = internalMutation({
     let skipped = 0;
     const now = Date.now();
     for (const [lotId, rows] of rowsByLot) {
-      const lot: any = lotById.get(lotId);
+      const lot = lotById.get(lotId);
       const row = rows[0];
       if (lot.locationId === row.locationId) {
         skipped++;
