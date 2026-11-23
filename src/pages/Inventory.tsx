@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, usePaginatedQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Doc } from "@/convex/_generated/dataModel";
 import { AppShell } from "@/components/AppShell";
@@ -56,7 +56,15 @@ export default function Inventory() {
   const isAdmin = user?.role === "admin";
   const canInitialLoad = isAdmin || user?.role === "stock_manager";
 
-  const inventories = useQuery(api.inventory.list) as InventoryView[] | undefined;
+  const {
+    results: inventories,
+    status: inventoriesStatus,
+    loadMore: loadMoreInventories,
+  } = usePaginatedQuery(api.inventory.list, {}, { initialNumItems: 30 }) as {
+    results: InventoryView[];
+    status: string;
+    loadMore: (count: number) => void;
+  };
   const locations = useQuery(api.storageLocations.listActive);
   const areas = useQuery(api.stockAreas.listActive);
   const products = useQuery(api.products.listActive);
@@ -146,7 +154,7 @@ export default function Inventory() {
     });
   }, [sheetText, locations, areas, products]);
 
-  if (inventories === undefined) {
+  if (inventoriesStatus === "LoadingFirstPage") {
     return (
       <AppShell>
         <div className="space-y-6 max-w-7xl mx-auto">
@@ -162,7 +170,7 @@ export default function Inventory() {
     );
   }
 
-  const filtered = inventories?.filter((i) => {
+  const filtered = inventories.filter((i) => {
     if (filter === "active") return i.status !== "closed" && i.status !== "cancelled";
     if (filter === "closed") return i.status === "closed";
     if (filter === "cancelled") return i.status === "cancelled";
@@ -420,7 +428,7 @@ export default function Inventory() {
               </Card>
             ) : (
               <div className="space-y-3">
-                {filtered?.map((inv) => {
+                {filtered.map((inv) => {
                   const uncounted = getUncounted(inv.counts);
                   const diffs = getDiffs(inv.counts);
                   const isActive = viewId === inv._id;
@@ -575,6 +583,17 @@ export default function Inventory() {
                 })}
               </div>
             )}
+            {inventoriesStatus !== "Exhausted" ? (
+              <div className="flex justify-center pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => loadMoreInventories(30)}
+                  disabled={inventoriesStatus === "LoadingMore"}
+                >
+                  {inventoriesStatus === "LoadingMore" ? "Carregando..." : "Carregar mais inventários"}
+                </Button>
+              </div>
+            ) : null}
           </TabsContent>
 
           {/* ═══ Implantação Inicial ═══ */}
