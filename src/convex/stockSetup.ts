@@ -1065,7 +1065,7 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
       throw new Error("Manifesto fechado de TI Geral inválido; nenhuma alteração realizada.");
     }
 
-    const areas: any[] = await ctx.db.query("stockAreas").collect();
+    const areas = await ctx.db.query("stockAreas").collect();
     const matchingAreas = areas.filter((area) => area.name === "TI Geral" && area.active);
     if (matchingAreas.length !== 1) {
       throw new Error('Deve existir exatamente uma área ativa chamada "TI Geral".');
@@ -1073,16 +1073,16 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
     const area = matchingAreas[0];
     const areaId = String(area._id);
 
-    const entryMatches: any[] = await ctx.db
+    const entryMatches = await ctx.db
       .query("entries")
-      .withIndex("by_number", (q: any) => q.eq("entryNumber", "ENT-2026-000001"))
+      .withIndex("by_number", (q) => q.eq("entryNumber", "ENT-2026-000001"))
       .collect();
     if (entryMatches.length !== 1) {
       throw new Error(
         `Esperada exatamente uma entrada ENT-2026-000001; encontradas ${entryMatches.length}. Nenhuma alteração realizada.`
       );
     }
-    const entry: any = entryMatches[0];
+    const entry = entryMatches[0]!;
     if (
       !entry ||
       entry.status !== "confirmed" ||
@@ -1101,9 +1101,9 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
       allMovements,
       allMovementLotLinks,
       allReservations,
-    ]: any[][] = await Promise.all([
-      ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", entry._id)).collect(),
-      ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", entry._id)).collect(),
+    ] = await Promise.all([
+      ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", entry._id)).collect(),
+      ctx.db.query("lots").withIndex("by_entry", (q) => q.eq("entryId", entry._id)).collect(),
       ctx.db.query("lots").collect(),
       ctx.db.query("lotLocationBalances").collect(),
       ctx.db.query("stockByLocation").collect(),
@@ -1112,7 +1112,7 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
       ctx.db.query("requestItemReservations").collect(),
     ]);
 
-    const initialMovements = allMovements.filter((movement: any) => String(movement.entryId) === String(entry._id));
+    const initialMovements = allMovements.filter((movement) => String(movement.entryId) === String(entry._id));
     if (initialItems.length !== 53 || initialLots.length !== 53 || initialMovements.length !== 53) {
       throw new Error(
         "Entrada inicial fora do manifesto: itens=" + initialItems.length +
@@ -1122,21 +1122,21 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
     }
 
     const manifestByName = new Map(INITIAL_STOCK_MANIFEST.map((row) => [row.productName, row]));
-    const balancesByLot = new Map<string, any[]>();
+    const balancesByLot = new Map<string, (typeof allBalances)[number][]>();
     for (const balance of allBalances) {
       const key = String(balance.lotId);
       const list = balancesByLot.get(key) ?? [];
       list.push(balance);
       balancesByLot.set(key, list);
     }
-    const linksByMovement = new Map<string, any[]>();
+    const linksByMovement = new Map<string, (typeof allMovementLotLinks)[number][]>();
     for (const link of allMovementLotLinks) {
       const key = String(link.movementId);
       const list = linksByMovement.get(key) ?? [];
       list.push(link);
       linksByMovement.set(key, list);
     }
-    const reservationsByLot = new Map<string, any[]>();
+    const reservationsByLot = new Map<string, (typeof allReservations)[number][]>();
     for (const reservation of allReservations) {
       const key = String(reservation.lotId);
       const list = reservationsByLot.get(key) ?? [];
@@ -1148,7 +1148,7 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
       target: (typeof targets)[number];
       itemId: string;
       movementId: string;
-      linkIds: string[];
+      linkIds: Id<"stockMovementLots">[];
     }> = [];
     let alreadyClassified = 0;
 
@@ -1164,11 +1164,11 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
         throw new Error('O item "' + target.productName + '" não confere com a planilha oficial; operação abortada.');
       }
 
-      const [product, location, lot, localRow]: any[] = await Promise.all([
-        ctx.db.get(target.productId as any),
-        ctx.db.get(target.locationId as any),
-        ctx.db.get(target.lotId as any),
-        ctx.db.get(target.rowId as any),
+      const [product, location, lot, localRow] = await Promise.all([
+        ctx.db.get(target.productId as Id<"products">),
+        ctx.db.get(target.locationId as Id<"storageLocations">),
+        ctx.db.get(target.lotId as Id<"lots">),
+        ctx.db.get(target.rowId as Id<"stockByLocation">),
       ]);
       if (!product || product.name !== target.productName) {
         throw new Error('Produto de "' + target.productName + '" não corresponde ao ID da auditoria.');
@@ -1206,7 +1206,7 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
         throw new Error('Escopo produto/local de "' + target.productName + '" possui saldos adicionais ou duplicados.');
       }
 
-      const areaLessLots = allLots.filter((candidate: any) =>
+      const areaLessLots = allLots.filter((candidate) =>
         String(candidate.productId) === target.productId &&
         String(candidate.locationId) === target.locationId &&
         (candidate.areaId == null || String(candidate.areaId) === areaId) &&
@@ -1227,7 +1227,7 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
         throw new Error('Saldo lote/localização de "' + target.productName + '" não fecha com a quantidade documental.');
       }
 
-      const entryItemMatches = initialItems.filter((item: any) =>
+      const entryItemMatches = initialItems.filter((item) =>
         String(item.productId) === target.productId &&
         (String(item.lotId) === target.lotId || String(item.lotId) === String(lot.lotNumber)) &&
         String(item.locationId) === target.locationId &&
@@ -1253,7 +1253,7 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
         }
       }
 
-      const movementMatches = initialMovements.filter((movement: any) =>
+      const movementMatches = initialMovements.filter((movement) =>
         String(movement.productId) === target.productId &&
         String(movement.lotId) === target.lotId
       );
@@ -1275,7 +1275,7 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
 
       const movementLinks = linksByMovement.get(String(movement._id)) ?? [];
       if (movementLinks.length > 0) {
-        const linkedQuantity = movementLinks.reduce((sum: number, link: any) => sum + Number(link.quantity), 0);
+        const linkedQuantity = movementLinks.reduce((sum: number, link) => sum + Number(link.quantity), 0);
         if (
           movementLinks.length !== 1 ||
           String(movementLinks[0].lotId) !== target.lotId ||
@@ -1291,7 +1291,7 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
         entryItem.areaId,
         localRow.areaId,
         movement.areaId,
-        ...movementLinks.map((link: any) => link.areaId),
+        ...movementLinks.map((link) => link.areaId),
       ].map((value) => value == null ? "unset" : String(value));
       if (metadataStates.some((value) => value !== "unset" && value !== areaId)) {
         throw new Error('"' + target.productName + '" já possui metadado de área conflitante; operação abortada.');
@@ -1306,9 +1306,9 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
       } else {
         patches.push({
           target,
-          itemId: String(entryItem._id),
-          movementId: String(movement._id),
-          linkIds: movementLinks.map((link: any) => String(link._id)),
+          itemId: entryItem._id,
+          movementId: movement._id,
+          linkIds: movementLinks.map((link) => link._id),
         });
       }
     }
@@ -1334,12 +1334,12 @@ export const applyLegacyGeneralAreaClassification = internalMutation({
 
     // Todas as 36 linhas e seus vínculos históricos foram validados antes da primeira escrita.
     for (const patch of patches) {
-      await ctx.db.patch(patch.target.lotId as any, { areaId: area._id });
-      await ctx.db.patch(patch.itemId as any, { areaId: area._id });
-      await ctx.db.patch(patch.target.rowId as any, { areaId: area._id });
-      await ctx.db.patch(patch.movementId as any, { areaId: area._id });
+      await ctx.db.patch(patch.target.lotId as Id<"lots">, { areaId: area._id });
+      await ctx.db.patch(patch.itemId as Id<"entryItems">, { areaId: area._id });
+      await ctx.db.patch(patch.target.rowId as Id<"stockByLocation">, { areaId: area._id });
+      await ctx.db.patch(patch.movementId as Id<"stockMovements">, { areaId: area._id });
       for (const linkId of patch.linkIds) {
-        await ctx.db.patch(linkId as any, { areaId: area._id });
+        await ctx.db.patch(linkId, { areaId: area._id });
       }
     }
 
