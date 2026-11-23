@@ -9,3 +9,9 @@ export function resolveUniqueRecord<T>(records: readonly T[]): UniqueRecordResol
   if (records.length > 1) return { status: "ambiguous", count: records.length };
   return { status: "unique", record: records[0] };
 }
+
+
+/** Canonical e-mail key shared by account creation and credential login. */
+export function normalizeLoginEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
