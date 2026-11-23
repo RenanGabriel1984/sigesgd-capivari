@@ -4,7 +4,7 @@ import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
-import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { isDiscreteStockUnit, requireValidScopedStockQuantity } from "../lib/stock-quantity-rules";
 import {
   validateReturnQuantity,
@@ -21,8 +21,6 @@ import {
   type ReturnCondition,
 } from "../lib/returns-rules";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
-
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
 async function requireUser(ctx: any) {
   // RBAC central: consulta de devoluções.
