@@ -292,15 +292,25 @@ export const classifyLot = mutation({
 
     const rows = await ctx.db.query("stockByLocation")
       .withIndex("by_product", (q) => q.eq("productId", lot.productId)).collect();
-    const targetRow = rows.find((row) =>
+    const targetRows = rows.filter((row) =>
       row.locationId === args.locationId && row.areaId === args.areaId
-    );
-    const alreadyClassifiedRow = rows.find((row) =>
-      row.locationId === args.locationId && row.areaId === lot.areaId && !!lot.areaId
     );
     const legacyRows = rows.filter((row) =>
       row.locationId === args.locationId && !row.areaId
     );
+    if (targetRows.length > 1) {
+      throw new Error("Há buckets físicos duplicados para a área/local selecionado. Classificação bloqueada.");
+    }
+    if (legacyRows.length > 1) {
+      throw new Error("Há buckets físicos legados duplicados neste local. Regularize a duplicidade antes de classificar o lote.");
+    }
+    for (const row of [...targetRows, ...legacyRows]) {
+      if (!Number.isFinite(row.quantity) || row.quantity < 0) {
+        throw new Error("Há quantidade física inválida neste produto/local. Classificação bloqueada.");
+      }
+    }
+    const targetRow = targetRows[0] ?? null;
+    const alreadyClassifiedRow = lot.areaId === args.areaId ? targetRow : undefined;
     const legacyQuantity = legacyRows.reduce((sum: number, row) => sum + row.quantity, 0);
 
     // Se o lote já possuía área e faltava somente a localização, o saldo pode
