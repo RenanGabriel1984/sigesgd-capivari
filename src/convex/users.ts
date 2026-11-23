@@ -113,7 +113,7 @@ export const listUsers = query({
       const [organization, passwordRecords] = await Promise.all([
         user.organizationId ? ctx.db.get(user.organizationId) : Promise.resolve(null),
         ctx.db.query("passwords")
-          .withIndex("by_user", (q: any) => q.eq("userId", user._id))
+          .withIndex("by_user", (q) => q.eq("userId", user._id))
           .collect(),
       ]);
       const passwordRecordCount = passwordRecords.length;
