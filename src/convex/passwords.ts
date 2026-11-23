@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword } from "./auth/passwords";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
+import { resolveUniqueRecord } from "../lib/credential-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -117,12 +118,18 @@ export const changePassword = mutation({
       throw new Error("A nova senha deve ser diferente da atual");
     }
 
-    const passwordRecord = await ctx.db
+    const passwordRecords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", userId))
-      .first();
-
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRecords);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error("Credenciais duplicadas. Contate o administrador para regularizar o acesso.");
+    }
+    if (passwordResolution.status === "missing") {
+      throw new Error("Senha não configurada. Contate o administrador.");
+    }
+    const passwordRecord = passwordResolution.record;
 
     const valid = await verifyPassword(
       args.currentPassword,
@@ -170,14 +177,18 @@ export const adminResetPassword = mutation({
 
     assertPasswordPolicy(args.newPassword);
 
-    const passwordRecord = await ctx.db
+    const passwordRecords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .first();
-
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRecords);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error("Credenciais duplicadas. Regularize o cadastro antes de redefinir a senha.");
+    }
     const { hash, salt } = await hashPassword(args.newPassword);
 
-    if (passwordRecord) {
+    if (passwordResolution.status === "unique") {
+      const passwordRecord = passwordResolution.record;
       await ctx.db.patch(passwordRecord._id, {
         passwordHash: hash,
         salt,
@@ -218,12 +229,18 @@ export const forceChangePassword = mutation({
 
     assertPasswordPolicy(args.newPassword);
 
-    const passwordRecord = await ctx.db
+    const passwordRecords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", userId))
-      .first();
-
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRecords);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error("Credenciais duplicadas. Contate o administrador para regularizar o acesso.");
+    }
+    if (passwordResolution.status === "missing") {
+      throw new Error("Senha não configurada. Contate o administrador.");
+    }
+    const passwordRecord = passwordResolution.record;
 
     const { hash, salt } = await hashPassword(args.newPassword);
 
@@ -258,17 +275,21 @@ export const verifyCredentials = internalQuery({
     password: v.string(),
   },
   handler: async (ctx, args) => {
-    // Find user by email
-    const user = await ctx.db
+    // An email is also expected to identify exactly one account. Never
+    // authenticate whichever duplicate happens to be returned first.
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", args.email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
 
     // ── ANTI-ENUMERAÇÃO (§11) ────────────────────────────────────────────
     // TODOS os caminhos de falha devolvem EXATAMENTE a mesma mensagem, com a
-    // mesma forma. O chamador não consegue distinguir "e-mail não existe",
-    // "usuário inativo", "sem senha", "sem perfil de acesso" ou "senha errada".
-    if (!user) return { success: false, error: GENERIC_AUTH_ERROR };
+    // mesma forma. Duplicidade de identidade também falha de forma genérica.
+    if (userResolution.status !== "unique") {
+      return { success: false, error: GENERIC_AUTH_ERROR };
+    }
+    const user = userResolution.record;
 
     // Check if user is active
     if (user.active === false) {
@@ -285,15 +306,19 @@ export const verifyCredentials = internalQuery({
       return { success: false, error: GENERIC_AUTH_ERROR };
     }
 
-    // Find password record
-    const passwordRecord = await ctx.db
+    // A user must have exactly one credential record. Choosing .first()
+    // silently authenticates against an arbitrary hash if historical duplicate
+    // rows exist; fail closed until an authorized reset consolidates them.
+    const passwordRecords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
+      .collect();
 
-    if (!passwordRecord) {
+    const passwordResolution = resolveUniqueRecord(passwordRecords);
+    if (passwordResolution.status !== "unique") {
       return { success: false, error: GENERIC_AUTH_ERROR };
     }
+    const passwordRecord = passwordResolution.record;
 
     // Verify password
     const valid = await verifyPassword(
@@ -462,14 +487,16 @@ export const bootstrapSetPassword = internalMutation({
     assertPasswordPolicy(args.password);
 
     // Find user by email
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
 
-    if (!user) {
-      throw new Error(`Usuário não encontrado com e-mail: ${email}`);
+    if (userResolution.status !== "unique") {
+      throw new Error("E-mail não encontrado ou identidade duplicada; regularize o cadastro antes de definir a senha.");
     }
+    const user = userResolution.record;
 
     // Check if password already exists
     const existingPassword = await ctx.db
@@ -572,14 +599,19 @@ export const requestPasswordReset = mutation({
     if (!email) throw new Error("E-mail é obrigatório");
     if (!Number.isFinite(args.email.length)) throw new Error("E-mail inválido");
 
-    // Find user by email
-    const user = await ctx.db
+    // A recovery email must resolve to exactly one account. Keep the public
+    // response identical for missing and ambiguous identities.
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
+    if (userResolution.status !== "unique") {
+      return { message: RESET_GENERIC_MESSAGE };
+    }
+    const user = userResolution.record;
 
     // Always return the same message to prevent email enumeration
-    if (!user) return { message: RESET_GENERIC_MESSAGE };
     if (user.active === false) return { message: RESET_GENERIC_MESSAGE };
     if ((user as { isAnonymous?: boolean }).isAnonymous === true) {
       return { message: RESET_GENERIC_MESSAGE };
@@ -664,13 +696,17 @@ export const confirmPasswordReset = mutation({
     if (!email) throw new Error("E-mail é obrigatório");
     assertPasswordPolicy(args.newPassword);
 
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
 
-    // Generic error to prevent email enumeration
-    if (!user) throw new Error("Código inválido ou expirado");
+    // Missing or ambiguous identity: same public failure.
+    if (userResolution.status !== "unique") {
+      throw new Error("Código inválido ou expirado");
+    }
+    const user = userResolution.record;
 
     // Find valid token
     const tokens = await ctx.db
@@ -704,20 +740,25 @@ export const confirmPasswordReset = mutation({
       throw new Error("Código inválido ou expirado");
     }
 
-    // Mark token as used
+    // Resolve credentials before consuming the one-time token. If historical
+    // duplicates exist, fail closed and preserve the token for controlled repair.
+    const existingPasswordRecords = await ctx.db
+      .query("passwords")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+    const passwordResolution = resolveUniqueRecord(existingPasswordRecords);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error("Não foi possível redefinir a senha; cadastro de credenciais duplicado precisa ser regularizado.");
+    }
+
+    // Mark token as used only after identity and credential integrity checks.
     await ctx.db.patch(validToken._id, { usedAt: Date.now() });
 
     // Hash new password
     const { hash, salt } = await hashPassword(args.newPassword);
 
-    // Update or create password record
-    const existingPw = await ctx.db
-      .query("passwords")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
-
-    if (existingPw) {
-      await ctx.db.patch(existingPw._id, {
+    if (passwordResolution.status === "unique") {
+      await ctx.db.patch(passwordResolution.record._id, {
         passwordHash: hash,
         salt,
         requiresReset: false,
@@ -890,12 +931,16 @@ export const bootstrapResetPassword = internalMutation({
     if (!email) throw new Error("E-mail é obrigatório");
     assertPasswordPolicy(args.newPassword);
 
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
 
-    if (!user) throw new Error(`Usuário não encontrado: ${email}`);
+    if (userResolution.status !== "unique") {
+      throw new Error("E-mail não encontrado ou identidade duplicada; regularize o cadastro antes de redefinir a senha.");
+    }
+    const user = userResolution.record;
 
     // Safety: only allow reset for admin/stock_manager
     if (user.role !== "admin" && user.role !== "stock_manager") {
@@ -905,12 +950,17 @@ export const bootstrapResetPassword = internalMutation({
     const { hash, salt } = await hashPassword(args.newPassword);
 
     // Check if password record exists
-    const existingPw = await ctx.db
+    const existingPasswords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
+      .collect();
+    const passwordResolution = resolveUniqueRecord(existingPasswords);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error("Credenciais duplicadas. Regularize o cadastro antes de redefinir a senha.");
+    }
 
-    if (existingPw) {
+    if (passwordResolution.status === "unique") {
+      const existingPw = passwordResolution.record;
       await ctx.db.patch(existingPw._id, {
         passwordHash: hash,
         salt,
