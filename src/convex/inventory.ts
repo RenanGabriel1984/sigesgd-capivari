@@ -511,6 +511,19 @@ export const close = mutation({
       let eligibleLots = lots;
       let reservedInScope = previousReserved;
       if (inv.locationId) {
+        // Revalida no fechamento as mesmas invariantes da abertura. O estado
+        // pode ter sido criado antes da proteção ou alterado por outro fluxo;
+        // não permitir que um inventário antigo feche sobre buckets ambíguos.
+        const currentScopedQuantity = resolveScopedInventoryQuantity(
+          locationRows,
+          lots,
+          String(inv.areaId),
+          String(inv.locationId),
+          product.name,
+        );
+        if (Math.abs(currentScopedQuantity - snapshot) > 1e-9) {
+          throw new Error(`O saldo conciliado de "${product.name}" mudou depois da abertura do inventário. Atualize o inventário antes de fechar.`);
+        }
         const targetRows = locationRows.filter((row) =>
           row.locationId === inv.locationId && row.areaId === inv.areaId
         );
