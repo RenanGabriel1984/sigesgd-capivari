@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getOptionalSingleValidGlobalStock,
+  getUniqueAreaLocationBuckets,
   inspectProductStockIntegrity,
   requireSingleValidGlobalStock,
   resolveScopedInventoryQuantity,
@@ -268,5 +269,56 @@ describe("integridade da abertura de inventário localizado", () => {
 
   it("returns zero only when both the scoped bucket and scoped lots are empty", () => {
     expect(resolveScopedInventoryQuantity([], [], "ti", "cabinet-1", "Mouse")).toBe(0);
+  });
+});
+
+
+describe("seleção segura de buckets na classificação de lotes", () => {
+  it("retorna o único bucket classificado e os buckets legados do mesmo local", () => {
+    const result = getUniqueAreaLocationBuckets(
+      [
+        { areaId: "ti", locationId: "cabinet-1", quantity: 4 },
+        { locationId: "cabinet-1", quantity: 6 },
+        { areaId: "printers", locationId: "cabinet-2", quantity: 3 },
+      ],
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    );
+    expect(result.targetRow?.quantity).toBe(4);
+    expect(result.legacyRows.map((row) => row.quantity)).toEqual([6]);
+  });
+
+  it("bloqueia duplicidade de buckets classificados", () => {
+    expect(() => getUniqueAreaLocationBuckets(
+      [
+        { areaId: "ti", locationId: "cabinet-1", quantity: 4 },
+        { areaId: "ti", locationId: "cabinet-1", quantity: 6 },
+      ],
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    )).toThrow(/buckets físicos duplicados/i);
+  });
+
+  it("bloqueia duplicidade de buckets legados em vez de consumir uma soma arbitrária", () => {
+    expect(() => getUniqueAreaLocationBuckets(
+      [
+        { locationId: "cabinet-1", quantity: 4 },
+        { locationId: "cabinet-1", quantity: 6 },
+      ],
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    )).toThrow(/buckets físicos legados duplicados/i);
+  });
+
+  it("bloqueia quantidades físicas inválidas antes de classificar", () => {
+    expect(() => getUniqueAreaLocationBuckets(
+      [{ locationId: "cabinet-1", quantity: Number.NaN }],
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    )).toThrow(/quantidade física inválida/i);
   });
 });
