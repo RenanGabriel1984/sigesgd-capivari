@@ -87,19 +87,21 @@ describe("R32/D1 — destino explícito da entrada", () => {
     expect(payload.invoiceNumber).toBe("2967");
   });
 
-  it("estoque geral: areaId vazio não vira undefined nem consumo por padrão", async () => {
+  it("área vazia bloqueia antes de upload, criação ou confirmação", async () => {
     const ctx = setup({ destination: { materialType: "permanent", areaId: "  " } });
 
-    await runEntryImport({ ...ctx.input, requiresPatrimonyUnits: true });
-
-    const payload = ctx.createEntry.mock.calls[0][0] as any;
-    expect(payload.materialType).toBe("permanent");
-    expect("areaId" in payload).toBe(false);
+    await expect(runEntryImport({ ...ctx.input, requiresPatrimonyUnits: true })).rejects.toBeInstanceOf(
+      NfeDestinationError,
+    );
+    expect(ctx.uploadDocument).not.toHaveBeenCalled();
+    expect(ctx.uploadXml).not.toHaveBeenCalled();
+    expect(ctx.createEntry).not.toHaveBeenCalled();
+    expect(ctx.confirmEntry).not.toHaveBeenCalled();
   });
 
   it("material permanente NÃO confirma antes das unidades patrimoniais", async () => {
     const ctx = setup({
-      destination: { materialType: "permanent", areaId: "" },
+      destination: { materialType: "permanent", areaId: "area-impressoras" },
     });
 
     const result = await runEntryImport({ ...ctx.input, requiresPatrimonyUnits: true });

@@ -4,7 +4,7 @@
 
 Aplicação web responsiva e instalável como PWA para controle interno de estoque, materiais, equipamentos e movimentações da Secretaria de Gestão e Governo Digital da Prefeitura Municipal de Capivari.
 
-> ⚠️ **Projeto em desenvolvimento.** Esta versão (v0.3 — Fase 3 Homologada) ainda não está em produção.
+> ⚠️ **Projeto em desenvolvimento e estabilização.** O sistema ainda não está liberado para operação oficial. Homologação funcional e migração para a infraestrutura municipal são etapas obrigatórias.
 
 ---
 
@@ -22,11 +22,11 @@ O sistema é utilizado tanto em computadores quanto em dispositivos móveis.
 |--------|-----------|
 | Frontend | React 19, TypeScript, Vite 7, Tailwind CSS v4, shadcn/ui |
 | Backend / Banco | Convex (serverless, real-time) |
-| Autenticação | @convex-dev/auth (credenciais + OTP por e-mail) |
+| Autenticação | Convex Auth + provider de credenciais SIGESGD |
 | Roteamento | React Router v7 |
 | Gráficos | Recharts |
 | Animações | Framer Motion |
-| PWA | Manifest + meta tags (Service Worker pendente) |
+| PWA | vite-plugin-pwa, Service Worker com atualização automática e cache somente de recursos estáticos |
 | Testes | Vitest |
 | Pacote | Bun |
 
@@ -72,7 +72,7 @@ O estoque é controlado por uma **fonte única de verdade**: a tabela `stock`, c
 - **Entregas** → baixam estoque físico e liberam reserva.
 - **Cancelamentos** → liberam reserva quando aprovado; não permitem cancelamento após entrega.
 - **Inventário** (`inventories` + `inventoryCounts`) → compara estoque do sistema com contagem física e gera ajustes auditados.
-- **Movimentações** (`stockMovements`) → histórico imutável de todas as alterações de saldo.
+- **Movimentações** (`stockMovements`) → histórico de alterações de saldo, com estornos registrados e trilha de auditoria complementar.
 
 ---
 
@@ -80,7 +80,7 @@ O estoque é controlado por uma **fonte única de verdade**: a tabela `stock`, c
 
 | Módulo | Status | Descrição |
 |--------|--------|-----------|
-| Autenticação | ✅ Implementado | Credenciais + OTP por e-mail, RBAC (admin, stock_manager, director, secretary, technician) |
+| Autenticação | ✅ Implementado | Login por e-mail/senha, recuperação por código OTP, primeiro acesso e RBAC (admin, stock_manager, director, secretary, technician, patrimony_manager) |
 | Cadastro de Produtos | ✅ Implementado | CRUD completo, categorias, fornecedores, compatibilidade com impressoras |
 | Estoque | ✅ Implementado | Saldo físico/reservado, fonte única, proteção contra negativo |
 | Entradas | ✅ Implementado | Entradas multi-item, origem, NF, AF, fornecedor, fotos, documentos, lotes automáticos |
@@ -95,7 +95,7 @@ O estoque é controlado por uma **fonte única de verdade**: a tabela `stock`, c
 | Relatórios | ✅ Implementado | Métricas gerais, consumo de toners, movimentações |
 | Painel (Dashboard) | ✅ Implementado | Indicadores, alertas, evolução mensal |
 | Auditoria | ✅ Implementado | Registro completo de todas as operações sensíveis |
-| PWA | ⚠️ Parcial | Manifest + meta tags; Service Worker real pendente |
+| PWA | ✅ Implementado no build | Manifest + Service Worker via vite-plugin-pwa, atualização automática e cache de recursos estáticos; dados do Convex não são cacheados offline |
 
 ---
 
@@ -154,22 +154,44 @@ bun vitest
 | `VITE_CONVEX_URL` | URL do deployment Convex (cliente) |
 | `CONVEX_DEPLOYMENT` | Deployment do Convex (backend) |
 | `CONVEX_SITE_URL` | URL do site para autenticação |
+| `FREEBUFF_EMAIL_API_KEY` | Segredo do backend Convex para o endpoint Freebuff de recuperação por OTP |
+| `RESEND_API_KEY` | Segredo separado do backend Convex para envio de e-mail de primeiro acesso via Resend |
+| `EMAIL_FROM` | Remetente verificado no Resend (opcional; usa o padrão institucional definido no código) |
+
+### Destinos Convex por ambiente
+
+| Ambiente | Deployment | Uso |
+|---|---|---|
+| Produção (build Vite) | `savory-sockeye-292` | Backend oficial |
+| Desenvolvimento local (`vite dev`) | `first-herring-264` | Desenvolvimento; não usar para publicação de produção |
+| Homologação isolada | `tame-alligator-797` | Projeto Convex separado; exige `VITE_APP_ENV=homologacao` e URL explícita |
+
+O resolvedor em `src/lib/convex-url.ts` fixa esses destinos por ambiente e recusa
+redirecionamentos para deployments diferentes. A configuração não executa migração
+nem altera dados de qualquer deployment.
+
+As credenciais `FREEBUFF_EMAIL_API_KEY` e `RESEND_API_KEY` pertencem a provedores diferentes e **não são intercambiáveis**. Todas essas variáveis são do ambiente **do backend Convex**, não variáveis `VITE_*`; nunca devem ser expostas ao frontend nem versionadas. Cada fluxo falha de forma segura quando sua própria credencial está ausente.
 
 > ⚠️ **Nunca commite arquivos `.env` ou `.env.local`.** O `.gitignore` já os exclui.
 
 ---
 
-## Situação Atual
+## Homologação e infraestrutura municipal
 
-**Versão:** v0.3 — Fase 3 Homologada
+O projeto permanece em desenvolvimento. A aprovação do build e dos testes automatizados não substitui a homologação funcional dos fluxos completos.
 
-| Fase | Status |
-|------|--------|
-| Fase 0 | ✅ Fundação (schema, auth, CRUD básico) |
-| Fase 0.5 | ✅ Auditoria técnica |
-| Fase 0.6 | ✅ Estabilização do núcleo de estoque |
-| Fase 3 | ✅ Estoque real, entradas, lotes, fotos, inventário |
-| Fase 4 | 🔜 Pendente |
+Antes da operação oficial, são obrigatórios:
+- auditoria de segurança, autenticação e permissões;
+- conciliação de saldos gerais, por local e por lote;
+- rastreabilidade entre entradas, documentos, lotes, saídas, equipamentos e usuários;
+- verificação de cobertura e integridade da auditoria;
+- teste de backup e restauração;
+- homologação em ambiente isolado;
+- ensaio de instalação e migração na infraestrutura municipal.
+
+O plano técnico, incluindo as dependências do Convex auto-hospedado, autenticação, e-mail, arquivos, backup e critérios de aceite, está em [docs/PLANO-MIGRACAO-INFRAESTRUTURA-MUNICIPAL.md](docs/PLANO-MIGRACAO-INFRAESTRUTURA-MUNICIPAL.md).
+
+**Atenção:** não remover providers, dependências de plataforma ou configurações do ambiente atual antes de validar login, recuperação de senha, PWA, armazenamento e restauração em homologação municipal.
 
 ---
 

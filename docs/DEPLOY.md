@@ -214,11 +214,20 @@ preciso um deployment Convex separado da produção.
   teste é permitido **apenas nele**.
 - `CONVEX_DEPLOY_KEY` de produção nunca deve ser usada no build de homologação.
 
-> Situação atual deste workspace: não há segundo deployment Convex
-> configurado (o `convex.json` só define `src/convex/` como pasta de funções) e
-> os arquivos de ambiente são gerenciados fora do repositório. Portanto o
-> preview de homologação **não está disponível** até que o deployment seja
-> criado e o build seja gerado apontando para ele.
+> **Registro histórico de 12/11/2026 — mapa corrigido em 19/11:** o projeto de homologação continua separado. O mapa vigente é: produção `savory-sockeye-292`, desenvolvimento `first-herring-264` e homologação `tame-alligator-797`. Builds de produção e desenvolvimento agora resolvem seus destinos pelo modo Vite; homologação exige `VITE_APP_ENV=homologacao` e allowlist própria.
+>
+> Fotografia histórica de 12/11: há um projeto Convex separado
+> `sigesgd-capivari-homologacao`. O backend persistente é
+> `tame-alligator-797.convex.cloud`; seu Development é
+> `first-dinosaur-625.convex.cloud`. O projeto principal mantém os deployments
+> `savory-sockeye-292` (slot Production) e `first-herring-264` (Development,
+> mas banco operacional atual carregado pelo Freebuff). Os Previews
+> `first-starling-943` e `brilliant-bullfrog-982` pertencem a branches do
+> projeto principal e não devem ser tratados como homologação.
+>
+> O projeto Vercel separado já tem Preview READY. Ainda falta confirmar a
+> publicação do schema/funções atuais no backend `tame-alligator-797` e
+> concluir os testes autenticados ponta a ponta.
 
 ---
 

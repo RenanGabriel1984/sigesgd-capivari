@@ -33,8 +33,8 @@ export default function Settings() {
       toast.error(isForceChange ? "Preencha o campo de nova senha" : "Preencha todos os campos");
       return;
     }
-    if (newPassword.length < 6) {
-      toast.error("A nova senha deve ter pelo menos 6 caracteres");
+    if (newPassword.length < 8) {
+      toast.error("A nova senha deve ter pelo menos 8 caracteres");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -137,7 +137,7 @@ export default function Settings() {
               )}
               <div>
                 <Label>Nova Senha</Label>
-                <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+                <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" />
               </div>
               <div>
                 <Label>Confirmar Nova Senha</Label>

@@ -255,16 +255,16 @@ describe("Tipo de material e patrimônio", () => {
         quantity: 2,
         units: [{ patrimonyNumber: "000001" }],
       })
-    ).toContain("uma unidade patrimonial por unidade recebida");
+    ).toContain("identificação provisória por unidade recebida");
   });
 
-  it("material permanente exige número de patrimônio em cada unidade", () => {
+  it("material permanente pode ser recebido antes do tombamento oficial", () => {
     const error = validateEntryUnits({
       materialType: "permanent",
       quantity: 2,
-      units: [{ patrimonyNumber: "000001" }, { serialNumber: "SN-9" }],
+      units: [{ serialNumber: "SN-1" }, { serialNumber: "SN-9" }],
     });
-    expect(error).toContain("precisa do número de patrimônio");
+    expect(error).toBeNull();
   });
 
   it("aceita o mesmo produto com vários patrimônios/terminais diferentes", () => {
@@ -333,7 +333,7 @@ describe("Área/Subestoque", () => {
     ).toBe("area_impressoras");
     // O nome da área NÃO carrega fornecedor: trocar de empresa não muda a estrutura.
     expect(area).toBe("Impressoras");
-    expect(NO_AREA_LABEL).toBe("Sem área (estoque geral)");
+    expect(NO_AREA_LABEL).toBe("Sem área/local — classificação pendente");
   });
 });
 

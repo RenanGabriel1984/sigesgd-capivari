@@ -407,8 +407,8 @@ describe("PACKCFG-12 — Parâmetros mínimo/ideal continuam na unidade base", (
   it("a tela de suprimentos mantém a unidade base como principal", () => {
     const screenBody = stripComments(gomaq);
     expect(screenBody).toMatch(/PacksApproximation/);
-    expect(screenBody).toMatch(/\{f\.baseStock\}/);
-    expect(screenBody).toMatch(/\{family\.baseStock\}/);
+    expect(screenBody).toMatch(/\{f\.baseAvailableInArea\}/);
+    expect(screenBody).toMatch(/\{family\.baseAvailableInArea\}/);
     expect(printSuppliesLib).toMatch(/familyPacksApproximation/);
   });
 });

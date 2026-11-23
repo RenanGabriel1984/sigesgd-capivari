@@ -36,10 +36,11 @@ import {
   Network,
   Phone,
   SlidersHorizontal,
+  Droplet,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { getPermissions, ROLE_LABELS } from "@/types/constants";
 import { isNavItemActive } from "@/lib/nav-active";
@@ -96,6 +97,7 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Dar saída", href: "/exit", icon: PackageMinus, permission: "canCreateEntries" },
     { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests", permission2: "canApproveRequests" },
     { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
+    { label: "Água mineral", href: "/water", icon: Droplet, permission: "canViewWater" },
   ]},
   // ── Equipamentos ──────────────────────────────────────────────────────────
   // Estrutura por CATEGORIA de equipamento. O fornecedor NUNCA faz parte do
@@ -103,6 +105,9 @@ const NAV_SECTIONS: NavSection[] = [
   // "Impressoras" abre a Gestão de Suprimentos de Impressão (tela antes
   // chamada "Impressoras / Gomaq"); o fornecedor de cada entrada continua
   // sendo dado cadastral/histórico.
+  { title: "Patrimônio", items: [
+    { label: "Pendências de tombamento", href: "/patrimony", icon: ClipboardCheck, permission: "canViewPatrimony" },
+  ]},
   { title: "Equipamentos", items: [
     { label: "Impressoras", href: "/gomaq", icon: Printer, permission: "canManageGomaQ", permission2: "canManageAssets" },
     { label: "Computadores", href: "/assets?categoria=computadores", icon: Monitor, permission: "canManageAssets" },
@@ -193,6 +198,7 @@ const SidebarLink = memo(function SidebarLink({
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
+  const recordLogout = useMutation(api.passwords.recordLogout);
   const location = useLocation();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -246,10 +252,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     localStorage.setItem("estoque-sggd-pwa-dismissed", "1");
   };
 
-  const pendingCount = useQuery(api.requests.pendingCount);
-  const belowMinItems = useQuery(api.products.belowMinimum);
   const role = (user?.role ?? "technician") as UserRole;
   const permissions = getPermissions(role);
+  const pendingCount = useQuery(
+    api.requests.pendingCount,
+    permissions.canViewRequests ? {} : "skip",
+  );
+  const belowMinItems = useQuery(
+    api.products.belowMinimum,
+    permissions.canViewStock ? {} : "skip",
+  );
   const alertCount = belowMinItems?.length ?? 0;
 
   // ── Mobile menu ────────────────────────────────────────────────────────────
@@ -300,6 +312,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   })).filter((section) => section.items.length > 0);
 
   const handleSignOut = async () => {
+    try {
+      await recordLogout({});
+    } catch {
+      // Falha de auditoria não pode impedir o encerramento da sessão.
+      console.error("[SIGESGD] Não foi possível registrar o encerramento da sessão.");
+    }
     await signOut();
     navigate("/");
   };

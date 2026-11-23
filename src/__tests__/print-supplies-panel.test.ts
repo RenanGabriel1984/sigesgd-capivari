@@ -81,6 +81,23 @@ describe("PRINT-02 — totais dos cards correspondem ao estoque real", () => {
   });
 });
 
+describe("PRINT-02b — painel calcula saldo, status e reposição dentro da área", () => {
+  it("não confunde estoque global com o saldo da área Impressoras", () => {
+    const supply = row({
+      currentStock: 100,
+      inArea: 20,
+      availableInArea: 15,
+      minimumStock: 18,
+      idealStock: 30,
+    });
+    expect(supply.currentStock).toBe(100);
+    expect(supply.inArea).toBe(20);
+    expect(supply.status).toBe("Baixo");
+    expect(supply.suggestedReorder).toBe(15);
+    expect(computeCardTotals([supply]).toners).toBe(20);
+  });
+});
+
 /* ═══ PRINT-03/04/05 — classificação por tipo ═══════════════════════════════ */
 
 describe("PRINT-03 — Toner agrupado corretamente", () => {
@@ -151,11 +168,12 @@ describe("PRINT-08 — retirada rápida reduz estoque corretamente", () => {
 
 describe("PRINT-09 — retirada registra lotId", () => {
   it("movement carrega lotId estruturado (1º lote consumido)", () => {
-    expect(backend).toContain("lotId: consumedLots[0].lotId");
+    expect(backend).toContain("lotId: input.consumedLots[0]?.lotId");
+    expect(backend).toContain('ctx.db.insert("stockMovementLots"');
   });
   it("consome lotes FIFO por recebimento e registra todos na observation", () => {
-    expect(backend).toMatch(/sort\(\(a, b\) => a\.receivedAt - b\.receivedAt\)/);
-    expect(backend).toContain("Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(\", \")}");
+    expect(backend).toMatch(/sort\(\(a: any, b: any\) => a\.receivedAt - b\.receivedAt\)/);
+    expect(backend).toContain("consumedLots.map((lot) => `${lot.lotNumber}(${lot.qty})`)");
   });
 });
 
@@ -166,7 +184,7 @@ describe("PRINT-10 — retirada maior que estoque é bloqueada", () => {
     expect(v.reason).toContain("Estoque insuficiente");
   });
   it("backend revalida contra o estoque real", () => {
-    expect(backend).toContain("Estoque insuficiente. Disponível: ${available} ${product.unitOfMeasure}");
+    expect(backend).toContain("Estoque livre insuficiente na área Impressoras");
   });
 });
 
@@ -196,6 +214,10 @@ describe("PRINT-19 — nenhuma duplicação de estoque é criada", () => {
 });
 
 describe("PRINT-20 — migração histórica TI Geral → Impressoras é idempotente", () => {
+  it("a migração histórica não é exposta como mutation pública", () => {
+    expect(backend).not.toContain("export const migrateTIGeralToImpressoras = mutation");
+    expect(backend).toContain("export const migrateTIGeralToImpressorasInternal = internalMutation");
+  });
   it("só move lotes que AINDA NÃO estão na área", () => {
     expect(backend).toContain("l.areaId !== PRINT_AREA_ID");
   });
@@ -219,6 +241,22 @@ const META = new Map([
   ["toner", { name: "Toner CX735 — Preto", brand: "Lexmark", unitOfMeasure: "un" }],
   ["papel", { name: "Papel térmico", brand: null, unitOfMeasure: "rl" }],
 ]);
+
+describe("PRINT-12b — consulta mensal não trunca histórico antigo", () => {
+  it("consulta movimentos diretamente no intervalo do mês, sem limite arbitrário", () => {
+    const query = backend.slice(backend.indexOf("export const getMonthlyConsumption"), backend.indexOf("type SupplyConsumedLot"));
+    expect(query).toContain('.withIndex("by_timestamp"');
+    expect(query).toContain('q.gte("timestamp", period.start).lt("timestamp", period.end)');
+    expect(query).not.toContain(".take(2000)");
+  });
+
+  it("consulta requisições entregues por status e data efetiva, sem corte nos 500 registros", () => {
+    const query = backend.slice(backend.indexOf("export const getMonthlyConsumption"), backend.indexOf("type SupplyConsumedLot"));
+    expect(query).toContain('.withIndex("by_status_deliveredAt"');
+    expect(query).toContain('q.eq("status", "delivered").gte("deliveredAt", period.start).lt("deliveredAt", period.end)');
+    expect(query).not.toContain(".take(500)");
+  });
+});
 
 describe("PRINT-12 — consumo mensal conta somente saídas operacionais", () => {
   it("isOperationalConsumption: apenas exit", () => {

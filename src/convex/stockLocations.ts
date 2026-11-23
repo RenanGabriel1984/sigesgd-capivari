@@ -3,60 +3,108 @@ import { query } from "./_generated/server";
 import { v } from "convex/values";
 
 async function requireUser(ctx: any) {
-  // RBAC central: posição por local exige visão de estoque.
   return requirePermission(ctx, "stock.view");
 }
 
-// Stock per location for a product
+async function loadReservationsByProduct(ctx: any, productIds: string[]) {
+  const uniqueProductIds = [...new Set(productIds)];
+  const rows = await Promise.all(uniqueProductIds.map((productId) =>
+    ctx.db.query("requestItemReservations")
+      .withIndex("by_product", (q: any) => q.eq("productId", productId))
+      .collect()
+  ));
+  return new Map(uniqueProductIds.map((productId, index) => [productId, rows[index]]));
+}
+
+async function enrichLocationStock(ctx: any, row: any, reservations: any[] = []) {
+  const location = await ctx.db.get(row.locationId);
+  const area = row.areaId ? await ctx.db.get(row.areaId) : null;
+  const reservedQuantity = reservations
+    .filter((reservation: any) =>
+      reservation.locationId === row.locationId &&
+      reservation.areaId === (row.areaId ?? undefined)
+    )
+    .reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0);
+
+  return {
+    ...row,
+    location,
+    area,
+    classificationPending: !area,
+    reservedQuantity,
+    availableQuantity: Math.max(0, row.quantity - reservedQuantity),
+  };
+}
+
+// Stock per location and area for a product.
 export const listByProduct = query({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    const entries = await ctx.db
-      .query("stockByLocation")
-      .withIndex("by_product", (q) => q.eq("productId", args.productId))
+    const entries = await ctx.db.query("stockByLocation")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
       .collect();
-    return Promise.all(entries.map(async (e: any) => {
-      const location = await ctx.db.get(e.locationId);
-      return { ...e, location };
-    }));
+    const reservationsByProduct = await loadReservationsByProduct(ctx, [args.productId]);
+    const reservations = reservationsByProduct.get(args.productId) ?? [];
+    return Promise.all(entries.map((entry: any) => enrichLocationStock(ctx, entry, reservations)));
   },
 });
 
-// All stock locations summary
+// Physical, reserved and free balances by physical storage location.
 export const summary = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    const locations = await ctx.db
-      .query("storageLocations")
-      .withIndex("by_active", (q) => q.eq("active", true))
+    const locations = await ctx.db.query("storageLocations")
+      .withIndex("by_active", (q: any) => q.eq("active", true))
       .collect();
 
-    return Promise.all(locations.map(async (loc: any) => {
-      const entries = await ctx.db
-        .query("stockByLocation")
-        .withIndex("by_location", (q) => q.eq("locationId", loc._id))
-        .collect();
-      const totalItems = entries.length;
-      const totalQuantity = entries.reduce((sum: number, e: any) => sum + e.quantity, 0);
-      return { ...loc, totalItems, totalQuantity };
+    const locationEntries = await Promise.all(locations.map(async (location: any) => ({
+      location,
+      entries: await ctx.db.query("stockByLocation")
+        .withIndex("by_location", (q: any) => q.eq("locationId", location._id))
+        .collect(),
+    })));
+    const allEntries = locationEntries.flatMap(({ entries }: any) => entries);
+    const reservationsByProduct = await loadReservationsByProduct(
+      ctx,
+      allEntries.map((entry: any) => entry.productId as string),
+    );
+
+    return Promise.all(locationEntries.map(async ({ location, entries }: any) => {
+      const detailed = await Promise.all(entries.map((entry: any) =>
+        enrichLocationStock(ctx, entry, reservationsByProduct.get(entry.productId as string) ?? [])
+      ));
+      return {
+        ...location,
+        area: location.areaId ? await ctx.db.get(location.areaId) : null,
+        totalItems: detailed.length,
+        totalQuantity: detailed.reduce((sum: number, entry: any) => sum + entry.quantity, 0),
+        totalReserved: detailed.reduce((sum: number, entry: any) => sum + entry.reservedQuantity, 0),
+        totalAvailable: detailed.reduce((sum: number, entry: any) => sum + entry.availableQuantity, 0),
+        // Pendência é avaliada por saldo/área, nunca por um areaId legado do armário.
+        classificationPending: detailed.some((entry: any) => entry.classificationPending),
+        balances: detailed,
+      };
     }));
   },
 });
 
-// Stock at a specific location
+// Stock at a specific physical location; each row still distinguishes its area.
 export const listByLocation = query({
   args: { locationId: v.id("storageLocations") },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    const entries = await ctx.db
-      .query("stockByLocation")
-      .withIndex("by_location", (q) => q.eq("locationId", args.locationId))
+    const entries = await ctx.db.query("stockByLocation")
+      .withIndex("by_location", (q: any) => q.eq("locationId", args.locationId))
       .collect();
-    return Promise.all(entries.map(async (e: any) => {
-      const product = await ctx.db.get(e.productId);
-      return { ...e, product };
-    }));
+    const reservationsByProduct = await loadReservationsByProduct(
+      ctx,
+      entries.map((entry: any) => entry.productId as string),
+    );
+    return Promise.all(entries.map(async (entry: any) => ({
+      ...await enrichLocationStock(ctx, entry, reservationsByProduct.get(entry.productId as string) ?? []),
+      product: await ctx.db.get(entry.productId),
+    })));
   },
 });

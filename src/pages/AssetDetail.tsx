@@ -20,7 +20,9 @@ import { toast } from "sonner";
 import { useNavigate, useParams } from "react-router";
 import type { Id } from "@/convex/_generated/dataModel";
 
-const ASSET_STATUS_LABELS: Record<string, string> = {
+type AssetStatus = "active" | "maintenance" | "inactive" | "disposal_pending" | "disposed" | "lost";
+
+const ASSET_STATUS_LABELS: Record<AssetStatus, string> = {
   active: "Ativo", maintenance: "Manutenção", inactive: "Inativo",
   disposal_pending: "Descarte Pendente", disposed: "Descartado", lost: "Perdido",
 };
@@ -50,7 +52,7 @@ export default function AssetDetailPage() {
 
   const [tab, setTab] = useState("data");
   const [showStatus, setShowStatus] = useState(false);
-  const [newStatus, setNewStatus] = useState("");
+  const [newStatus, setNewStatus] = useState<AssetStatus | "">("");
   const [statusObs, setStatusObs] = useState("");
   const [showAssign, setShowAssign] = useState(false);
   const [assignUserId, setAssignUserId] = useState("");
@@ -75,8 +77,8 @@ export default function AssetDetailPage() {
     try {
       await assign({
         assetId: asset._id as Id<"assets">,
-        responsibleUserId: (assignUserId as Id<"users">) || undefined,
-        organizationId: (assignOrgId as Id<"organizations">) || undefined,
+        responsibleUserId: assignUserId ? assignUserId as Id<"users"> : null,
+        organizationId: assignOrgId ? assignOrgId as Id<"organizations"> : null,
         observation: assignObs || undefined,
       });
       toast.success("Atribuição atualizada");
@@ -98,7 +100,12 @@ export default function AssetDetailPage() {
             </p>
           </div>
           <div className="ml-auto flex gap-2">
-            <Button variant="outline" onClick={() => setShowAssign(true)} className="gap-2"><ArrowRightLeft className="h-4 w-4" /> Atribuir</Button>
+            <Button variant="outline" onClick={() => {
+              setAssignUserId(asset.responsibleUserId ?? "");
+              setAssignOrgId(asset.organizationId ?? "");
+              setAssignObs("");
+              setShowAssign(true);
+            }} className="gap-2"><ArrowRightLeft className="h-4 w-4" /> Atribuir</Button>
             <Button variant="outline" onClick={() => setShowStatus(true)} className="gap-2"><Settings className="h-4 w-4" /> Status</Button>
           </div>
         </div>
@@ -235,7 +242,7 @@ export default function AssetDetailPage() {
             <div className="space-y-4">
               <div>
                 <Label>Novo Status</Label>
-                <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={newStatus} onChange={(e) => setNewStatus(e.target.value)}>
+                <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={newStatus} onChange={(e) => setNewStatus(e.target.value as AssetStatus | "")}>
                   <option value="">Selecione...</option>
                   {Object.entries(ASSET_STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                 </select>

@@ -1,7 +1,10 @@
 # SIGESGD Capivari — Classificação oficial dos 53 produtos do estoque
 
 **Operação:** somente cadastro (`products.categoryId`) + categorias oficiais.
-**Deployment:** `https://first-herring-264.convex.cloud`
+**Base operacional usada na época:** `https://first-herring-264.convex.cloud`
+(`Development (Cloud)` no painel Convex; banco operacional atual confirmado
+pelo proprietário, carregado pelo Freebuff). Não confundir o tipo do deployment
+com o papel operacional dos dados.
 **Execução:** `productClassification:applyProductClassificationInternal`
 (`confirm="CLASSIFICAR-53-PRODUTOS"`) — precedida de prévia
 (`previewProductClassificationInternal`) e de `dryRun: true`.

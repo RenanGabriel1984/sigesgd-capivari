@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { usePaginatedQuery, useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { AppShell } from "@/components/AppShell";
 import { SearchInput } from "@/components/SearchInput";
@@ -18,6 +18,8 @@ import {
 import { Plus, Monitor, Laptop, Server, Printer, Wifi, HardDrive, HelpCircle, Search, Phone, Warehouse } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { useAuth } from "@/hooks/use-auth";
+import { getPermissions, type UserRole } from "@/types/constants";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   EQUIPMENT_CATEGORIES,
@@ -39,6 +41,7 @@ import {
 import type { RelatedStockProduct } from "@/lib/equipment-categories";
 
 const ASSET_TYPE_LABELS: Record<string, string> = EQUIPMENT_TYPE_LABELS;
+type AssetType = "desktop" | "notebook" | "monitor" | "server" | "printer" | "switch" | "router" | "access_point" | "ups" | "storage" | "phone" | "other";
 
 const ASSET_STATUS_LABELS: Record<string, string> = {
   active: "Ativo", maintenance: "Manutenção", inactive: "Inativo",
@@ -180,24 +183,27 @@ function AssetsSkeleton() {
 }
 
 export default function AssetsPage() {
+  const { user } = useAuth();
+  const permissions = getPermissions(user?.role as UserRole | undefined);
+  const canAssignOfficialPatrimony = permissions.canViewPatrimony;
   const [searchParams, setSearchParams] = useSearchParams();
   // A categoria vive NA URL: cada uma tem o próprio recorte e permanece na tela
   // mesmo quando não existe nenhum asset cadastrado.
   const category = resolveEquipmentCategory(searchParams);
   const [tab, setTab] = useState("list");
   const [showNew, setShowNew] = useState(false);
-  const [filters, setFilters] = useState({ status: "", assetType: "", search: "" });
+  const [filters, setFilters] = useState<{ status: string; assetType: AssetType | ""; search: string }>({ status: "", assetType: "", search: "" });
   const [form, setForm] = useState({
-    patrimonyNumber: "", serialNumber: "", assetType: "desktop",
+    patrimonyNumber: "", serialNumber: "", assetType: "desktop" as AssetType,
     manufacturer: "", model: "", hostname: "", macAddress: "",
     organizationId: "", responsibleUserId: "", observation: "",
   });
 
-  const assets = useQuery(api.assets.list, {
+  const { results: assets, status: assetsStatus, loadMore: loadMoreAssets } = usePaginatedQuery(api.assets.listPaginated, {
     status: filters.status || undefined,
     assetType: filters.assetType || undefined,
     search: filters.search || undefined,
-  });
+  }, { initialNumItems: 50 });
   const organizations = useQuery(api.organizations.list);
   const createAsset = useMutation(api.assets.create);
   const navigate = useNavigate();
@@ -228,7 +234,7 @@ export default function AssetsPage() {
     }
   };
 
-  if (assets === undefined) return <AssetsSkeleton />;
+  if (assetsStatus === "LoadingFirstPage") return <AssetsSkeleton />;
 
   // A categoria de equipamento (Impressoras/Computadores/Redes/Telefonia) é
   // apenas um recorte da lista — nenhuma regra de fornecedor ou de destino de
@@ -241,6 +247,8 @@ export default function AssetsPage() {
     !filters.search ||
     a.patrimonyNumber?.toLowerCase().includes(filters.search.toLowerCase()) ||
     a.serialNumber?.toLowerCase().includes(filters.search.toLowerCase()) ||
+    a.hostname?.toLowerCase().includes(filters.search.toLowerCase()) ||
+    a.macAddress?.toLowerCase().includes(filters.search.toLowerCase()) ||
     a.manufacturer?.toLowerCase().includes(filters.search.toLowerCase()) ||
     a.model?.toLowerCase().includes(filters.search.toLowerCase())
   );
@@ -251,8 +259,8 @@ export default function AssetsPage() {
     if (!form.assetType) { toast.error("Selecione o tipo de equipamento"); return; }
     try {
       await createAsset({
-        assetType: form.assetType as any,
-        patrimonyNumber: form.patrimonyNumber || undefined,
+        assetType: form.assetType,
+        patrimonyNumber: canAssignOfficialPatrimony ? form.patrimonyNumber || undefined : undefined,
         serialNumber: form.serialNumber || undefined,
         manufacturer: form.manufacturer || undefined,
         model: form.model || undefined,
@@ -264,7 +272,7 @@ export default function AssetsPage() {
       });
       toast.success("Equipamento cadastrado com sucesso");
       setShowNew(false);
-      setForm({ patrimonyNumber: "", serialNumber: "", assetType: "desktop", manufacturer: "", model: "", hostname: "", macAddress: "", organizationId: "", responsibleUserId: "", observation: "" });
+      setForm({ patrimonyNumber: "", serialNumber: "", assetType: "desktop" as AssetType, manufacturer: "", model: "", hostname: "", macAddress: "", organizationId: "", responsibleUserId: "", observation: "" });
     } catch (e: any) {
       toast.error(e.message ?? "Erro ao cadastrar equipamento");
     }
@@ -323,7 +331,7 @@ export default function AssetsPage() {
         <div className="flex flex-wrap gap-3">
           <div className="relative flex-1 min-w-[200px] max-w-sm">
             <SearchInput
-              placeholder="Buscar por patrimônio, série, marca..."
+              placeholder="Buscar por patrimônio, série, hostname, MAC, marca..."
               value={filters.search}
               onChange={(e) => setFilters({ ...filters, search: e.target.value })}
             />
@@ -341,7 +349,7 @@ export default function AssetsPage() {
           <select
             className="border rounded-md p-2 text-sm bg-background"
             value={filters.assetType}
-            onChange={(e) => setFilters({ ...filters, assetType: e.target.value })}
+            onChange={(e) => setFilters({ ...filters, assetType: e.target.value as AssetType | "" })}
           >
             <option value="">Todos os tipos</option>
             {Object.entries(ASSET_TYPE_LABELS).map(([k, v]) => (
@@ -352,27 +360,34 @@ export default function AssetsPage() {
 
         {/* Empty State */}
         {filteredAssets.length === 0 ? (
-          // Filtros ativos ≠ categoria vazia: aqui a busca é que não encontrou
-          // nada, então não se fala em "nenhum equipamento cadastrado".
-          filters.search || filters.status || filters.assetType ? (
-            <Card className="border-border/50">
-              <CardContent className="py-16">
-                <div className="empty-state">
-                  <Monitor className="empty-state-icon" />
-                  <p className="empty-state-title">Nenhum equipamento encontrado</p>
-                  <p className="empty-state-desc">
-                    {filters.search
-                      ? `Nenhum resultado para "${filters.search}"${category ? ` em ${category.label}` : ""}. Tente outro termo ou limpe a busca.`
-                      : category
-                        ? `Nenhum equipamento em ${category.label} com os filtros atuais.`
-                        : "Tente alterar os filtros aplicados."}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <EmptyCategoryCard category={category} relatedStock={category ? relatedStock : undefined} />
-          )
+          <>
+            {filters.search || filters.status || filters.assetType ? (
+              <Card className="border-border/50">
+                <CardContent className="py-16">
+                  <div className="empty-state">
+                    <Monitor className="empty-state-icon" />
+                    <p className="empty-state-title">Nenhum equipamento encontrado nesta página</p>
+                    <p className="empty-state-desc">
+                      {filters.search
+                        ? `Nenhum resultado para "${filters.search}"${category ? ` em ${category.label}` : ""} nesta página.`
+                        : category
+                          ? `Nenhum equipamento em ${category.label} nesta página.`
+                          : "Nenhum equipamento nesta página."}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <EmptyCategoryCard category={category} relatedStock={category ? relatedStock : undefined} />
+            )}
+            {assetsStatus !== "Exhausted" && (
+              <div className="flex justify-center py-3">
+                <Button variant="outline" onClick={() => loadMoreAssets(50)} disabled={assetsStatus === "LoadingMore"}>
+                  {assetsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais equipamentos"}
+                </Button>
+              </div>
+            )}
+          </>
         ) : (
           <>
             {/* Desktop Table */}
@@ -462,6 +477,13 @@ export default function AssetsPage() {
 
             {/* Ponte para o estoque: os produtos relacionados NUNCA entram no
                 grid de equipamentos, nem quando a categoria já tem assets. */}
+            {assetsStatus !== "Exhausted" && (
+              <div className="flex justify-center py-3">
+                <Button variant="outline" onClick={() => loadMoreAssets(50)} disabled={assetsStatus === "LoadingMore"}>
+                  {assetsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais equipamentos"}
+                </Button>
+              </div>
+            )}
             {category && <RelatedStockSection category={category} relatedStock={relatedStock} />}
           </>
         )}
@@ -475,22 +497,29 @@ export default function AssetsPage() {
             <div className="space-y-4">
               <div>
                 <Label>Tipo de Equipamento *</Label>
-                <select className="w-full border rounded-md p-2 text-sm" value={form.assetType} onChange={(e) => setForm({ ...form, assetType: e.target.value })}>
+                <select className="w-full border rounded-md p-2 text-sm" value={form.assetType} onChange={(e) => setForm({ ...form, assetType: e.target.value as AssetType })}>
                   {Object.entries(ASSET_TYPE_LABELS).map(([k, v]) => (
                     <option key={k} value={k}>{v}</option>
                   ))}
                 </select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Nº Patrimônio</Label>
-                  <Input value={form.patrimonyNumber} onChange={(e) => setForm({ ...form, patrimonyNumber: e.target.value })} />
-                </div>
+              <div className={canAssignOfficialPatrimony ? "grid grid-cols-2 gap-3" : "grid grid-cols-1 gap-3"}>
+                {canAssignOfficialPatrimony && (
+                  <div>
+                    <Label>Nº Patrimônio oficial</Label>
+                    <Input value={form.patrimonyNumber} onChange={(e) => setForm({ ...form, patrimonyNumber: e.target.value })} />
+                  </div>
+                )}
                 <div>
                   <Label>Nº Série</Label>
                   <Input value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} />
                 </div>
               </div>
+              {!canAssignOfficialPatrimony && (
+                <p className="text-xs text-muted-foreground">
+                  O número oficial de patrimônio é atribuído pelo setor de Patrimônio após o recebimento.
+                </p>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label>Fabricante</Label>

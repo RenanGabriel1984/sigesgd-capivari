@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useSearchParams } from "react-router";
-import { useQuery, useMutation } from "convex/react";
+import { usePaginatedQuery, useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { AppShell } from "@/components/AppShell";
@@ -42,6 +42,8 @@ interface RequestItemForm {
   productId: string;
   quantity: number;
   targetPrinterId: string;
+  areaId: string;
+  sourceLocationId: string;
 }
 
 const REASON_OPTIONS = [
@@ -55,8 +57,10 @@ const REASON_OPTIONS = [
 
 export default function Requests() {
   const { user } = useAuth();
-  const requests = useQuery(api.requests.list);
+  const { results: requests, status: requestsStatus, loadMore: loadMoreRequests } = usePaginatedQuery(api.requests.listPaginated, {}, { initialNumItems: 50 });
   const products = useQuery(api.products.listActive);
+  const stockAreas = useQuery(api.stockAreas.listActive);
+  const storageLocations = useQuery(api.storageLocations.listActive);
   const organizations = useQuery(api.organizations.list);
   const createRequest = useMutation(api.requests.create);
   const allPrinters = useQuery(api.printers.listActive);
@@ -70,7 +74,9 @@ export default function Requests() {
   const [searchParams] = useSearchParams();
   const prefillProduct = searchParams.get("product") ?? "";
   const [createDialog, setCreateDialog] = useState(!!prefillProduct);
-  const [items, setItems] = useState<RequestItemForm[]>([{ productId: prefillProduct, quantity: 1, targetPrinterId: "" }]);
+  const [items, setItems] = useState<RequestItemForm[]>([{
+    productId: prefillProduct, quantity: 1, targetPrinterId: "", areaId: "", sourceLocationId: "",
+  }]);
   const [observation, setObservation] = useState("");
   const [secretariaId, setSecretariaId] = useState("");
   const [departamentoId, setDepartamentoId] = useState("");
@@ -112,18 +118,20 @@ export default function Requests() {
   const [histSerialSearch, setHistSerialSearch] = useState("");
 
   const hasFilters = !!(histSecretariaId || histStartDate || histEndDate || histSerialSearch);
-  const deliveredRequests = useQuery(
-    api.requests.listDelivered,
-    hasFilters
-      ? {
-          secretariaId: histSecretariaId ? (histSecretariaId as any) : undefined,
-          startDate: histStartDate ? new Date(histStartDate).getTime() : undefined,
-          endDate: histEndDate ? new Date(histEndDate + "T23:59:59").getTime() : undefined,
-          serialSearch: histSerialSearch || undefined,
-        }
-      : "skip"
+  const {
+    results: deliveredRequests,
+    status: deliveredRequestsStatus,
+    loadMore: loadMoreDeliveredRequests,
+  } = usePaginatedQuery(
+    api.requests.listDeliveredPaginated,
+    {
+      secretariaId: histSecretariaId ? (histSecretariaId as any) : undefined,
+      startDate: histStartDate ? new Date(histStartDate).getTime() : undefined,
+      endDate: histEndDate ? new Date(histEndDate + "T23:59:59.999").getTime() : undefined,
+      serialSearch: histSerialSearch || undefined,
+    },
+    { initialNumItems: 50 },
   );
-  const allDeliveredRequests = useQuery(api.requests.listDelivered, {});
 
   const role = (user?.role ?? "technician") as UserRole;
   const permissions = getPermissions(role);
@@ -154,7 +162,9 @@ export default function Requests() {
 
   const availableProducts = useMemo(() => products?.filter((p) => p.active) ?? [], [products]);
 
-  const addItem = () => setItems([...items, { productId: "", quantity: 1, targetPrinterId: "" }]);
+  const addItem = () => setItems([...items, {
+    productId: "", quantity: 1, targetPrinterId: "", areaId: "", sourceLocationId: "",
+  }]);
   const removeItem = (i: number) => setItems(items.filter((_, idx) => idx !== i));
   const updateItem = (i: number, field: keyof RequestItemForm, value: any) => {
     const newItems = [...items];
@@ -163,7 +173,7 @@ export default function Requests() {
   };
 
   const resetForm = () => {
-    setItems([{ productId: "", quantity: 1, targetPrinterId: "" }]);
+    setItems([{ productId: "", quantity: 1, targetPrinterId: "", areaId: "", sourceLocationId: "" }]);
     setObservation("");
     setSecretariaId("");
     setDepartamentoId("");
@@ -182,6 +192,15 @@ export default function Requests() {
     if (!reason.trim()) { toast.error("O motivo da solicitação é obrigatório"); return; }
     const validItems = items.filter((i) => i.productId && i.quantity > 0);
     if (validItems.length === 0) { toast.error("Adicione pelo menos um item do estoque válido"); return; }
+    for (const item of validItems) {
+      if (!item.areaId) { toast.error("Selecione a área/subestoque de cada item"); return; }
+      if (!item.sourceLocationId) { toast.error("Selecione o local físico de origem de cada item"); return; }
+      const location = (storageLocations ?? []).find((entry: any) => entry._id === item.sourceLocationId);
+      if (!location || !location.active) {
+        toast.error("Selecione um local físico ativo");
+        return;
+      }
+    }
     // Frontend toner check: for items with compatibility entries, targetPrinterId is required
     for (const item of validItems) {
       const product = availableProducts.find((p) => p._id === item.productId);
@@ -229,6 +248,8 @@ export default function Requests() {
           productId: i.productId as any,
           quantityRequested: i.quantity,
           targetPrinterId: i.targetPrinterId ? (i.targetPrinterId as any) : undefined,
+          areaId: i.areaId as any,
+          sourceLocationId: i.sourceLocationId as any,
         })),
       });
       toast.success("Solicitação criada com sucesso");
@@ -469,8 +490,15 @@ export default function Requests() {
         {r.osNumber && <div className="mb-2 text-xs"><span className="font-medium text-muted-foreground">O.S.:</span> {r.osNumber}</div>}
         <div className="space-y-1.5 mb-3">
           {r.items?.map((item: any) => (
-            <div key={item._id} className="flex items-center justify-between text-sm bg-muted/50 rounded px-3 py-1.5">
-              <span className="truncate">{item.product?.name ?? "Item"}</span>
+            <div key={item._id} className="flex items-center justify-between text-sm bg-muted/50 rounded px-3 py-1.5 gap-3">
+              <div className="min-w-0">
+                <span className="truncate block">{item.product?.name ?? "Item"}</span>
+                {(item.area || item.sourceLocation) && (
+                  <span className="text-[10px] text-muted-foreground block">
+                    {item.area?.name ?? "Sem área"} · {item.sourceLocation?.name ?? "Local não informado"}
+                  </span>
+                )}
+              </div>
               <span className="font-mono text-xs shrink-0 ml-2">
                 Sol: {item.quantityRequested}
                 {item.quantityApproved > 0 && ` | Apr: ${item.quantityApproved}`}
@@ -568,6 +596,13 @@ export default function Requests() {
                 <p className="text-muted-foreground text-sm">Nenhuma solicitação</p>
               </CardContent></Card>
             ) : myRequests.map((r) => renderRequest(r, r.status === "pending" && permissions.canApproveRequests))}
+            {requestsStatus !== "Exhausted" && (
+              <div className="flex justify-center">
+                <Button variant="outline" onClick={() => loadMoreRequests(50)} disabled={requestsStatus === "LoadingMore"}>
+                  {requestsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais solicitações"}
+                </Button>
+              </div>
+            )}
           </TabsContent>
           <TabsContent value="pending" className="space-y-3 mt-4">
             {pendingForApproval.length === 0 ? (
@@ -576,9 +611,23 @@ export default function Requests() {
                 <p className="text-muted-foreground text-sm">Nenhuma pendente</p>
               </CardContent></Card>
             ) : pendingForApproval.map((r) => renderRequest(r, true))}
+            {requestsStatus !== "Exhausted" && (
+              <div className="flex justify-center">
+                <Button variant="outline" onClick={() => loadMoreRequests(50)} disabled={requestsStatus === "LoadingMore"}>
+                  {requestsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais solicitações"}
+                </Button>
+              </div>
+            )}
           </TabsContent>
           <TabsContent value="all" className="space-y-3 mt-4">
-            {requests?.map((r) => renderRequest(r, r.status === "pending" && permissions.canApproveRequests && (role === "admin" || r.requesterId !== user?._id)))}
+            {requests.map((r) => renderRequest(r, r.status === "pending" && permissions.canApproveRequests && (role === "admin" || r.requesterId !== user?._id)))}
+            {requestsStatus !== "Exhausted" && (
+              <div className="flex justify-center">
+                <Button variant="outline" onClick={() => loadMoreRequests(50)} disabled={requestsStatus === "LoadingMore"}>
+                  {requestsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais solicitações"}
+                </Button>
+              </div>
+            )}
           </TabsContent>
 
           {/* ═══ Arquivo Histórico ═══ */}
@@ -633,11 +682,11 @@ export default function Requests() {
               </CardContent>
             </Card>
             {(() => {
-              const list = hasFilters ? deliveredRequests : allDeliveredRequests;
-              if (list === undefined) {
+              const list = deliveredRequests;
+              if (deliveredRequestsStatus === "LoadingFirstPage") {
                 return <Card className="border-border/50"><CardContent className="py-8 text-center"><p className="text-muted-foreground text-sm">Carregando...</p></CardContent></Card>;
               }
-              if (list.length === 0) {
+              if (list.length === 0 && deliveredRequestsStatus === "Exhausted") {
                 return (
                   <Card className="border-border/50"><CardContent className="py-12 text-center">
                     <Archive className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
@@ -649,8 +698,20 @@ export default function Requests() {
               }
               return (
                 <div className="space-y-3">
-                  <p className="text-xs text-muted-foreground">{list.length} entrega(s) encontrada(s)</p>
+                  <p className="text-xs text-muted-foreground">
+                    {list.length} entrega(s) carregada(s){deliveredRequestsStatus !== "Exhausted" ? " — há mais registros" : ""}
+                  </p>
                   {list.map((r) => renderRequest(r))}
+                  {deliveredRequestsStatus === "CanLoadMore" && (
+                    <div className="flex justify-center pt-2">
+                      <Button variant="outline" onClick={() => loadMoreDeliveredRequests(50)}>
+                        Carregar mais entregas
+                      </Button>
+                    </div>
+                  )}
+                  {deliveredRequestsStatus === "LoadingMore" && (
+                    <p className="text-center text-xs text-muted-foreground">Carregando mais entregas...</p>
+                  )}
                 </div>
               );
             })()}
@@ -707,7 +768,7 @@ export default function Requests() {
               ) : (
                 <div className="space-y-2 mt-2">
                   {items.map((item, i) => (
-                    <div key={i} className="flex gap-2 items-end">
+                    <div key={i} className="border rounded-lg p-3 space-y-2">
                       <div className="flex-1">
                         <Select value={item.productId} onValueChange={(v) => updateItem(i, "productId", v)}>
                           <SelectTrigger><SelectValue placeholder="Selecione um item..." /></SelectTrigger>
@@ -721,6 +782,32 @@ export default function Requests() {
                       </div>
                       <div className="w-20">
                         <Input type="number" min="1" value={item.quantity} onChange={(e) => updateItem(i, "quantity", Number(e.target.value))} />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <Label className="text-xs">Área / Subestoque *</Label>
+                          <Select value={item.areaId} onValueChange={(value) => {
+                            updateItem(i, "areaId", value);
+                          }}>
+                            <SelectTrigger><SelectValue placeholder="Selecione a área" /></SelectTrigger>
+                            <SelectContent>
+                              {(stockAreas ?? []).map((area) => (
+                                <SelectItem key={area._id} value={area._id}>{area.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Local físico de origem *</Label>
+                          <Select value={item.sourceLocationId} onValueChange={(value) => updateItem(i, "sourceLocationId", value)} disabled={!item.areaId}>
+                            <SelectTrigger><SelectValue placeholder="Selecione o local" /></SelectTrigger>
+                            <SelectContent>
+                              {(storageLocations ?? []).filter((location: any) => location.active).map((location: any) => (
+                                <SelectItem key={location._id} value={location._id}>{location.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
                       {/* Printer selector — only for toner/compat items */}
                       {(() => {

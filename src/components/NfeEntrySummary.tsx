@@ -196,8 +196,11 @@ export function NfeEntrySummary({
                   <SummaryField label="Produto associado" value={item.productName} />
                 </dl>
 
-                {(item.locationName || item.supplierLot) && (
-                  <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {(item.areaName || item.locationName || item.supplierLot) && (
+                  <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    {item.areaName ? (
+                      <SummaryField label="Área / subestoque" value={item.areaName} />
+                    ) : null}
                     {item.locationName ? (
                       <SummaryField label="Local de destino" value={item.locationName} />
                     ) : null}

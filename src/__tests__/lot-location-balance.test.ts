@@ -1,0 +1,99 @@
+import { describe, expect, it } from "vitest";
+import { planLotLocationBalanceChange, planLotLocationBalanceLocationChange } from "../lib/lot-location-balance";
+
+const base = {
+  lotId: "lot_1",
+  productId: "product_1",
+  locationId: "location_1",
+  quantityAvailable: 10,
+  _id: "balance_1",
+};
+
+describe("planLotLocationBalanceChange", () => {
+  it("ignora lotes legados sem localização física, mas ainda valida a variação", () => {
+    expect(planLotLocationBalanceChange({
+      rows: [], lotId: "lot_1", productId: "product_1", delta: -2,
+    })).toEqual({ kind: "skip" });
+    expect(() => planLotLocationBalanceChange({
+      rows: [], lotId: "lot_1", productId: "product_1", delta: Number.NaN,
+    })).toThrow(/finita/);
+  });
+
+  it("cria saldo somente quando a operação declara que o lote é novo", () => {
+    expect(planLotLocationBalanceChange({
+      rows: [], lotId: "lot_1", productId: "product_1",
+      locationId: "location_1", delta: 10, allowCreate: true,
+    })).toEqual({ kind: "insert", quantityAvailable: 10 });
+    expect(() => planLotLocationBalanceChange({
+      rows: [], lotId: "lot_1", productId: "product_1",
+      locationId: "location_1", delta: 10,
+    })).toThrow(/não existe/);
+  });
+
+  it("impede baixa sem saldo mapeado", () => {
+    expect(() => planLotLocationBalanceChange({
+      rows: [], lotId: "lot_1", productId: "product_1",
+      locationId: "location_1", delta: -1,
+    })).toThrow(/não tem saldo/);
+  });
+
+  it("atualiza um vínculo existente sem alterar a localização", () => {
+    expect(planLotLocationBalanceChange({
+      rows: [base], lotId: "lot_1", productId: "product_1",
+      locationId: "location_1", delta: -3,
+    })).toEqual({ kind: "patch", rowId: "balance_1", quantityAvailable: 7 });
+  });
+
+  it("bloqueia saldo negativo, duplicidade e vínculo de produto/local divergente", () => {
+    expect(() => planLotLocationBalanceChange({
+      rows: [base], lotId: "lot_1", productId: "product_1",
+      locationId: "location_1", delta: -11,
+    })).toThrow(/negativo/);
+    expect(() => planLotLocationBalanceChange({
+      rows: [base, { ...base, _id: "balance_2" }],
+      lotId: "lot_1", productId: "product_1", locationId: "location_1", delta: -1,
+    })).toThrow(/duplicados/);
+    expect(() => planLotLocationBalanceChange({
+      rows: [base], lotId: "lot_1", productId: "product_1",
+      locationId: "location_2", delta: -1,
+    })).toThrow(/não corresponde/);
+  });
+
+  it("rejeita variações não finitas e saldos atuais inválidos", () => {
+    expect(() => planLotLocationBalanceChange({
+      rows: [base], lotId: "lot_1", productId: "product_1",
+      locationId: "location_1", delta: Number.NaN,
+    })).toThrow(/finita/);
+    expect(() => planLotLocationBalanceChange({
+      rows: [{ ...base, quantityAvailable: Number.NaN }],
+      lotId: "lot_1", productId: "product_1", locationId: "location_1", delta: 1,
+    })).toThrow(/inválido/);
+  });
+});
+
+describe("planLotLocationBalanceLocationChange", () => {
+  it("move apenas a localização do vínculo, preservando a quantidade", () => {
+    expect(planLotLocationBalanceLocationChange({
+      rows: [base], lotId: "lot_1", productId: "product_1",
+      locationId: "location_2", quantityAvailable: 10,
+    })).toEqual({
+      kind: "patch", rowId: "balance_1",
+      locationId: "location_2", quantityAvailable: 10,
+    });
+  });
+
+  it("cria o vínculo somente em classificação explícita e bloqueia divergências", () => {
+    expect(planLotLocationBalanceLocationChange({
+      rows: [], lotId: "lot_1", productId: "product_1",
+      locationId: "location_1", quantityAvailable: 4, allowCreate: true,
+    })).toEqual({ kind: "insert", locationId: "location_1", quantityAvailable: 4 });
+    expect(() => planLotLocationBalanceLocationChange({
+      rows: [], lotId: "lot_1", productId: "product_1",
+      locationId: "location_1", quantityAvailable: 4,
+    })).toThrow(/não existe/);
+    expect(() => planLotLocationBalanceLocationChange({
+      rows: [base], lotId: "lot_1", productId: "product_1",
+      locationId: "location_2", quantityAvailable: 9,
+    })).toThrow(/diverge/);
+  });
+});

@@ -43,10 +43,10 @@ describe("First Access — Forced Password Change", () => {
     expect(currentHash).not.toBe(oldPasswordHash);
   });
 
-  it("FF. New password must be at least 6 characters", () => {
-    const passwords = ["abc", "12345", "123456", "MinhaSenh@1"];
-    const valid = passwords.filter((p) => p.length >= 6);
-    expect(valid).toEqual(["123456", "MinhaSenh@1"]);
+  it("FF. New password must be at least 8 characters", () => {
+    const passwords = ["abc", "12345", "123456", "1234567", "12345678", "MinhaSenh@1"];
+    const valid = passwords.filter((p) => p.length >= 8);
+    expect(valid).toEqual(["12345678", "MinhaSenh@1"]);
   });
 
   it("FG. New password and confirmation must match", () => {
@@ -125,55 +125,27 @@ describe("Password Reset — Token Security", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BRUTE FORCE LOCKOUT TESTS
+// BRUTE FORCE — não bloquear conta por endereço de e-mail
 // ═══════════════════════════════════════════════════════════════════════════
 
-describe("Brute Force Protection", () => {
-  it("FO. After 5 failed attempts, account is locked", () => {
+describe("Brute Force Protection — sem bloqueio remoto por conta", () => {
+  it("FO. Tentativas inválidas são contabilizadas sem bloquear o titular", () => {
     let attempts = 0;
-    let lockedUntil: number | undefined;
-    for (let i = 0; i < 6; i++) {
-      attempts++;
-      if (attempts >= 5 && !lockedUntil) {
-        lockedUntil = Date.now() + 15 * 60 * 1000;
-      }
-    }
-    expect(attempts).toBe(6);
-    expect(lockedUntil).toBeDefined();
-    expect(lockedUntil! > Date.now()).toBe(true);
+    for (let i = 0; i < 10; i++) attempts++;
+    expect(attempts).toBe(10);
+    // A contagem é para auditoria; não existe lockedUntil por e-mail.
   });
 
-  it("FP. Lockout expires after 15 minutes", () => {
-    const lockedAt = Date.now();
-    const lockedUntil = lockedAt + 15 * 60 * 1000;
-    // After 15 minutes
-    const now = lockedUntil + 1;
-    expect(now > lockedUntil).toBe(true);
-  });
-
-  it("FQ. Successful login resets failed attempts", () => {
+  it("FQ. Login bem-sucedido zera as tentativas anteriores", () => {
     let attempts = 3;
-    // Successful login
     attempts = 0;
     expect(attempts).toBe(0);
   });
 
-  it("FR. Password reset clears lockout", () => {
+  it("FR. Recuperação de senha limpa contagem residual de tentativas", () => {
     let attempts = 5;
-    let lockedUntil: number | undefined = Date.now() + 15 * 60 * 1000;
-    // After password reset
     attempts = 0;
-    lockedUntil = undefined;
     expect(attempts).toBe(0);
-    expect(lockedUntil).toBeUndefined();
-  });
-
-  it("FS. Lockout message is user-friendly", () => {
-    const remainingMinutes = 12;
-    const message = `Acesso temporariamente bloqueado. Tente novamente em ${remainingMinutes} minuto(s). Use "Esqueci minha senha" para redefinir.`;
-    expect(message).toContain("bloqueado");
-    expect(message).toContain("12");
-    expect(message).toContain("Esqueci minha senha");
   });
 });
 

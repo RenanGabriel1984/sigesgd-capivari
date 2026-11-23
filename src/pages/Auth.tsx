@@ -63,8 +63,10 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const [faShowPassword, setFaShowPassword] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && isAuthenticated) {
-      // Check if user needs to change password (first access)
+    // Convex queries return undefined while loading. Do not redirect until the
+    // user profile arrives, otherwise the first-access password dialog can be
+    // skipped and a temporary-password account lands directly in the app.
+    if (!authLoading && isAuthenticated && user !== undefined) {
       if (user?.requiresPasswordReset) {
         setFirstAccessOpen(true);
         return;
@@ -86,7 +88,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       formData.set("email", email.trim().toLowerCase());
       formData.set("password", password);
       await signIn("credentials", formData);
-      navigate(redirect);
+      // Navigation is coordinated by the effect above after currentUser loads,
+      // so accounts requiring a first-login password change are not skipped.
+      setIsLoading(false);
     } catch (error) {
       setError(
         getLoginErrorMessage(
@@ -113,7 +117,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   const handleConfirmReset = async () => {
     if (!resetCode.trim()) { toast.error("Informe o código"); return; }
-    if (!newPassword.trim() || newPassword.length < 6) { toast.error("A nova senha deve ter pelo menos 6 caracteres"); return; }
+    if (!newPassword.trim() || newPassword.length < 8) { toast.error("A nova senha deve ter pelo menos 8 caracteres"); return; }
     setForgotLoading(true);
     try {
       await confirmPasswordReset({
@@ -134,8 +138,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   };
 
   const handleFirstAccess = async () => {
-    if (!faNewPassword.trim() || faNewPassword.length < 6) {
-      toast.error("A nova senha deve ter pelo menos 6 caracteres");
+    if (!faNewPassword.trim() || faNewPassword.length < 8) {
+      toast.error("A nova senha deve ter pelo menos 8 caracteres");
       return;
     }
     if (faNewPassword !== faConfirmPassword) {
@@ -346,7 +350,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Mínimo 6 caracteres"
+                  placeholder="Mínimo 8 caracteres"
                   className="mt-1"
                   disabled={forgotLoading}
                 />
@@ -397,7 +401,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     type={faShowPassword ? "text" : "password"}
                     value={faNewPassword}
                     onChange={(e) => setFaNewPassword(e.target.value)}
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder="Mínimo 8 caracteres"
                     className="pl-9 pr-9"
                     disabled={faLoading}
                   />
@@ -433,7 +437,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
             <Button
               className="w-full bg-[var(--capivari-green)] hover:bg-[var(--capivari-green-dark)]"
               onClick={handleFirstAccess}
-              disabled={faLoading || !faNewPassword || !faConfirmPassword || faNewPassword !== faConfirmPassword || faNewPassword.length < 6}
+              disabled={faLoading || !faNewPassword || !faConfirmPassword || faNewPassword !== faConfirmPassword || faNewPassword.length < 8}
             >
               {faLoading ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Salvando...</>

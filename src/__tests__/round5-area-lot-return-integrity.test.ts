@@ -31,6 +31,9 @@ import {
 import {
   resolveReturnLotGuard,
   buildUnresolvableLotMessage,
+  shouldRestockReturnedMaterial,
+  validateExitLotLinks,
+  applyReturnToLot,
 } from "@/lib/returns-rules";
 
 import {
@@ -122,22 +125,24 @@ describe("NF-e: destino viaja por argumento (regressão do stale closure)", () =
     expect(resolved).toEqual({ materialType: "permanent", areaId: AREA_IMPRESSORAS });
   });
 
-  it("permite escolha consciente de 'Sem área' (estoque geral)", () => {
-    const payload = toEntryDestinationPayload({
+  it("bloqueia a escolha sem área para novas entradas", () => {
+    expect(() => resolveNfeDestination({
+      override: { materialType: "consumption", areaId: "" },
+    })).toThrow(NfeDestinationError);
+    expect(() => toEntryDestinationPayload({
       materialType: "consumption",
       areaId: "",
-    });
-    // String vazia = escolha explícita de estoque geral → undefined é correto.
-    expect(payload.areaId).toBeUndefined();
-    expect(payload.materialType).toBe("consumption");
+    })).toThrow(NfeDestinationError);
   });
 
-  it("ignora areaId só com espaços em branco", () => {
-    const payload = toEntryDestinationPayload({
+  it("bloqueia areaId composto apenas por espaços", () => {
+    expect(() => resolveNfeDestination({
+      override: { materialType: "consumption", areaId: "   " },
+    })).toThrow(NfeDestinationError);
+    expect(() => toEntryDestinationPayload({
       materialType: "consumption",
       areaId: "   ",
-    });
-    expect(payload.areaId).toBeUndefined();
+    })).toThrow(NfeDestinationError);
   });
 
   it("FALHA explicitamente quando não há override nem escolha no estado", () => {
@@ -367,5 +372,52 @@ describe("Tela de Produtos: 'Reservado 0' é apresentado como '—'", () => {
     const s = stockSummary({ physicalQuantity: 0, reservedQuantity: 0 });
     expect(formatStockQuantity(s.physical)).toBe("0");
     expect(formatStockQuantity(s.reserved, { zeroAsEmpty: true })).toBe("—");
+  });
+});
+
+
+describe("Devoluções: somente material não utilizado recompõe o saldo utilizável", () => {
+  it("reintegra material explicitamente não utilizado", () => {
+    expect(shouldRestockReturnedMaterial("unused")).toBe(true);
+  });
+
+  it.each(["partially_used", "defective", "other"] as const)(
+    "mantém %s fora do estoque disponível para avaliação",
+    (condition) => {
+      expect(shouldRestockReturnedMaterial(condition)).toBe(false);
+    },
+  );
+
+  it("não trata condição histórica ausente como prova de material novo", () => {
+    expect(shouldRestockReturnedMaterial(undefined)).toBe(false);
+  });
+});
+
+
+describe("Devolução: restauração integral do lote", () => {
+  it("reativa um lote que estava zerado/inativo quando o material não utilizado retorna", () => {
+    expect(applyReturnToLot(0, 1)).toEqual({ quantityAvailable: 1, active: true });
+    expect(applyReturnToLot(14, 1)).toEqual({ quantityAvailable: 15, active: true });
+  });
+
+  it("rejeita trilha de saída com soma diferente da quantidade baixada", () => {
+    expect(validateExitLotLinks(5, [
+      { lotId: "lote-a", quantity: 2 },
+      { lotId: "lote-b", quantity: 2 },
+    ])).toMatch(/não corresponde/i);
+  });
+
+  it("rejeita vínculo duplicado de lote na mesma saída", () => {
+    expect(validateExitLotLinks(2, [
+      { lotId: "lote-a", quantity: 1 },
+      { lotId: "lote-a", quantity: 1 },
+    ])).toMatch(/duplicado/i);
+  });
+
+  it("aceita a trilha quando os lotes somam exatamente a saída", () => {
+    expect(validateExitLotLinks(5, [
+      { lotId: "lote-a", quantity: 2 },
+      { lotId: "lote-b", quantity: 3 },
+    ])).toBeNull();
   });
 });

@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { useEffect, useRef } from "react";
 
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { isLoading, isAuthenticated, user } = useAuth();
+  const { isLoading, isAuthenticated, user, signOut } = useAuth();
   const location = useLocation();
   const hasShownToast = useRef(false);
 
@@ -32,6 +32,47 @@ export function RequireAuth({ children }: { children: ReactNode }) {
         to={`/auth?returnTo=${encodeURIComponent(returnTo)}`}
         replace
       />
+    );
+  }
+
+  // Fail closed if the auth session exists but no SIGESGD profile is
+  // available. Rendering protected pages in this state creates confusing
+  // query failures and must never be treated as an authenticated app user.
+  if (isAuthenticated && !user) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-6 text-center">
+        <h1 className="text-lg font-semibold">Perfil de acesso não encontrado</h1>
+        <p className="max-w-md text-sm text-muted-foreground">
+          Sua sessão foi reconhecida, mas não existe um cadastro ativo correspondente no SIGESGD. Saia do sistema e procure um administrador.
+        </p>
+        <button
+          type="button"
+          className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+          onClick={() => void signOut()}
+        >
+          Sair do sistema
+        </button>
+      </main>
+    );
+  }
+
+  // Revoke the UI session immediately when an administrator deactivates
+  // an account, even if the auth token has not expired yet.
+  if (isAuthenticated && user?.active === false) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background p-6 text-center">
+        <h1 className="text-lg font-semibold">Acesso desativado</h1>
+        <p className="max-w-md text-sm text-muted-foreground">
+          Esta conta foi desativada. Saia do sistema e procure um administrador caso precise recuperar o acesso.
+        </p>
+        <button
+          type="button"
+          className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+          onClick={() => void signOut()}
+        >
+          Sair do sistema
+        </button>
+      </main>
     );
   }
 

@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { MATERIAL_TYPE_LABELS, type MaterialType } from "@/lib/material-types";
-import { NO_AREA_LABEL } from "@/lib/stock-areas";
 import { formatCnpj } from "@/lib/nfe";
 
 interface AreaOption {
@@ -69,7 +68,7 @@ export function NfeDestinationDialog({
     }
   }, [open, initialMaterialType, initialAreaId]);
 
-  const areaName = areas.find((a) => a.id === areaId)?.name ?? NO_AREA_LABEL;
+  const areaName = areas.find((a) => a.id === areaId)?.name ?? "Área não selecionada";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -131,9 +130,9 @@ export function NfeDestinationDialog({
           </div>
 
           <div>
-            <Label className="text-xs">Área/Subestoque</Label>
+            <Label className="text-xs">Área/Subestoque *</Label>
             <Select value={areaId} onValueChange={setAreaId}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder={NO_AREA_LABEL} /></SelectTrigger>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione uma área ativa" /></SelectTrigger>
               <SelectContent>
                 {areas.map((a) => (
                   <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
@@ -141,9 +140,12 @@ export function NfeDestinationDialog({
               </SelectContent>
             </Select>
             <p className="text-[10px] text-muted-foreground mt-1">
-              A área é uma escolha de destino do estoque. O fornecedor identificado não define a área —
-              o mesmo produto pode vir de outro fornecedor para a mesma área.
+              A área é uma escolha obrigatória de destino do estoque. O fornecedor não define a área;
+              o armário físico também será informado separadamente em cada item.
             </p>
+            {!areaId && (
+              <p className="mt-1 text-xs text-amber-700">Selecione uma área ativa para continuar.</p>
+            )}
           </div>
 
           <div className="rounded-lg border p-3 space-y-1.5">
@@ -180,7 +182,7 @@ export function NfeDestinationDialog({
         <DialogFooter className="gap-2 sm:gap-2">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
           <Button
-            disabled={!materialType}
+            disabled={!materialType || !areaId.trim()}
             onClick={() => {
               if (!materialType) return;
               onConfirm(materialType, areaId);

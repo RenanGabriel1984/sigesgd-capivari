@@ -1,0 +1,160 @@
+name: Classificação controlada — movimentos históricos de teste
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmar:
+        description: 'Digite classificar-movimentos-de-teste para autorizar a classificação dos dois registros de teste'
+        required: true
+        default: nao
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: classify-historical-test-movements-first-herring
+  cancel-in-progress: false
+
+jobs:
+  classify:
+    name: Publicar e classificar somente os dois movimentos de teste em first-herring-264
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirmar == 'classificar-movimentos-de-teste'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TARGET_DEPLOYMENT: first-herring-264
+      TARGET_HOST: first-herring-264.convex.cloud
+      CONVEX_MAINTENANCE_KEY: ${{ secrets.CONVEX_MAINTENANCE_KEY_FIRST_HERRING }}
+      HOSTS_PROIBIDOS: "savory-sockeye-292.convex.cloud tame-alligator-797.convex.cloud first-starling-943.convex.cloud brilliant-bullfrog-982.convex.cloud first-dinosaur-625.convex.cloud"
+
+    steps:
+      - name: Validar execução manual na branch principal
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Execute este workflow manualmente a partir da main. Nenhuma alteração foi feita."
+            exit 1
+          fi
+
+      - name: Checkout da versão integrada
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Bun 1.3.14
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Validar chave e destino
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${CONVEX_MAINTENANCE_KEY:-}" ]; then
+            echo "::error::Secret CONVEX_MAINTENANCE_KEY_FIRST_HERRING ausente. Nenhuma alteração feita."
+            exit 1
+          fi
+          normalized_key="$(printf '%s' "${CONVEX_MAINTENANCE_KEY}" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          prefix="${normalized_key%%|*}"
+          token="${normalized_key#*|}"
+          if [ "${prefix}" != "dev:${TARGET_DEPLOYMENT}" ] || [[ "${token}" != eyJ* || "${token}" == *'|'* || "${token}" =~ [[:space:]] ]]; then
+            echo "::error::A chave não corresponde ao deployment dev:first-herring-264."
+            exit 1
+          fi
+          if [ -n "${CONVEX_DEPLOYMENT:-}" ]; then
+            echo "::error::CONVEX_DEPLOYMENT inesperada; operação cancelada."
+            exit 1
+          fi
+          printf 'CONVEX_DEPLOY_KEY=%s\n' "${normalized_key}" >> "${GITHUB_ENV}"
+          echo "Chave validada para dev:first-herring-264."
+
+      - name: Instalar dependências
+        run: bun install --frozen-lockfile
+
+      - name: Publicar schema e mutation no deployment autorizado
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="${RUNNER_TEMP}/convex-deploy.log"
+          bunx convex deploy 2>&1 | tee "${log}"
+          for host in ${HOSTS_PROIBIDOS}; do
+            if grep -qF "${host}" "${log}"; then
+              echo "::error::Destino protegido detectado no log: ${host}"
+              exit 1
+            fi
+          done
+          grep -qF "Deployed Convex functions to https://${TARGET_HOST}" "${log}" || {
+            echo "::error::O deploy não confirmou o destino first-herring-264."
+            exit 1
+          }
+
+      - name: Confirmar publicação da mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          spec="${RUNNER_TEMP}/function-spec.json"
+          bunx convex function-spec > "${spec}"
+          grep -qF "historicalTestMovementMaintenance.js:classifyHistoricalTestMovementsInternal" "${spec}" || {
+            echo "::error::Mutation não encontrada no deployment. Não será chamada."
+            exit 1
+          }
+
+      - name: Classificar exatamente saída e devolução de teste
+        shell: bash
+        run: |
+          set -euo pipefail
+          args='{"expectedMovementIds":["kx70n82skp2ph9wq5d75020wp58ez5ag","kx758yrsbatdw2yc4m09ytfapn8en7mn"],"confirmation":"CLASSIFICAR-2-MOVIMENTOS-DE-TESTE"}'
+          bunx convex run historicalTestMovementMaintenance:classifyHistoricalTestMovementsInternal "${args}" > "${RUNNER_TEMP}/classification-result.json"
+          cat "${RUNNER_TEMP}/classification-result.json"
+
+      - name: Verificação independente pós-classificação
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/verify-test-movements.inline.ts" <<'EOF'
+          const ids = [
+            "kx70n82skp2ph9wq5d75020wp58ez5ag",
+            "kx758yrsbatdw2yc4m09ytfapn8en7mn",
+          ];
+          const expectedTypes = ["return", "exit"];
+          const results = [];
+          for (let i = 0; i < ids.length; i++) {
+            const movement = await ctx.db.get(ids[i]);
+            if (!movement || movement.type !== expectedTypes[i] || movement.quantity !== 1 || movement.isTest !== true || !movement.testReason) {
+              throw new Error("Movimento não corresponde à classificação esperada: " + ids[i]);
+            }
+            const location = movement.locationId ? await ctx.db.get(movement.locationId) : null;
+            if (!location || location.name !== "Armário TI 01") {
+              throw new Error("Local físico divergente: " + ids[i]);
+            }
+            const logs = await ctx.db.query("auditLogs")
+              .withIndex("by_entity_entityId", q => q.eq("entity", "stockMovement").eq("entityId", ids[i]))
+              .collect();
+            const matching = logs.filter(row => {
+              try { return JSON.parse(row.details ?? "{}").operation === "historical_test_movement_classification"; }
+              catch { return false; }
+            });
+            if (matching.length !== 1) {
+              throw new Error("Auditoria ausente ou duplicada: " + ids[i]);
+            }
+            results.push({ id: ids[i], type: movement.type, quantity: movement.quantity, isTest: movement.isTest, location: location.name, auditLogs: matching.length });
+          }
+          return { readOnlyVerification: true, verified: results.length, results };
+          EOF
+          bunx convex run --inline-query "$(cat "${RUNNER_TEMP}/verify-test-movements.inline.ts")" > "${RUNNER_TEMP}/verification.json"
+          cat "${RUNNER_TEMP}/verification.json"
+          node -e 'const fs=require("fs"); const s=fs.readFileSync(process.argv[1],"utf8"); const j=JSON.parse(s); if(j.verified!==2 || !j.readOnlyVerification || j.results.some(x=>x.location!=="Armário TI 01" || x.isTest!==true || x.quantity!==1 || x.auditLogs!==1)) process.exit(1);' "${RUNNER_TEMP}/verification.json"
+
+          {
+            echo "### Classificação histórica concluída e verificada"
+            echo ""
+            echo "- Deployment: dev:first-herring-264"
+            echo "- Movimentos classificados como teste: **2 (1 saída + 1 devolução)**"
+            echo "- Local confirmado: **Armário TI 01**"
+            echo "- Logs individuais de auditoria: **2**"
+            echo "- Quantidades e saldos alterados: **nenhum**"
+            echo "- Registros excluídos: **nenhum**"
+          } >> "${GITHUB_STEP_SUMMARY}"

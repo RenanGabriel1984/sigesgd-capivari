@@ -1,0 +1,216 @@
+name: Correção controlada — first-herring-264
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmar:
+        description: 'Digite aplicar-correcoes-historicas para autorizar a correção em first-herring-264'
+        required: true
+        default: nao
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apply-historical-stock-location-corrections-first-herring
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Validar, publicar e aplicar exclusivamente em first-herring-264
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirmar == 'aplicar-correcoes-historicas'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TARGET_DEPLOYMENT: first-herring-264
+      TARGET_HOST: first-herring-264.convex.cloud
+      CONVEX_MAINTENANCE_KEY: ${{ secrets.CONVEX_MAINTENANCE_KEY_FIRST_HERRING }}
+      HOSTS_PROIBIDOS: "savory-sockeye-292.convex.cloud tame-alligator-797.convex.cloud first-starling-943.convex.cloud brilliant-bullfrog-982.convex.cloud first-dinosaur-625.convex.cloud"
+
+    steps:
+      - name: Validar execução manual na branch principal
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Execute este workflow manualmente a partir da main. Nenhuma alteração foi feita."
+            exit 1
+          fi
+
+      - name: Checkout da versão integrada
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Bun 1.3.14
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+
+      - name: Verificar chave de manutenção
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${CONVEX_MAINTENANCE_KEY:-}" ]; then
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            echo "Chave de manutenção ainda não cadastrada. Nenhum deploy ou dado foi alterado."
+            {
+              echo "### Execução não iniciada"
+              echo ""
+              echo "Aguardando o secret CONVEX_MAINTENANCE_KEY_FIRST_HERRING."
+              echo "Nenhum deploy e nenhuma gravação foram executados."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          if [ -n "${CONVEX_DEPLOYMENT:-}" ]; then
+            echo "::error::CONVEX_DEPLOYMENT está definida; operação cancelada."
+            exit 1
+          fi
+
+          normalized_key="$(printf '%s' "${CONVEX_MAINTENANCE_KEY}" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          prefix="${normalized_key%%|*}"
+          token="${normalized_key#*|}"
+          if [ "${prefix}" != "dev:${TARGET_DEPLOYMENT}" ]; then
+            echo "::error::A chave não corresponde exatamente a dev:first-herring-264."
+            exit 1
+          fi
+          if [[ "${token}" != eyJ* || "${token}" == *'|'* || "${token}" =~ [[:space:]] ]]; then
+            echo "::error::Formato da deploy key inválido."
+            exit 1
+          fi
+
+          printf 'CONVEX_DEPLOY_KEY=%s\n' "${normalized_key}" >> "${GITHUB_ENV}"
+          echo "enabled=true" >> "${GITHUB_OUTPUT}"
+          echo "Chave de manutenção validada para dev:first-herring-264."
+
+      - name: Instalar dependências
+        if: steps.gate.outputs.enabled == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Conferir identidade do backend antes do deploy
+        if: steps.gate.outputs.enabled == 'true'
+        shell: bash
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_MAINTENANCE_KEY_FIRST_HERRING }}
+        run: |
+          set -euo pipefail
+          spec="${RUNNER_TEMP}/before-deploy-function-spec.json"
+          bunx convex function-spec > "${spec}"
+
+          for expected in \
+            "stockAreas.js:unclassifiedLots" \
+            "stockAreas.js:classifyLot" \
+            "stockSetup.js:applyLegacyPrinterAreaClassification" \
+            "stockSetup.js:applyLegacyGeneralAreaClassification" \
+            "stockSetup.js:applyLotLocationMetadataBackfill" \
+            "diagnostics.js:structureAuditInternal" \
+            "stockMovements.js:createEntry"; do
+            if ! grep -qF "${expected}" "${spec}"; then
+              echo "::error::Backend implantado não corresponde à base validada (${expected}). Deploy cancelado."
+              exit 1
+            fi
+          done
+
+          count="$(grep -c '"identifier"' "${spec}" || true)"
+          if [ "${count}" -lt 250 ]; then
+            echo "::error::Inventário de funções incompleto (${count}). Deploy cancelado."
+            exit 1
+          fi
+          echo "Inventário compatível: ${count} identificadores de funções."
+
+      - name: Publicar a base compatível e a mutation interna
+        if: steps.gate.outputs.enabled == 'true'
+        shell: bash
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_MAINTENANCE_KEY_FIRST_HERRING }}
+        run: |
+          set -euo pipefail
+          log="${RUNNER_TEMP}/convex-deploy.log"
+          bunx convex deploy 2>&1 | tee "${log}"
+
+          for host in ${HOSTS_PROIBIDOS}; do
+            if grep -qF "${host}" "${log}"; then
+              echo "::error::O log citou deployment protegido (${host})."
+              exit 1
+            fi
+          done
+          if ! grep -qF "Deploying code to deployment:" "${log}"; then
+            echo "::error::O CLI não confirmou o início do deploy."
+            exit 1
+          fi
+          if ! grep -qF "Deployed Convex functions to https://${TARGET_HOST}" "${log}"; then
+            echo "::error::O CLI não confirmou o destino first-herring-264."
+            exit 1
+          fi
+
+      - name: Confirmar que a mutation interna foi publicada
+        if: steps.gate.outputs.enabled == 'true'
+        shell: bash
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_MAINTENANCE_KEY_FIRST_HERRING }}
+        run: |
+          set -euo pipefail
+          spec="${RUNNER_TEMP}/after-deploy-function-spec.json"
+          bunx convex function-spec > "${spec}"
+          if ! grep -qF "stockMovementLocationMaintenance.js:applyHistoricalLocationCorrectionsInternal" "${spec}"; then
+            echo "::error::A mutation interna não aparece no deployment. Nenhuma correção foi chamada."
+            exit 1
+          fi
+          echo "Mutation interna publicada e identificada."
+
+      - name: Gerar dry-run novo no deployment alvo
+        if: steps.gate.outputs.enabled == 'true'
+        shell: bash
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_MAINTENANCE_KEY_FIRST_HERRING }}
+        run: |
+          set -euo pipefail
+          query_source="$(cat scripts/stock-movement-location-dry-run.inline.ts)"
+          bunx convex run --inline-query "${query_source}" > "${RUNNER_TEMP}/location-dry-run.json"
+          node scripts/validate-historical-stock-location-correction.mjs \
+            dry-run "${RUNNER_TEMP}/location-dry-run.json" "${RUNNER_TEMP}/approved-arguments.json"
+
+      - name: Aplicar exatamente os 61 movimentos aprovados
+        if: steps.gate.outputs.enabled == 'true'
+        shell: bash
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_MAINTENANCE_KEY_FIRST_HERRING }}
+        run: |
+          set -euo pipefail
+          args="$(cat "${RUNNER_TEMP}/approved-arguments.json")"
+          bunx convex run stockMovementLocationMaintenance:applyHistoricalLocationCorrectionsInternal "${args}" \
+            > "${RUNNER_TEMP}/mutation-result.json"
+          echo "Mutation executada; iniciando conferência pós-operação."
+
+      - name: Auditar movimentos após a correção
+        if: steps.gate.outputs.enabled == 'true'
+        shell: bash
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_MAINTENANCE_KEY_FIRST_HERRING }}
+        run: |
+          set -euo pipefail
+          query_source="$(cat scripts/stock-movement-traceability-audit.inline.ts)"
+          bunx convex run --inline-query "${query_source}" > "${RUNNER_TEMP}/traceability-after.json"
+
+          log_query='const rows = await ctx.db.query("auditLogs").withIndex("by_entity", q => q.eq("entity", "stockMovement")).collect(); const matches = rows.filter(row => { try { return JSON.parse(row.details ?? "{}").operation === "historical_location_backfill"; } catch { return false; } }); return { count: matches.length, movementIds: matches.map(row => String(row.entityId)).filter(Boolean).sort() };'
+          bunx convex run --inline-query "${log_query}" > "${RUNNER_TEMP}/backfill-audit-logs.json"
+
+          node scripts/validate-historical-stock-location-correction.mjs \
+            verify \
+            "${RUNNER_TEMP}/mutation-result.json" \
+            "${RUNNER_TEMP}/traceability-after.json" \
+            "${RUNNER_TEMP}/backfill-audit-logs.json" \
+            "${RUNNER_TEMP}/approved-arguments.json"
+
+          {
+            echo "### Correção histórica finalizada e verificada"
+            echo ""
+            echo '- Deployment: `dev:first-herring-264`'
+            echo "- Movimentos corrigidos: **61**"
+            echo "- Logs de auditoria individuais: **61**"
+            echo "- Movimentos preservados para revisão: **1 saída + 1 devolução**"
+            echo "- Campos de movimento alterados: **somente locationId**"
+            echo "- Outros dados de estoque alterados: **nenhum**"
+          } >> "${GITHUB_STEP_SUMMARY}"
