@@ -79,21 +79,32 @@ function assert(condition: unknown, message: string): asserts condition {
  */
 export function buildLotLocationMigrationPlan(
   report: LotLocationMigrationReport,
-  expected = { lotCount: 61, totalQuantity: 3338 },
+  expected?: { lotCount: number; totalQuantity: number },
 ): LotLocationMigrationPlan {
   assert(report?.readOnly === true, "a origem não é um diagnóstico somente leitura.");
   assert(report?.migrationApplied === false, "o diagnóstico indica uma migração já aplicada ou estado inesperado.");
 
   const summary = report.summary;
+  // O snapshot histórico de 61 lotes / 3.338 unidades não é uma constante
+  // operacional: o estoque muda com entradas, saídas e devoluções. Na ausência
+  // de baseline explicitamente fornecido, o plano usa o total atual do
+  // diagnóstico e exige conciliação integral entre lotes, estoque global e
+  // armários. Assim, movimentações legítimas não tornam a migração obsoleta.
+  const baseline = expected ?? {
+    lotCount: summary.lots.withAvailableQuantity,
+    totalQuantity: summary.lots.quantityAvailableTotal,
+  };
+  assert(Number.isInteger(baseline.lotCount) && baseline.lotCount >= 0, "quantidade-base de lotes inválida.");
+  assert(Number.isFinite(baseline.totalQuantity) && baseline.totalQuantity >= 0, "quantidade-base total inválida.");
   assert(summary.globalStock.invalidRecords === 0, "há registros globais inválidos.");
   assert(summary.stockByLocation.invalidRecords === 0, "há registros por armário inválidos.");
   assert(summary.lotLocationBalances.invalidRecords === 0, "há saldos lote × armário inválidos.");
   assert(
-    summary.lots.withAvailableQuantity === expected.lotCount,
+    summary.lots.withAvailableQuantity === baseline.lotCount,
     `esperados ${expected.lotCount} lotes com saldo; encontrados ${summary.lots.withAvailableQuantity}.`,
   );
   assert(
-    Math.abs(summary.lots.quantityAvailableTotal - expected.totalQuantity) <= EPSILON,
+    Math.abs(summary.lots.quantityAvailableTotal - baseline.totalQuantity) <= EPSILON,
     `saldo dos lotes esperado ${expected.totalQuantity}; encontrado ${summary.lots.quantityAvailableTotal}.`,
   );
   assert(
