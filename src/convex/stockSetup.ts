@@ -1289,12 +1289,12 @@ export const lotLocationReadiness = internalQuery({
             } : null;
           })(),
           entryItemEvidence: entryItems.map((item) => {
-            const sourceProduct = productById.get(String(item.productId));
+            
             const locationId = item.locationId ? String(item.locationId) : null;
             return {
               entryItemId: String(item._id),
               productId: String(item.productId),
-              productName: sourceProduct?.name ?? "Produto inexistente",
+              productName: item.productId === product._id ? product.name : "Produto divergente",
               quantity: item.quantity,
               unitOfMeasure: item.unitOfMeasure ?? null,
               locationId,
