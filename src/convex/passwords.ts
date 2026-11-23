@@ -933,8 +933,11 @@ export const confirmPasswordReset = mutation({
     await ctx.db.insert("auditLogs", {
       action: "password_reset",
       entity: "passwords",
-      entityId: user._id,
-      details: `Senha redefinida via recuperação para ${email}`,
+      entityId: passwordRecordId,
+      details: `Senha redefinida via recuperação para ${email}` +
+        (existingPasswordRows.length > 1
+          ? ` | ${existingPasswordRows.length} credenciais duplicadas consolidadas após validação do código.`
+          : ""),
       timestamp: Date.now(),
     });
 
@@ -1138,22 +1141,24 @@ export const bootstrapResetPassword = internalMutation({
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
-    const passwordResolution = resolveUniqueRecord(existingPasswordRows);
-    if (passwordResolution.status === "ambiguous") {
-      throw new Error(describeDuplicateCredential(passwordResolution.count));
-    }
-    const existingPw = passwordResolution.status === "unique"
-      ? passwordResolution.record
-      : null;
-
-    if (existingPw) {
-      await ctx.db.patch(existingPw._id, {
+    let passwordRecordId: Id<"passwords">;
+    if (existingPasswordRows.length > 1) {
+      await Promise.all(existingPasswordRows.map((record) => ctx.db.delete(record._id)));
+      passwordRecordId = await ctx.db.insert("passwords", {
+        userId: user._id,
+        passwordHash: hash,
+        salt,
+        requiresReset: false,
+      });
+    } else if (existingPasswordRows.length === 1) {
+      passwordRecordId = existingPasswordRows[0]._id;
+      await ctx.db.patch(passwordRecordId, {
         passwordHash: hash,
         salt,
         requiresReset: false,
       });
     } else {
-      await ctx.db.insert("passwords", {
+      passwordRecordId = await ctx.db.insert("passwords", {
         userId: user._id,
         passwordHash: hash,
         salt,
@@ -1172,16 +1177,23 @@ export const bootstrapResetPassword = internalMutation({
     const failedAttempts = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
-    if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined, lastAuditAt: undefined });
-    }
+      .collect();
+    await Promise.all(failedAttempts.map((record) =>
+      ctx.db.patch(record._id, {
+        attempts: 0,
+        lockedUntil: undefined,
+        lastAuditAt: undefined,
+      }),
+    ));
 
     await ctx.db.insert("auditLogs", {
       action: "password_reset",
       entity: "passwords",
-      entityId: user._id,
-      details: `Bootstrap: senha redefinida para ${user.name ?? email}`,
+      entityId: passwordRecordId,
+      details: `Bootstrap: senha redefinida para ${user.name ?? email}` +
+        (existingPasswordRows.length > 1
+          ? ` | ${existingPasswordRows.length - 1} credencial(is) duplicada(s) removida(s) por redefinição administrativa.`
+          : ""),
       timestamp: Date.now(),
     });
 
