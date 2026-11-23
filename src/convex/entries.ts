@@ -115,7 +115,7 @@ async function generateEntryNumber(ctx: MutationCtx): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `ENT-${year}-`;
   const existing = await ctx.db.query("entries").withIndex("by_number", (q) => q.gte("entryNumber", prefix)).collect();
-  const maxNum = existing.reduce((max: number, e: any) => {
+  const maxNum = existing.reduce((max: number, e) => {
     const match = e.entryNumber.match(/^ENT-\d{4}-(\d+)$/);
     if (match && e.entryNumber.startsWith(prefix)) {
       const num = parseInt(match[1], 10);
@@ -131,7 +131,7 @@ async function generateLotNumber(ctx: MutationCtx): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `LOT-${year}-`;
   const existing = await ctx.db.query("lots").withIndex("by_number", (q) => q.gte("lotNumber", prefix)).collect();
-  const maxNum = existing.reduce((max: number, l: any) => {
+  const maxNum = existing.reduce((max: number, l) => {
     const match = l.lotNumber.match(/^LOT-\d{4}-(\d+)$/);
     if (match && l.lotNumber.startsWith(prefix)) {
       const num = parseInt(match[1], 10);
@@ -505,7 +505,7 @@ export const confirm = mutation({
       .collect();
     if (entry.materialType === "permanent") {
       for (const item of items) {
-        const product: any = await ctx.db.get(item.productId);
+        const product = await ctx.db.get(item.productId);
         const itemUnits = entryUnits
           .filter((u) => u.entryItemId === item._id)
           .map((u) => ({
@@ -530,7 +530,7 @@ export const confirm = mutation({
 
     // Área de negócio e local físico são dimensões independentes.
     // entries.areaId é a área padrão; item.areaId pode sobrescrever por linha.
-    const itemAreas = new Map<string, string | undefined>();
+    const itemAreas = new Map<Id<"entryItems">, Id<"stockAreas">>();
     if (entry.areaId) {
       const defaultArea = await ctx.db.get(entry.areaId);
       if (!defaultArea || !defaultArea.active) {
@@ -566,11 +566,12 @@ export const confirm = mutation({
           "Classifique o rascunho antes de confirmar; o armário não determina a área."
         );
       }
-      const area = await ctx.db.get(effectiveAreaId as Id<"stockAreas">);
+      const areaId = effectiveAreaId as Id<"stockAreas">;
+      const area = await ctx.db.get(areaId);
       if (!area || !area.active) {
         throw new Error(`A área selecionada para "${product.name}" não existe ou está inativa.`);
       }
-      itemAreas.set(item._id as string, effectiveAreaId as string);
+      itemAreas.set(item._id, areaId);
       if (!item.locationId) {
         const product = await ctx.db.get(item.productId);
         throw new Error(`Selecione o local físico para "${product?.name ?? "o item"}" antes de confirmar esta entrada.`);
@@ -597,7 +598,7 @@ export const confirm = mutation({
     const confirmedItemDetails: string[] = [];
 
     for (const item of items) {
-      const itemAreaId = itemAreas.get(item._id as string);
+      const itemAreaId = itemAreas.get(item._id);
       // Validate product
       const product = await ctx.db.get(item.productId);
       if (!product) throw new Error(`Produto não encontrado para item da entrada`);
@@ -624,7 +625,7 @@ export const confirm = mutation({
         active: true,
         observation: item.observation,
         materialType: entry.materialType,
-        areaId: itemAreaId as any,
+        areaId: itemAreaId,
         locationId: item.locationId,
       });
       await adjustLotLocationBalance(ctx, {
@@ -661,7 +662,7 @@ export const confirm = mutation({
       // Update stock by location (saldo por localização) — keeps global × location consistent
       if (item.locationId) {
         const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
-        const sbl = sblList.find((s: any) =>
+        const sbl = sblList.find((s) =>
           s.locationId === item.locationId &&
           (s.areaId ?? undefined) === (itemAreaId ?? undefined)
         );
@@ -1014,7 +1015,7 @@ export const reverse = mutation({
 
       // O estorno precisa atingir o lote criado por ESTE item da entrada.
       // Nunca usa outro lote do mesmo produto para compensar uma entrada consumida.
-      let lot: any = null;
+      let lot: Doc<"lots"> | null = null;
       if (item.lotId) {
         lot = await ctx.db.get(item.lotId as Id<"lots">);
         if (!lot) lot = entryLots.find((candidate) => candidate.lotNumber === item.lotId) ?? null;
@@ -1081,7 +1082,7 @@ export const reverse = mutation({
         );
       }
 
-      let locationStock: any = null;
+      let locationStock: Doc<"stockByLocation"> | null = null;
       if (lotLocationId) {
         const locationRows = await ctx.db.query("stockByLocation")
           .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
@@ -1096,7 +1097,7 @@ export const reverse = mutation({
         locationStock = matchingRows[0];
         const scopeReservations = (await ctx.db.query("requestItemReservations")
           .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect())
-          .filter((reservation: any) =>
+          .filter((reservation) =>
             reservation.locationId === lotLocationId && reservation.areaId === lotAreaId
           )
           .reduce((sum: number, reservation) => sum + Number(reservation.quantityRemaining ?? 0), 0);
@@ -1132,8 +1133,8 @@ export const reverse = mutation({
         userId,
         entryId: args.entryId,
         lotId: lot._id as string,
-        areaId: lotAreaId as any,
-        locationId: lotLocationId as any,
+        areaId: lotAreaId ? lotAreaId as Id<"stockAreas"> : undefined,
+        locationId: lotLocationId as Id<"storageLocations">,
         observation: `Estorno da entrada ${entry.entryNumber} — lote ${lot.lotNumber}. Motivo: ${reason}`,
         timestamp: now,
       });
@@ -1209,7 +1210,7 @@ export const setUnits = mutation({
 
     // Todos os itens informados pertencem à entrada
     const items = await ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", args.entryId)).collect();
-    const itemIds = new Set(items.map((i: any) => i._id as string));
+    const itemIds = new Set(items.map((item) => item._id));
     for (const u of args.units) {
       if (!itemIds.has(u.entryItemId as string)) {
         throw new Error("Item informado não pertence a esta entrada");
@@ -1236,10 +1237,11 @@ export const setUnits = mutation({
       .collect();
     for (const u of existing) await ctx.db.delete(u._id);
 
-    const itemById = new Map(items.map((i: any) => [i._id as string, i]));
+    const itemById = new Map(items.map((item) => [item._id, item] as const));
     const now = Date.now();
     for (const u of args.units) {
-      const item: any = itemById.get(u.entryItemId as string);
+      const item = itemById.get(u.entryItemId);
+      if (!item) throw new Error("Item informado não pertence a esta entrada.");
       await ctx.db.insert("entryItemUnits", {
         entryId: args.entryId,
         entryItemId: u.entryItemId,
@@ -1296,11 +1298,11 @@ export const listPendingPatrimony = query({
       .withIndex("by_registration_status", (q) => q.eq("patrimonyRegistrationStatus", "pending"))
       .collect();
     const rows = await Promise.all(pending.map(async (unit) => {
-      const entry: any = await ctx.db.get(unit.entryId);
+      const entry = await ctx.db.get(unit.entryId);
       if (!entry || entry.status !== "confirmed") return null;
-      const item: any = await ctx.db.get(unit.entryItemId);
-      const product: any = item ? await ctx.db.get(item.productId) : null;
-      const supplier: any = entry.supplierId ? await ctx.db.get(entry.supplierId) : null;
+      const item = await ctx.db.get(unit.entryItemId);
+      const product = item ? await ctx.db.get(item.productId) : null;
+      const supplier = entry.supplierId ? await ctx.db.get(entry.supplierId) : null;
       return {
         ...unit,
         entryNumber: entry.entryNumber,
@@ -1385,7 +1387,7 @@ export const assignPatrimony = mutation({
     if (!item || !product) throw new Error("Produto ou item da entrada não encontrado.");
     const now = Date.now();
     const organizationId = unit.unidadeId ?? unit.departamentoId ?? unit.secretariaId;
-    let assetId: any;
+    let assetId: Id<"assets">;
 
     if (existingAsset) {
       // Reaproveita o cadastro legado para não criar um segundo ativo.
