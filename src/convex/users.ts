@@ -230,7 +230,7 @@ export const createUser = mutation({
     const name = normalizeUserName(args.name);
     const email = normalizeUserEmail(args.email);
     const existingRows = await ctx.db.query("users")
-      .withIndex("email", (q: any) => q.eq("email", email))
+      .withIndex("email", (q) => q.eq("email", email))
       .collect();
     const existing = resolveUniqueRecord(existingRows);
     if (existing.status === "ambiguous") {
@@ -300,7 +300,7 @@ export const updateUser = mutation({
     if (updates.email !== undefined) {
       const email = normalizeUserEmail(updates.email);
       const existingRows = await ctx.db.query("users")
-        .withIndex("email", (q: any) => q.eq("email", email))
+        .withIndex("email", (q) => q.eq("email", email))
         .collect();
       const otherAccounts = existingRows.filter((record) => record._id !== userId);
       if (otherAccounts.length > 0) {
@@ -364,11 +364,11 @@ export const deactivateUser = mutation({
     if (!user) throw new Error("Usuário não encontrado");
     if ((user.role === "admin" || user.role === "secretary") && user.active !== false) {
       const [admins, secretaries] = await Promise.all([
-        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect(),
-        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "secretary")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "admin")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "secretary")).collect(),
       ]);
       const activeUserManagers = [...admins, ...secretaries]
-        .filter((manager: any) => manager.active !== false);
+        .filter((manager) => manager.active !== false);
       if (activeUserManagers.length <= 1) {
         throw new Error("Não é possível desativar o último administrador/secretário com acesso integral");
       }
