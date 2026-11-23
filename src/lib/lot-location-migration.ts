@@ -13,6 +13,7 @@ export type LotLocationMigrationReport = {
     globalStock: { physicalQuantityTotal: number; reservedQuantityTotal: number; invalidRecords: number };
     stockByLocation: { physicalQuantityTotal: number; invalidRecords: number };
     lotLocationBalances: { records: number; quantityAvailableTotal: number; invalidRecords: number };
+    stockAreas: { areas: Array<{ areaId: string; name: string; active: boolean }> };
     storageLocations: { locations: Array<{ locationId: string; name: string; active: boolean }> };
   };
   products: Array<{
@@ -40,6 +41,7 @@ export type LotLocationMigrationReport = {
     lots: Array<{
       lotId: string;
       lotNumber: string;
+      areaId: string | null;
       quantityAvailable: number;
       status: string;
       candidateLocationId: string | null;
@@ -108,6 +110,8 @@ export function buildLotLocationMigrationPlan(
     "o total reservado é inválido.",
   );
 
+  const activeAreaIds = new Set(summary.stockAreas.areas.filter((area) => area.active).map((area) => area.areaId));
+  assert(activeAreaIds.size === summary.stockAreas.areas.length, "há área de estoque inativa no conjunto auditado.");
   const activeLocationIds = new Set(summary.storageLocations.locations.filter((location) => location.active).map((location) => location.locationId));
   assert(activeLocationIds.size === summary.storageLocations.locations.length, "há local de armazenamento inativo no conjunto auditado.");
 
@@ -144,6 +148,8 @@ export function buildLotLocationMigrationPlan(
       assert(!seenLots.has(lot.lotId), `o lote ${lot.lotNumber} aparece mais de uma vez no diagnóstico.`);
       seenLots.add(lot.lotId);
       assert(Number.isFinite(lot.quantityAvailable) && lot.quantityAvailable > 0, `o lote ${lot.lotNumber} possui quantidade inválida.`);
+      assert(!!lot.areaId, `o lote ${lot.lotNumber} ainda não possui área/subestoque classificado.`);
+      assert(activeAreaIds.has(lot.areaId), `o lote ${lot.lotNumber} aponta para área inexistente ou inativa.`);
 
       let row: LotLocationMigrationRow;
       if (lot.status === "candidate") {
