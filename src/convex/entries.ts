@@ -1116,7 +1116,7 @@ export const reverse = mutation({
       });
       await adjustLotLocationBalance(ctx, {
         lotId: lot._id, productId: lot.productId, locationId: lotLocationId,
-        delta: -Number(item.quantity),
+        delta: -Number(item.quantity), expectedQuantityBefore: Number(lot.quantityAvailable),
       });
       if (locationStock) {
         await ctx.db.patch(locationStock._id, { quantity: locationStock.quantity - item.quantity });
