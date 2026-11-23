@@ -182,16 +182,23 @@ export default function UsersPage() {
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">{orgName ?? "—"}</TableCell>
                         <TableCell>
-                          <Badge variant={u.active !== false ? "default" : "destructive"} className="text-[10px]">
-                            {u.active !== false ? "Ativo" : "Inativo"}
-                          </Badge>
+                          <div className="flex flex-col items-start gap-1">
+                            <Badge variant={u.active !== false ? "default" : "destructive"} className="text-[10px]">
+                              {u.active !== false ? "Ativo" : "Inativo"}
+                            </Badge>
+                            {u.passwordRecordCount > 1 && (
+                              <Badge variant="destructive" className="text-[10px]">
+                                {u.passwordRecordCount} senhas duplicadas
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1 items-center">
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(u)} title="Editar">
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openPassword(u._id, u.name ?? u.email, !u.hasPassword)} title={u.hasPassword ? "Redefinir senha" : "Definir senha"}>
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openPassword(u._id, u.name ?? u.email, !u.hasPassword)} title={u.passwordRecordCount > 1 ? "Redefinir senha e corrigir duplicidade" : u.hasPassword ? "Redefinir senha" : "Definir senha"}>
                               <Key className="h-3.5 w-3.5" />
                             </Button>
                             <Button variant="ghost" size="icon" className="h-7 w-7"
