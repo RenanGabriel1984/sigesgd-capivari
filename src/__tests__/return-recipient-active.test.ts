@@ -20,3 +20,18 @@ describe("devoluções — usuário recebedor", () => {
     expect(firstWrite).toBeGreaterThan(validation);
   });
 });
+
+
+describe("devoluções — identificação inequívoca de lote legado", () => {
+  it("rejeita número de lote duplicado em vez de selecionar o primeiro registro", () => {
+    const source = readFileSync(resolve(__dirname, "../convex/returns.ts"), "utf8");
+    const start = source.indexOf("export const create = mutation({");
+    const end = source.indexOf("\n});", start);
+    const mutation = source.slice(start, end < 0 ? undefined : end);
+    expect(mutation).toContain('.withIndex("by_number", (q: any) => q.eq("lotNumber", rawLotId))');
+    expect(mutation).toContain(".collect()");
+    expect(mutation).toContain("matchingLots.length > 1");
+    expect(mutation).toContain("fallbackLot = matchingLots[0] ?? null");
+    expect(mutation).not.toContain('.withIndex("by_number", (q: any) => q.eq("lotNumber", rawLotId))\n            .first()');
+  });
+});

@@ -260,9 +260,13 @@ export const create = mutation({
       let fallbackLot: any = args.lotId ? await ctx.db.get(args.lotId) : null;
       if (!fallbackLot && rawLotId) {
         if (String(rawLotId).startsWith("LOT-")) {
-          fallbackLot = await ctx.db.query("lots")
+          const matchingLots = await ctx.db.query("lots")
             .withIndex("by_number", (q: any) => q.eq("lotNumber", rawLotId))
-            .first();
+            .collect();
+          if (matchingLots.length > 1) {
+            throw new Error(`O número de lote "${rawLotId}" está duplicado. Regularize a identificação antes de registrar a devolução.`);
+          }
+          fallbackLot = matchingLots[0] ?? null;
         } else {
           fallbackLot = await ctx.db.get(rawLotId as any);
         }

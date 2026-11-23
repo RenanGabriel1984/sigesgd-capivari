@@ -3,6 +3,7 @@ import {
   getOptionalSingleValidGlobalStock,
   inspectProductStockIntegrity,
   requireSingleValidGlobalStock,
+  resolveScopedInventoryQuantity,
   validateUniqueScopedStockRows,
 } from "@/lib/stock-read-integrity";
 
@@ -165,5 +166,56 @@ describe("stock read integrity", () => {
     const result = inspectProductStockIntegrity([], [], [], "New product");
     expect(result.consistent).toBe(true);
     expect(result.globalStock).toBeNull();
+  });
+});
+
+
+describe("integridade da abertura de inventário localizado", () => {
+  const rows = [{ productId: "mouse", areaId: "ti", locationId: "cabinet-1", quantity: 5 }];
+  const lots = [{ lotNumber: "LOT-1", areaId: "ti", locationId: "cabinet-1", quantityAvailable: 5, active: true }];
+
+  it("uses the unique physical balance when it matches the scoped lots", () => {
+    expect(resolveScopedInventoryQuantity(rows, lots, "ti", "cabinet-1", "Mouse")).toBe(5);
+  });
+
+  it("rejects duplicate physical buckets instead of summing them", () => {
+    expect(() => resolveScopedInventoryQuantity(
+      [...rows, { ...rows[0], quantity: 2 }],
+      lots,
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    )).toThrow(/duplicados/i);
+  });
+
+  it("rejects a physical balance that diverges from scoped lots", () => {
+    expect(() => resolveScopedInventoryQuantity(
+      rows,
+      [{ ...lots[0], quantityAvailable: 4 }],
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    )).toThrow(/diverge dos lotes/i);
+  });
+
+  it("rejects invalid or inactive positive lots", () => {
+    expect(() => resolveScopedInventoryQuantity(
+      rows,
+      [{ ...lots[0], quantityAvailable: Number.NaN }],
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    )).toThrow(/saldo inválido/i);
+    expect(() => resolveScopedInventoryQuantity(
+      rows,
+      [{ ...lots[0], active: false }],
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    )).toThrow(/inativo com saldo positivo/i);
+  });
+
+  it("returns zero only when both the scoped bucket and scoped lots are empty", () => {
+    expect(resolveScopedInventoryQuantity([], [], "ti", "cabinet-1", "Mouse")).toBe(0);
   });
 });

@@ -551,9 +551,15 @@ export const deliver = mutation({
       { entity: "requests", entityId: args.requestId },
     );
 
-    const passwordRecord = await ctx.db.query("passwords")
-      .withIndex("by_user", (q: any) => q.eq("userId", userId)).first();
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+    const passwordRecords = await ctx.db.query("passwords")
+      .withIndex("by_user", (q: any) => q.eq("userId", userId)).collect();
+    if (passwordRecords.length === 0) {
+      throw new Error("Senha não configurada. Contate o administrador.");
+    }
+    if (passwordRecords.length !== 1) {
+      throw new Error("Há mais de um registro de senha para este usuário. A confirmação foi bloqueada; contate o administrador.");
+    }
+    const passwordRecord = passwordRecords[0];
     const passwordValid = await verifyPassword(
       args.confirmationPassword, passwordRecord.passwordHash, passwordRecord.salt
     );
