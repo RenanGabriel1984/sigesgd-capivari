@@ -1,5 +1,6 @@
 import { internalQuery } from "./_generated/server";
 import { LEGACY_GENERAL_AREA_CLASSIFICATION_TARGETS } from "../lib/legacy-general-area-classification";
+import { inspectLotLocationBalances } from "../lib/lot-location-balance";
 
 /**
  * Diagnóstico estritamente somente leitura da divergência que bloqueou a
@@ -147,6 +148,49 @@ export const legacyGeneralAreaClassificationDiagnostic = internalQuery({
           canceled: movement.canceled,
         })),
       },
+    };
+  },
+});
+
+/**
+ * Diagnóstico read-only do livro derivado lote × localização.
+ * Não tenta corrigir ou inferir locais para lotes legados sem vínculo explícito.
+ */
+export const lotLocationBalanceIntegrityDiagnostic = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const [lots, balances] = await Promise.all([
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+    ]);
+
+    const result = inspectLotLocationBalances(
+      lots.map((lot) => ({
+        _id: String(lot._id),
+        productId: String(lot.productId),
+        lotNumber: lot.lotNumber,
+        quantityAvailable: lot.quantityAvailable,
+        locationId: lot.locationId == null ? null : String(lot.locationId),
+        active: lot.active,
+      })),
+      balances.map((balance) => ({
+        _id: String(balance._id),
+        lotId: String(balance.lotId),
+        productId: String(balance.productId),
+        locationId: String(balance.locationId),
+        quantityAvailable: balance.quantityAvailable,
+      })),
+    );
+
+    return {
+      readOnly: true,
+      ...result,
+      issueCount: result.issues.length,
+      limitationCount: result.limitations.length,
+      issues: result.issues.slice(0, 100),
+      limitations: result.limitations.slice(0, 100),
+      issuesTruncated: result.issues.length > 100,
+      limitationsTruncated: result.limitations.length > 100,
     };
   },
 });
