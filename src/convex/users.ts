@@ -9,8 +9,6 @@ import {
   resolveUniqueRecord,
 } from "../lib/credential-integrity";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
-
 async function requireUser(ctx: any) {
   // Compatibilidade: wrapper fino sobre a camada central src/lib/rbac.ts
   const auth = await requirePermission(ctx, "users.view");
