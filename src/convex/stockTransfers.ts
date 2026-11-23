@@ -7,8 +7,6 @@ import { isDiscreteStockUnit, requireValidScopedStockQuantity } from "../lib/sto
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
-
 async function requireUser(ctx: any) {
   // RBAC central: consulta de transferências.
   return requirePermission(ctx, "transfers.view");
