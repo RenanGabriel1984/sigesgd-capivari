@@ -50,13 +50,13 @@ export const credentials = ConvexCredentials<DataModel>({
       { email: normalizedEmail, password },
     );
 
-    if (!result.success) {
+    if (!("userId" in result)) {
       // Registra a falha SOMENTE dentro deste fluxo confiável de autenticação.
       await ctx.runMutation(internal.passwords.recordFailedLogin, {
         email: normalizedEmail,
       });
       // Mensagem genérica: idêntica para qualquer causa de falha.
-      throw new ConvexError(result.error ?? "E-mail ou senha incorretos.");
+      throw new ConvexError("error" in result ? result.error : "E-mail ou senha incorretos.");
     }
 
     // Login válido: limpa o contador de falhas mantido para auditoria.
