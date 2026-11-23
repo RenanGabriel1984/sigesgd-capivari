@@ -17,8 +17,6 @@ import type { Id } from "./_generated/dataModel";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import { resolveEntryItemAreaId, resolveEntryLotLocationId } from "../lib/entry-area-classification";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
-
 function assertNonNegativeFiniteAmount(value: number | undefined, label: string): void {
   if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
     throw new Error(`${label} deve ser um valor numérico finito e não negativo.`);
