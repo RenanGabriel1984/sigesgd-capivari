@@ -234,7 +234,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
 describe("unicidade operacional de áreas de estoque", () => {
   it("garante áreas padrão somente quando não há duplicidade pelo nome", () => {
     const ensure = mutationBlock(stockAreas, "ensureBaselineAreas");
-    expect(ensure).toContain('.withIndex("by_name", (q: any) => q.eq("name", area.name))');
+    expect(ensure).toContain('.withIndex("by_name", (q) => q.eq("name", area.name))');
     expect(ensure).toContain(".collect()");
     expect(ensure).toContain("existingRows.length > 1");
     expect(ensure).toContain("existingRows.length === 1");
