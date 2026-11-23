@@ -182,7 +182,9 @@ describe("autenticação e recuperação com registros únicos", () => {
 
   it("painel administrativo mostra credenciais duplicadas e permite correção controlada", () => {
     const listing = sourceSection(users, "export const listUsers = query({", "/**\n * Opções mínimas de usuário");
-    expect(listing).toContain('ctx.db.query("passwords").collect()');
+    expect(listing).toContain('ctx.db.query("passwords")');
+    expect(listing).toContain('.withIndex("by_user"');
+    expect(listing).toContain(".collect()");
     expect(listing).toContain("passwordRecordCount");
     expect(listing).not.toContain("passwordHash");
     expect(page).toContain("u.passwordRecordCount > 1");
