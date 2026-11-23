@@ -743,7 +743,8 @@ export const preview = query({
   handler: async (ctx) => {
     await requirePermission(ctx, "stock.view", { entity: "stockRegularization" });
     const plan = await buildRegularizationPlan(ctx);
-    const { internal: _internal, ...report } = plan;
+    const { internal, ...report } = plan;
+    void internal;
     return report;
   },
 });
