@@ -113,21 +113,27 @@ export const listFiltered = query({
       orderedQuery = base
         .withIndex("by_user", (q) => q.eq("userId", args.userId))
         .order("desc");
-    } else if (args.action) {
+    } else if (args.action !== undefined) {
+      const action = args.action;
       orderedQuery = base
-        .withIndex("by_action", (q) => q.eq("action", args.action))
+        .withIndex("by_action", (q) => q.eq("action", action))
         .order("desc");
-    } else if (args.entity) {
+    } else if (args.entity !== undefined) {
+      const entity = args.entity;
       orderedQuery = base
-        .withIndex("by_entity", (q) => q.eq("entity", args.entity))
+        .withIndex("by_entity", (q) => q.eq("entity", entity))
         .order("desc");
     } else {
+      const startDate = args.startDate;
+      const endDate = args.endDate;
       orderedQuery = base
         .withIndex("by_timestamp", (index) => {
-          let range = index;
-          if (args.startDate !== undefined) range = range.gte("timestamp", args.startDate);
-          if (args.endDate !== undefined) range = range.lte("timestamp", args.endDate);
-          return range;
+          if (startDate !== undefined && endDate !== undefined) {
+            return index.gte("timestamp", startDate).lte("timestamp", endDate);
+          }
+          if (startDate !== undefined) return index.gte("timestamp", startDate);
+          if (endDate !== undefined) return index.lte("timestamp", endDate);
+          return index;
         })
         .order("desc");
     }
