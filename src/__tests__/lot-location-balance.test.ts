@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertLotLocationBalanceMatchesExpected,
   inspectLotLocationBalances,
   planLotLocationBalanceChange,
   planLotLocationBalanceLocationChange,
@@ -180,5 +181,52 @@ describe("inspectLotLocationBalances", () => {
     const result = inspectLotLocationBalances([lot], []);
     expect(result.consistent).toBe(false);
     expect(result.issues.join(" ")).toContain("não possui vínculo lote × local");
+  });
+});
+
+describe("assertLotLocationBalanceMatchesExpected", () => {
+  it("permite a variação quando o saldo derivado coincide com o lote", () => {
+    expect(() => assertLotLocationBalanceMatchesExpected({
+      rows: [base],
+      lotId: "lot_1",
+      expectedQuantityBefore: 10,
+    })).not.toThrow();
+  });
+
+  it("bloqueia divergência de quantidade antes da movimentação", () => {
+    expect(() => assertLotLocationBalanceMatchesExpected({
+      rows: [{ ...base, quantityAvailable: 8 }],
+      lotId: "lot_1",
+      expectedQuantityBefore: 10,
+    })).toThrow(/diverge do saldo do lote/);
+  });
+
+  it("bloqueia ausência de vínculo para lote que já possui saldo", () => {
+    expect(() => assertLotLocationBalanceMatchesExpected({
+      rows: [],
+      lotId: "lot_1",
+      expectedQuantityBefore: 10,
+    })).toThrow(/já possui saldo/);
+  });
+
+  it("aceita ausência de vínculo somente quando o saldo anterior esperado é zero", () => {
+    expect(() => assertLotLocationBalanceMatchesExpected({
+      rows: [],
+      lotId: "lot_1",
+      expectedQuantityBefore: 0,
+    })).not.toThrow();
+  });
+
+  it("bloqueia vínculos duplicados e saldos esperados inválidos", () => {
+    expect(() => assertLotLocationBalanceMatchesExpected({
+      rows: [base, { ...base, _id: "balance_2" }],
+      lotId: "lot_1",
+      expectedQuantityBefore: 10,
+    })).toThrow(/duplicados/);
+    expect(() => assertLotLocationBalanceMatchesExpected({
+      rows: [base],
+      lotId: "lot_1",
+      expectedQuantityBefore: Number.NaN,
+    })).toThrow(/esperado do lote/);
   });
 });
