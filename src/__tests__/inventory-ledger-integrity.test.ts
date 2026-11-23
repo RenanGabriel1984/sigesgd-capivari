@@ -18,6 +18,7 @@ describe("integridade do fechamento de inventário", () => {
   });
 
   it("confere área/local e não mistura saldos de armários diferentes", () => {
+    expect(close).toContain("resolveScopedInventoryQuantity(");
     expect(close).toContain("row.areaId ??");
     expect(close).toContain("row.locationId");
     expect(close).toContain("lot.areaId === inv.areaId && lot.locationId === inv.locationId");
