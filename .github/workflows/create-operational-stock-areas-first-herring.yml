@@ -2,6 +2,12 @@ name: Inclusão controlada das três áreas operacionais — first-herring-264
 
 on:
   workflow_dispatch:
+    inputs:
+      confirmar:
+        description: 'Digite CRIAR-3-AREAS-OPERACIONAIS-FIRST-HERRING para autorizar a criação das três áreas no backend operacional'
+        required: true
+        default: nao
+        type: string
 
 permissions:
   contents: read
@@ -13,6 +19,7 @@ concurrency:
 jobs:
   create-areas:
     name: Criar somente as três áreas autorizadas e verificar
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirmar == 'CRIAR-3-AREAS-OPERACIONAIS-FIRST-HERRING'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -21,6 +28,19 @@ jobs:
       CONVEX_MAINTENANCE_KEY: ${{ secrets.CONVEX_MAINTENANCE_KEY_FIRST_HERRING }}
       FORBIDDEN_HOSTS: "savory-sockeye-292.convex.cloud tame-alligator-797.convex.cloud first-starling-943.convex.cloud brilliant-bullfrog-982.convex.cloud first-dinosaur-625.convex.cloud"
     steps:
+      - name: Validar execução manual e confirmação explícita
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Execute este workflow manualmente a partir da main. Nenhuma alteração foi feita."
+            exit 1
+          fi
+          if [ "${{ github.event.inputs.confirmar }}" != "CRIAR-3-AREAS-OPERACIONAIS-FIRST-HERRING" ]; then
+            echo "::error::Confirmação explícita ausente. Nenhuma alteração foi feita."
+            exit 1
+          fi
+
       - name: Checkout branch autorizada
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
