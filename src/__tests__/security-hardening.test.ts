@@ -879,8 +879,9 @@ describe("AUTH-FAILURE-AUDIT — contenção de abuso no login", () => {
     const start = passwords.indexOf("export const recordFailedLogin");
     const end = passwords.indexOf("export const recordSuccessfulLogin", start);
     const block = passwords.slice(start, end);
-    expect(block).toMatch(/const account = await ctx\.db[\s\S]*?\.withIndex\("email"/);
-    expect(block).toMatch(/if \(!account\) return/);
+    expect(block).toMatch(/const accountRows = await ctx\\.db[\\s\\S]*?\\.withIndex\\("email"/);
+    expect(block).toContain('if (accountResolution.status !== "unique") return;');
+    expect(block).toContain('if (existingResolution.status === "ambiguous") return;');
     expect(block).toMatch(/auditIntervalMs = 15 \* 60 \* 1000/);
     expect(block).toMatch(/lastAuditAt/);
     expect(block).toMatch(/if \(shouldAudit\)/);
