@@ -72,7 +72,16 @@ type ExitRow = {
 export default function ReturnsPage() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
-  const exits = useQuery(api.returns.returnable);
+  const exitParam = searchParams.get("exit") ?? "";
+  const { results: exits, status: exitsStatus, loadMore: loadMoreExits } = usePaginatedQuery(
+    api.returns.returnablePage,
+    {},
+    { initialNumItems: 50 },
+  );
+  const exitFromLink = useQuery(
+    api.returns.returnableByExit,
+    exitParam ? { exitMovementId: exitParam as any } : "skip",
+  );
   const { results: returns, status: returnsStatus, loadMore: loadMoreReturns } = usePaginatedQuery(api.returns.listPage, {}, { initialNumItems: 50 });
   const locations = useQuery(api.storageLocations.listActive);
   const createReturn = useMutation(api.returns.create);
@@ -85,18 +94,18 @@ export default function ReturnsPage() {
   const [observation, setObservation] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // Ação "Devolver" vinda da tela de Histórico/Relatório de saídas
-  const exitParam = searchParams.get("exit") ?? "";
+  // Ação "Devolver" vinda da tela de Histórico/Relatório de saídas.
+  // Consulta pontual preserva deep-links mesmo quando a saída não está na primeira página.
   useEffect(() => {
-    if (exitParam && exits !== undefined) {
-      const exists = exits.some((e: ExitRow) => e._id === exitParam);
-      if (exists) setSelectedExitId(exitParam);
-    }
-  }, [exitParam, exits]);
+    if (!exitParam) return;
+    const existsInPage = exits.some((exit: ExitRow) => exit._id === exitParam);
+    const loadedById = exitFromLink?._id === exitParam;
+    if (existsInPage || loadedById) setSelectedExitId(exitParam);
+  }, [exitParam, exits, exitFromLink]);
 
-  const selectedExit: ExitRow | undefined = (exits ?? []).find(
-    (e: ExitRow) => e._id === selectedExitId
-  );
+  const selectedExit: ExitRow | undefined =
+    exits.find((exit: ExitRow) => exit._id === selectedExitId) ??
+    (exitFromLink?._id === selectedExitId ? exitFromLink as ExitRow : undefined);
 
   const alreadyReturned = selectedExit?.returned ?? 0;
   const exitQty = selectedExit?.quantity ?? 0;
@@ -188,9 +197,13 @@ export default function ReturnsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {exits.length === 0 ? (
+            {exitsStatus === "LoadingFirstPage" ? (
+              <p className="text-muted-foreground">Carregando saídas disponíveis...</p>
+            ) : exits.length === 0 ? (
               <p className="text-muted-foreground">
-                Nenhuma saída com saldo disponível para devolução
+                {exitsStatus === "CanLoadMore"
+                  ? "Não há devoluções disponíveis nesta página. Carregue mais saídas para continuar."
+                  : "Nenhuma saída com saldo disponível para devolução"}
               </p>
             ) : (
               <div className="overflow-x-auto">
@@ -258,6 +271,17 @@ export default function ReturnsPage() {
                 </Table>
               </div>
             )}
+            {exitsStatus !== "Exhausted" ? (
+              <div className="flex justify-center pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => loadMoreExits(50)}
+                  disabled={exitsStatus === "LoadingMore"}
+                >
+                  {exitsStatus === "LoadingMore" ? "Carregando..." : "Carregar mais saídas"}
+                </Button>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
