@@ -496,7 +496,7 @@ export const create = mutation({
         observation: args.observation,
         createdAt: now,
       });
-      returnIds.push(returnId as string);
+      returnIds.push(returnId);
 
       const nextPhysical = runningPhysical + (restocked ? part.quantity : 0);
       await ctx.db.insert("stockMovements", {
