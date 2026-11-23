@@ -1660,8 +1660,8 @@ export const applyLotLocationBalancesMigration = internalMutation({
   args: {
     confirmation: v.literal("CONFIRMAR_MIGRACAO_LOTES_FIRST_HERRING"),
   },
-  handler: async (ctx) => {
-    const report = await ctx.runQuery(internal.stockSetup.lotLocationReadiness, {});
+  handler: async (ctx): Promise<any> => {
+    const report: any = await ctx.runQuery(internal.stockSetup.lotLocationReadiness, {});
     const areaPlan = report.areaClassification;
     if (areaPlan.blockers.length > 0) {
       throw new Error(
