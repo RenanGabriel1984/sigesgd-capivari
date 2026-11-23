@@ -1,4 +1,5 @@
 import { query, mutation } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { validateEntryUnits } from "../lib/material-types";
@@ -13,7 +14,7 @@ import {
 import { requirePermission } from "./rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { attachStorageFile } from "./storage";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import { resolveEntryItemAreaId, resolveEntryLotLocationId } from "../lib/entry-area-classification";
 
@@ -33,12 +34,12 @@ function assertEntryFinancialValues(input: {
   assertNonNegativeFiniteAmount(input.totalCost, `Custo total de ${label}`);
 }
 
-async function requireUser(ctx: any) {
+async function requireUser(ctx: QueryCtx | MutationCtx) {
   // RBAC central: entradas exigem sessão com visão de estoque.
   return requirePermission(ctx, "stock.view");
 }
 
-async function requireStockManagerOrAdmin(ctx: any) {
+async function requireStockManagerOrAdmin(ctx: MutationCtx) {
   // RBAC central: operação de entradas (criar/confirmar/editar/estornar).
   return requirePermission(ctx, "entries.create", { entity: "entries" });
 }
@@ -59,7 +60,7 @@ async function requireStockManagerOrAdmin(ctx: any) {
  * segunda (ela reavalia e enxerga a entrada recém-criada).
  */
 async function findExistingInvoice(
-  ctx: any,
+  ctx: MutationCtx,
   probe: {
     accessKey?: string | null;
     invoiceNumber?: string | null;
@@ -70,12 +71,12 @@ async function findExistingInvoice(
 ) {
   const accessKey = normalizeAccessKey(probe.accessKey);
   const fingerprint = entryInvoiceFingerprint(probe);
-  const candidates: any[] = [];
+  const candidates: Doc<"entries">[] = [];
 
   if (accessKey) {
     const byKey = await ctx.db
       .query("entries")
-      .withIndex("by_access_key", (q: any) => q.eq("accessKey", accessKey))
+      .withIndex("by_access_key", (q) => q.eq("accessKey", accessKey))
       .collect();
     candidates.push(...byKey);
   }
@@ -83,7 +84,7 @@ async function findExistingInvoice(
   if (fingerprint) {
     const byFingerprint = await ctx.db
       .query("entries")
-      .withIndex("by_invoice_fingerprint", (q: any) => q.eq("invoiceFingerprint", fingerprint))
+      .withIndex("by_invoice_fingerprint", (q) => q.eq("invoiceFingerprint", fingerprint))
       .collect();
     candidates.push(...byFingerprint);
   }
@@ -110,10 +111,10 @@ async function findExistingInvoice(
 }
 
 /** Generate sequential entry number: ENT-ANO-SEQUENCIAL */
-async function generateEntryNumber(ctx: any): Promise<string> {
+async function generateEntryNumber(ctx: MutationCtx): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `ENT-${year}-`;
-  const existing = await ctx.db.query("entries").withIndex("by_number", (q: any) => q.gte("entryNumber", prefix)).collect();
+  const existing = await ctx.db.query("entries").withIndex("by_number", (q) => q.gte("entryNumber", prefix)).collect();
   const maxNum = existing.reduce((max: number, e: any) => {
     const match = e.entryNumber.match(/^ENT-\d{4}-(\d+)$/);
     if (match && e.entryNumber.startsWith(prefix)) {
@@ -126,10 +127,10 @@ async function generateEntryNumber(ctx: any): Promise<string> {
 }
 
 /** Generate sequential lot number: LOT-ANO-SEQUENCIAL */
-async function generateLotNumber(ctx: any): Promise<string> {
+async function generateLotNumber(ctx: MutationCtx): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `LOT-${year}-`;
-  const existing = await ctx.db.query("lots").withIndex("by_number", (q: any) => q.gte("lotNumber", prefix)).collect();
+  const existing = await ctx.db.query("lots").withIndex("by_number", (q) => q.gte("lotNumber", prefix)).collect();
   const maxNum = existing.reduce((max: number, l: any) => {
     const match = l.lotNumber.match(/^LOT-\d{4}-(\d+)$/);
     if (match && l.lotNumber.startsWith(prefix)) {
@@ -148,15 +149,15 @@ export const list = query({
   handler: async (ctx) => {
     await requireUser(ctx);
     const entries = await ctx.db.query("entries").withIndex("by_date").order("desc").collect();
-    return Promise.all(entries.map(async (e: any) => {
+    return Promise.all(entries.map(async (e) => {
       const responsible = await ctx.db.get(e.responsibleUserId);
       const supplier = e.supplierId ? await ctx.db.get(e.supplierId) : null;
-      const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", e._id)).collect();
-      const itemsWithProduct = await Promise.all(items.map(async (item: any) => {
+      const items = await ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", e._id)).collect();
+      const itemsWithProduct = await Promise.all(items.map(async (item) => {
         const product = await ctx.db.get(item.productId);
         const location = item.locationId ? await ctx.db.get(item.locationId) : null;
         const area = item.areaId ? await ctx.db.get(item.areaId) : null;
-        const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
+        const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q) => q.eq("entryItemId", item._id)).collect();
         return { ...item, product, location, area, units };
       }));
       const area = e.areaId ? await ctx.db.get(e.areaId) : null;
@@ -170,15 +171,15 @@ export const listPage = query({
   handler: async (ctx, args) => {
     await requireUser(ctx);
     const page = await ctx.db.query("entries").withIndex("by_date").order("desc").paginate(args.paginationOpts);
-    const enriched = await Promise.all(page.page.map(async (e: any) => {
+    const enriched = await Promise.all(page.page.map(async (e) => {
       const responsible = await ctx.db.get(e.responsibleUserId);
       const supplier = e.supplierId ? await ctx.db.get(e.supplierId) : null;
-      const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", e._id)).collect();
-      const itemsWithProduct = await Promise.all(items.map(async (item: any) => {
+      const items = await ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", e._id)).collect();
+      const itemsWithProduct = await Promise.all(items.map(async (item) => {
         const product = await ctx.db.get(item.productId);
         const location = item.locationId ? await ctx.db.get(item.locationId) : null;
         const area = item.areaId ? await ctx.db.get(item.areaId) : null;
-        const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
+        const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q) => q.eq("entryItemId", item._id)).collect();
         return { ...item, product, location, area, units };
       }));
       const area = e.areaId ? await ctx.db.get(e.areaId) : null;
@@ -196,15 +197,15 @@ export const get = query({
     if (!entry) return null;
     const responsible = await ctx.db.get(entry.responsibleUserId);
     const supplier = entry.supplierId ? await ctx.db.get(entry.supplierId) : null;
-    const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", entry._id)).collect();
-    const itemsWithProduct = await Promise.all(items.map(async (item: any) => {
+    const items = await ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", entry._id)).collect();
+    const itemsWithProduct = await Promise.all(items.map(async (item) => {
       const product = await ctx.db.get(item.productId);
       const location = item.locationId ? await ctx.db.get(item.locationId) : null;
       const area = item.areaId ? await ctx.db.get(item.areaId) : null;
-      const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
+      const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q) => q.eq("entryItemId", item._id)).collect();
       return { ...item, product, location, area, units };
     }));
-    const lots = await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", entry._id)).collect();
+    const lots = await ctx.db.query("lots").withIndex("by_entry", (q) => q.eq("entryId", entry._id)).collect();
     const area = entry.areaId ? await ctx.db.get(entry.areaId) : null;
     return { ...entry, responsible, supplier, area, items: itemsWithProduct, lots };
   },
@@ -476,7 +477,7 @@ export const confirm = mutation({
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ser confirmadas");
 
-    const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
+    const items = await ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", args.entryId)).collect();
     if (items.length === 0) throw new Error("Entrada não possui itens");
 
     // ── Segunda barreira de duplicidade (D5) ──
@@ -500,14 +501,14 @@ export const confirm = mutation({
     // ── Unidades patrimoniais (material permanente) ──
     const entryUnits = await ctx.db
       .query("entryItemUnits")
-      .withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId))
+      .withIndex("by_entry", (q) => q.eq("entryId", args.entryId))
       .collect();
     if (entry.materialType === "permanent") {
       for (const item of items) {
         const product: any = await ctx.db.get(item.productId);
         const itemUnits = entryUnits
-          .filter((u: any) => u.entryItemId === item._id)
-          .map((u: any) => ({
+          .filter((u) => u.entryItemId === item._id)
+          .map((u) => ({
             patrimonyNumber: u.patrimonyNumber,
             serialNumber: u.serialNumber,
           }));
@@ -554,7 +555,7 @@ export const confirm = mutation({
       }
 
       const globalRows = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+        .withIndex("by_product", (q) => q.eq("productId", item.productId))
         .collect();
       getOptionalSingleValidGlobalStock(globalRows, product.name);
 
@@ -579,9 +580,9 @@ export const confirm = mutation({
         throw new Error("Um dos locais físicos selecionados não existe ou está inativo.");
       }
       const locationRows = await ctx.db.query("stockByLocation")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+        .withIndex("by_product", (q) => q.eq("productId", item.productId))
         .collect();
-      const sameScope = locationRows.filter((row: any) =>
+      const sameScope = locationRows.filter((row) =>
         row.locationId === item.locationId &&
         (row.areaId ?? undefined) === (effectiveAreaId ?? undefined)
       );
@@ -645,7 +646,7 @@ export const confirm = mutation({
 
       // Update stock (increase physicalQuantity)
       const stockRows = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
       const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
       const prevPhysical = stock?.physicalQuantity ?? 0;
       const prevReserved = stock?.reservedQuantity ?? 0;
@@ -659,7 +660,7 @@ export const confirm = mutation({
 
       // Update stock by location (saldo por localização) — keeps global × location consistent
       if (item.locationId) {
-        const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
         const sbl = sblList.find((s: any) =>
           s.locationId === item.locationId &&
           (s.areaId ?? undefined) === (itemAreaId ?? undefined)
@@ -881,7 +882,7 @@ export const removeItem = mutation({
     if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ter itens removidos");
 
     // Prevent removing last item
-    const allItems = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", item.entryId)).collect();
+    const allItems = await ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", item.entryId)).collect();
     if (allItems.length <= 1) throw new Error("A entrada deve ter pelo menos um item");
 
     const product = await ctx.db.get(item.productId);
@@ -936,7 +937,7 @@ export const editDraft = mutation({
       if (args.materialType !== "permanent") {
         const existingUnits = await ctx.db
           .query("entryItemUnits")
-          .withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId))
+          .withIndex("by_entry", (q) => q.eq("entryId", args.entryId))
           .collect();
         for (const u of existingUnits) await ctx.db.delete(u._id);
       }
@@ -981,16 +982,16 @@ export const reverse = mutation({
     if (entry.status !== "confirmed") throw new Error("Apenas entradas confirmadas podem ser estornadas");
 
     const [items, entryLots, entryUnits] = await Promise.all([
-      ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect(),
-      ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect(),
-      ctx.db.query("entryItemUnits").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect(),
+      ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", args.entryId)).collect(),
+      ctx.db.query("lots").withIndex("by_entry", (q) => q.eq("entryId", args.entryId)).collect(),
+      ctx.db.query("entryItemUnits").withIndex("by_entry", (q) => q.eq("entryId", args.entryId)).collect(),
     ]);
     if (items.length === 0) throw new Error("Entrada confirmada não possui itens para estornar");
 
     // Depois do tombamento, o bem já tem vínculo administrativo próprio.
     // Não desfazemos esse vínculo automaticamente ao estornar o estoque:
     // o setor de Patrimônio precisa conciliar o ativo antes de qualquer reversão.
-    const registeredPatrimonyUnit = entryUnits.find((unit: any) =>
+    const registeredPatrimonyUnit = entryUnits.find((unit) =>
       unit.patrimonyRegistrationStatus === "registered" ||
       !!unit.assetId ||
       !!unit.patrimonyNumber?.trim()
@@ -1008,7 +1009,7 @@ export const reverse = mutation({
     for (const item of items) {
       const product = await ctx.db.get(item.productId);
       const stockRows = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
       const stock = requireSingleValidGlobalStock(stockRows, product?.name ?? String(item.productId));
 
       // O estorno precisa atingir o lote criado por ESTE item da entrada.
@@ -1016,10 +1017,10 @@ export const reverse = mutation({
       let lot: any = null;
       if (item.lotId) {
         lot = await ctx.db.get(item.lotId as Id<"lots">);
-        if (!lot) lot = entryLots.find((candidate: any) => candidate.lotNumber === item.lotId) ?? null;
+        if (!lot) lot = entryLots.find((candidate) => candidate.lotNumber === item.lotId) ?? null;
       }
       if (!lot) {
-        const candidates = entryLots.filter((candidate: any) => candidate.productId === item.productId);
+        const candidates = entryLots.filter((candidate) => candidate.productId === item.productId);
         if (candidates.length === 1) lot = candidates[0];
         else {
           throw new Error(
@@ -1038,9 +1039,9 @@ export const reverse = mutation({
       reversedLotIds.add(String(lot._id));
 
       const lotReservations = await ctx.db.query("requestItemReservations")
-        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+        .withIndex("by_lot", (q) => q.eq("lotId", lot._id)).collect();
       const reservedInLot = lotReservations.reduce(
-        (sum: number, reservation: any) => sum + Number(reservation.quantityRemaining ?? 0),
+        (sum: number, reservation) => sum + Number(reservation.quantityRemaining ?? 0),
         0,
       );
       const lotAfter = Number(lot.quantityAvailable) - Number(item.quantity);
@@ -1063,7 +1064,7 @@ export const reverse = mutation({
       const itemAreaId = resolveEntryItemAreaId(item.areaId, entry.areaId);
       const lotAreaId = lot.areaId ?? itemAreaId;
       const lotLocationRows = await ctx.db.query("lotLocationBalances")
-        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+        .withIndex("by_lot", (q) => q.eq("lotId", lot._id)).collect();
       if (lotLocationRows.length > 1) {
         throw new Error(`Não é possível estornar "${product?.name ?? "item"}": há saldos lote × armário duplicados.`);
       }
@@ -1083,8 +1084,8 @@ export const reverse = mutation({
       let locationStock: any = null;
       if (lotLocationId) {
         const locationRows = await ctx.db.query("stockByLocation")
-          .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const matchingRows = locationRows.filter((row: any) =>
+          .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
+        const matchingRows = locationRows.filter((row) =>
           row.locationId === lotLocationId && (row.areaId ?? undefined) === lotAreaId
         );
         if (matchingRows.length !== 1) {
@@ -1094,11 +1095,11 @@ export const reverse = mutation({
         }
         locationStock = matchingRows[0];
         const scopeReservations = (await ctx.db.query("requestItemReservations")
-          .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect())
+          .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect())
           .filter((reservation: any) =>
             reservation.locationId === lotLocationId && reservation.areaId === lotAreaId
           )
-          .reduce((sum: number, reservation: any) => sum + Number(reservation.quantityRemaining ?? 0), 0);
+          .reduce((sum: number, reservation) => sum + Number(reservation.quantityRemaining ?? 0), 0);
         if (locationStock.quantity - item.quantity < scopeReservations) {
           throw new Error(
             `Não é possível estornar "${product?.name ?? "item"}": a redução deixaria o local abaixo das reservas existentes.`,
@@ -1207,7 +1208,7 @@ export const setUnits = mutation({
     }
 
     // Todos os itens informados pertencem à entrada
-    const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
+    const items = await ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", args.entryId)).collect();
     const itemIds = new Set(items.map((i: any) => i._id as string));
     for (const u of args.units) {
       if (!itemIds.has(u.entryItemId as string)) {
@@ -1231,7 +1232,7 @@ export const setUnits = mutation({
     // Substitui as unidades da entrada (rascunho)
     const existing = await ctx.db
       .query("entryItemUnits")
-      .withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId))
+      .withIndex("by_entry", (q) => q.eq("entryId", args.entryId))
       .collect();
     for (const u of existing) await ctx.db.delete(u._id);
 
@@ -1294,7 +1295,7 @@ export const listPendingPatrimony = query({
       .query("entryItemUnits")
       .withIndex("by_registration_status", (q) => q.eq("patrimonyRegistrationStatus", "pending"))
       .collect();
-    const rows = await Promise.all(pending.map(async (unit: any) => {
+    const rows = await Promise.all(pending.map(async (unit) => {
       const entry: any = await ctx.db.get(unit.entryId);
       if (!entry || entry.status !== "confirmed") return null;
       const item: any = await ctx.db.get(unit.entryItemId);
@@ -1312,7 +1313,7 @@ export const listPendingPatrimony = query({
       };
     }));
     return rows.filter((row): row is NonNullable<typeof row> => row !== null)
-      .sort((a: any, b: any) => a.createdAt - b.createdAt);
+      .sort((a, b) => a.createdAt - b.createdAt);
   },
 });
 
@@ -1345,13 +1346,13 @@ export const assignPatrimony = mutation({
       ctx.db.query("entryItemUnits").collect(),
       ctx.db.query("assets").collect(),
     ]);
-    if (units.some((row: any) =>
+    if (units.some((row) =>
       row._id !== args.entryItemUnitId &&
       row.patrimonyNumber?.trim().toLocaleUpperCase("pt-BR") === normalized
     )) {
       throw new Error("Este número já está associado a outra unidade recebida.");
     }
-    const existingAsset = assets.find((asset: any) =>
+    const existingAsset = assets.find((asset) =>
       asset.patrimonyNumber?.trim().toLocaleUpperCase("pt-BR") === normalized
     );
     if (existingAsset?.entryItemUnitId && existingAsset.entryItemUnitId !== args.entryItemUnitId) {
@@ -1368,7 +1369,7 @@ export const assignPatrimony = mutation({
           "O patrimônio informado já pertence a um equipamento com outro número de série. Faça a conciliação do cadastro antes do tombamento.",
         );
       }
-      const serialOwner = assets.find((asset: any) =>
+      const serialOwner = assets.find((asset) =>
         asset.serialNumber?.trim().toLocaleUpperCase("pt-BR") === normalizedSerial &&
         asset.entryItemUnitId !== args.entryItemUnitId
       );
