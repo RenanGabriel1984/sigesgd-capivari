@@ -1,4 +1,6 @@
 import { query, mutation } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
@@ -18,7 +20,7 @@ async function requireStockManagerOrAdmin(ctx: any) {
 }
 
 /** Generate sequential inventory number: INV-ANO-SEQUENCIAL */
-async function generateInventoryNumber(ctx: any): Promise<string> {
+async function generateInventoryNumber(ctx: MutationCtx): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `INV-${year}-`;
   const nextPrefix = `INV-${year + 1}-`;
@@ -53,7 +55,7 @@ function assertUniqueInventoryProductCounts(counts: Array<{ productId: unknown }
   }
 }
 
-async function decorateInventorySummary(ctx: any, inv: any) {
+async function decorateInventorySummary(ctx: QueryCtx, inv: Doc<"inventories">) {
   const [responsible, closedBy, location, area, category, countRows] = await Promise.all([
     ctx.db.get(inv.responsibleUserId),
     inv.closedByUserId ? ctx.db.get(inv.closedByUserId) : Promise.resolve(null),
@@ -61,12 +63,12 @@ async function decorateInventorySummary(ctx: any, inv: any) {
     inv.areaId ? ctx.db.get(inv.areaId) : Promise.resolve(null),
     inv.categoryId ? ctx.db.get(inv.categoryId) : Promise.resolve(null),
     ctx.db.query("inventoryCounts")
-      .withIndex("by_inventory", (q: any) => q.eq("inventoryId", inv._id))
+      .withIndex("by_inventory", (q) => q.eq("inventoryId", inv._id))
       .collect(),
   ]);
   assertUniqueInventoryProductCounts(countRows);
   const total = countRows.length;
-  const uncounted = countRows.filter((count: any) =>
+  const uncounted = countRows.filter((count) =>
     count.countedQuantity === null || count.countedQuantity === undefined
   ).length;
   const differences = countRows.filter((count: any) =>
