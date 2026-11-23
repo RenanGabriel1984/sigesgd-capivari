@@ -20,9 +20,11 @@ function section(source: string, startMarker: string, endMarker?: string): strin
 describe("integridade de identidade e credenciais", () => {
   it("login exige exatamente um usuário e uma senha", () => {
     const verify = section(passwords, "export const verifyCredentials = internalQuery({", "/** Check if a user has a password configured. */");
-    expect(verify).toContain('.withIndex("email", (q) => q.eq("email", args.email)).collect()');
+    expect(verify).toContain('.withIndex("email", (q) => q.eq("email", args.email))');
+    expect(verify).toContain(".collect();");
     expect(verify).toContain("userResolution.status !== \"unique\"");
-    expect(verify).toContain('.withIndex("by_user", (q) => q.eq("userId", user._id)).collect()');
+    expect(verify).toContain('.withIndex("by_user", (q) => q.eq("userId", user._id))');
+    expect(verify).toContain(".collect();");
     expect(verify).toContain("passwordResolution.status !== \"unique\"");
     expect(verify).not.toContain('.withIndex("email", (q) => q.eq("email", args.email)).first()');
     expect(verify).not.toContain('.withIndex("by_user", (q) => q.eq("userId", user._id)).first()');
