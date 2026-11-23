@@ -35,7 +35,7 @@ describe("regularização histórica de área/local", () => {
     expect(migration).toContain('ctx.db.query("stockTransferLots")');
     expect(migration).toContain("Transferência histórica da movimentação");
     expect(migration).toContain("movementLotPatches");
-    expect(migration).toContain("keyOf(lot.productId as string, lot.lotNumber as string)");
+    expect(migration).toContain("keyOf(lot.productId, lot.lotNumber)");
     expect(migration).toContain("return matches.length === 1 ? matches[0] : null;");
     expect(migration).toContain("Lote duplicado para produto/número");
     expect(migration).toContain("gomaqEntries.length !== 1");
@@ -47,8 +47,8 @@ describe("regularização histórica de área/local", () => {
   });
 
   it("não escolhe arbitrariamente entradas, áreas, locais ou lotes duplicados", () => {
-    expect(migration).toContain('.withIndex("by_number", (q: any) => q.eq("entryNumber", INITIAL_ENTRY_NUMBER)).collect()');
-    expect(migration).toContain('.withIndex("by_number", (q: any) => q.eq("entryNumber", GOMAQ_ENTRY_NUMBER)).collect()');
+    expect(migration).toContain('.withIndex("by_number", (q) => q.eq("entryNumber", INITIAL_ENTRY_NUMBER)).collect()');
+    expect(migration).toContain('.withIndex("by_number", (q) => q.eq("entryNumber", GOMAQ_ENTRY_NUMBER)).collect()');
     expect(migration).toContain("matches.length === 1 ? matches[0] : null");
     expect(migration).toContain("Existem");
   });
