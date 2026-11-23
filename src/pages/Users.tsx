@@ -88,9 +88,13 @@ export default function UsersPage() {
     if (!tempPassword.trim()) { toast.error("A senha temporária é obrigatória"); return; }
     if (tempPassword.trim().length < 8) { toast.error("A senha temporária deve ter pelo menos 8 caracteres"); return; }
     try {
-      const newUserId = await createUser({ name: name.trim(), email: email.trim(), role, organizationId: (orgId || undefined) as Id<"organizations"> | undefined });
-      // Auto-create password with requiresReset: true
-      await createPassword({ userId: newUserId as Id<"users">, password: tempPassword, requiresReset: true });
+      await createUser({
+        name: name.trim(),
+        email: email.trim(),
+        role,
+        organizationId: (orgId || undefined) as Id<"organizations"> | undefined,
+        temporaryPassword: tempPassword,
+      });
       toast.success("Usuário criado com sucesso. Obrigará troca de senha no primeiro acesso.");
       setCreateDialog(false);
     } catch (e: any) { toast.error(e.message ?? "Erro ao criar usuário"); }
