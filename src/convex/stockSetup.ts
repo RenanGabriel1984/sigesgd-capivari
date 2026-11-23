@@ -1610,7 +1610,7 @@ export const quickExit = mutation({
       await ctx.db.patch(lot._id, { quantityAvailable: nextQuantity, active: nextQuantity > 0 });
       await adjustLotLocationBalance(ctx, {
         lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
-        delta: -consume,
+        delta: -consume, expectedQuantityBefore: Number(lot.quantityAvailable),
       });
       consumedLots.push({ lotId: lot._id as string, quantity: consume });
       remaining -= consume;
