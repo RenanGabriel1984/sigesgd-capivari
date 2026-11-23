@@ -281,7 +281,16 @@ export const startReview = mutation({
       throw new Error(`${uncounted.length} item(ns) ainda não foram contados. Registre a contagem de todos os itens antes de revisar.`);
     }
 
-    await ctx.db.patch(args.inventoryId, { status: "review", updatedAt: Date.now() });
+    const now = Date.now();
+    await ctx.db.patch(args.inventoryId, { status: "review", updatedAt: now });
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "count_inventory",
+      entity: "inventories",
+      entityId: args.inventoryId,
+      details: `Inventário ${inv.inventoryNumber} — contagem concluída e encaminhada para revisão (${counts.length} itens)`,
+      timestamp: now,
+    });
   },
 });
 
