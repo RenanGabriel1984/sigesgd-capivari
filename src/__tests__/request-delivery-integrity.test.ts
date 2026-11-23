@@ -71,3 +71,21 @@ describe("integração de entrega com o livro-razão lote/local", () => {
     expect(block).toContain("Reserva não utilizada liberada");
   });
 });
+
+
+describe("integração da aprovação sem reserva duplicada", () => {
+  it("rejeita IDs de item repetidos antes da primeira escrita", () => {
+    const source = readFileSync(resolve(__dirname, "../convex/requests.ts"), "utf8");
+    const start = source.indexOf("export const approve = mutation({");
+    const end = source.indexOf("export const reject = mutation({", start);
+    const block = source.slice(start, end);
+    const guard = block.indexOf("assertUniqueApprovalItemIds(args.items)");
+    const firstWrite = Math.min(
+      ...["ctx.db.patch(", "ctx.db.insert("]
+        .map((needle) => block.indexOf(needle))
+        .filter((index) => index >= 0),
+    );
+    expect(guard).toBeGreaterThan(-1);
+    expect(firstWrite).toBeGreaterThan(guard);
+  });
+});
