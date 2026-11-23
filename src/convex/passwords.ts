@@ -259,17 +259,21 @@ export const verifyCredentials = internalQuery({
     password: v.string(),
   },
   handler: async (ctx, args) => {
-    // Find user by email
-    const user = await ctx.db
+    // An email is also expected to identify exactly one account. Never
+    // authenticate whichever duplicate happens to be returned first.
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", args.email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
 
     // ── ANTI-ENUMERAÇÃO (§11) ────────────────────────────────────────────
     // TODOS os caminhos de falha devolvem EXATAMENTE a mesma mensagem, com a
-    // mesma forma. O chamador não consegue distinguir "e-mail não existe",
-    // "usuário inativo", "sem senha", "sem perfil de acesso" ou "senha errada".
-    if (!user) return { success: false, error: GENERIC_AUTH_ERROR };
+    // mesma forma. Duplicidade de identidade também falha de forma genérica.
+    if (userResolution.status !== "unique") {
+      return { success: false, error: GENERIC_AUTH_ERROR };
+    }
+    const user = userResolution.record;
 
     // Check if user is active
     if (user.active === false) {
