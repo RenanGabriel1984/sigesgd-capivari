@@ -15,7 +15,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation, internalMutation, internalQuery } from "./_generated/server";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
@@ -503,17 +503,11 @@ type SupplyConsumedLot = {
   unitCost?: number;
 };
 
-type SupplyGlobalStockRow = {
-  _id: Id<"stock">;
-  physicalQuantity: number;
-  reservedQuantity: number;
-};
-
 type SupplyAreaLedger = {
-  stock: any;
-  lots: any[];
-  areaLots: any[];
-  locationRows: any[];
+  stock: Doc<"stock"> | null;
+  lots: Doc<"lots">[];
+  areaLots: Doc<"lots">[];
+  locationRows: Doc<"stockByLocation">[];
   reservedByLot: Map<string, number>;
   physical: number;
   reserved: number;
@@ -522,34 +516,31 @@ type SupplyAreaLedger = {
   areaAvailable: number;
 };
 
-async function readSupplyAreaLedger(ctx: any, productId: string): Promise<SupplyAreaLedger> {
+async function readSupplyAreaLedger(ctx: QueryCtx | MutationCtx, productId: Id<"products">): Promise<SupplyAreaLedger> {
   const [stockRows, lots, locationRows, reservations] = await Promise.all([
-    ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
-    ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
-    ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
-    ctx.db.query("requestItemReservations").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
+    ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", productId)).collect(),
+    ctx.db.query("lots").withIndex("by_product", (q) => q.eq("productId", productId)).collect(),
+    ctx.db.query("stockByLocation").withIndex("by_product", (q) => q.eq("productId", productId)).collect(),
+    ctx.db.query("requestItemReservations").withIndex("by_product", (q) => q.eq("productId", productId)).collect(),
   ]);
-  const stock = getOptionalSingleValidGlobalStock<SupplyGlobalStockRow>(
-    stockRows as SupplyGlobalStockRow[],
-    productId,
-  );
+  const stock = getOptionalSingleValidGlobalStock(stockRows, String(productId));
 
   const physical = Number(stock?.physicalQuantity ?? 0);
   const reserved = Number(stock?.reservedQuantity ?? 0);
-  if (lots.some((lot: any) =>
+  if (lots.some((lot) =>
     !Number.isFinite(Number(lot.quantityAvailable)) ||
     Number(lot.quantityAvailable) < 0 ||
     (lot.active === false && Number(lot.quantityAvailable) > 0)
   )) {
     throw new Error(`Há lote com saldo inválido ou inativo com saldo positivo no produto ${productId}. Retirada bloqueada.`);
   }
-  if (locationRows.some((row: any) =>
+  if (locationRows.some((row) =>
     !Number.isFinite(Number(row.quantity)) || Number(row.quantity) < 0
   )) {
     throw new Error(`Há saldo físico por localização inválido no produto ${productId}. Retirada bloqueada.`);
   }
-  const lotsPhysical = lots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
-  const locationsPhysical = locationRows.reduce((sum: number, row: any) => sum + Number(row.quantity), 0);
+  const lotsPhysical = lots.reduce((sum: number, lot) => sum + Number(lot.quantityAvailable), 0);
+  const locationsPhysical = locationRows.reduce((sum: number, row) => sum + Number(row.quantity), 0);
   if (Math.abs(physical - lotsPhysical) > 1e-9) {
     throw new Error(`Integridade de ${productId}: saldo global (${physical}) diverge dos lotes (${lotsPhysical}). Retirada bloqueada.`);
   }
@@ -557,10 +548,10 @@ async function readSupplyAreaLedger(ctx: any, productId: string): Promise<Supply
     throw new Error(`Integridade de ${productId}: saldo global (${physical}) diverge dos locais físicos (${locationsPhysical}). Retirada bloqueada.`);
   }
 
-  const lotById = new Map<string, any>(lots.map((lot: any) => [String(lot._id), lot]));
+  const lotById = new Map<string, Doc<"lots">>(lots.map((lot) => [String(lot._id), lot]));
   const reservedByLot = new Map<string, number>();
   let reservationTotal = 0;
-  for (const reservation of reservations as any[]) {
+  for (const reservation of reservations) {
     const quantity = Number(reservation.quantityRemaining);
     if (!Number.isFinite(quantity) || quantity < 0) {
       throw new Error(`Reserva inválida no produto ${productId}; regularize a solicitação antes da retirada.`);
@@ -588,15 +579,15 @@ async function readSupplyAreaLedger(ctx: any, productId: string): Promise<Supply
     throw new Error(`Reservas por lote (${reservationTotal}) divergem do reservado global (${reserved}). Resolva as reservas pendentes antes da retirada.`);
   }
 
-  const areaLots = lots.filter((lot: any) => lot.areaId === PRINT_AREA_ID);
-  if (areaLots.some((lot: any) => Number(lot.quantityAvailable) > 0 && lot.active === false)) {
+  const areaLots = lots.filter((lot) => lot.areaId === PRINT_AREA_ID);
+  if (areaLots.some((lot) => Number(lot.quantityAvailable) > 0 && lot.active === false)) {
     throw new Error("Há lote inativo com saldo positivo na área Impressoras. Corrija a integridade antes da retirada.");
   }
-  if (areaLots.some((lot: any) => Number(lot.quantityAvailable) > 0 && !lot.locationId)) {
+  if (areaLots.some((lot) => Number(lot.quantityAvailable) > 0 && !lot.locationId)) {
     throw new Error("Há lote da área Impressoras sem local físico. Classifique o local antes da retirada.");
   }
-  const areaPhysical = areaLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
-  const areaRows = locationRows.filter((row: any) => row.areaId === PRINT_AREA_ID);
+  const areaPhysical = areaLots.reduce((sum: number, lot) => sum + Number(lot.quantityAvailable), 0);
+  const areaRows = locationRows.filter((row) => row.areaId === PRINT_AREA_ID);
   const areaLocationKeys = new Set<string>();
   for (const row of areaRows) {
     const key = String(row.locationId);
@@ -605,11 +596,11 @@ async function readSupplyAreaLedger(ctx: any, productId: string): Promise<Supply
     }
     areaLocationKeys.add(key);
   }
-  const areaLocationsPhysical = areaRows.reduce((sum: number, row: any) => sum + Number(row.quantity), 0);
+  const areaLocationsPhysical = areaRows.reduce((sum: number, row) => sum + Number(row.quantity), 0);
   if (Math.abs(areaPhysical - areaLocationsPhysical) > 1e-9) {
     throw new Error(`Integridade da área Impressoras: lotes (${areaPhysical}) divergem dos locais (${areaLocationsPhysical}). Retirada bloqueada.`);
   }
-  const areaLotIds = new Set(areaLots.map((lot: any) => String(lot._id)));
+  const areaLotIds = new Set(areaLots.map((lot) => String(lot._id)));
   const areaReserved = [...reservedByLot.entries()]
     .filter(([lotId]) => areaLotIds.has(lotId))
     .reduce((sum, [, quantity]) => sum + quantity, 0);
@@ -625,8 +616,8 @@ async function changeSupplyLocationQuantity(
   ctx: any, productId: string, locationId: string, delta: number,
 ) {
   const rows = await ctx.db.query("stockByLocation")
-    .withIndex("by_product", (q: any) => q.eq("productId", productId)).collect();
-  const matches = rows.filter((row: any) =>
+    .withIndex("by_product", (q) => q.eq("productId", productId)).collect();
+  const matches = rows.filter((row) =>
     row.areaId === PRINT_AREA_ID && String(row.locationId) === String(locationId),
   );
   if (matches.length > 1) {
@@ -653,7 +644,7 @@ async function consumeSupplyLotsInArea(
   let remaining = quantity;
   const consumed: SupplyConsumedLot[] = [];
   const lots = [...ledger.areaLots]
-    .filter((lot: any) => lot.active !== false && Number(lot.quantityAvailable) > 0)
+    .filter((lot) => lot.active !== false && Number(lot.quantityAvailable) > 0)
     .sort((a: any, b: any) => a.receivedAt - b.receivedAt);
   for (const lot of lots) {
     if (remaining <= 1e-9) break;
@@ -760,7 +751,7 @@ export const withdraw = mutation({
       throw new Error('Produto não pertence à categoria "Suprimentos de Impressão".');
     }
 
-    const before = await readSupplyAreaLedger(ctx, String(args.productId));
+    const before = await readSupplyAreaLedger(ctx, args.productId);
     if (!before.stock) throw new Error("Estoque do produto não encontrado");
     if (quantity > before.areaAvailable) {
       throw new Error(`Estoque livre insuficiente na área Impressoras. Disponível: ${before.areaAvailable} ${product.unitOfMeasure}.`);
@@ -785,7 +776,7 @@ export const withdraw = mutation({
         (args.observation ? ` | Obs: ${args.observation}` : ""),
     });
 
-    const after = await readSupplyAreaLedger(ctx, String(args.productId));
+    const after = await readSupplyAreaLedger(ctx, args.productId);
     if (
       Math.abs(after.physical - newPhysical) > 1e-9 ||
       Math.abs(after.areaPhysical - (before.areaPhysical - quantity)) > 1e-9 ||
@@ -1005,8 +996,8 @@ export const withdrawFamily = mutation({
     const closedMember = closedMembers[0];
     const looseMember = looseMembers[0];
 
-    const closedBefore = await readSupplyAreaLedger(ctx, String(closedMember._id));
-    const looseBefore = await readSupplyAreaLedger(ctx, String(looseMember._id));
+    const closedBefore = await readSupplyAreaLedger(ctx, closedMember._id);
+    const looseBefore = await readSupplyAreaLedger(ctx, looseMember._id);
     if (!closedBefore.stock) throw new Error("Estoque do produto de embalagem não encontrado.");
     const closedAvailable = closedBefore.areaAvailable;
     const looseAvailable = looseBefore.areaAvailable;
@@ -1108,7 +1099,7 @@ export const withdrawFamily = mutation({
 
       const looseStockAfterOpen = looseBefore.physical + openedUnits;
       await ctx.db.patch(looseBefore.stock._id, { physicalQuantity: looseStockAfterOpen });
-      looseAfterOpening = await readSupplyAreaLedger(ctx, String(looseMember._id));
+      looseAfterOpening = await readSupplyAreaLedger(ctx, looseMember._id);
     }
 
     if (looseUnitsToConsume > 0) {
@@ -1189,8 +1180,8 @@ export const withdrawFamily = mutation({
       movementIds.push(String(movementId));
     }
 
-    const closedAfter = await readSupplyAreaLedger(ctx, String(closedMember._id));
-    const looseAfter = await readSupplyAreaLedger(ctx, String(looseMember._id));
+    const closedAfter = await readSupplyAreaLedger(ctx, closedMember._id);
+    const looseAfter = await readSupplyAreaLedger(ctx, looseMember._id);
     const baseBefore = closedBefore.areaPhysical * conversion.factor + looseBefore.areaPhysical;
     const baseAfter = closedAfter.areaPhysical * conversion.factor + looseAfter.areaPhysical;
     const availableBefore = closedBefore.areaAvailable * conversion.factor + looseBefore.areaAvailable;
@@ -1288,7 +1279,7 @@ async function previewFamilyWithdrawalImpl(ctx: any, args: { productId: string; 
 
     const stockOf = async (productId: string, productName: string) => {
       const rows = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", productId))
+        .withIndex("by_product", (q) => q.eq("productId", productId))
         .collect();
       return getOptionalSingleValidGlobalStock<SupplyGlobalStockRow>(
         rows as SupplyGlobalStockRow[],
