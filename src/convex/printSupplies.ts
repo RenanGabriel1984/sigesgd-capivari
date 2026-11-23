@@ -14,6 +14,8 @@
  */
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { query, mutation, internalMutation, internalQuery } from "./_generated/server";
+import type { QueryCtx, MutationCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
@@ -64,17 +66,17 @@ interface GlobalTotals {
 }
 
 /** Snapshot SOMENTE-LEITURA dos 4 livros-razão globais. */
-async function readGlobalTotals(ctx: any): Promise<GlobalTotals> {
+async function readGlobalTotals(ctx: QueryCtx | MutationCtx): Promise<GlobalTotals> {
   const [stock, sbl, lots] = await Promise.all([
     ctx.db.query("stock").collect(),
     ctx.db.query("stockByLocation").collect(),
     ctx.db.query("lots").collect(),
   ]);
   return {
-    physical: stock.reduce((s: number, x: any) => s + x.physicalQuantity, 0),
-    reserved: stock.reduce((s: number, x: any) => s + x.reservedQuantity, 0),
-    stockByLocation: sbl.reduce((s: number, x: any) => s + x.quantity, 0),
-    lotsAvailable: lots.reduce((s: number, l: any) => s + l.quantityAvailable, 0),
+    physical: stock.reduce((sum, row) => sum + row.physicalQuantity, 0),
+    reserved: stock.reduce((sum, row) => sum + row.reservedQuantity, 0),
+    stockByLocation: sbl.reduce((sum, row) => sum + row.quantity, 0),
+    lotsAvailable: lots.reduce((sum, lot) => sum + lot.quantityAvailable, 0),
   };
 }
 
@@ -225,8 +227,8 @@ export const getSupplyDashboard = query({
     // Lotes da área Impressoras por produto (recorte operacional).
     const areaLots = new Map<string, number>();
     const areaLotsByLocation = new Map<string, Map<string, number>>();
-    const supplyLotsById = new Map<string, any>();
-    for (const lot of lots as any[]) {
+    const supplyLotsById = new Map<string, (typeof lots)[number]>();
+    for (const lot of lots) {
       const productId = String(lot.productId);
       if (!supplyIds.has(productId)) continue;
       supplyLotsById.set(String(lot._id), lot);
@@ -251,8 +253,8 @@ export const getSupplyDashboard = query({
 
     // O painel mostra saldo por lotes, mas precisa confirmar que cada lote da
     // área Impressoras está refletido no bucket físico correspondente.
-    const areaRowsByProduct = new Map<string, Map<string, any>>();
-    for (const row of stockByLocation as any[]) {
+    const areaRowsByProduct = new Map<string, Map<string, (typeof stockByLocation)[number]>>();
+    for (const row of stockByLocation) {
       const productId = String(row.productId);
       if (!supplyIds.has(productId)) continue;
       if (!Number.isFinite(Number(row.quantity)) || Number(row.quantity) < 0) {
@@ -260,7 +262,7 @@ export const getSupplyDashboard = query({
       }
       if (row.areaId !== PRINT_AREA_ID) continue;
       const locationId = String(row.locationId);
-      const perLocation = areaRowsByProduct.get(productId) ?? new Map<string, any>();
+      const perLocation = areaRowsByProduct.get(productId) ?? new Map<string, (typeof stockByLocation)[number]>();
       if (perLocation.has(locationId)) {
         throw new Error("Há buckets duplicados de área/local na área Impressoras. Consulta bloqueada.");
       }
@@ -269,7 +271,7 @@ export const getSupplyDashboard = query({
     }
     for (const productId of supplyIds) {
       const expectedByLocation = areaLotsByLocation.get(productId) ?? new Map<string, number>();
-      const actualByLocation = areaRowsByProduct.get(productId) ?? new Map<string, any>();
+      const actualByLocation = areaRowsByProduct.get(productId) ?? new Map<string, (typeof stockByLocation)[number]>();
       for (const [locationId, quantity] of expectedByLocation) {
         const row = actualByLocation.get(locationId);
         if (!row || Math.abs(Number(row.quantity) - quantity) > 1e-9) {
@@ -287,7 +289,7 @@ export const getSupplyDashboard = query({
     const areaReserved = new Map<string, number>();
     const reservationTotalsByProduct = new Map<string, number>();
     const reservationTotalsByLot = new Map<string, number>();
-    for (const reservation of reservations as any[]) {
+    for (const reservation of reservations) {
       const productId = String(reservation.productId);
       if (!supplyIds.has(productId)) continue;
       const quantity = Number(reservation.quantityRemaining);
@@ -318,7 +320,7 @@ export const getSupplyDashboard = query({
     // Estoque global por produto (o recorte é sobre lotes; o saldo exibido
     // permanece o estoque real do produto). Duplicidades não podem ser
     // resolvidas pela ordem de leitura: bloqueamos em vez de mostrar saldo arbitrário.
-    const stockRowsByProduct = new Map<string, any[]>();
+    const stockRowsByProduct = new Map<string, (typeof stock)[number][]>();
     for (const row of stock) {
       if (!supplyIds.has(String(row.productId))) continue;
       const matches = stockRowsByProduct.get(String(row.productId)) ?? [];
@@ -333,15 +335,15 @@ export const getSupplyDashboard = query({
       );
       const physical = Number(globalStock?.physicalQuantity ?? 0);
       const reserved = Number(globalStock?.reservedQuantity ?? 0);
-      const productLots = lots.filter((lot: any) => lot.productId === product._id);
-      if (productLots.some((lot: any) =>
+      const productLots = lots.filter((lot) => lot.productId === product._id);
+      if (productLots.some((lot) =>
         !Number.isFinite(Number(lot.quantityAvailable)) ||
         Number(lot.quantityAvailable) < 0 ||
         (lot.active === false && Number(lot.quantityAvailable) > 0)
       )) {
         throw new Error(`Há lote com saldo inválido para "${product.name}". Consulta Gomaq bloqueada.`);
       }
-      const lotsPhysical = productLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+      const lotsPhysical = productLots.reduce((sum: number, lot) => sum + Number(lot.quantityAvailable), 0);
       if (Math.abs(physical - lotsPhysical) > 1e-9) {
         throw new Error(`Saldo global de "${product.name}" (${physical}) diverge dos lotes (${lotsPhysical}). Regularize antes de consultar suprimentos.`);
       }
