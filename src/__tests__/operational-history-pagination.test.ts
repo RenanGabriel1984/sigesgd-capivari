@@ -133,3 +133,27 @@ describe("paginação e escopo do histórico de devoluções", () => {
     expect(page).toContain("Carregar mais saídas");
   });
 });
+
+describe("paginação do arquivo de inventários", () => {
+  it("o endpoint lista somente uma página de inventários", () => {
+    const backend = read("convex/inventory.ts");
+    const endpoint = backend.slice(
+      backend.indexOf("export const list = query({"),
+      backend.indexOf("export const get = query({"),
+    );
+    expect(endpoint).toContain("paginationOptsValidator");
+    expect(endpoint).toContain('.withIndex("by_date")');
+    expect(endpoint).toContain(".paginate(args.paginationOpts)");
+    expect(endpoint).toContain("return { ...page, page: enriched }");
+    expect(endpoint).not.toContain(".collect()");
+  });
+
+  it("a tela oferece carregamento incremental e não consulta todos os inventários de uma vez", () => {
+    const page = read("pages/Inventory.tsx");
+    expect(page).toContain("usePaginatedQuery(api.inventory.list");
+    expect(page).toContain("loadMoreInventories(30)");
+    expect(page).toContain("Carregar mais inventários");
+    expect(page).toContain('inventoriesStatus === "LoadingFirstPage"');
+    expect(page).not.toContain("useQuery(api.inventory.list)");
+  });
+});
