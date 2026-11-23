@@ -45,7 +45,7 @@ describe("integridade do fechamento de inventário", () => {
     expect(close).toContain('ctx.db.insert("entryItems"');
     expect(close).toContain('ctx.db.insert("lots"');
     expect(close).toContain("quantityReceived: delta");
-    expect(close).toContain("lotId: adjustmentLotId as string");
+    expect(close).toContain("lotId: adjustmentLotId ?? plannedReductions[0]?.lot._id");
   });
 
   it("toda diferença gera movimento e vínculo com cada lote ajustado", () => {
