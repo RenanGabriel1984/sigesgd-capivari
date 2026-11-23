@@ -4,6 +4,7 @@ import { requirePermission } from "./rbac";
 import { PRINT_AREA_ID } from "./printSupplies";
 import { attachStorageFile } from "./storage";
 import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import { getOptionalSingleValidGlobalStock } from "../lib/stock-quantity-rules";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -197,17 +198,49 @@ export const monthlyOrder = query({
       const product = rawProduct as any;
       if (!product.name || !product.categoryId) return null;
 
-      const [stock, lots, reservations] = await Promise.all([
-        ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", pid)).first(),
+      const [stockRows, lots, reservations] = await Promise.all([
+        ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", pid)).collect(),
         ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", pid)).collect(),
         ctx.db.query("requestItemReservations").withIndex("by_product", (q: any) => q.eq("productId", pid)).collect(),
       ]);
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
 
       const compatEntries = allCompat.filter((c: any) => c.productId === pid);
       const compatibleModels = compatEntries.map((c: any) => c.printerModel);
 
-      const physical = stock?.physicalQuantity ?? 0;
-      const reserved = stock?.reservedQuantity ?? 0;
+      if (lots.some((lot: any) =>
+        !Number.isFinite(Number(lot.quantityAvailable)) ||
+        Number(lot.quantityAvailable) < 0 ||
+        (lot.active === false && Number(lot.quantityAvailable) > 0)
+      )) {
+        throw new Error(`Há lote com saldo inválido ou inativo com saldo positivo em "${product.name}". Pedido Gomaq bloqueado.`);
+      }
+      const physical = Number(stock?.physicalQuantity ?? 0);
+      const reserved = Number(stock?.reservedQuantity ?? 0);
+      const lotsPhysical = lots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+      if (Math.abs(physical - lotsPhysical) > 1e-9) {
+        throw new Error(`Saldo global de "${product.name}" (${physical}) diverge dos lotes (${lotsPhysical}). Regularize antes de calcular o pedido Gomaq.`);
+      }
+
+      const lotById = new Map<string, any>(lots.map((lot: any) => [String(lot._id), lot]));
+      let reservationsTotal = 0;
+      for (const reservation of reservations as any[]) {
+        const remaining = Number(reservation.quantityRemaining);
+        if (!Number.isFinite(remaining) || remaining < 0) {
+          throw new Error(`Reserva inválida para "${product.name}". Regularize as solicitações antes do pedido Gomaq.`);
+        }
+        if (remaining === 0) continue;
+        const lot = lotById.get(String(reservation.lotId));
+        if (!lot || reservation.areaId !== lot.areaId ||
+            reservation.locationId !== lot.locationId ||
+            remaining > Number(lot.quantityAvailable)) {
+          throw new Error(`Reserva do produto "${product.name}" não corresponde ao lote/área/local ou excede o saldo. Pedido Gomaq bloqueado.`);
+        }
+        reservationsTotal += remaining;
+      }
+      if (Math.abs(reservationsTotal - reserved) > 1e-9) {
+        throw new Error(`Reservas por lote (${reservationsTotal}) divergem do reservado global (${reserved}) em "${product.name}". Pedido Gomaq bloqueado.`);
+      }
       const available = physical - reserved;
       const areaLots = lots.filter((lot: any) => lot.areaId === PRINT_AREA_ID);
       const areaLotIds = new Set(areaLots.map((lot: any) => String(lot._id)));
