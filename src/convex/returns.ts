@@ -139,18 +139,22 @@ export const returnableByExit = query({
 });
 
 export const listByRequest = query({
-  args: { requestId: v.id("requests") },
+  args: {
+    requestId: v.id("requests"),
+    paginationOpts: paginationOptsValidator,
+  },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    const returns = await ctx.db
-      .query("returns")
+    const page = await ctx.db.query("returns")
       .withIndex("by_request", (q) => q.eq("requestId", args.requestId))
-      .collect();
-    return Promise.all(returns.map(async (r: any) => {
-      const product = await ctx.db.get(r.productId);
-      const lot = r.lotId ? await ctx.db.get(r.lotId) : null;
-      return { ...r, product, lot };
+      .order("desc")
+      .paginate(args.paginationOpts);
+    const enriched = await Promise.all(page.page.map(async (record: any) => {
+      const product = await ctx.db.get(record.productId);
+      const lot = record.lotId ? await ctx.db.get(record.lotId) : null;
+      return { ...record, product, lot };
     }));
+    return { ...page, page: enriched };
   },
 });
 
