@@ -8,6 +8,7 @@ on:
     branches:
       - main
       - codex/historical-stock-location-maintenance
+      - codex/inventory-opening-integrity-pr13
 
 permissions:
   contents: read
