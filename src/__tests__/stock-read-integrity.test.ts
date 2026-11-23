@@ -162,6 +162,57 @@ describe("stock read integrity", () => {
     expect(result.limitations.some((issue) => /localização atual por lote/.test(issue))).toBe(true);
   });
 
+  it("flags a legacy wildcard bucket coexisting with area-scoped buckets as ambiguous", () => {
+    const result = inspectProductStockIntegrity(
+      [{ physicalQuantity: 10, reservedQuantity: 0 }],
+      [
+        { locationId: "cabinet-1", quantity: 10 },
+        { areaId: "ti", locationId: "cabinet-1", quantity: 6 },
+        { areaId: "printers", locationId: "cabinet-1", quantity: 4 },
+      ],
+      [
+        { lotNumber: "LOT-TI", areaId: "ti", locationId: "cabinet-1", quantityAvailable: 6, active: true },
+        { lotNumber: "LOT-PRINT", areaId: "printers", locationId: "cabinet-1", quantityAvailable: 4, active: true },
+      ],
+      "Mouse",
+    );
+    expect(result.consistent).toBe(false);
+    expect(result.issues.some((issue) => /mistura saldo legado sem área com buckets por área/.test(issue))).toBe(true);
+  });
+
+  it("does not treat an unclassified legacy bucket as an empty area during inventory opening", () => {
+    expect(() => resolveScopedInventoryQuantity(
+      [
+        { locationId: "cabinet-1", quantity: 5 },
+        { areaId: "ti", locationId: "cabinet-1", quantity: 5 },
+      ],
+      [{ lotNumber: "LOT-1", areaId: "ti", locationId: "cabinet-1", quantityAvailable: 5, active: true }],
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    )).toThrow(/saldo legado sem área/i);
+  });
+
+  it("blocks a positive lot in the selected area when its current location is unknown", () => {
+    expect(() => resolveScopedInventoryQuantity(
+      [{ areaId: "ti", locationId: "cabinet-1", quantity: 5 }],
+      [{ lotNumber: "LOT-LEGACY", areaId: "ti", quantityAvailable: 2, active: true }],
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    )).toThrow(/sem área\/local suficiente/i);
+  });
+
+  it("blocks a positive lot in the selected location when its area is unknown", () => {
+    expect(() => resolveScopedInventoryQuantity(
+      [{ areaId: "ti", locationId: "cabinet-1", quantity: 5 }],
+      [{ lotNumber: "LOT-LEGACY", locationId: "cabinet-1", quantityAvailable: 2, active: true }],
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    )).toThrow(/sem área\/local suficiente/i);
+  });
+
   it("accepts a new product with no stock row or lot balance", () => {
     const result = inspectProductStockIntegrity([], [], [], "New product");
     expect(result.consistent).toBe(true);
