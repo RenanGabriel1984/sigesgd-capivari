@@ -1120,7 +1120,7 @@ export const lotLocationReadiness = internalQuery({
   args: {},
   handler: async (ctx, args) => {
     const [
-      allProducts, allLots, allBalances, allLocations, allGlobalStock,
+      allProducts, allLots, allBalances, allLocations, allAreas, allGlobalStock,
       allLocalStock, allEntryItems, allEntries, allMovements, allTransfers,
       allReturns, allSuppliers, allGomaQExchanges, allGomaQEmptyCartridges,
       allGomaQCollections,
@@ -1129,6 +1129,7 @@ export const lotLocationReadiness = internalQuery({
       ctx.db.query("lots").collect(),
       ctx.db.query("lotLocationBalances").collect(),
       ctx.db.query("storageLocations").collect(),
+      ctx.db.query("stockAreas").collect(),
       ctx.db.query("stock").collect(),
       ctx.db.query("stockByLocation").collect(),
       ctx.db.query("entryItems").collect(),
@@ -1273,6 +1274,7 @@ export const lotLocationReadiness = internalQuery({
         return {
           lotId: String(lot._id),
           lotNumber: lot.lotNumber,
+          areaId: lot.areaId ? String(lot.areaId) : null,
           quantityAvailable: lot.quantityAvailable,
           receivedAt: lot.receivedAt,
           entryNumber: entryNumbers.get(String(lot.entryId)) ?? null,
@@ -1571,6 +1573,11 @@ export const lotLocationReadiness = internalQuery({
         },
         transfers: { total: allTransfers.length },
         returns: { total: allReturns.length },
+        stockAreas: {
+          areas: allAreas.map((area) => ({
+            areaId: String(area._id), name: area.name, active: area.active,
+          })),
+        },
         storageLocations: {
           total: allLocations.length,
           active: allLocations.filter((location) => location.active).length,
