@@ -447,8 +447,7 @@ export default function Inventory() {
             ) : (
               <div className="space-y-3">
                 {filtered.map((inv) => {
-                  const uncounted = getUncounted(inv.counts);
-                  const diffs = getDiffs(inv.counts);
+                  const { total, uncounted, differences } = inv.countSummary;
                   const isActive = viewId === inv._id;
 
                   return (
@@ -493,27 +492,27 @@ export default function Inventory() {
                           {inv.area && <span>Área: {inv.area.name}</span>}
                           {inv.location && <span>Local físico: {inv.location.name}</span>}
                           {inv.category && <span>Categoria: {inv.category.name}</span>}
-                          <span>{inv.counts.length} itens</span>
-                          {uncounted.length > 0 && (
-                            <Badge variant="destructive" className="text-[10px]">{uncounted.length} não contado(s)</Badge>
+                          <span>{total} itens</span>
+                          {uncounted > 0 && (
+                            <Badge variant="destructive" className="text-[10px]">{uncounted} não contado(s)</Badge>
                           )}
-                          {diffs.length > 0 && (
-                            <Badge variant="secondary" className="text-[10px]">{diffs.length} diferença(s)</Badge>
+                          {differences > 0 && (
+                            <Badge variant="secondary" className="text-[10px]">{differences} diferença(s)</Badge>
                           )}
                         </div>
                         {/* Progress indicator for counting/review */}
-                        {(inv.status === "counting" || inv.status === "review") && inv.counts.length > 0 && (
+                        {(inv.status === "counting" || inv.status === "review") && total > 0 && (
                           <div className="mt-3 space-y-1">
                             <div className="flex items-center justify-between text-xs">
                               <span className="text-muted-foreground">
-                                {inv.counts.length - uncounted.length} de {inv.counts.length} produtos conferidos
+                                {total - uncounted} de {total} produtos conferidos
                               </span>
                               <span className="font-medium">
-                                {Math.round(((inv.counts.length - uncounted.length) / inv.counts.length) * 100)}%
+                                {Math.round(((total - uncounted) / total) * 100)}%
                               </span>
                             </div>
                             <Progress
-                              value={((inv.counts.length - uncounted.length) / inv.counts.length) * 100}
+                              value={((total - uncounted) / total) * 100}
                               className="h-2"
                             />
                           </div>
