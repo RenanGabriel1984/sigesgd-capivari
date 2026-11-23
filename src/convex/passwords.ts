@@ -471,14 +471,16 @@ export const bootstrapSetPassword = internalMutation({
     assertPasswordPolicy(args.password);
 
     // Find user by email
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
 
-    if (!user) {
-      throw new Error(`Usuário não encontrado com e-mail: ${email}`);
+    if (userResolution.status !== "unique") {
+      throw new Error("E-mail não encontrado ou identidade duplicada; regularize o cadastro antes de definir a senha.");
     }
+    const user = userResolution.record;
 
     // Check if password already exists
     const existingPassword = await ctx.db
@@ -581,14 +583,19 @@ export const requestPasswordReset = mutation({
     if (!email) throw new Error("E-mail é obrigatório");
     if (!Number.isFinite(args.email.length)) throw new Error("E-mail inválido");
 
-    // Find user by email
-    const user = await ctx.db
+    // A recovery email must resolve to exactly one account. Keep the public
+    // response identical for missing and ambiguous identities.
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
+    if (userResolution.status !== "unique") {
+      return { message: RESET_GENERIC_MESSAGE };
+    }
+    const user = userResolution.record;
 
     // Always return the same message to prevent email enumeration
-    if (!user) return { message: RESET_GENERIC_MESSAGE };
     if (user.active === false) return { message: RESET_GENERIC_MESSAGE };
     if ((user as { isAnonymous?: boolean }).isAnonymous === true) {
       return { message: RESET_GENERIC_MESSAGE };
@@ -673,13 +680,17 @@ export const confirmPasswordReset = mutation({
     if (!email) throw new Error("E-mail é obrigatório");
     assertPasswordPolicy(args.newPassword);
 
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
 
-    // Generic error to prevent email enumeration
-    if (!user) throw new Error("Código inválido ou expirado");
+    // Missing or ambiguous identity: same public failure.
+    if (userResolution.status !== "unique") {
+      throw new Error("Código inválido ou expirado");
+    }
+    const user = userResolution.record;
 
     // Find valid token
     const tokens = await ctx.db
@@ -899,12 +910,16 @@ export const bootstrapResetPassword = internalMutation({
     if (!email) throw new Error("E-mail é obrigatório");
     assertPasswordPolicy(args.newPassword);
 
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
 
-    if (!user) throw new Error(`Usuário não encontrado: ${email}`);
+    if (userResolution.status !== "unique") {
+      throw new Error("E-mail não encontrado ou identidade duplicada; regularize o cadastro antes de redefinir a senha.");
+    }
+    const user = userResolution.record;
 
     // Safety: only allow reset for admin/stock_manager
     if (user.role !== "admin" && user.role !== "stock_manager") {
