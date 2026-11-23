@@ -1,4 +1,6 @@
 import { query, mutation } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { BASELINE_STOCK_AREAS, NO_AREA_LABEL } from "../lib/stock-areas";
 import { requirePermission } from "./rbac";
@@ -8,12 +10,12 @@ import { assertShortTextLimits, assertTextLimits } from "../lib/text-limits";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
-async function requireUser(ctx: any) {
+async function requireUser(ctx: QueryCtx) {
   // RBAC central: visualização de áreas/subestoques.
   return requirePermission(ctx, "areas.view");
 }
 
-async function requireStockManagerOrAdmin(ctx: any) {
+async function requireStockManagerOrAdmin(ctx: MutationCtx) {
   // RBAC central: gerenciamento de áreas/subestoques.
   return requirePermission(ctx, "areas.manage", { entity: "stockAreas" });
 }
@@ -41,7 +43,7 @@ export const listActive = query({
     await requireUser(ctx);
     return await ctx.db
       .query("stockAreas")
-      .withIndex("by_active", (q: any) => q.eq("active", true))
+      .withIndex("by_active", (q) => q.eq("active", true))
       .order("asc")
       .collect();
   },
@@ -152,8 +154,8 @@ export const unclassifiedLots = query({
       const product = await ctx.db.get(lot.productId);
       const entry = await ctx.db.get(lot.entryId);
       const entryItems = await ctx.db.query("entryItems")
-        .withIndex("by_entry", (q: any) => q.eq("entryId", lot.entryId)).collect();
-      const entryItem = entryItems.find((item: any) =>
+        .withIndex("by_entry", (q) => q.eq("entryId", lot.entryId)).collect();
+      const entryItem = entryItems.find((item) =>
         item.lotId === lot._id || item.lotId === lot.lotNumber
       ) ?? null;
       const currentArea = lot.areaId ? await ctx.db.get(lot.areaId) : null;
@@ -215,19 +217,19 @@ export const classifyLot = mutation({
     }
 
     const reservations = await ctx.db.query("requestItemReservations")
-      .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
-    const reserved = reservations.reduce((sum: number, item: any) => sum + item.quantityRemaining, 0);
+      .withIndex("by_lot", (q) => q.eq("lotId", lot._id)).collect();
+    const reserved = reservations.reduce((sum: number, item) => sum + item.quantityRemaining, 0);
     if (reserved > 0) {
       throw new Error("Este lote possui unidades reservadas por solicitações. Conclua ou cancele essas solicitações antes de classificá-lo.");
     }
 
     const entryItems = await ctx.db.query("entryItems")
-      .withIndex("by_entry", (q: any) => q.eq("entryId", lot.entryId)).collect();
-    const linkedEntryItem = entryItems.find((item: any) =>
+      .withIndex("by_entry", (q) => q.eq("entryId", lot.entryId)).collect();
+    const linkedEntryItem = entryItems.find((item) =>
       item.lotId === lot._id || item.lotId === lot.lotNumber
     );
     const existingLotBalances = await ctx.db.query("lotLocationBalances")
-      .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+      .withIndex("by_lot", (q) => q.eq("lotId", lot._id)).collect();
     if (existingLotBalances.length > 1) {
       throw new Error("Há saldos lote × armário duplicados. Classificação bloqueada.");
     }
@@ -251,18 +253,18 @@ export const classifyLot = mutation({
     }
 
     const lotMovements = (await ctx.db.query("stockMovements")
-      .withIndex("by_product", (q: any) => q.eq("productId", lot.productId))
+      .withIndex("by_product", (q) => q.eq("productId", lot.productId))
       .collect())
-      .filter((movement: any) => movement.lotId === lot._id || movement.lotId === lot.lotNumber);
-    if (lotMovements.some((movement: any) =>
+      .filter((movement) => movement.lotId === lot._id || movement.lotId === lot.lotNumber);
+    if (lotMovements.some((movement) =>
       (movement.areaId && movement.areaId !== args.areaId) ||
       (movement.locationId && movement.locationId !== args.locationId)
     )) {
       throw new Error("Há movimentação histórica com área/local divergente deste lote. Regularize a trilha documental antes de classificar.");
     }
     const movementLotLinks = await ctx.db.query("stockMovementLots")
-      .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
-    if (movementLotLinks.some((link: any) =>
+      .withIndex("by_lot", (q) => q.eq("lotId", lot._id)).collect();
+    if (movementLotLinks.some((link) =>
       (link.areaId && link.areaId !== args.areaId) ||
       (link.locationId && link.locationId !== args.locationId)
     )) {
@@ -270,16 +272,16 @@ export const classifyLot = mutation({
     }
 
     const productStockRows = await ctx.db.query("stock")
-      .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).collect();
+      .withIndex("by_product", (q) => q.eq("productId", lot.productId)).collect();
     const productStock = requireSingleValidGlobalStock(productStockRows, String(lot.productId));
     const productReservations = await ctx.db.query("requestItemReservations")
-      .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).collect();
-    if (productReservations.some((item: any) =>
+      .withIndex("by_product", (q) => q.eq("productId", lot.productId)).collect();
+    if (productReservations.some((item) =>
       !Number.isFinite(item.quantityRemaining) || item.quantityRemaining < 0
     )) {
       throw new Error("Há reserva por lote inválida para este produto. Regularize antes de classificar.");
     }
-    const areaReserved = productReservations.reduce((sum: number, item: any) => sum + item.quantityRemaining, 0);
+    const areaReserved = productReservations.reduce((sum: number, item) => sum + item.quantityRemaining, 0);
     if (areaReserved - productStock.reservedQuantity > 1e-9) {
       throw new Error("As reservas por lote excedem o saldo reservado global. Classificação cancelada.");
     }
@@ -289,17 +291,17 @@ export const classifyLot = mutation({
     }
 
     const rows = await ctx.db.query("stockByLocation")
-      .withIndex("by_product", (q: any) => q.eq("productId", lot.productId)).collect();
-    const targetRow = rows.find((row: any) =>
+      .withIndex("by_product", (q) => q.eq("productId", lot.productId)).collect();
+    const targetRow = rows.find((row) =>
       row.locationId === args.locationId && row.areaId === args.areaId
     );
-    const alreadyClassifiedRow = rows.find((row: any) =>
+    const alreadyClassifiedRow = rows.find((row) =>
       row.locationId === args.locationId && row.areaId === lot.areaId && !!lot.areaId
     );
-    const legacyRows = rows.filter((row: any) =>
+    const legacyRows = rows.filter((row) =>
       row.locationId === args.locationId && !row.areaId
     );
-    const legacyQuantity = legacyRows.reduce((sum: number, row: any) => sum + row.quantity, 0);
+    const legacyQuantity = legacyRows.reduce((sum: number, row) => sum + row.quantity, 0);
 
     // Se o lote já possuía área e faltava somente a localização, o saldo pode
     // já estar no bucket classificado. Caso contrário, precisa existir saldo legado.
@@ -361,26 +363,26 @@ export const classifyLot = mutation({
 
     // Movimentos multi-lote não têm um único lotId. Só recebem área/local
     // quando TODOS os lotes vinculados já concordam com a mesma combinação.
-    const relatedMovementIds = [...new Set(movementLotLinks.map((link: any) => link.movementId as string))];
+    const relatedMovementIds = [...new Set(movementLotLinks.map((link) => link.movementId))];
     for (const movementId of relatedMovementIds) {
       const allLinks = await ctx.db.query("stockMovementLots")
-        .withIndex("by_movement", (q: any) => q.eq("movementId", movementId as any)).collect();
-      const linkedPairs: Array<{ areaId: string; locationId: string }> = [];
+        .withIndex("by_movement", (q) => q.eq("movementId", movementId)).collect();
+      const linkedPairs: Array<{ areaId: Id<"stockAreas">; locationId: Id<"storageLocations"> }> = [];
       for (const link of allLinks) {
         const isCurrentLot = link.lotId === lot._id;
-        const linkedLot: any = isCurrentLot ? lot : await ctx.db.get(link.lotId);
+        const linkedLot = isCurrentLot ? lot : await ctx.db.get(link.lotId);
         const linkedAreaId = isCurrentLot ? args.areaId : linkedLot?.areaId;
         const linkedLocationId = isCurrentLot ? args.locationId : linkedLot?.locationId;
         if (!linkedAreaId || !linkedLocationId) continue;
         linkedPairs.push({
-          areaId: linkedAreaId as string,
-          locationId: linkedLocationId as string,
+          areaId: linkedAreaId,
+          locationId: linkedLocationId,
         });
       }
       if (linkedPairs.length !== allLinks.length || linkedPairs.length === 0) continue;
       const common = linkedPairs[0];
       if (linkedPairs.some((pair) => pair.areaId !== common.areaId || pair.locationId !== common.locationId)) continue;
-      const movement: any = await ctx.db.get(movementId as any);
+      const movement = await ctx.db.get(movementId);
       if (!movement) continue;
       if (
         (movement.areaId && movement.areaId !== common.areaId) ||
@@ -390,8 +392,8 @@ export const classifyLot = mutation({
       }
       if (movement.areaId !== common.areaId || movement.locationId !== common.locationId) {
         await ctx.db.patch(movement._id, {
-          areaId: common.areaId as any,
-          locationId: common.locationId as any,
+          areaId: common.areaId,
+          locationId: common.locationId,
         });
       }
     }
@@ -417,7 +419,7 @@ export const ensureBaselineAreas = mutation({
     for (const area of BASELINE_STOCK_AREAS) {
       const existingRows = await ctx.db
         .query("stockAreas")
-        .withIndex("by_name", (q: any) => q.eq("name", area.name))
+        .withIndex("by_name", (q) => q.eq("name", area.name))
         .collect();
       if (existingRows.length > 1) {
         throw new Error(`Há mais de uma área chamada "${area.name}". Regularize a duplicidade antes de garantir as áreas padrão.`);
@@ -460,7 +462,7 @@ export const create = mutation({
 
     const existingRows = await ctx.db
       .query("stockAreas")
-      .withIndex("by_name", (q: any) => q.eq("name", name))
+      .withIndex("by_name", (q) => q.eq("name", name))
       .collect();
     if (existingRows.length > 1) {
       throw new Error(`Há áreas duplicadas chamadas "${name}". Regularize antes de criar outra.`);
@@ -504,7 +506,7 @@ export const update = mutation({
       if (name !== area.name) {
         const duplicates = await ctx.db
           .query("stockAreas")
-          .withIndex("by_name", (q: any) => q.eq("name", name))
+          .withIndex("by_name", (q) => q.eq("name", name))
           .collect();
         if (duplicates.length > 1) {
           throw new Error(`Há áreas duplicadas chamadas "${name}". Regularize antes de renomear.`);
@@ -520,7 +522,7 @@ export const update = mutation({
     if (args.active !== undefined) {
       if (args.active === false) {
         const lots = await ctx.db.query("lots").collect();
-        if (lots.some((lot: any) => lot.areaId === args.id && lot.active && lot.quantityAvailable > 0)) {
+        if (lots.some((lot) => lot.areaId === args.id && lot.active && lot.quantityAvailable > 0)) {
           throw new Error("Não é possível desativar uma área que ainda possui lotes com saldo. Transfira ou regularize o estoque primeiro.");
         }
       }
