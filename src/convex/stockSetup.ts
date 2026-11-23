@@ -1089,13 +1089,7 @@ export const stockDimensionDiagnostics = query({
       return acc;
     }, {});
 
-    const areaClassification = buildHistoricalAreaClassificationPlan(
-      productsResult.flatMap((product) => product.lots),
-      allAreas.map((area) => ({ areaId: String(area._id), name: area.name, active: area.active })),
-    );
-
     return {
-      areaClassification,
       generatedAt: Date.now(),
       readOnly: true,
       totals: {
@@ -1556,7 +1550,13 @@ export const lotLocationReadiness = internalQuery({
       allLocalStock.some((row) => row.productId === product._id && row.quantity > 0),
     ).length;
 
+    const areaClassification = buildHistoricalAreaClassificationPlan(
+      productsResult.flatMap((product) => product.lots),
+      allAreas.map((area) => ({ areaId: String(area._id), name: area.name, active: area.active })),
+    );
+
     return {
+      areaClassification,
       generatedAt: Date.now(),
       readOnly: true,
       migrationApplied: false,
