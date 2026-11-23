@@ -965,17 +965,25 @@ export const recordFailedLogin = internalMutation({
     // Não persistir identificadores arbitrários enviados por visitantes.
     // Sem esta verificação, uma enxurrada de logins inexistentes criaria
     // linhas ilimitadas em failedLoginAttempts e auditLogs.
-    const account = await ctx.db
+    const accountRows = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
-    if (!account) return;
+      .collect();
+    const accountResolution = resolveUniqueRecord(accountRows);
+    if (accountResolution.status !== "unique") return;
+    const account = accountResolution.record;
 
     const now = Date.now();
-    const existing = await ctx.db
+    const existingRows = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const existingResolution = resolveUniqueRecord(existingRows);
+    // This counter is audit-only. Never update an arbitrary duplicate row.
+    if (existingResolution.status === "ambiguous") return;
+    const existing = existingResolution.status === "unique"
+      ? existingResolution.record
+      : null;
 
     const auditIntervalMs = 15 * 60 * 1000;
     let shouldAudit = false;
@@ -1028,12 +1036,13 @@ export const recordSuccessfulLogin = internalMutation({
     if (!email) return { cleared: false };
 
     const now = Date.now();
-    const account = await ctx.db
+    const accountRows = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
-
-    if (account) {
+      .collect();
+    const accountResolution = resolveUniqueRecord(accountRows);
+    if (accountResolution.status === "unique") {
+      const account = accountResolution.record;
       await ctx.db.insert("auditLogs", {
         userId: account._id,
         action: "login",
@@ -1044,17 +1053,26 @@ export const recordSuccessfulLogin = internalMutation({
       });
     }
 
-    const existing = await ctx.db
+    const existingRows = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    if (existingRows.length === 0) return { cleared: false };
 
-    if (!existing) return { cleared: false };
-    if ((existing.attempts ?? 0) === 0 && existing.lockedUntil === undefined) {
-      return { cleared: false };
-    }
+    const needsClearing = existingRows.filter(
+      (record) => (record.attempts ?? 0) !== 0 || record.lockedUntil !== undefined,
+    );
+    if (needsClearing.length === 0) return { cleared: false };
 
-    await ctx.db.patch(existing._id, { attempts: 0, lockedUntil: undefined, lastAuditAt: undefined });
+    // This is an audit counter, not an authentication secret. Clear every
+    // duplicate row together instead of arbitrarily leaving stale state.
+    await Promise.all(existingRows.map((record) =>
+      ctx.db.patch(record._id, {
+        attempts: 0,
+        lockedUntil: undefined,
+        lastAuditAt: undefined,
+      }),
+    ));
     return { cleared: true };
   },
 });
