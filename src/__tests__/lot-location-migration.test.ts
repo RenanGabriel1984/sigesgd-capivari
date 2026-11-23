@@ -59,6 +59,39 @@ describe("planejamento da migração lote × armário", () => {
     expect(plan.alreadyMapped).toBe(0);
   });
 
+  it("usa o saldo atual conciliado, sem fixar o snapshot histórico de 61 lotes", () => {
+    const base = report();
+    const current = {
+      ...base,
+      summary: {
+        ...base.summary,
+        lots: { withAvailableQuantity: 62, quantityAvailableTotal: 3339 },
+        globalStock: { ...base.summary.globalStock, physicalQuantityTotal: 3339 },
+        stockByLocation: { ...base.summary.stockByLocation, physicalQuantityTotal: 3339 },
+      },
+      products: [{
+        ...base.products[0],
+        globalPhysical: 3339,
+        localPhysicalTotal: 3339,
+        lotsAvailableTotal: 3339,
+        candidateLotTotal: 3339,
+        localComparison: base.products[0].localComparison.map((row) => ({
+          ...row,
+          physicalQuantity: row.locationId === "loc-1" ? row.physicalQuantity + 1 : row.physicalQuantity,
+          candidateLotQuantity: row.locationId === "loc-1" ? row.candidateLotQuantity + 1 : row.candidateLotQuantity,
+        })),
+        lots: [
+          ...base.products[0].lots,
+          { lotId: "lot-62", lotNumber: "LOT-000062", areaId: "area-1", quantityAvailable: 1, status: "candidate", candidateLocationId: "loc-1", mappedLocations: [] },
+        ],
+      }],
+    };
+    const plan = buildLotLocationMigrationPlan(current);
+    expect(plan.totalLots).toBe(62);
+    expect(plan.totalQuantity).toBe(3339);
+    expect(plan.insertions).toHaveLength(62);
+  });
+
   it("é idempotente: reconhece os 61 vínculos já mapeados e não propõe inserções", () => {
     const base = report();
     const mappedLots = base.products[0].lots.map((lot) => ({
