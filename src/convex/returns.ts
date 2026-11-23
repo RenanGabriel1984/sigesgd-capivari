@@ -1,6 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
@@ -22,13 +22,13 @@ import {
 } from "../lib/returns-rules";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 
-async function requireUser(ctx: any) {
+async function requireUser(ctx: QueryCtx) {
   // RBAC central: consulta de devoluções.
   return requirePermission(ctx, "returns.view");
 }
 
 /** RBAC central: registrar devolução (opera estoque). */
-async function requireReturnCreate(ctx: any) {
+async function requireReturnCreate(ctx: MutationCtx) {
   return requirePermission(ctx, "returns.create", { entity: "returns" });
 }
 
@@ -98,7 +98,7 @@ export const listPage = query({
   handler: async (ctx, args) => {
     await requireUser(ctx);
     const page = await ctx.db.query("returns").order("desc").paginate(args.paginationOpts);
-    const enriched = await Promise.all(page.page.map(async (r: any) => {
+    const enriched = await Promise.all(page.page.map(async (r) => {
       const product = await ctx.db.get(r.productId);
       const lot = r.lotId ? await ctx.db.get(r.lotId) : null;
       const returnedBy = await ctx.db.get(r.returnedByUserId);
@@ -155,7 +155,7 @@ export const listByRequest = query({
       .withIndex("by_request", (q) => q.eq("requestId", args.requestId))
       .order("desc")
       .paginate(args.paginationOpts);
-    const enriched = await Promise.all(page.page.map(async (record: any) => {
+    const enriched = await Promise.all(page.page.map(async (record) => {
       const product = await ctx.db.get(record.productId);
       const lot = record.lotId ? await ctx.db.get(record.lotId) : null;
       return { ...record, product, lot };
@@ -197,12 +197,12 @@ export const create = mutation({
     if (!reason) throw new Error("O motivo da devolução é obrigatório");
     assertTextLimits({ observation: reason, description: args.observation }, MAX_OBSERVATION);
 
-    const exit: any = await ctx.db.get(args.exitMovementId);
+    const exit = await ctx.db.get(args.exitMovementId);
     if (!exit) throw new Error("Saída original não encontrada");
     if (exit.type !== "exit") throw new Error("A movimentação informada não é uma saída");
     if (exit.canceled) throw new Error("A saída original foi cancelada — devolução não permitida");
 
-    const product: any = await ctx.db.get(exit.productId);
+    const product = await ctx.db.get(exit.productId);
     if (!product) throw new Error("Produto da saída não encontrado");
     if (isDiscreteStockUnit(product.unitOfMeasure, product.hasSerial) && !Number.isSafeInteger(args.quantity)) {
       throw new Error(`A quantidade devolvida deve ser inteira para a unidade ${product.unitOfMeasure}.`);
@@ -219,12 +219,12 @@ export const create = mutation({
 
     // Devoluções de saídas classificadas permanecem na mesma área e no mesmo
     // local físico de origem. Mudança de local deve ser uma transferência.
-    let targetLocationId: any = undefined;
+    let targetLocationId: Id<"storageLocations"> | undefined = undefined;
     if (exit.areaId) {
       if (!exit.locationId) {
         throw new Error("A saída não possui local físico registrado. Não é seguro devolver para um subestoque sem origem identificada.");
       }
-      const sourceLocation: any = await ctx.db.get(exit.locationId);
+      const sourceLocation = await ctx.db.get(exit.locationId);
       if (!sourceLocation || !sourceLocation.active) {
         throw new Error("O local físico da saída original não existe ou está inativo.");
       }
@@ -243,21 +243,21 @@ export const create = mutation({
     // Preferir a trilha completa de lotes consumidos. Ela permite devolver
     // corretamente uma saída que utilizou dois ou mais lotes FIFO.
     const movementLots = await ctx.db.query("stockMovementLots")
-      .withIndex("by_movement", (q: any) => q.eq("movementId", exit._id))
+      .withIndex("by_movement", (q) => q.eq("movementId", exit._id))
       .collect();
-    const sourceLots: Array<{ lot: any; quantity: number }> = [];
+    const sourceLots: Array<{ lot: Doc<"lots">; quantity: number }> = [];
 
     if (movementLots.length > 0) {
       const linkError = validateExitLotLinks(
         Number(exit.quantity),
-        movementLots.map((link: any) => ({
+        movementLots.map((link) => ({
           lotId: link.lotId ? String(link.lotId) : "",
           quantity: Number(link.quantity),
         })),
       );
       if (linkError) throw new Error(linkError);
       for (const link of movementLots) {
-        const lot: any = await ctx.db.get(link.lotId);
+        const lot = await ctx.db.get(link.lotId);
         if (!lot || lot.productId !== exit.productId ||
             !Number.isFinite(lot.quantityReceived) || link.quantity > lot.quantityReceived) {
           throw new Error("A trilha de lotes da saída está incompleta ou excede o lote recebido. Devolução bloqueada para preservar a rastreabilidade.");
@@ -273,24 +273,24 @@ export const create = mutation({
       }
     } else {
       const productLots = await ctx.db.query("lots")
-        .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+        .withIndex("by_product", (q) => q.eq("productId", exit.productId))
         .collect();
       const rawLotId = args.lotId ?? exit.lotId ?? null;
-      let fallbackLot: any = args.lotId ? await ctx.db.get(args.lotId) : null;
+      let fallbackLot: Doc<"lots"> | null = args.lotId ? await ctx.db.get(args.lotId) : null;
       if (!fallbackLot && rawLotId) {
         if (String(rawLotId).startsWith("LOT-")) {
           const matchingLots = await ctx.db.query("lots")
-            .withIndex("by_number", (q: any) => q.eq("lotNumber", rawLotId))
+            .withIndex("by_number", (q) => q.eq("lotNumber", rawLotId))
             .collect();
           if (matchingLots.length > 1) {
             throw new Error(`O número de lote "${rawLotId}" está duplicado. Regularize a identificação antes de registrar a devolução.`);
           }
           fallbackLot = matchingLots[0] ?? null;
         } else {
-          fallbackLot = await ctx.db.get(rawLotId as any);
+          fallbackLot = await ctx.db.get(rawLotId as Id<"lots">);
         }
       }
-      const requiresLot = !!rawLotId || productLots.some((lot: any) => lot.active);
+      const requiresLot = !!rawLotId || productLots.some((lot) => lot.active);
       const lotGuard = resolveReturnLotGuard({
         exitLotId: fallbackLot?._id ? String(fallbackLot._id) : null,
         requiresLot,
@@ -350,9 +350,9 @@ export const create = mutation({
     for (const source of orderedSources) {
       const assignedLegacyReturn = Math.min(source.quantity, unassignedLegacyReturned);
       unassignedLegacyReturned -= assignedLegacyReturn;
-      legacyReturnedByLot.set(source.lot._id as string, assignedLegacyReturn);
+      legacyReturnedByLot.set(String(source.lot._id), assignedLegacyReturn);
     }
-    const parts: Array<{ lot: any | null; quantity: number }> = [];
+    const parts: Array<{ lot: Doc<"lots"> | null; quantity: number }> = [];
     let remaining = args.quantity;
     if (orderedSources.length > 0) {
       const candidates = args.lotId
@@ -363,8 +363,8 @@ export const create = mutation({
       }
       for (const source of candidates) {
         if (remaining <= 0) break;
-        const assignedLegacyReturn = legacyReturnedByLot.get(source.lot._id as string) ?? 0;
-        const alreadyForLot = (returnedByLot.get(source.lot._id as string) ?? 0) + assignedLegacyReturn;
+        const assignedLegacyReturn = legacyReturnedByLot.get(String(source.lot._id)) ?? 0;
+        const alreadyForLot = (returnedByLot.get(String(source.lot._id)) ?? 0) + assignedLegacyReturn;
         const availableFromLot = Math.max(0, source.quantity - alreadyForLot);
         const quantity = Math.min(availableFromLot, remaining);
         if (quantity <= 0) continue;
@@ -387,13 +387,13 @@ export const create = mutation({
 
     const [stockRows, productLots, locationRows] = await Promise.all([
       ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+        .withIndex("by_product", (q) => q.eq("productId", exit.productId))
         .collect(),
       ctx.db.query("lots")
-        .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+        .withIndex("by_product", (q) => q.eq("productId", exit.productId))
         .collect(),
       ctx.db.query("stockByLocation")
-        .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+        .withIndex("by_product", (q) => q.eq("productId", exit.productId))
         .collect(),
     ]);
     if (stockRows.length !== 1) {
@@ -407,17 +407,17 @@ export const create = mutation({
         stock.physicalQuantity < stock.reservedQuantity) {
       throw new Error("O saldo global está inconsistente. Regularize o estoque antes de registrar a devolução.");
     }
-    if (productLots.some((lot: any) =>
+    if (productLots.some((lot) =>
       !Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0 ||
       (lot.active === false && lot.quantityAvailable > 0)
     )) {
       throw new Error("Há lote com saldo inválido ou inativo com quantidade positiva. Regularize antes de devolver.");
     }
 
-    let locationStock: any = null;
+    let locationStock: Doc<"stockByLocation"> | null = null;
     let locationStockQuantity = 0;
     if (targetLocationId) {
-      const matchingRows = locationRows.filter((row: any) =>
+      const matchingRows = locationRows.filter((row) =>
         row.locationId === targetLocationId &&
         (row.areaId ?? undefined) === (exit.areaId ?? undefined)
       );
@@ -429,9 +429,9 @@ export const create = mutation({
         ? requireValidScopedStockQuantity(locationStock.quantity, "área/local de origem")
         : 0;
       const lotsAtLocation = productLots
-        .filter((lot: any) => lot.locationId === targetLocationId &&
+        .filter((lot) => lot.locationId === targetLocationId &&
           (lot.areaId ?? undefined) === (exit.areaId ?? undefined))
-        .reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+        .reduce((sum: number, lot) => sum + Number(lot.quantityAvailable), 0);
       if (!Number.isFinite(lotsAtLocation) ||
           Math.abs(lotsAtLocation - locationStockQuantity) > 1e-9) {
         throw new Error("O saldo físico da área/local diverge dos lotes. Regularize antes de devolver.");
@@ -466,7 +466,7 @@ export const create = mutation({
       }
     }
 
-    const returnIds: string[] = [];
+    const returnIds: Id<"returns">[] = [];
     let runningPhysical = stock.physicalQuantity;
     for (const part of parts) {
       if (restocked && part.lot) {
@@ -522,9 +522,9 @@ export const create = mutation({
     }
 
     const exitLabel = exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
-    const area: any = exit.areaId ? await ctx.db.get(exit.areaId) : null;
-    const location: any = targetLocationId ? await ctx.db.get(targetLocationId) : null;
-    const returnedLotDetails = parts.map((part: any) =>
+    const area = exit.areaId ? await ctx.db.get(exit.areaId) : null;
+    const location = targetLocationId ? await ctx.db.get(targetLocationId) : null;
+    const returnedLotDetails = parts.map((part) =>
       `${part.lot?.lotNumber ?? "lote não identificado"} x${part.quantity}`
     ).join(", ");
     await ctx.db.insert("auditLogs", {
