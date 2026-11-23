@@ -506,7 +506,7 @@ export const approve = mutation({
 export const reject = mutation({
   args: { requestId: v.id("requests"), observation: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const { userId, user, role } = await requireUser(ctx);
+    const { userId, role } = await requireUser(ctx);
     if (!roleHasPermission(role, "requests.reject")) {
       throw new Error("ACESSO NEGADO: seu perfil não possui a permissão " +
         "de rejeição de requisições.");
