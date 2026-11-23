@@ -255,6 +255,14 @@ export function getUniqueAreaLocationBuckets<T extends ScopedStockBalance>(
   locationId: string,
   productLabel: string,
 ): { targetRow: T | null; legacyRows: T[] } {
+  for (const row of rows) {
+    if (typeof row.quantity !== "number" || !Number.isFinite(row.quantity) || row.quantity < 0) {
+      throw new Error(`Há quantidade física inválida de "${productLabel}" na estrutura por área/local.`);
+    }
+    if (!row.locationId && row.quantity > TOLERANCE) {
+      throw new Error(`Há saldo físico de "${productLabel}" sem local definido; regularize antes de classificar o lote.`);
+    }
+  }
   const localRows = rows.filter((row) => row.locationId === locationId);
   const targetRows = localRows.filter((row) => row.areaId === areaId);
   const legacyRows = localRows.filter((row) => !row.areaId);
