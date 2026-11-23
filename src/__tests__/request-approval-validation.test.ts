@@ -119,3 +119,21 @@ describe("integração da entrega parcial com liberação de reserva", () => {
     expect(block).toContain("Reserva não utilizada liberada");
   });
 });
+
+
+describe("integridade da senha de assinatura da entrega", () => {
+  it("exige exatamente uma credencial antes de iniciar qualquer baixa", () => {
+    const start = requestsSource.indexOf("export const deliver = mutation({");
+    const end = requestsSource.indexOf("export const cancel = mutation({", start);
+    const block = requestsSource.slice(start, end);
+    const guard = block.indexOf("if (passwordRecords.length !== 1)");
+    const firstWrite = Math.min(
+      ...["ctx.db.patch(", "ctx.db.insert("]
+        .map((needle) => block.indexOf(needle))
+        .filter((index) => index >= 0),
+    );
+    expect(guard).toBeGreaterThan(-1);
+    expect(firstWrite).toBeGreaterThan(guard);
+    expect(block).toContain("const passwordRecord = passwordRecords[0]");
+  });
+});
