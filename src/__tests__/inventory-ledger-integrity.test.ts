@@ -78,7 +78,7 @@ describe("trilha de auditoria do ciclo de inventário", () => {
     expect(review).toContain('if (inv.status !== "counting")');
     expect(review).toContain("const uncounted = counts.filter");
     expect(review).toContain('status: "review", updatedAt: now');
-    expect(review).toContain('ctx.db.insert("auditLogs")');
+    expect(review).toContain('ctx.db.insert("auditLogs", {');
     expect(review).toContain('action: "count_inventory"');
     expect(review).toContain('entity: "inventories"');
     expect(review).toContain("entityId: args.inventoryId");
