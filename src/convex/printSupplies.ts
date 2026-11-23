@@ -501,6 +501,12 @@ type SupplyConsumedLot = {
   unitCost?: number;
 };
 
+type SupplyGlobalStockRow = {
+  _id: Id<"stock">;
+  physicalQuantity: number;
+  reservedQuantity: number;
+};
+
 type SupplyAreaLedger = {
   stock: any;
   lots: any[];
@@ -521,7 +527,7 @@ async function readSupplyAreaLedger(ctx: any, productId: string): Promise<Supply
     ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
     ctx.db.query("requestItemReservations").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
   ]);
-  const stock = getOptionalSingleValidGlobalStock(stockRows, productId);
+  const stock = getOptionalSingleValidGlobalStock<SupplyGlobalStockRow>(\n    stockRows as SupplyGlobalStockRow[],\n    productId,\n  );
 
   const physical = Number(stock?.physicalQuantity ?? 0);
   const reserved = Number(stock?.reservedQuantity ?? 0);
@@ -1277,7 +1283,7 @@ async function previewFamilyWithdrawalImpl(ctx: any, args: { productId: string; 
       const rows = await ctx.db.query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", productId))
         .collect();
-      return getOptionalSingleValidGlobalStock(rows, productName);
+      return getOptionalSingleValidGlobalStock<SupplyGlobalStockRow>(\n        rows as SupplyGlobalStockRow[],\n        productName,\n      );
     };
     const closedStock = closedMember ? await stockOf(closedMember._id, closedMember.name) : null;
     const looseStock = looseMember ? await stockOf(looseMember._id, looseMember.name) : null;
