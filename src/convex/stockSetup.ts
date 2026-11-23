@@ -27,7 +27,7 @@ async function requireUser(ctx: QueryCtx) {
   return requirePermission(ctx, "stock.view");
 }
 
-async function requireAdmin(ctx: MutationCtx) {
+async function requireAdmin(ctx: MutationCtx | QueryCtx) {
   // RBAC central: carga inicial, importação de planilha e saída rápida.
   return requirePermission(ctx, "stock.mutate", { entity: "stockSetup" });
 }
@@ -71,9 +71,9 @@ async function performInitialLoad(
   ctx: MutationCtx,
   userId: Id<"users">,
   items: Array<{
-    productId: string;
-    locationId: string;
-    areaId?: string;
+    productId: Id<"products">;
+    locationId: Id<"storageLocations">;
+    areaId?: Id<"stockAreas">;
     quantity: number;
     unitOfMeasure?: string;
     brand?: string;
@@ -161,7 +161,7 @@ async function performInitialLoad(
       .collect();
     const hasInitialLot = await hasInitialInventoryLot(
       existingLots,
-      (entryId) => ctx.db.get(entryId)
+      (entryId) => ctx.db.get(entryId as Id<"entries">)
     );
 
     if (hasInitialLot) {
@@ -1784,7 +1784,7 @@ export const implementationStockStatus = query({
     const allMovements = await ctx.db.query("stockMovements").collect();
     const allLots = await ctx.db.query("lots").collect();
 
-    const productIds = new Set<string>();
+    const productIds = new Set<Id<"products">>();
     const entriesSummary: Array<{
       entryNumber: string;
       receivedAt: number;
@@ -1811,7 +1811,7 @@ export const implementationStockStatus = query({
       const responsible = await ctx.db.get(entry.responsibleUserId);
       const units = items.reduce((sum, i) => sum + i.quantity, 0);
 
-      for (const lot of entryLots) productIds.add(lot.productId as string);
+      for (const lot of entryLots) productIds.add(lot.productId);
       totalUnits += units;
       totalLots += entryLots.length;
       totalMovements += entryMovements.length;
@@ -1854,15 +1854,13 @@ export const implementationStockStatus = query({
     for (const productId of productIds) {
       const stockRows = await ctx.db
         .query("stock")
-        .withIndex("by_product", (q) => q.eq("productId", productId as any))
+        .withIndex("by_product", (q) => q.eq("productId", productId))
         .collect();
       const sblRows = await ctx.db
         .query("stockByLocation")
         .withIndex("by_product", (q) => q.eq("productId", productId as any))
         .collect();
-      const product = (await ctx.db.get(productId as Id<"products">)) as {
-        name?: string;
-      } | null;
+      const product = await ctx.db.get(productId);
       const byLocation = sblRows.reduce((sum, row) => sum + row.quantity, 0);
       const productName = product?.name ?? productId;
       const physical = stockRows.length === 1 ? stockRows[0].physicalQuantity : null;
@@ -1992,14 +1990,14 @@ export const getInitialLoadStatus = query({
       .withIndex("by_active", (q) => q.eq("active", true))
       .collect();
     const lots = await ctx.db.query("lots").collect();
-    const entryCache = new Map<string, any>();
+    const entryCache = new Map<string, Doc<"entries"> | null>();
 
     const result: Array<{ productId: string; loaded: boolean }> = [];
     for (const product of products) {
       const productLots = lots.filter((l) => l.productId === product._id);
       const loaded = await hasInitialInventoryLot(productLots, async (entryId) => {
         if (!entryCache.has(entryId)) {
-          entryCache.set(entryId, await ctx.db.get(entryId));
+          entryCache.set(entryId, await ctx.db.get(entryId as Id<"entries">));
         }
         return entryCache.get(entryId);
       });
