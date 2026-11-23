@@ -1148,6 +1148,7 @@ export const lotLocationReadiness = internalQuery({
     const products = allProducts;
     const locationNames = new Map(allLocations.map((location) => [String(location._id), location.name]));
     const entryNumbers = new Map(allEntries.map((entry) => [String(entry._id), entry.entryNumber]));
+    const entriesById = new Map(allEntries.map((entry) => [String(entry._id), entry]));
     const productsResult: Array<Record<string, any>> = [];
 
     for (const product of products) {
@@ -1278,6 +1279,29 @@ export const lotLocationReadiness = internalQuery({
           quantityAvailable: lot.quantityAvailable,
           receivedAt: lot.receivedAt,
           entryNumber: entryNumbers.get(String(lot.entryId)) ?? null,
+          sourceEntry: (() => {
+            const entry = lot.entryId ? entriesById.get(String(lot.entryId)) : null;
+            return entry ? {
+              entryNumber: entry.entryNumber,
+              invoiceNumber: entry.invoiceNumber ?? null,
+              originType: entry.originType ?? null,
+              receivedAt: entry.receivedAt,
+            } : null;
+          })(),
+          entryItemEvidence: entryItems.map((item) => {
+            const sourceProduct = productById.get(String(item.productId));
+            const locationId = item.locationId ? String(item.locationId) : null;
+            return {
+              entryItemId: String(item._id),
+              productId: String(item.productId),
+              productName: sourceProduct?.name ?? "Produto inexistente",
+              quantity: item.quantity,
+              unitOfMeasure: item.unitOfMeasure ?? null,
+              locationId,
+              locationName: locationId ? locationNames.get(locationId) ?? "Local inexistente" : null,
+              lotId: item.lotId ? String(item.lotId) : null,
+            };
+          }),
           sourceEntryLocations: candidateLocationIds.map((locationId) => ({
             locationId,
             locationName: locationNames.get(locationId) ?? "Local inexistente",
