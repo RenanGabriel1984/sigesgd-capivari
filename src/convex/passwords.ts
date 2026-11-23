@@ -218,24 +218,28 @@ export const adminResetPassword = mutation({
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .collect();
-    const passwordResolution = resolveUniqueRecord(passwordRows);
-    if (passwordResolution.status === "ambiguous") {
-      throw new Error(describeDuplicateCredential(passwordResolution.count));
-    }
-    const passwordRecord = passwordResolution.status === "unique"
-      ? passwordResolution.record
-      : null;
 
     const { hash, salt } = await hashPassword(args.newPassword);
-
-    if (passwordRecord) {
-      await ctx.db.patch(passwordRecord._id, {
+    let passwordRecordId: Id<"passwords">;
+    if (passwordRows.length > 1) {
+      // A deliberate administrator reset establishes a fresh, single
+      // credential; no arbitrary duplicate hash is treated as canonical.
+      await Promise.all(passwordRows.map((record) => ctx.db.delete(record._id)));
+      passwordRecordId = await ctx.db.insert("passwords", {
+        userId: args.userId,
+        passwordHash: hash,
+        salt,
+        requiresReset: true,
+      });
+    } else if (passwordRows.length === 1) {
+      passwordRecordId = passwordRows[0]._id;
+      await ctx.db.patch(passwordRecordId, {
         passwordHash: hash,
         salt,
         requiresReset: true,
       });
     } else {
-      await ctx.db.insert("passwords", {
+      passwordRecordId = await ctx.db.insert("passwords", {
         userId: args.userId,
         passwordHash: hash,
         salt,
@@ -251,8 +255,9 @@ export const adminResetPassword = mutation({
       userId: adminId,
       action: "password_reset",
       entity: "passwords",
-      entityId: args.userId,
-      details: `Senha redefinida pelo administrador para ${user.name ?? user.email}`,
+      entityId: passwordRecordId,
+      details: `Senha redefinida pelo administrador para ${user.name ?? user.email}` +
+        (passwordRows.length > 1 ? ` | ${passwordRows.length - 1} credencial(is) duplicada(s) removida(s) por redefinição autorizada.` : ""),
       timestamp: Date.now(),
     });
     await ctx.scheduler.runAfter(0, internal.passwords.invalidateUserSessionsInternal, {
@@ -894,41 +899,28 @@ export const confirmPasswordReset = mutation({
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
-    const existingPasswordResolution = resolveUniqueRecord(existingPasswordRows);
-    if (existingPasswordResolution.status === "ambiguous") {
-      throw new Error("Código inválido ou expirado");
-    }
-    const existingPw = existingPasswordResolution.status === "unique"
-      ? existingPasswordResolution.record
-      : null;
-
-    if (existingPw) {
-      await ctx.db.patch(existingPw._id, {
-        passwordHash: hash,
-        salt,
-        requiresReset: false,
-      });
-    } else {
-      await ctx.db.insert("passwords", {
-        userId: user._id,
-        passwordHash: hash,
-        salt,
-        requiresReset: false,
-      });
-    }
+    // A successful one-time email challenge authorizes a complete credential
+    // reset. Replacing the full set repairs duplicates without trusting one.
+    await Promise.all(existingPasswordRows.map((record) => ctx.db.delete(record._id)));
+    const passwordRecordId = await ctx.db.insert("passwords", {
+      userId: user._id,
+      passwordHash: hash,
+      salt,
+      requiresReset: false,
+    });
 
     // Clear residual failed-login counters after successful recovery.
     const failedAttempts = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
-    if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, {
+      .collect();
+    await Promise.all(failedAttempts.map((record) =>
+      ctx.db.patch(record._id, {
         attempts: 0,
         lockedUntil: undefined,
         lastAuditAt: undefined,
-      });
-    }
+      }),
+    ));
 
     // Clear requiresPasswordReset flag
     await ctx.db.patch(user._id, { requiresPasswordReset: false });
