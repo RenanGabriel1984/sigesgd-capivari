@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword } from "./auth/passwords";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
+import { resolveUniqueRecord } from "../lib/credential-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -293,10 +294,11 @@ export const verifyCredentials = internalQuery({
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
 
-    if (passwordRecords.length !== 1) {
+    const passwordResolution = resolveUniqueRecord(passwordRecords);
+    if (passwordResolution.status !== "unique") {
       return { success: false, error: GENERIC_AUTH_ERROR };
     }
-    const passwordRecord = passwordRecords[0];
+    const passwordRecord = passwordResolution.record;
 
     // Verify password
     const valid = await verifyPassword(
