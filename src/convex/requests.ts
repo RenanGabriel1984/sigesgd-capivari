@@ -233,6 +233,7 @@ export const approve = mutation({
       entity: "requests", entityId: args.requestId,
     });
     if (request.status !== "pending") throw new Error("Solicitação não está pendente. Verifique se já foi aprovada, rejeitada ou cancelada.");
+    assertUniqueApprovalItemIds(args.items);
 
     // ─── PHASE 1: Validate ALL items and calculate total reservation per product ───
     // Group by productId to handle multiple request items for the same product
