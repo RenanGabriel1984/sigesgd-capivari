@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
@@ -62,11 +63,15 @@ async function decorateInventory(ctx: any, inv: any) {
 }
 
 export const list = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
     await requireUser(ctx);
-    const inventories = await ctx.db.query("inventories").withIndex("by_date").order("desc").collect();
-    return Promise.all(inventories.map((inv) => decorateInventory(ctx, inv)));
+    const page = await ctx.db.query("inventories")
+      .withIndex("by_date")
+      .order("desc")
+      .paginate(args.paginationOpts);
+    const enriched = await Promise.all(page.page.map((inventory) => decorateInventory(ctx, inventory)));
+    return { ...page, page: enriched };
   },
 });
 
