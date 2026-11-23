@@ -62,7 +62,7 @@ describe("integração da classificação com entries.confirm", () => {
   });
 
   it("mantém também o ledger físico lote × armário na confirmação", () => {
-    expect(entries).toMatch(/await adjustLotLocationBalance\(ctx, \{\s*lotId,\s*productId: item\.productId,\s*locationId: item\.locationId,\s*delta: item\.quantity,\s*allowCreate: true,/);
+    expect(entries).toMatch(/await adjustLotLocationBalance\(ctx, \{\s*lotId,\s*productId: item\.productId,\s*locationId: item\.locationId,\s*delta: item\.quantity,\s*expectedQuantityBefore: 0,\s*allowCreate: true,/);
     expect(entries.indexOf("await adjustLotLocationBalance(ctx, {"))
       .toBeLessThan(entries.indexOf("// Update stock (increase physicalQuantity)"));
   });
