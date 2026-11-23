@@ -582,10 +582,14 @@ export const bootstrapSetPassword = internalMutation({
     const failedAttempts = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
-    if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined, lastAuditAt: undefined });
-    }
+      .collect();
+    await Promise.all(failedAttempts.map((record) =>
+      ctx.db.patch(record._id, {
+        attempts: 0,
+        lockedUntil: undefined,
+        lastAuditAt: undefined,
+      }),
+    ));
 
     // Audit
     await ctx.db.insert("auditLogs", {
@@ -1117,12 +1121,18 @@ export const bootstrapResetPassword = internalMutation({
     if (!email) throw new Error("E-mail é obrigatório");
     assertPasswordPolicy(args.newPassword);
 
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
-
-    if (!user) throw new Error(`Usuário não encontrado: ${email}`);
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
+    if (userResolution.status === "missing") {
+      throw new Error(`Usuário não encontrado: ${email}`);
+    }
+    if (userResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(userResolution.count));
+    }
+    const user = userResolution.record;
 
     // Safety: only allow reset for admin/stock_manager
     if (user.role !== "admin" && user.role !== "stock_manager") {
@@ -1132,10 +1142,17 @@ export const bootstrapResetPassword = internalMutation({
     const { hash, salt } = await hashPassword(args.newPassword);
 
     // Check if password record exists
-    const existingPw = await ctx.db
+    const existingPasswordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
+      .collect();
+    const passwordResolution = resolveUniqueRecord(existingPasswordRows);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(passwordResolution.count));
+    }
+    const existingPw = passwordResolution.status === "unique"
+      ? passwordResolution.record
+      : null;
 
     if (existingPw) {
       await ctx.db.patch(existingPw._id, {
