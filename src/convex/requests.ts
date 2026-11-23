@@ -415,7 +415,7 @@ export const approve = mutation({
       .collect();
     if (
       seenItems.size !== requestItems.length ||
-      requestItems.some((item) => !seenItems.has(item._id as string))
+      requestItems.some((item) => !seenItems.has(item._id))
     ) {
       throw new Error("A aprovação deve informar exatamente todos os itens da solicitação. Atualize a tela e tente novamente.");
     }
@@ -584,6 +584,11 @@ export const deliver = mutation({
     const requestItems = await ctx.db.query("requestItems")
       .withIndex("by_request", (q) => q.eq("requestId", args.requestId)).collect();
     const byId = new Map(requestItems.map((item) => [item._id, item] as const));
+    const getRequestItem = (itemId: Id<"requestItems">) => {
+      const item = byId.get(itemId);
+      if (!item) throw new Error("Item não pertence a esta solicitação.");
+      return item;
+    };
     const deliveredByItem = new Map<Id<"requestItems">, number>();
     const seen = new Set<string>();
     const seenSerialNumbers = new Set<string>();
@@ -738,7 +743,7 @@ export const deliver = mutation({
 
     const now = Date.now();
     for (const input of inputItems) {
-      const item = byId.get(input.itemId);
+      const item = getRequestItem(input.itemId);
       const stockRows = await ctx.db.query("stock")
         .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
       const stock = requireSingleValidGlobalStock(stockRows, String(item.productId));
@@ -881,7 +886,7 @@ export const deliver = mutation({
       reverseLogisticsConfirmed: args.reverseLogisticsConfirmed ?? undefined,
     });
     const deliveredAuditLines = await Promise.all(inputItems.map(async (input) => {
-      const item = byId.get(input.itemId);
+      const item = getRequestItem(input.itemId);
       const product = await ctx.db.get(item.productId);
       const area = item.areaId ? await ctx.db.get(item.areaId) : null;
       const location = item.sourceLocationId ? await ctx.db.get(item.sourceLocationId) : null;
@@ -1088,16 +1093,23 @@ export const listDeliveredPaginated = query({
     if (args.serialSearch?.trim()) assertShortTextLimits({ serialSearch: args.serialSearch });
 
     const source = ctx.db.query("requests");
-    const query = args.startDate !== undefined || args.endDate !== undefined
-      ? source.withIndex("by_status_deliveredAt", (q) => {
-          let range = q.eq("status", "delivered");
-          if (args.startDate !== undefined) range = range.gte("deliveredAt", args.startDate);
-          if (args.endDate !== undefined) range = range.lte("deliveredAt", args.endDate);
-          return range;
-        }).order("desc")
-      : source.withIndex("by_status", (q) => q.eq("status", "delivered")).order("desc");
-
-    const page = await query.paginate(args.paginationOpts);
+    const page = await (
+      args.startDate !== undefined && args.endDate !== undefined
+        ? source.withIndex("by_status_deliveredAt", (q) =>
+            q.eq("status", "delivered")
+              .gte("deliveredAt", args.startDate!)
+              .lte("deliveredAt", args.endDate!),
+          ).order("desc")
+        : args.startDate !== undefined
+          ? source.withIndex("by_status_deliveredAt", (q) =>
+              q.eq("status", "delivered").gte("deliveredAt", args.startDate!),
+            ).order("desc")
+          : args.endDate !== undefined
+            ? source.withIndex("by_status_deliveredAt", (q) =>
+                q.eq("status", "delivered").lte("deliveredAt", args.endDate!),
+              ).order("desc")
+            : source.withIndex("by_status", (q) => q.eq("status", "delivered")).order("desc")
+    ).paginate(args.paginationOpts);
     let scoped = page.page;
     if (!fullVisibility) scoped = scoped.filter((request) => request.requesterId === user._id);
     if (args.secretariaId) scoped = scoped.filter((request) => request.secretariaId === args.secretariaId);
