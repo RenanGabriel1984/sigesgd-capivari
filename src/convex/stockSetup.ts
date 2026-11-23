@@ -42,7 +42,7 @@ async function generateLotNumber(ctx: MutationCtx): Promise<string> {
     .query("lots")
     .withIndex("by_number", (q) => q.gte("lotNumber", prefix))
     .collect();
-  const maxSequence = existingLots.reduce((max: number, lot: any) => {
+  const maxSequence = existingLots.reduce((max: number, lot) => {
     if (!lot.lotNumber?.startsWith(prefix)) return max;
     const sequence = Number(lot.lotNumber.slice(prefix.length));
     return Number.isSafeInteger(sequence) && sequence > max ? sequence : max;
@@ -176,7 +176,7 @@ async function performInitialLoad(
   // ── Create entry header for the initial load ──
   const existingEntries = await ctx.db.query("entries").collect();
   const entryPrefix = `ENT-${year}-`;
-  const entrySequence = existingEntries.reduce((max: number, entry: any) => {
+  const entrySequence = existingEntries.reduce((max: number, entry) => {
     const match = String(entry.entryNumber ?? "").match(/^ENT-\d{4}-(\d+)$/);
     if (!match || !String(entry.entryNumber).startsWith(entryPrefix)) return max;
     const sequence = Number(match[1]);
@@ -547,8 +547,8 @@ export const productLocationSummary = query({
       ctx.db.query("stockByLocation").collect(),
       ctx.db.query("requestItemReservations").collect(),
     ]);
-    const reservationsByProduct = new Map<string, any[]>();
-    for (const reservation of allReservations as any[]) {
+    const reservationsByProduct = new Map<string, (typeof allReservations)[number][]>();
+    for (const reservation of allReservations) {
       const key = String(reservation.productId);
       const grouped = reservationsByProduct.get(key) ?? [];
       grouped.push(reservation);
@@ -565,11 +565,11 @@ export const productLocationSummary = query({
       const area = row.areaId ? await ctx.db.get(row.areaId) : null;
       const reservations = reservationsByProduct.get(String(row.productId)) ?? [];
       const reserved = reservations
-        .filter((reservation: any) =>
+        .filter((reservation) =>
           reservation.locationId === row.locationId &&
           reservation.areaId === (row.areaId ?? undefined)
         )
-        .reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0);
+        .reduce((sum: number, reservation) => sum + reservation.quantityRemaining, 0);
       const entries = byProduct.get(row.productId) ?? [];
       entries.push({
         locationId: row.locationId,
@@ -597,9 +597,9 @@ export const lotLocationBalanceIntegrity = internalQuery({
       ctx.db.query("stockByLocation").collect(),
       ctx.db.query("stock").collect(),
     ]);
-    const lotsById = new Map<string, any>(lots.map((lot) => [String(lot._id), lot] as const));
-    const balancesByLot = new Map<string, any[]>();
-    for (const row of balances as any[]) {
+    const lotsById = new Map<string, (typeof lots)[number]>(lots.map((lot) => [String(lot._id), lot] as const));
+    const balancesByLot = new Map<string, (typeof balances)[number][]>();
+    for (const row of balances) {
       const key = String(row.lotId);
       const list = balancesByLot.get(key) ?? [];
       list.push(row);
@@ -611,10 +611,10 @@ export const lotLocationBalanceIntegrity = internalQuery({
     let invalidBalances = 0;
     let invalidLotQuantities = 0;
     let mismatchedLotBalances = 0;
-    for (const lot of lots as any[]) {
+    for (const lot of lots) {
       if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0) invalidLotQuantities++;
     }
-    for (const row of balances as any[]) {
+    for (const row of balances) {
       const lot = lotsById.get(String(row.lotId));
       if (!lot) orphanBalances++;
       if (!Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0) invalidBalances++;
@@ -646,8 +646,8 @@ export const lotLocationBalanceIntegrity = internalQuery({
     const scopeKey = (productId: string, areaId: string | undefined, locationId: string) =>
       `${productId}::${areaId ?? ""}::${locationId}`;
     const lotTotalsByScope = new Map<string, number>();
-    const lotsByScope = new Map<string, any[]>();
-    for (const lot of lots as any[]) {
+    const lotsByScope = new Map<string, (typeof lots)[number][]>();
+    for (const lot of lots) {
       const resolvedLocationId = lot.locationId ?? resolvedLocationByLot.get(String(lot._id));
       if (!resolvedLocationId || !Number.isFinite(lot.quantityAvailable)) continue;
       const key = scopeKey(String(lot.productId), lot.areaId ? String(lot.areaId) : undefined, String(resolvedLocationId));
@@ -656,8 +656,8 @@ export const lotLocationBalanceIntegrity = internalQuery({
       scopedLots.push(lot);
       lotsByScope.set(key, scopedLots);
     }
-    const localRowsByScope = new Map<string, any[]>();
-    for (const row of localRows as any[]) {
+    const localRowsByScope = new Map<string, (typeof localRows)[number][]>();
+    for (const row of localRows) {
       const key = scopeKey(String(row.productId), row.areaId ? String(row.areaId) : undefined, String(row.locationId));
       const list = localRowsByScope.get(key) ?? [];
       list.push(row);
@@ -682,7 +682,7 @@ export const lotLocationBalanceIntegrity = internalQuery({
     for (const key of scopeKeys) {
       const rows = localRowsByScope.get(key) ?? [];
       if (rows.length > 1) duplicateLocalScopes++;
-      const localQuantity = rows.reduce((sum: number, row: any) => sum + Number(row.quantity), 0);
+      const localQuantity = rows.reduce((sum: number, row) => sum + Number(row.quantity), 0);
       const lotsQuantity = lotTotalsByScope.get(key) ?? 0;
       const hasInvalidLocalQuantity = rows.some((row) => !Number.isFinite(row.quantity) || row.quantity < 0);
       if (hasInvalidLocalQuantity || Math.abs(localQuantity - lotsQuantity) > 1e-9) {
@@ -692,10 +692,13 @@ export const lotLocationBalanceIntegrity = internalQuery({
         const productId = String(sample.productId);
         const areaId = sample.areaId ? String(sample.areaId) : null;
         const locationId = String(sample.locationId ?? resolvedLocationByLot.get(String(sample._id)) ?? sample.locationId);
-        const [product, area, location]: any[] = await Promise.all([
-          ctx.db.get(productId as any),
-          areaId ? ctx.db.get(areaId as any) : Promise.resolve(null),
-          locationId && locationId !== "undefined" ? ctx.db.get(locationId as any) : Promise.resolve(null),
+        const productDocId = productId as Id<"products">;
+        const areaDocId = areaId ? areaId as Id<"stockAreas"> : null;
+        const locationDocId = locationId && locationId !== "undefined" ? locationId as Id<"storageLocations"> : null;
+        const [product, area, location] = await Promise.all([
+          ctx.db.get(productId as Id<"products">),
+          areaId ? ctx.db.get(areaId as Id<"stockAreas">) : Promise.resolve(null),
+          locationId && locationId !== "undefined" ? ctx.db.get(locationId as Id<"storageLocations">) : Promise.resolve(null),
         ]);
         scopeMismatchDetails.push({
           productId,
@@ -729,7 +732,7 @@ export const lotLocationBalanceIntegrity = internalQuery({
     // Esta etapa é estritamente read-only; não corrige nem altera quantidades.
     const lotAreaTotalsByProductLocation = new Map<string, Map<string, number>>();
     const lotAreaIdsByProductLocation = new Map<string, Set<string>>();
-    for (const lot of lots as any[]) {
+    for (const lot of lots) {
       const locationId = lot.locationId ?? resolvedLocationByLot.get(String(lot._id));
       if (!locationId || !lot.areaId || !Number.isFinite(lot.quantityAvailable)) continue;
       const key = `${String(lot.productId)}::${String(locationId)}`;
@@ -741,8 +744,8 @@ export const lotLocationBalanceIntegrity = internalQuery({
       areaIds.add(areaId);
       lotAreaIdsByProductLocation.set(key, areaIds);
     }
-    const localRowsByProductLocation = new Map<string, any[]>();
-    for (const row of localRows as any[]) {
+    const localRowsByProductLocation = new Map<string, (typeof localRows)[number][]>();
+    for (const row of localRows) {
       const key = `${String(row.productId)}::${String(row.locationId)}`;
       const rows = localRowsByProductLocation.get(key) ?? [];
       rows.push(row);
@@ -780,7 +783,7 @@ export const lotLocationBalanceIntegrity = internalQuery({
       const [productId, locationId] = key.split("::");
       const areaIds = lotAreaIdsByProductLocation.get(key) ?? new Set<string>();
       const byArea = lotAreaTotalsByProductLocation.get(key) ?? new Map<string, number>();
-      const allLotsForScope = (lots as any[]).filter((lot) =>
+      const allLotsForScope = lots.filter((lot) =>
         String(lot.productId) === productId &&
         String(lot.locationId ?? resolvedLocationByLot.get(String(lot._id)) ?? "") === locationId &&
         Number(lot.quantityAvailable) > 0
@@ -814,9 +817,9 @@ export const lotLocationBalanceIntegrity = internalQuery({
         if (unclassifiedRows.some((row) => !Number.isFinite(row.quantity) || row.quantity < 0)) {
           reasons.push("quantidade_do_saldo_invalida");
         }
-        const [product, location]: any[] = await Promise.all([
-          ctx.db.get(productId as any),
-          ctx.db.get(locationId as any),
+        const [product, location] = await Promise.all([
+          ctx.db.get(productId as Id<"products">),
+          ctx.db.get(locationId as Id<"storageLocations">),
         ]);
         areaClassificationBlockedDetails.push({
           productId,
@@ -835,10 +838,10 @@ export const lotLocationBalanceIntegrity = internalQuery({
         });
         continue;
       }
-      const [product, location, area]: any[] = await Promise.all([
-        ctx.db.get(productId as any),
-        ctx.db.get(locationId as any),
-        ctx.db.get(onlyAreaId as any),
+      const [product, location, area] = await Promise.all([
+        ctx.db.get(productId as Id<"products">),
+        ctx.db.get(locationId as Id<"storageLocations">),
+        ctx.db.get(onlyAreaId as Id<"stockAreas">),
       ]);
       areaClassificationCandidates.push({
         productId,
@@ -856,12 +859,12 @@ export const lotLocationBalanceIntegrity = internalQuery({
     }
 
     const lotTotalsByProduct = new Map<string, number>();
-    for (const lot of lots as any[]) {
+    for (const lot of lots) {
       lotTotalsByProduct.set(String(lot.productId),
         (lotTotalsByProduct.get(String(lot.productId)) ?? 0) + Number(lot.quantityAvailable));
     }
-    const globalsByProduct = new Map<string, any[]>();
-    for (const row of globalRows as any[]) {
+    const globalsByProduct = new Map<string, (typeof globalRows)[number][]>();
+    for (const row of globalRows) {
       const key = String(row.productId);
       const list = globalsByProduct.get(key) ?? [];
       list.push(row);
@@ -882,7 +885,7 @@ export const lotLocationBalanceIntegrity = internalQuery({
       generatedAt: Date.now(),
       lotsWithLocation: lots.filter((lot) => !!lot.locationId).length,
       lotLocationBalanceRecords: balances.length,
-      lotLocationBalanceQuantity: balances.reduce((sum: number, row: any) => sum + Number(row.quantityAvailable), 0),
+      lotLocationBalanceQuantity: balances.reduce((sum: number, row) => sum + Number(row.quantityAvailable), 0),
       missingLotBalances,
       lotsMissingLocationMetadata,
       unmappedPositiveLots,
@@ -945,7 +948,7 @@ export const applyLegacyPrinterAreaClassification = internalMutation({
     ];
     if (expected.length !== 22) throw new Error("Lista autorizada inválida; nenhuma gravação realizada.");
 
-    const area: any = await ctx.db.get(areaId as any);
+    const area: any = await ctx.db.get(areaId as Id<"stockAreas">);
     if (!area || !area.active || area.name !== "Impressoras") {
       throw new Error("Área Impressoras ausente, inativa ou alterada; operação abortada.");
     }
@@ -1384,7 +1387,7 @@ export const applyLotLocationMetadataBackfill = internalMutation({
     const lotById = new Map<string, any>(lots.map((lot) => [String(lot._id), lot] as const));
     const locationById = new Map<string, any>(locations.map((location: any) => [String(location._id), location] as const));
     const rowsByLot = new Map<string, any[]>();
-    for (const row of balances as any[]) {
+    for (const row of balances) {
       const key = String(row.lotId);
       const current = rowsByLot.get(key) ?? [];
       current.push(row);
@@ -1415,7 +1418,7 @@ export const applyLotLocationMetadataBackfill = internalMutation({
         problems.push(`lote ${lot.lotNumber}: localização já preenchida diverge do saldo conciliado`);
       }
     }
-    for (const lot of lots as any[]) {
+    for (const lot of lots) {
       if (Number(lot.quantityAvailable) > 0 && !rowsByLot.has(String(lot._id))) {
         problems.push(`lote ${lot.lotNumber}: saldo positivo sem vínculo lote × armário`);
       }
@@ -1604,7 +1607,7 @@ export const quickExit = mutation({
       if (!lot) throw new Error("Lote desapareceu durante a saída.");
       const reservations = await ctx.db.query("requestItemReservations")
         .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
-      const reserved = reservations.reduce((sum: number, reservation: any) => sum + reservation.quantityRemaining, 0);
+      const reserved = reservations.reduce((sum: number, reservation) => sum + reservation.quantityRemaining, 0);
       const free = Math.max(0, lot.quantityAvailable - reserved);
       const consume = Math.min(free, remaining);
       if (consume <= 0) continue;
@@ -1857,7 +1860,7 @@ export const implementationStockStatus = query({
         .query("stockByLocation")
         .withIndex("by_product", (q) => q.eq("productId", productId as any))
         .collect();
-      const product = (await ctx.db.get(productId as any)) as {
+      const product = (await ctx.db.get(productId as Id<"products">)) as {
         name?: string;
       } | null;
       const byLocation = sblRows.reduce((sum, row) => sum + row.quantity, 0);
