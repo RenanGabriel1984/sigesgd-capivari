@@ -34,6 +34,19 @@ async function generateInventoryNumber(ctx: any): Promise<string> {
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
+function assertUniqueInventoryProductCounts(counts: Array<{ productId: unknown }>): void {
+  const seen = new Set<string>();
+  for (const count of counts) {
+    const productId = String(count.productId);
+    if (seen.has(productId)) {
+      throw new Error(
+        "O inventário contém mais de uma contagem para o mesmo produto. Regularize os registros duplicados antes de continuar.",
+      );
+    }
+    seen.add(productId);
+  }
+}
+
 async function decorateInventory(ctx: any, inv: any) {
   const responsible = await ctx.db.get(inv.responsibleUserId);
   const closedBy = inv.closedByUserId ? await ctx.db.get(inv.closedByUserId) : null;
@@ -276,6 +289,7 @@ export const startReview = mutation({
 
     // Validate all counts have been filled
     const counts = await ctx.db.query("inventoryCounts").withIndex("by_inventory", (q: any) => q.eq("inventoryId", args.inventoryId)).collect();
+    assertUniqueInventoryProductCounts(counts);
     const uncounted = counts.filter((c) => c.countedQuantity === null || c.countedQuantity === undefined);
     if (uncounted.length > 0) {
       throw new Error(`${uncounted.length} item(ns) ainda não foram contados. Registre a contagem de todos os itens antes de revisar.`);
@@ -320,6 +334,7 @@ export const close = mutation({
 
     const counts = await ctx.db.query("inventoryCounts")
       .withIndex("by_inventory", (q: any) => q.eq("inventoryId", args.inventoryId)).collect();
+    assertUniqueInventoryProductCounts(counts);
     const changedCounts = counts.filter((count: any) =>
       count.countedQuantity !== undefined &&
       count.countedQuantity !== null &&
