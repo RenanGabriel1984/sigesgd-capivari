@@ -97,7 +97,7 @@ export async function adjustLotLocationBalance(
     productId: any;
     locationId?: any;
     delta: number;
-    expectedQuantityBefore: number;
+    expectedQuantityBefore?: number;
     allowCreate?: boolean;
   },
 ): Promise<void> {
@@ -114,11 +114,13 @@ export async function adjustLotLocationBalance(
   // possuam o vínculo conciliado na tabela nova. Nesse caso, usa-se o vínculo.
   const locationId = input.locationId ?? rows[0]?.locationId;
   if (!locationId) return;
-  assertLotLocationBalanceMatchesExpected({
-    rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
-    lotId: String(input.lotId),
-    expectedQuantityBefore: input.expectedQuantityBefore,
-  });
+  if (input.expectedQuantityBefore !== undefined) {
+    assertLotLocationBalanceMatchesExpected({
+      rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
+      lotId: String(input.lotId),
+      expectedQuantityBefore: input.expectedQuantityBefore,
+    });
+  }
   const plan = planLotLocationBalanceChange({
     rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
     lotId: String(input.lotId),
