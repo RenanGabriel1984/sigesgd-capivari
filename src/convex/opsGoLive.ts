@@ -134,7 +134,7 @@ export const stampImplementationStock = internalMutation({
 
 export const registerGomaqNfe372043 = internalMutation({
   args: { confirm: v.literal("REGISTRAR-NF-372043") },
-  handler: async (ctx: any, _args: { confirm: "REGISTRAR-NF-372043" }) => {
+  handler: async (ctx: any) => {
     // ── 0. Admin de operação (responsável auditável) ──
     const admin = await ctx.db.get("jx70c3y841fp20pt5qfd5a5tw18dhhd8"); // Renan Gabriel (bootstrap admin)
     if (!admin || admin.role !== "admin") throw new Error("Admin de operação não encontrado");
