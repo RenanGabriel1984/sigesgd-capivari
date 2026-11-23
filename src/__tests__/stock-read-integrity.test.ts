@@ -178,6 +178,7 @@ describe("stock read integrity", () => {
       "Mouse",
     );
     expect(result.consistent).toBe(false);
+    expect(result.locationQuantity).toBe(0);
     expect(result.issues.some((issue) => /mistura saldo legado sem área com buckets por área/.test(issue))).toBe(true);
   });
 
