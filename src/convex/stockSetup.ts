@@ -1500,7 +1500,7 @@ export const quickExit = mutation({
       throw new Error("A área/subestoque e o local físico precisam estar ativos.");
     }
     const stockRows = await ctx.db.query("stock")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+      .withIndex("by_product", (q) => q.eq("productId", args.productId)).collect();
     if (stockRows.length !== 1) {
       throw new Error(stockRows.length === 0
         ? "Produto não possui registro de estoque"
@@ -1518,11 +1518,11 @@ export const quickExit = mutation({
     }
 
     const existingReservations = await ctx.db.query("requestItemReservations")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+      .withIndex("by_product", (q) => q.eq("productId", args.productId)).collect();
     const areaReservedGlobal = existingReservations.reduce(
-      (sum: number, reservation: any) => sum + reservation.quantityRemaining, 0
+      (sum: number, reservation) => sum + reservation.quantityRemaining, 0
     );
-    if (existingReservations.some((reservation: any) =>
+    if (existingReservations.some((reservation) =>
       !Number.isFinite(reservation.quantityRemaining) || reservation.quantityRemaining < 0
     )) {
       throw new Error("Há reserva de solicitação com quantidade inválida. Regularize antes da saída rápida.");
@@ -1541,7 +1541,7 @@ export const quickExit = mutation({
     }
 
     const locationRows = await ctx.db.query("stockByLocation")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+      .withIndex("by_product", (q) => q.eq("productId", args.productId)).collect();
     const matchingLocationRows = locationRows.filter((row) =>
       row.locationId === args.locationId && row.areaId === args.areaId
     );
@@ -1554,14 +1554,14 @@ export const quickExit = mutation({
     }
 
     const productLots = await ctx.db.query("lots")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect();
+      .withIndex("by_product", (q) => q.eq("productId", args.productId)).collect();
     if (productLots.some((lot) => lot.materialType === "permanent")) {
       throw new Error("Material permanente deve ser movimentado pelo cadastro individual do patrimônio, não por saída agregada.");
     }
     const sourceLots = productLots.filter((lot) =>
       lot.areaId === args.areaId && lot.locationId === args.locationId
     );
-    const sourceLotTotal = sourceLots.reduce((sum: number, lot: any) => {
+    const sourceLotTotal = sourceLots.reduce((sum: number, lot) => {
       if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0) {
         throw new Error(`O lote ${lot.lotNumber} possui saldo inválido. Regularize antes da saída rápida.`);
       }
@@ -1575,8 +1575,8 @@ export const quickExit = mutation({
     }
 
     const reservedByLot = new Map<string, number>();
-    for (const reservation of existingReservations as any[]) {
-      const lot = productLots.find((candidate: any) => candidate._id === reservation.lotId);
+    for (const reservation of existingReservations) {
+      const lot = productLots.find((candidate) => candidate._id === reservation.lotId);
       if (!lot || reservation.productId !== args.productId ||
           reservation.areaId !== lot.areaId || reservation.locationId !== lot.locationId) {
         throw new Error("Há reserva sem correspondência válida de produto, lote, área ou local.");
@@ -1585,7 +1585,7 @@ export const quickExit = mutation({
       reservedByLot.set(String(lot._id), (reservedByLot.get(String(lot._id)) ?? 0) + remaining);
     }
 
-    const candidates = [];
+    const candidates: Array<{ lot: (typeof sourceLots)[number]; free: number }> = [];
     for (const lot of sourceLots) {
       if (!lot.active) continue;
       const reserved = reservedByLot.get(String(lot._id)) ?? 0;
@@ -1595,18 +1595,18 @@ export const quickExit = mutation({
       }
       candidates.push({ lot, free: Math.max(0, free) });
     }
-    candidates.sort((a: any,b: any) =>
+    candidates.sort((a,b) =>
       a.lot.receivedAt - b.lot.receivedAt || a.lot.lotNumber.localeCompare(b.lot.lotNumber)
     );
 
     let remaining = args.quantity;
-    const consumedLots: Array<{ lotId: string; quantity: number }> = [];
+    const consumedLots: Array<{ lotId: Id<"lots">; quantity: number }> = [];
     for (const candidate of candidates) {
       if (remaining <= 0) break;
       const lot = await ctx.db.get(candidate.lot._id);
       if (!lot) throw new Error("Lote desapareceu durante a saída.");
       const reservations = await ctx.db.query("requestItemReservations")
-        .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id)).collect();
+        .withIndex("by_lot", (q) => q.eq("lotId", lot._id)).collect();
       const reserved = reservations.reduce((sum: number, reservation) => sum + reservation.quantityRemaining, 0);
       const free = Math.max(0, lot.quantityAvailable - reserved);
       const consume = Math.min(free, remaining);
@@ -1617,7 +1617,7 @@ export const quickExit = mutation({
         lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
         delta: -consume, expectedQuantityBefore: Number(lot.quantityAvailable),
       });
-      consumedLots.push({ lotId: lot._id as string, quantity: consume });
+      consumedLots.push({ lotId: lot._id, quantity: consume });
       remaining -= consume;
     }
     if (remaining > 0) {
@@ -1631,7 +1631,7 @@ export const quickExit = mutation({
     await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
     await ctx.db.patch(locationStock._id, { quantity: locationStock.quantity - args.quantity });
 
-    const consumedLotId = resolveConsumedLotId(consumedLots as LotConsumption[]);
+    const consumedLotId = resolveConsumedLotId(consumedLots);
     const lotInfo = formatConsumedLots(consumedLots, (id) =>
       productLots.find((lot) => lot._id === id)?.lotNumber
     );
@@ -1656,7 +1656,7 @@ export const quickExit = mutation({
     for (const consumed of consumedLots) {
       await ctx.db.insert("stockMovementLots", {
         movementId,
-        lotId: consumed.lotId as any,
+        lotId: consumed.lotId,
         quantity: consumed.quantity,
         areaId: args.areaId,
         locationId: args.locationId,
