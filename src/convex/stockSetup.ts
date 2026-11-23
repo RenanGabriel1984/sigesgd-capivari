@@ -6,7 +6,6 @@ import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import {
   resolveConsumedLotId,
   formatConsumedLots,
-  type LotConsumption,
 } from "../lib/stock-consumption";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -1434,6 +1433,9 @@ export const applyLotLocationMetadataBackfill = internalMutation({
     const now = Date.now();
     for (const [lotId, rows] of rowsByLot) {
       const lot = lotById.get(lotId);
+      if (!lot) {
+        throw new Error(`Lote ${lotId} deixou de estar disponível durante o backfill.`);
+      }
       const row = rows[0];
       if (lot.locationId === row.locationId) {
         skipped++;
@@ -1858,7 +1860,7 @@ export const implementationStockStatus = query({
         .collect();
       const sblRows = await ctx.db
         .query("stockByLocation")
-        .withIndex("by_product", (q) => q.eq("productId", productId as any))
+        .withIndex("by_product", (q) => q.eq("productId", productId))
         .collect();
       const product = await ctx.db.get(productId);
       const byLocation = sblRows.reduce((sum, row) => sum + row.quantity, 0);
