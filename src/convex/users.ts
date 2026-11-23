@@ -1,5 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { query, mutation, internalMutation, QueryCtx } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
 import { requirePermission } from "./rbac";
@@ -9,13 +10,13 @@ import {
   resolveUniqueRecord,
 } from "../lib/credential-integrity";
 
-async function requireUser(ctx: any) {
+async function requireUser(ctx: QueryCtx | MutationCtx) {
   // Compatibilidade: wrapper fino sobre a camada central src/lib/rbac.ts
   const auth = await requirePermission(ctx, "users.view");
   return auth;
 }
 
-async function requireUserManager(ctx: any) {
+async function requireUserManager(ctx: MutationCtx) {
   // Admin e secretary têm o mesmo conjunto de permissões na matriz central.
   // A autorização deve seguir users.manage, sem restringir indevidamente ao
   // rótulo literal "admin".
@@ -135,8 +136,8 @@ export const listUserOptions = query({
     await requirePermission(ctx, "requests.view");
     const users = await ctx.db.query("users").collect();
     return users
-      .filter((u: any) => u.active !== false && !!u.role)
-      .map((u: any) => ({ _id: u._id as string, name: (u.name ?? null) as string | null, role: (u.role ?? null) as string | null, active: (u.active ?? true) as boolean }));
+      .filter((u) => u.active !== false && !!u.role)
+      .map((u) => ({ _id: u._id, name: u.name ?? null, role: u.role ?? null, active: u.active ?? true }));
   },
 });
 
@@ -162,7 +163,7 @@ export const createUserWithPassword = mutation({
       throw new Error("A senha temporária deve ter entre 8 e 200 caracteres.");
     }
     const existingRows = await ctx.db.query("users")
-      .withIndex("email", (q: any) => q.eq("email", email))
+      .withIndex("email", (q) => q.eq("email", email))
       .collect();
     const existing = resolveUniqueRecord(existingRows);
     if (existing.status === "ambiguous") {
@@ -284,11 +285,11 @@ export const updateUser = mutation({
       (updates.active === false || (updates.role !== undefined && !remainsUserManager));
     if (removesActiveAdmin) {
       const [admins, secretaries] = await Promise.all([
-        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect(),
-        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "secretary")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "admin")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "secretary")).collect(),
       ]);
       const activeUserManagers = [...admins, ...secretaries]
-        .filter((manager: any) => manager.active !== false);
+        .filter((manager) => manager.active !== false);
       if (activeUserManagers.length <= 1) {
         throw new Error("Não é possível desativar ou rebaixar o último administrador/secretário com acesso integral");
       }
