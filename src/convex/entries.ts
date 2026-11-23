@@ -1212,7 +1212,7 @@ export const setUnits = mutation({
     const items = await ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", args.entryId)).collect();
     const itemIds = new Set(items.map((item) => item._id));
     for (const u of args.units) {
-      if (!itemIds.has(u.entryItemId as string)) {
+      if (!itemIds.has(u.entryItemId)) {
         throw new Error("Item informado não pertence a esta entrada");
       }
     }
