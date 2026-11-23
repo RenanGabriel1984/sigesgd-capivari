@@ -186,3 +186,120 @@ export async function setLotLocationBalanceLocation(
     });
   }
 }
+
+export type LotLocationIntegrityLot = {
+  _id: string;
+  productId: string;
+  quantityAvailable: number;
+  locationId?: string | null;
+  lotNumber?: string;
+  active?: boolean;
+};
+
+export type LotLocationIntegrityRow = LotLocationBalanceRow & {
+  _id: string;
+};
+
+export type LotLocationBalanceIntegrity = {
+  consistent: boolean;
+  fullyReconciled: boolean;
+  checkedLots: number;
+  checkedRows: number;
+  matchedLots: number;
+  issues: string[];
+  limitations: string[];
+};
+
+/**
+ * Concilia o saldo atual de cada lote com seu vínculo derivado lote × local.
+ * Não infere localização: um lote positivo sem locationId e sem vínculo
+ * explícito permanece como limitação a ser regularizada.
+ */
+export function inspectLotLocationBalances(
+  lots: readonly LotLocationIntegrityLot[],
+  rows: readonly LotLocationIntegrityRow[],
+): LotLocationBalanceIntegrity {
+  const issues: string[] = [];
+  const limitations: string[] = [];
+  const lotsById = new Map<string, LotLocationIntegrityLot>();
+  for (const lot of lots) {
+    lotsById.set(String(lot._id), lot);
+  }
+
+  const rowsByLot = new Map<string, LotLocationIntegrityRow[]>();
+  for (const row of rows) {
+    const lotId = String(row.lotId);
+    const group = rowsByLot.get(lotId) ?? [];
+    group.push(row);
+    rowsByLot.set(lotId, group);
+
+    if (!Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0) {
+      issues.push(`O saldo lote × local do registro ${row._id} é inválido.`);
+    }
+    if (!row.locationId) {
+      issues.push(`O saldo lote × local do registro ${row._id} não possui localização.`);
+    }
+    if (!lotsById.has(lotId)) {
+      issues.push(`O vínculo lote × local ${row._id} aponta para lote inexistente (${lotId}).`);
+    }
+  }
+
+  let matchedLots = 0;
+  for (const lot of lots) {
+    const lotId = String(lot._id);
+    const lotNumber = lot.lotNumber ?? lotId;
+    const quantity = lot.quantityAvailable;
+    const matchingRows = rowsByLot.get(lotId) ?? [];
+
+    if (!Number.isFinite(quantity) || quantity < 0) {
+      issues.push(`O lote ${lotNumber} possui saldo inválido.`);
+      continue;
+    }
+    if (lot.active === false && quantity > 1e-9) {
+      issues.push(`O lote ${lotNumber} está inativo com saldo positivo.`);
+    }
+    if (matchingRows.length > 1) {
+      issues.push(`O lote ${lotNumber} possui vínculos lote × local duplicados.`);
+      continue;
+    }
+
+    const balance = matchingRows[0];
+    if (!balance) {
+      if (quantity > 1e-9) {
+        if (lot.locationId) {
+          issues.push(`O lote ${lotNumber} possui saldo positivo, mas não possui vínculo lote × local.`);
+        } else {
+          limitations.push(`O lote ${lotNumber} possui saldo positivo sem localização atual explícita nem vínculo lote × local.`);
+        }
+      }
+      continue;
+    }
+
+    if (String(balance.productId) !== String(lot.productId)) {
+      issues.push(`O vínculo lote × local do lote ${lotNumber} aponta para outro produto.`);
+    }
+    if (lot.locationId && String(balance.locationId) !== String(lot.locationId)) {
+      issues.push(`A localização do vínculo lote × local diverge da localização registrada no lote ${lotNumber}.`);
+    }
+    if (
+      Number.isFinite(balance.quantityAvailable) &&
+      Math.abs(balance.quantityAvailable - quantity) > 1e-9
+    ) {
+      issues.push(`O saldo lote × local diverge do saldo atual do lote ${lotNumber}.`);
+    }
+    matchedLots += 1;
+  }
+
+  const uniqueIssues = [...new Set(issues)];
+  const uniqueLimitations = [...new Set(limitations)];
+  return {
+    consistent: uniqueIssues.length === 0,
+    fullyReconciled: uniqueIssues.length === 0 && uniqueLimitations.length === 0 &&
+      matchedLots === lots.filter((lot) => Number.isFinite(lot.quantityAvailable) && lot.quantityAvailable > 1e-9).length,
+    checkedLots: lots.length,
+    checkedRows: rows.length,
+    matchedLots,
+    issues: uniqueIssues,
+    limitations: uniqueLimitations,
+  };
+}
