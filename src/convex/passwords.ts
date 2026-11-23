@@ -348,8 +348,6 @@ export const verifyCredentials = internalQuery({
     // TODOS os caminhos de falha devolvem EXATAMENTE a mesma mensagem, com a
     // mesma forma. O chamador não consegue distinguir "e-mail não existe",
     // "usuário inativo", "sem senha", "sem perfil de acesso" ou "senha errada".
-    if (!user) return await rejectCredentials(args.password);
-
     // Check if user is active
     if (user.active === false) {
       return await rejectCredentials(args.password);
