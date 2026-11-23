@@ -1,9 +1,11 @@
 import { query } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 
-async function requireUser(ctx: any) {
+async function requireUser(ctx: QueryCtx) {
   // RBAC central: auditoria é restrita a administração.
   return requirePermission(ctx, "audit.view");
 }
@@ -31,7 +33,7 @@ function validateDateRange(startDate?: number, endDate?: number): void {
   }
 }
 
-async function attachMinimalUser(ctx: any, logs: any[]) {
+async function attachMinimalUser(ctx: QueryCtx, logs: Doc<"auditLogs">[]) {
   return Promise.all(
     logs.map(async (log) => {
       const user = log.userId ? await ctx.db.get(log.userId) : null;
@@ -109,19 +111,19 @@ export const listFiltered = query({
     // after a fixed over-fetch window.
     if (args.userId) {
       orderedQuery = base
-        .withIndex("by_user", (q: any) => q.eq("userId", args.userId))
+        .withIndex("by_user", (q) => q.eq("userId", args.userId))
         .order("desc");
     } else if (args.action) {
       orderedQuery = base
-        .withIndex("by_action", (q: any) => q.eq("action", args.action))
+        .withIndex("by_action", (q) => q.eq("action", args.action))
         .order("desc");
     } else if (args.entity) {
       orderedQuery = base
-        .withIndex("by_entity", (q: any) => q.eq("entity", args.entity))
+        .withIndex("by_entity", (q) => q.eq("entity", args.entity))
         .order("desc");
     } else {
       orderedQuery = base
-        .withIndex("by_timestamp", (index: any) => {
+        .withIndex("by_timestamp", (index) => {
           let range = index;
           if (args.startDate !== undefined) range = range.gte("timestamp", args.startDate);
           if (args.endDate !== undefined) range = range.lte("timestamp", args.endDate);
@@ -135,14 +137,14 @@ export const listFiltered = query({
 
     // Apply every supplied filter independently. In particular, action +
     // entity + user + date combinations must all be honored simultaneously.
-    if (args.userId) filtered = filtered.filter((log: any) => log.userId === args.userId);
-    if (args.action) filtered = filtered.filter((log: any) => log.action === args.action);
-    if (args.entity) filtered = filtered.filter((log: any) => log.entity === args.entity);
+    if (args.userId) filtered = filtered.filter((log) => log.userId === args.userId);
+    if (args.action) filtered = filtered.filter((log) => log.action === args.action);
+    if (args.entity) filtered = filtered.filter((log) => log.entity === args.entity);
     if (args.startDate !== undefined) {
-      filtered = filtered.filter((log: any) => log.timestamp >= args.startDate!);
+      filtered = filtered.filter((log) => log.timestamp >= args.startDate!);
     }
     if (args.endDate !== undefined) {
-      filtered = filtered.filter((log: any) => log.timestamp <= args.endDate!);
+      filtered = filtered.filter((log) => log.timestamp <= args.endDate!);
     }
 
     return {
