@@ -51,7 +51,7 @@ describe("password management rejects ambiguous credentials", () => {
     for (const mutationName of ["changePassword", "adminResetPassword", "forceChangePassword", "bootstrapResetPassword"]) {
       const start = source.indexOf(`export const ${mutationName} = mutation({`);
       expect(start, `${mutationName} mutation exists`).toBeGreaterThan(-1);
-      const nextExport = source.indexOf("\\nexport const ", start + 1);
+      const nextExport = source.indexOf("\nexport const ", start + 1);
       const block = source.slice(start, nextExport === -1 ? source.length : nextExport);
       expect(block).toContain(".collect()");
       expect(block).toContain('passwordResolution.status === "ambiguous"');
