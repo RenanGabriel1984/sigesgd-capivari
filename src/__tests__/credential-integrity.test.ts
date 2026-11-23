@@ -48,7 +48,7 @@ describe("password management rejects ambiguous credentials", () => {
     const { readFileSync } = await import("node:fs");
     const { resolve } = await import("node:path");
     const source = readFileSync(resolve(__dirname, "../convex/passwords.ts"), "utf8");
-    for (const mutationName of ["changePassword", "adminResetPassword", "forceChangePassword", "bootstrapResetPassword"]) {
+    for (const mutationName of ["changePassword", "adminResetPassword", "forceChangePassword"]) {
       const start = source.indexOf(`export const ${mutationName} = mutation({`);
       expect(start, `${mutationName} mutation exists`).toBeGreaterThan(-1);
       const nextExport = source.indexOf("\nexport const ", start + 1);
@@ -56,6 +56,13 @@ describe("password management rejects ambiguous credentials", () => {
       expect(block).toContain(".collect()");
       expect(block).toContain('passwordResolution.status === "ambiguous"');
     }
+
+    const bootstrapStart = source.indexOf("export const bootstrapResetPassword = internalMutation({");
+    expect(bootstrapStart).toBeGreaterThan(-1);
+    const bootstrapEnd = source.indexOf("\\nexport const ", bootstrapStart + 1);
+    const bootstrapBlock = source.slice(bootstrapStart, bootstrapEnd === -1 ? source.length : bootstrapEnd);
+    expect(bootstrapBlock).toContain(".collect()");
+    expect(bootstrapBlock).toContain('passwordResolution.status === "ambiguous"');
   });
 });
 
