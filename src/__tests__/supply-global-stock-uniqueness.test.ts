@@ -21,15 +21,14 @@ describe("integridade do estoque global nos suprimentos de impressão", () => {
       "async function readSupplyAreaLedger(",
       "async function changeSupplyLocationQuantity(",
     );
-    expect(ledger).toContain('.withIndex("by_product", (q: any) => q.eq("productId", productId)).collect()');
-    expect(ledger).toContain("getOptionalSingleValidGlobalStock<SupplyGlobalStockRow>(");
-    expect(ledger).toContain("stockRows as SupplyGlobalStockRow[]");
+    expect(ledger).toContain('.withIndex("by_product", (q) => q.eq("productId", productId)).collect()');
+    expect(ledger).toContain("getOptionalSingleValidGlobalStock(stockRows, String(productId))");
     expect(ledger).toContain("Number.isFinite(Number(lot.quantityAvailable))");
     expect(ledger).toContain("Number.isFinite(Number(row.quantity))");
     expect(ledger).toContain("reservation.areaId !== lot.areaId");
     expect(ledger).toContain("reservation.locationId !== lot.locationId");
     expect(ledger).toContain("nextReserved > Number(lot.quantityAvailable)");
-    expect(ledger).not.toContain('.withIndex("by_product", (q: any) => q.eq("productId", productId)).first()');
+    expect(ledger).not.toContain('.withIndex("by_product", (q) => q.eq("productId", productId)).first()');
   });
 
   it("painel não sobrescreve duplicidades globais pela ordem de leitura", () => {
@@ -59,9 +58,8 @@ describe("integridade do estoque global nos suprimentos de impressão", () => {
     expect(preview).toContain(".collect()");
     expect(preview).toContain("closedMembers.length !== 1");
     expect(preview).toContain("looseMembers.length !== 1");
-    expect(preview).toContain("getOptionalSingleValidGlobalStock<SupplyGlobalStockRow>(");
-    expect(preview).toContain("rows as SupplyGlobalStockRow[]");
-    expect(preview).not.toContain('.withIndex("by_product", (q: any) => q.eq("productId", productId)).first()');
+    expect(preview).toContain("getOptionalSingleValidGlobalStock(rows, productName)");
+    expect(preview).not.toContain('.withIndex("by_product", (q) => q.eq("productId", productId)).first()');
   });
 
   it("retirada por família exige exatamente um produto fechado e um avulso", () => {
