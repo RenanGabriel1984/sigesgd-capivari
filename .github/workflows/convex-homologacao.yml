@@ -4,9 +4,9 @@ name: Convex — publicar funções em HOMOLOGAÇÃO
 # R32.4 — Publicação MANUAL das funções Convex no ambiente de homologação.
 #
 # DESTINO ÚNICO: tame-alligator-797.convex.cloud
-# (projeto sigesgd-capivari-homologacao). Este arquivo NÃO publica no projeto
-# principal: savory-sockeye-292 é o slot Production; first-herring-264 é a base
-# operacional atual carregada pelo Freebuff (embora classificada como Development).
+# (projeto sigesgd-capivari-homologacao). Este arquivo NÃO publica no backend
+# operacional oficial first-herring-264, que contém os registros do estoque usados
+# pela Secretaria. O rótulo Development no painel não altera essa condição operacional.
 # Também são proibidos os Previews first-starling-943 e brilliant-bullfrog-982.
 #
 # Por que ele vive na `main`: o GitHub só oferece "Run workflow"
@@ -80,7 +80,7 @@ jobs:
       - name: Checkout (sem credenciais persistidas)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: codex/stabilizacao-seguranca
+          ref: main
           persist-credentials: false
 
       - name: Node 22 (CLI do Convex)
