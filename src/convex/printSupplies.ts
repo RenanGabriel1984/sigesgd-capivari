@@ -1040,7 +1040,7 @@ export const withdrawFamily = mutation({
 
     let closedConsumed: SupplyConsumedLot[] = [];
     let looseConsumed: SupplyConsumedLot[] = [];
-    let reclassifiedLots: SupplyConsumedLot[] = [];
+    const reclassifiedLots: SupplyConsumedLot[] = [];
     let openedUnits = 0;
 
     if (closedPacksToConsume > 0) {
