@@ -110,7 +110,7 @@ describe("gestão de usuários — autorização e último administrador ativo",
 
   it("permite à secretaria criar usuários porque users.manage é a regra central", async () => {
     const handlers = await loadUsers();
-    const createUser = handlers.get("mutation:email,name,organizationId,role");
+    const createUser = handlers.get("mutation:email,name,organizationId,role,temporaryPassword");
     expect(createUser).toBeTypeOf("function");
 
     const ctx = usersContext([
