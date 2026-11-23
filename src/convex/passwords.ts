@@ -1,6 +1,7 @@
 import { getAuthSessionId, invalidateSessions } from "@convex-dev/auth/server";
 import { requirePermission } from "./rbac";
 import { mutation, internalQuery, internalMutation, internalAction } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword, verifyPassword, nextResetAttempt, verifyResetCode, isValidRecoveryEmail } from "./auth/passwords";
 import { internal } from "./_generated/api";
@@ -46,7 +47,7 @@ function assertPasswordPolicy(password: string): void {
   }
 }
 
-async function requireUser(ctx: any) {
+async function requireUser(ctx: MutationCtx) {
   // Hardening B-01: a gestão da PRÓPRIA senha também exige um cadastro SIGESGD
   // válido (não anônimo, ativo, com `role` reconhecido). `settings.view` está
   // presente em todos os cinco perfis — a checagem aqui é de IDENTIDADE, não de
@@ -54,15 +55,15 @@ async function requireUser(ctx: any) {
   return requirePermission(ctx, "settings.view", { entity: "passwords" });
 }
 
-async function requireAdmin(ctx: any) {
+async function requireAdmin(ctx: MutationCtx) {
   // RBAC central: operações administrativas de senha = gestão de usuários.
   return requirePermission(ctx, "users.manage", { entity: "passwords" });
 }
 /** Invalida OTPs pendentes quando a credencial ou o acesso muda. */
-async function invalidatePendingPasswordResets(ctx: any, userId: Id<"users">): Promise<void> {
+async function invalidatePendingPasswordResets(ctx: MutationCtx, userId: Id<"users">): Promise<void> {
   const resets = await ctx.db
     .query("passwordResets")
-    .withIndex("by_user", (q: any) => q.eq("userId", userId))
+    .withIndex("by_user", (q) => q.eq("userId", userId))
     .collect();
   const now = Date.now();
   for (const reset of resets) {
