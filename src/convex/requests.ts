@@ -375,11 +375,18 @@ export const deliver = mutation({
     await requirePermission(ctx, "requests.deliver", { entity: "requests", entityId: args.requestId });
 
     // Verify password for electronic signature
-    const passwordRecord = await ctx.db
+    const passwordRecords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q: any) => q.eq("userId", userId))
-      .first();
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+      .collect();
+    if (passwordRecords.length !== 1) {
+      throw new Error(
+        passwordRecords.length === 0
+          ? "Senha não configurada. Contate o administrador."
+          : "Credenciais duplicadas. Contate o administrador para regularizar o acesso.",
+      );
+    }
+    const passwordRecord = passwordRecords[0];
     const passwordValid = await verifyPassword(args.confirmationPassword, passwordRecord.passwordHash, passwordRecord.salt);
     if (!passwordValid) throw new Error("Senha de confirmação incorreta");
 
