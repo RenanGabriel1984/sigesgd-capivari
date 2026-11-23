@@ -59,3 +59,38 @@ describe("integração da proteção contra itens duplicados", () => {
     expect(firstWrite).toBeGreaterThan(guard);
   });
 });
+
+
+describe("ajuste de estoque em entrega parcial concluída", () => {
+  it("baixa do físico somente o entregue e libera toda a reserva aprovada", async () => {
+    const { getDeliveryStockAdjustment } = await import("../lib/request-approval-validation");
+    expect(getDeliveryStockAdjustment(10, 7)).toEqual({
+      physicalToRemove: 7,
+      reservedToRelease: 10,
+      unusedReservation: 3,
+    });
+  });
+
+  it("não permite quantidade entregue maior que a aprovada, zero ou não finita", async () => {
+    const { getDeliveryStockAdjustment } = await import("../lib/request-approval-validation");
+    expect(() => getDeliveryStockAdjustment(10, 11)).toThrow(/não pode exceder/i);
+    expect(() => getDeliveryStockAdjustment(10, 0)).toThrow(/maior que zero/i);
+    expect(() => getDeliveryStockAdjustment(10, Number.NaN)).toThrow(/maior que zero/i);
+  });
+
+  it("exige que todas as linhas aprovadas sejam informadas, sem duplicidade", async () => {
+    const { assertCompleteDeliveryItemIds } = await import("../lib/request-approval-validation");
+    expect(() => assertCompleteDeliveryItemIds(
+      [{ itemId: "a" }, { itemId: "b" }],
+      [{ itemId: "a" }, { itemId: "b" }],
+    )).not.toThrow();
+    expect(() => assertCompleteDeliveryItemIds(
+      [{ itemId: "a" }, { itemId: "b" }],
+      [{ itemId: "a" }],
+    )).toThrow(/todas as linhas aprovadas/i);
+    expect(() => assertCompleteDeliveryItemIds(
+      [{ itemId: "a" }],
+      [{ itemId: "a" }, { itemId: "a" }],
+    )).toThrow(/mesma linha/i);
+  });
+});
