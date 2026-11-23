@@ -20,6 +20,7 @@
  *  - FUNÇÃO INTERNA: sem rota pública, não substitui a UI de importação.
  */
 import { internalMutation } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import {
@@ -32,7 +33,7 @@ const GOMAQ_ACCESS_KEY = "35260961457941000143550010003720431466669127";
 const GOMAQ_CNPJ = "61457941000143";
 const GOMAQ_LEGAL_NAME = "Gomaq Máquinas para Escritório Ltda";
 const GOMAQ_TRADE_NAME = "Gomaq";
-const LOCATION_ARMARIO_TI_02 = "n576x4v2v08tyzvzef21qk3m8h8e5y2f"; // Armário TI 02
+const LOCATION_ARMARIO_TI_02 = "n576x4v2v08tyzvzef21qk3m8h8e5y2f" as Id<"storageLocations">; // Armário TI 02
 const CATEGORY_SUPRIMENTOS = "Suprimentos de Impressão";
 
 /** Itens da NF-e 372043 (quantidade EXATAMENTE como na NF — sem conversão). */
@@ -272,7 +273,7 @@ export const registerGomaqNfe372043 = internalMutation({
 
       const lotId = await ctx.db.insert("lots", {
         lotNumber,
-        productId: r.productId,
+        productId: r.productId as Id<"products">,
         entryId,
         brand: r.brand,
         model: r.model,
