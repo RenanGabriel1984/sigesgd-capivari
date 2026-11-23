@@ -8,6 +8,7 @@ import { internalMutation, internalQuery, mutation, query } from "./_generated/s
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { buildLotLocationMigrationPlan } from "../lib/lot-location-migration";
+import { buildHistoricalAreaClassificationPlan } from "../lib/stock-area-classification";
 import { resolveWithdrawalLocation, consumeLotLocationStock, recordLotMovementAllocations } from "./lotLocationLedger";
 import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 import { v } from "convex/values";
@@ -986,6 +987,7 @@ export const stockDimensionDiagnostics = query({
         return {
           lotId: String(lot._id),
           lotNumber: lot.lotNumber,
+          productName: product.name,
           areaId: lot.areaId ? String(lot.areaId) : null,
           areaName: lot.areaId ? ((areaById.get(String(lot.areaId)) as any)?.name ?? "Área não encontrada") : null,
           quantityReceived: lot.quantityReceived,
@@ -1087,7 +1089,13 @@ export const stockDimensionDiagnostics = query({
       return acc;
     }, {});
 
+    const areaClassification = buildHistoricalAreaClassificationPlan(
+      productsResult.flatMap((product) => product.lots),
+      allAreas.map((area) => ({ areaId: String(area._id), name: area.name, active: area.active })),
+    );
+
     return {
+      areaClassification,
       generatedAt: Date.now(),
       readOnly: true,
       totals: {
@@ -1654,7 +1662,26 @@ export const applyLotLocationBalancesMigration = internalMutation({
   },
   handler: async (ctx) => {
     const report = await ctx.runQuery(internal.stockSetup.lotLocationReadiness, {});
-    const plan = buildLotLocationMigrationPlan(report as unknown as Parameters<typeof buildLotLocationMigrationPlan>[0]);
+    const areaPlan = report.areaClassification;
+    if (areaPlan.blockers.length > 0) {
+      throw new Error(
+        `Classificação histórica abortada: ${areaPlan.blockers.length} lote(s) sem evidência inequívoca. Primeiro bloqueio: ${areaPlan.blockers[0].lotNumber} — ${areaPlan.blockers[0].reason}`,
+      );
+    }
+    for (const row of areaPlan.patches) {
+      await ctx.db.patch(row.lotId as Id<"lots">, { areaId: row.areaId as Id<"stockAreas"> });
+    }
+    const classifiedIds = new Map(areaPlan.patches.map((row) => [row.lotId, row.areaId]));
+    const reportWithClassifiedAreas = {
+      ...report,
+      products: report.products.map((product) => ({
+        ...product,
+        lots: product.lots.map((lot) => ({ ...lot, areaId: classifiedIds.get(lot.lotId) ?? lot.areaId })),
+      })),
+    };
+    const plan = buildLotLocationMigrationPlan(
+      reportWithClassifiedAreas as unknown as Parameters<typeof buildLotLocationMigrationPlan>[0],
+    );
     const now = Date.now();
     let inserted = 0;
     let skipped = 0;
@@ -1706,12 +1733,14 @@ export const applyLotLocationBalancesMigration = internalMutation({
       action: "update",
       entity: "lotLocationBalances",
       details:
-        `Migração controlada lote × armário: ${inserted} registro(s) inserido(s), ${skipped} já existente(s) idêntico(s), ${plan.totalLots} lotes, ${plan.totalQuantity} unidades. Nenhuma quantidade física/global, lote, entrada, movimentação ou devolução foi alterada.`,
+        `Regularização controlada: ${areaPlan.patches.length} lote(s) classificado(s) por evidência histórica, ${areaPlan.alreadyClassified} já classificados; ${inserted} saldo(s) lote × armário inserido(s), ${skipped} já existente(s), ${plan.totalLots} lotes e ${plan.totalQuantity} unidades. Quantidades físicas/globais, entradas, movimentações e devoluções não foram alteradas.`,
       timestamp: now,
     });
 
     return {
       migrationApplied: true,
+      classified: areaPlan.patches.length,
+      alreadyClassified: areaPlan.alreadyClassified,
       inserted,
       skipped,
       totalLots: plan.totalLots,
