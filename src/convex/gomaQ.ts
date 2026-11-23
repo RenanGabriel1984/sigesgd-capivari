@@ -6,8 +6,6 @@ import { attachStorageFile } from "./storage";
 import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { getOptionalSingleValidGlobalStock } from "../lib/stock-quantity-rules";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
-
 async function requireUser(ctx: any) {
   // RBAC central: consultas GomaQ (suprimentos de impressão).
   return requirePermission(ctx, "gomaq.view");
@@ -316,7 +314,7 @@ export const createExchange = internalMutation({
     organizationId: v.optional(v.id("organizations")),
     observation: v.optional(v.string()),
   },
-  handler: async (_ctx, _args) => {
+  handler: async () => {
     throw new Error("Fluxo legado de troca desativado. Registre a retirada pela Gestão de Suprimentos de Impressão.");
   },
 });
@@ -397,11 +395,6 @@ export const exportMonthlyOrder = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
     const now = Date.now();
-
-    const summary = args.items
-      .filter((i) => i.finalQuantity > 0)
-      .map((i) => `Produto ${i.productId}: ${i.finalQuantity}`)
-      .join(", ");
 
     await ctx.db.insert("auditLogs", {
       userId,
