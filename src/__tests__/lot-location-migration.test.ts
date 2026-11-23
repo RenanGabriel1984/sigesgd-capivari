@@ -8,6 +8,7 @@ function report(overrides: Partial<LotLocationMigrationReport> = {}): LotLocatio
   const lots = Array.from({ length: 61 }, (_, index) => ({
     lotId: `lot-${index + 1}`,
     lotNumber: `LOT-${String(index + 1).padStart(6, "0")}`,
+    areaId: index < 40 ? "area-1" : "area-2",
     quantityAvailable: index === 0 ? 3278 : 1,
     status: "candidate",
     candidateLocationId: index < 40 ? "loc-1" : "loc-2",
@@ -21,6 +22,7 @@ function report(overrides: Partial<LotLocationMigrationReport> = {}): LotLocatio
       globalStock: { physicalQuantityTotal: 3338, reservedQuantityTotal: 0, invalidRecords: 0 },
       stockByLocation: { physicalQuantityTotal: 3338, invalidRecords: 0 },
       lotLocationBalances: { records: 0, quantityAvailableTotal: 0, invalidRecords: 0 },
+      stockAreas: { areas: [{ areaId: "area-1", name: "TI Geral", active: true }, { areaId: "area-2", name: "Impressoras", active: true }] },
       storageLocations: { locations: [{ locationId: "loc-1", name: "Armário TI 01", active: true }, { locationId: "loc-2", name: "Armário TI 02", active: true }] },
     },
     products: [{
@@ -138,5 +140,32 @@ describe("planejamento da migração lote × armário", () => {
       }],
     } as LotLocationMigrationReport;
     expect(() => buildLotLocationMigrationPlan(mapped)).toThrow(/quantidade mapeada divergente/);
+  });
+});
+
+
+describe("classificação de área antes da migração lote × armário", () => {
+  it("bloqueia lotes sem área/subestoque", () => {
+    const base = report();
+    const changed = {
+      ...base,
+      products: [{
+        ...base.products[0],
+        lots: base.products[0].lots.map((lot, index) => index === 0 ? { ...lot, areaId: null } : lot),
+      }],
+    };
+    expect(() => buildLotLocationMigrationPlan(changed)).toThrow(/não possui área\/subestoque classificado/i);
+  });
+
+  it("bloqueia lote apontando para área inexistente ou inativa", () => {
+    const base = report();
+    const changed = {
+      ...base,
+      products: [{
+        ...base.products[0],
+        lots: base.products[0].lots.map((lot, index) => index === 0 ? { ...lot, areaId: "area-inativa" } : lot),
+      }],
+    };
+    expect(() => buildLotLocationMigrationPlan(changed)).toThrow(/área inexistente ou inativa/i);
   });
 });
