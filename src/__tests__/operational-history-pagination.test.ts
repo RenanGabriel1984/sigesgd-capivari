@@ -157,3 +157,58 @@ describe("paginação do arquivo de inventários", () => {
     expect(page).not.toContain("useQuery(api.inventory.list)");
   });
 });
+
+describe("paginação de consultas históricas segmentadas", () => {
+  it("paginação por entidade não materializa todos os eventos de auditoria", () => {
+    const backend = read("convex/auditLogs.ts");
+    const endpoint = backend.slice(
+      backend.indexOf("export const byEntity = query({"),
+      backend.indexOf("/** List audit logs with filters."),
+    );
+    expect(endpoint).toContain("paginationOptsValidator");
+    expect(endpoint).toContain(".paginate(args.paginationOpts)");
+    expect(endpoint).toContain("attachMinimalUser(ctx, page.page)");
+    expect(endpoint).not.toContain(".collect()");
+  });
+
+  it("histórico por produto usa paginação no índice do produto", () => {
+    const backend = read("convex/stockMovements.ts");
+    const endpoint = backend.slice(
+      backend.indexOf("export const byProduct = query({"),
+      backend.indexOf("export const createEntry = mutation({"),
+    );
+    expect(endpoint).toContain("paginationOptsValidator");
+    expect(endpoint).toContain('.withIndex("by_product"');
+    expect(endpoint).toContain(".paginate(args.paginationOpts)");
+    expect(endpoint).toContain("return { ...page, page: enriched }");
+    expect(endpoint).not.toContain(".collect()");
+  });
+
+  it("devoluções por solicitação usam cursor e preservam os joins", () => {
+    const backend = read("convex/returns.ts");
+    const endpoint = backend.slice(
+      backend.indexOf("export const listByRequest = query({"),
+      backend.indexOf("// ─── Mutations"),
+    );
+    expect(endpoint).toContain("paginationOptsValidator");
+    expect(endpoint).toContain('.withIndex("by_request"');
+    expect(endpoint).toContain(".paginate(args.paginationOpts)");
+    expect(endpoint).toContain("product, lot");
+    expect(endpoint).not.toContain(".collect()");
+  });
+
+  it("numeração de inventários consulta somente a faixa do ano corrente", () => {
+    const backend = read("convex/inventory.ts");
+    const generator = backend.slice(
+      backend.indexOf("async function generateInventoryNumber"),
+      backend.indexOf("// ─── Queries"),
+    );
+    const schema = read("convex/schema.ts");
+    expect(schema).toContain('.index("by_inventoryNumber", ["inventoryNumber"])');
+    expect(generator).toContain('.withIndex("by_inventoryNumber"');
+    expect(generator).toContain(".gte(\"inventoryNumber\", prefix)");
+    expect(generator).toContain("nextPrefix");
+    expect(generator).toContain(".lt(\"inventoryNumber\", nextPrefix)");
+    expect(generator).not.toContain('query("inventories").collect()');
+  });
+});
