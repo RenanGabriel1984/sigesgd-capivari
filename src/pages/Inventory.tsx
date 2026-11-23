@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, usePaginatedQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import type { Doc } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,19 @@ type InventoryCountView = Doc<"inventoryCounts"> & {
   product: Doc<"products"> | null;
 };
 
+type InventorySummaryView = Doc<"inventories"> & {
+  responsible: Doc<"users"> | null;
+  closedBy: Doc<"users"> | null;
+  location: Doc<"storageLocations"> | null;
+  area: Doc<"stockAreas"> | null;
+  category: Doc<"categories"> | null;
+  countSummary: {
+    total: number;
+    uncounted: number;
+    differences: number;
+  };
+};
+
 type InventoryView = Doc<"inventories"> & {
   responsible: Doc<"users"> | null;
   closedBy: Doc<"users"> | null;
@@ -61,7 +74,7 @@ export default function Inventory() {
     status: inventoriesStatus,
     loadMore: loadMoreInventories,
   } = usePaginatedQuery(api.inventory.list, {}, { initialNumItems: 30 }) as {
-    results: InventoryView[];
+    results: InventorySummaryView[];
     status: string;
     loadMore: (count: number) => void;
   };
@@ -122,7 +135,12 @@ export default function Inventory() {
 
   const [loadingInitial, setLoadingInitial] = useState(false);
 
-  const viewInventory = inventories?.find((i) => i._id === viewId);
+  // The list response contains only compact summaries. Full count rows and
+  // product joins are fetched for the single inventory currently expanded.
+  const viewInventory = useQuery(
+    api.inventory.get,
+    viewId ? { inventoryId: viewId as Id<"inventories"> } : "skip",
+  ) as InventoryView | null | undefined;
   const counts = viewInventory?.counts ?? [];
 
   // Count editing state
@@ -504,6 +522,15 @@ export default function Inventory() {
 
                       {isActive && (
                         <CardContent className="pt-0">
+                          {viewInventory === undefined ? (
+                            <div className="space-y-2 py-4">
+                              <Skeleton className="h-8 w-full" />
+                              <Skeleton className="h-8 w-full" />
+                              <Skeleton className="h-8 w-full" />
+                            </div>
+                          ) : !viewInventory ? (
+                            <p className="py-4 text-sm text-muted-foreground">Este inventário não está mais disponível.</p>
+                          ) : (
                           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
                             <Table>
                               <TableHeader>
@@ -576,6 +603,7 @@ export default function Inventory() {
                               </TableBody>
                             </Table>
                           </div>
+                          )}
                         </CardContent>
                       )}
                     </Card>
