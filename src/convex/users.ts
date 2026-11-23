@@ -308,7 +308,7 @@ export const updateUser = mutation({
       const existingRows = await ctx.db.query("users")
         .withIndex("email", (q: any) => q.eq("email", email))
         .collect();
-      const otherAccounts = existingRows.filter((record: any) => record._id !== userId);
+      const otherAccounts = existingRows.filter((record) => record._id !== userId);
       if (otherAccounts.length > 0) {
         throw new Error(otherAccounts.length > 1
           ? describeDuplicateCredential(otherAccounts.length + 1)
