@@ -68,3 +68,23 @@ describe("integridade da abertura de inventário", () => {
     expect(create).not.toContain(".reduce((sum: number, s: any) => sum + s.quantity, 0)");
   });
 });
+
+describe("trilha de auditoria do ciclo de inventário", () => {
+  it("registra o operador e a transição para revisão após validar todas as contagens", () => {
+    const reviewStart = inventory.indexOf("export const startReview = mutation({");
+    const closeStart = inventory.indexOf("export const close = mutation({", reviewStart);
+    const review = inventory.slice(reviewStart, closeStart);
+    expect(review).toContain("const { userId } = await requireStockManagerOrAdmin(ctx)");
+    expect(review).toContain('if (inv.status !== "counting")');
+    expect(review).toContain("const uncounted = counts.filter");
+    expect(review).toContain('status: "review", updatedAt: now');
+    expect(review).toContain('ctx.db.insert("auditLogs")');
+    expect(review).toContain('action: "count_inventory"');
+    expect(review).toContain('entity: "inventories"');
+    expect(review).toContain("entityId: args.inventoryId");
+    expect(review).toContain("userId,");
+    expect(review).toContain("contagem concluída e encaminhada para revisão");
+    expect(review).toContain("timestamp: now");
+    expect(review.indexOf("if (uncounted.length > 0)")).toBeLessThan(review.indexOf('ctx.db.insert("auditLogs")'));
+  });
+});
