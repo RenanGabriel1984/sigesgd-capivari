@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { usePaginatedQuery, useQuery, useMutation } from "convex/react";
 import { useSearchParams } from "react-router";
 import { api } from "@/convex/_generated/api";
@@ -95,18 +95,12 @@ export default function ReturnsPage() {
   const [observation, setObservation] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  // Ação "Devolver" vinda da tela de Histórico/Relatório de saídas.
-  // Consulta pontual preserva deep-links mesmo quando a saída não está na primeira página.
-  useEffect(() => {
-    if (!exitParam) return;
-    const existsInPage = exits.some((exit: ExitRow) => exit._id === exitParam);
-    const loadedById = exitFromLink?._id === exitParam;
-    if (existsInPage || loadedById) setSelectedExitId(exitParam);
-  }, [exitParam, exits, exitFromLink]);
-
+  // O deep-link participa diretamente da seleção; evita sincronização
+  // redundante por effect e preserva saídas fora da página inicial.
+  const activeExitId = exitParam || selectedExitId;
   const selectedExit: ExitRow | undefined =
-    exits.find((exit: ExitRow) => exit._id === selectedExitId) ??
-    (exitFromLink?._id === selectedExitId ? exitFromLink as ExitRow : undefined);
+    exits.find((exit: ExitRow) => exit._id === activeExitId) ??
+    (exitFromLink?._id === activeExitId ? exitFromLink as ExitRow : undefined);
 
   const alreadyReturned = selectedExit?.returned ?? 0;
   const exitQty = selectedExit?.quantity ?? 0;
