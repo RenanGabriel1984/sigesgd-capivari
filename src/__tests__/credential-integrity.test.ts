@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveUniqueRecord } from "../lib/credential-integrity";
+import { normalizeLoginEmail, resolveUniqueRecord } from "../lib/credential-integrity";
 
 describe("resolveUniqueRecord", () => {
   it("distinguishes missing, unique and duplicate records", () => {
@@ -39,5 +39,22 @@ describe("user account email normalization integration", () => {
     expect(source).toContain("normalizeLoginEmail(args.email)");
     expect(source).toContain("normalizeLoginEmail(updates.email)");
     expect(source).toContain(".collect()");
+  });
+});
+
+
+describe("password management rejects ambiguous credentials", () => {
+  it("does not change an arbitrary password record in self-service or admin flows", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(resolve(__dirname, "../convex/passwords.ts"), "utf8");
+    for (const mutationName of ["changePassword", "adminResetPassword", "forceChangePassword", "bootstrapResetPassword"]) {
+      const start = source.indexOf(`export const ${mutationName} = mutation({`);
+      expect(start, `${mutationName} mutation exists`).toBeGreaterThan(-1);
+      const nextExport = source.indexOf("\\nexport const ", start + 1);
+      const block = source.slice(start, nextExport === -1 ? source.length : nextExport);
+      expect(block).toContain(".collect()");
+      expect(block).toContain('passwordResolution.status === "ambiguous"');
+    }
   });
 });
