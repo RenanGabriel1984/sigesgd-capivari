@@ -115,6 +115,23 @@ export function inspectProductStockIntegrity(
     issues.push(error instanceof Error ? error.message : "Saldo global inválido.");
   }
 
+  const scopeKindsByLocation = new Map<string, { hasWildcard: boolean; hasScoped: boolean }>();
+  for (const row of locationRows) {
+    if (!row.locationId) continue;
+    const kinds = scopeKindsByLocation.get(row.locationId) ?? { hasWildcard: false, hasScoped: false };
+    if (row.areaId) kinds.hasScoped = true;
+    else kinds.hasWildcard = true;
+    scopeKindsByLocation.set(row.locationId, kinds);
+  }
+  const ambiguousLocations = new Set(
+    [...scopeKindsByLocation.entries()]
+      .filter(([, kinds]) => kinds.hasWildcard && kinds.hasScoped)
+      .map(([locationId]) => locationId),
+  );
+  for (const locationId of ambiguousLocations) {
+    issues.push(`A localização ${locationId} mistura saldo legado sem área com buckets por área; a representação é ambígua e não pode ser conciliada automaticamente.`);
+  }
+
   const locationByScope = new Map<string, number>();
   let locationQuantity = 0;
   const seenScopes = new Set<string>();
@@ -135,6 +152,9 @@ export function inspectProductStockIntegrity(
       : `*|${row.locationId}`;
     if (seenScopes.has(key)) issues.push("Há linhas duplicadas para a mesma combinação de área e local físico.");
     seenScopes.add(key);
+    // Não somar as duas representações de um mesmo armário quando coexistem:
+    // o bucket legado pode ser o total do armário, não uma parcela adicional.
+    if (ambiguousLocations.has(row.locationId)) continue;
     locationByScope.set(key, (locationByScope.get(key) ?? 0) + row.quantity);
     locationQuantity += row.quantity;
   }
@@ -182,6 +202,7 @@ export function inspectProductStockIntegrity(
   for (const [key, localQuantity] of locationByScope) {
     if (hasUnlocatedPositiveLots) continue;
     const [areaId, locationId] = key.split("|");
+    if (ambiguousLocations.has(locationId)) continue;
     // Um registro físico legado sem areaId representa todas as áreas do
     // armário. Só comparamos o total do armário; a abertura por área vem dos lotes.
     const expectedLotQuantity = areaId === "*"
@@ -195,6 +216,7 @@ export function inspectProductStockIntegrity(
   for (const key of lotsByScope.keys()) {
     if (hasUnlocatedPositiveLots) continue;
     const locationId = key.slice(key.lastIndexOf("|") + 1);
+    if (ambiguousLocations.has(locationId)) continue;
     const wildcardKey = `*|${locationId}`;
     if (!locationByScope.has(key) && !locationByScope.has(wildcardKey)) {
       issues.push(`Há lote com saldo sem bucket físico correspondente na localização ${locationId}.`);
@@ -202,7 +224,7 @@ export function inspectProductStockIntegrity(
   }
 
   if (globalStock) {
-    if (Math.abs(globalStock.physicalQuantity - locationQuantity) > TOLERANCE) {
+    if (ambiguousLocations.size === 0 && Math.abs(globalStock.physicalQuantity - locationQuantity) > TOLERANCE) {
       issues.push("O saldo global diverge da soma dos saldos por armário.");
     }
     if (Math.abs(globalStock.physicalQuantity - lotQuantity) > TOLERANCE) {
@@ -235,6 +257,20 @@ export function resolveScopedInventoryQuantity(
   locationId: string,
   productLabel: string,
 ): number {
+  // Buckets legados sem área não podem ser tratados como zero nem
+  // atribuídos à área selecionada: podem conter parte ou todo o saldo físico.
+  for (const row of rows) {
+    if (typeof row.quantity !== "number" || !Number.isFinite(row.quantity) || row.quantity < 0) {
+      throw new Error(`Há saldo físico inválido de "${productLabel}" na estrutura por área/local.`);
+    }
+    if (!row.locationId && row.quantity > TOLERANCE) {
+      throw new Error(`Há saldo físico legado de "${productLabel}" sem local definido; regularize antes de abrir o inventário.`);
+    }
+    if (row.locationId === locationId && !row.areaId && row.quantity > TOLERANCE) {
+      throw new Error(`Há saldo legado sem área em "${productLabel}" no local selecionado. Não é possível atribuí-lo com segurança à área; regularize antes de abrir o inventário.`);
+    }
+  }
+
   const matchingRows = rows.filter(
     (row) => row.areaId === areaId && row.locationId === locationId,
   );
@@ -248,6 +284,21 @@ export function resolveScopedInventoryQuantity(
     row.quantity < 0
   )) {
     throw new Error(`O saldo físico de "${productLabel}" na área/local selecionado é inválido.`);
+  }
+
+  // Lotes positivos sem área/local podem pertencer ao escopo solicitado.
+  // Nunca os excluir silenciosamente da abertura de inventário.
+  for (const lot of lots) {
+    const quantity = lot.quantityAvailable;
+    if (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity < 0) {
+      throw new Error(`O lote ${lot.lotNumber ?? "(sem número)"} de "${productLabel}" possui saldo inválido.`);
+    }
+    if (quantity > TOLERANCE && (
+      (!lot.areaId && (!lot.locationId || lot.locationId === locationId)) ||
+      (!lot.locationId && (!lot.areaId || lot.areaId === areaId))
+    )) {
+      throw new Error(`O lote ${lot.lotNumber ?? "(sem número)"} de "${productLabel}" possui saldo sem área/local suficiente para determinar se pertence ao inventário. Regularize antes de abrir.`);
+    }
   }
 
   const matchingLots = lots.filter(
