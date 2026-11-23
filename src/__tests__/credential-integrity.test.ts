@@ -105,3 +105,14 @@ describe("atomic user and temporary password creation", () => {
     expect(ui).not.toContain("await createPassword({ userId: newUserId");
   });
 });
+
+
+describe("cryptographic password salt generation", () => {
+  it("uses Web Crypto secure randomness instead of Math.random", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(resolve(__dirname, "../convex/auth/passwords.ts"), "utf8");
+    expect(source).toContain("crypto.getRandomValues(bytes)");
+    expect(source).not.toContain("Math.random()");
+  });
+});
