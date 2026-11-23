@@ -33,11 +33,56 @@ async function requireReturnCreate(ctx: any) {
 }
 
 /**
- * Carrega todas as devoluções (para cálculo de saldo por saída).
- * Inclui devoluções legadas sem `exitMovementId` (vinculadas por solicitação).
+ * Carrega somente devoluções relacionadas à saída consultada.
+ * O índice por saída atende registros atuais; o índice por solicitação cobre
+ * o legado sem exitMovementId, limitado à solicitação e ao produto.
  */
-async function loadReturns(ctx: any) {
-  return await ctx.db.query("returns").collect();
+async function loadReturnsForExit(ctx: any, exit: any) {
+  const [directReturns, requestReturns] = await Promise.all([
+    ctx.db.query("returns")
+      .withIndex("by_exitMovement", (q: any) => q.eq("exitMovementId", exit._id))
+      .collect(),
+    exit.requestId
+      ? ctx.db.query("returns")
+          .withIndex("by_request", (q: any) => q.eq("requestId", exit.requestId))
+          .collect()
+      : Promise.resolve([]),
+  ]);
+  const legacyReturns = requestReturns.filter((record: any) =>
+    !record.exitMovementId &&
+    (!record.productId || record.productId === exit.productId)
+  );
+  return [...directReturns, ...legacyReturns];
+}
+
+async function buildReturnableExitRow(ctx: any, movement: any) {
+  if (movement.type !== "exit" || movement.canceled) return null;
+  const [product, user, request, area, location, relatedReturns] = await Promise.all([
+    ctx.db.get(movement.productId),
+    ctx.db.get(movement.userId),
+    movement.requestId ? ctx.db.get(movement.requestId) : Promise.resolve(null),
+    movement.areaId ? ctx.db.get(movement.areaId) : Promise.resolve(null),
+    movement.locationId ? ctx.db.get(movement.locationId) : Promise.resolve(null),
+    loadReturnsForExit(ctx, movement),
+  ]);
+  const requester = request?.requesterId
+    ? await ctx.db.get(request.requesterId)
+    : null;
+  const returned = returnedQuantityForExit(relatedReturns, movement);
+  const available = returnableQuantity(movement.quantity, returned);
+  if (available <= 0) return null;
+  return {
+    ...movement,
+    product,
+    user,
+    area,
+    location,
+    requesterName: requester?.name ?? user?.name ?? null,
+    osNumber: request?.osNumber ?? null,
+    requestReason: request?.reason ?? null,
+    returned,
+    available,
+  };
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -87,45 +132,28 @@ export const listPage = query({
  * Mostra somente materiais que possuem quantidade efetivamente disponível:
  *   retirado − já devolvido = disponível para devolver
  */
-export const returnable = query({
-  args: {},
-  handler: async (ctx) => {
+export const returnablePage = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
     await requireUser(ctx);
-    const exits = await ctx.db
-      .query("stockMovements")
+    const page = await ctx.db.query("stockMovements")
       .withIndex("by_type", (q: any) => q.eq("type", "exit"))
       .order("desc")
-      .collect();
-    const allReturns = await loadReturns(ctx);
+      .paginate(args.paginationOpts);
+    const rows = await Promise.all(
+      page.page.map((movement: any) => buildReturnableExitRow(ctx, movement))
+    );
+    return { ...page, page: rows.filter((row): row is NonNullable<typeof row> => row !== null) };
+  },
+});
 
-    // Saídas canceladas não representam retirada válida e nunca podem aparecer
-    // como disponíveis para devolução. A mutation já as rejeita; filtrá-las
-    // aqui mantém a lista coerente e evita oferecer uma ação impossível.
-    const activeExits = exits.filter((movement: any) => !movement.canceled);
-    const rows = await Promise.all(activeExits.map(async (m: any) => {
-      const product: any = await ctx.db.get(m.productId);
-      const user: any = await ctx.db.get(m.userId);
-      const request: any = m.requestId ? await ctx.db.get(m.requestId) : null;
-      const requester: any = request?.requesterId ? await ctx.db.get(request.requesterId) : null;
-      const area = m.areaId ? await ctx.db.get(m.areaId) : null;
-      const location = m.locationId ? await ctx.db.get(m.locationId) : null;
-      const returned = returnedQuantityForExit(allReturns, m);
-      const available = returnableQuantity(m.quantity, returned);
-      return {
-        ...m,
-        product,
-        user,
-        area,
-        location,
-        requesterName: requester?.name ?? user?.name ?? null,
-        osNumber: request?.osNumber ?? null,
-        requestReason: request?.reason ?? null,
-        returned,
-        available,
-      };
-    }));
-
-    return rows.filter((r) => r.available > 0);
+export const returnableByExit = query({
+  args: { exitMovementId: v.id("stockMovements") },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    const movement = await ctx.db.get(args.exitMovementId);
+    if (!movement) return null;
+    return buildReturnableExitRow(ctx, movement);
   },
 });
 
@@ -189,8 +217,8 @@ export const create = mutation({
       throw new Error(`A quantidade devolvida deve ser inteira para a unidade ${product.unitOfMeasure}.`);
     }
 
-    const allReturns = await loadReturns(ctx);
-    const alreadyReturned = returnedQuantityForExit(allReturns, exit);
+    const relatedReturns = await loadReturnsForExit(ctx, exit);
+    const alreadyReturned = returnedQuantityForExit(relatedReturns, exit);
     const quantityError = validateReturnQuantity({
       exitQuantity: exit.quantity,
       alreadyReturned,
