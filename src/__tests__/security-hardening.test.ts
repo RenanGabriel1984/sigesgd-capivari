@@ -42,7 +42,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@convex-dev/auth/server", () => ({
-  getAuthUserId: async (_ctx: unknown) => h.currentUserId,
+  getAuthUserId: async () => h.currentUserId,
 }));
 
 /** Registra as definições de query/mutation/action por `kind:assinatura(args)`. */
@@ -78,7 +78,7 @@ function makeDb(tables: Record<string, any[]>): any {
   const withRows = (matching: any[]) => ({
     first: async () => matching[0] ?? null,
     collect: async () => matching,
-    order: (_dir: string) => ({
+    order: () => ({
       take: async (n: number) => matching.slice(0, n),
       collect: async () => matching,
     }),
@@ -764,7 +764,7 @@ describe("AUTH-SESSION — revogação e proteção contra bloqueio remoto", () 
   it("AUTH-SESSION-03: reset administrativo e recuperação revogam todas as sessões", () => {
     const passwords = stripComments(read("src/convex/passwords.ts"));
     expect(passwords).toMatch(/userId: args\.userId,[\s\S]{0,100}\n\s*\}\);/);
-    expect(passwords).toMatch(/userId: user\.\_id,[\s\S]{0,100}\n\s*\}\);/);
+    expect(passwords).toMatch(/userId: user\._id,[\s\S]{0,100}\n\s*\}\);/);
   });
 
   it("AUTH-SESSION-04: desativação ou mudança de perfil revoga sessões do usuário", () => {
@@ -855,7 +855,7 @@ describe("AUTH-RESET-REVOCATION — códigos antigos após mudança de acesso", 
     expect(passwords).toMatch(/async function invalidatePendingPasswordResets/);
     expect(passwords).toMatch(/invalidatePendingPasswordResets\(ctx, userId\)/);
     expect(passwords).toMatch(/invalidatePendingPasswordResets\(ctx, args\.userId\)/);
-    expect(passwords).toMatch(/invalidatePendingPasswordResets\(ctx, user\.\_id\)/);
+    expect(passwords).toMatch(/invalidatePendingPasswordResets\(ctx, user\._id\)/);
   });
 
   it("AUTH-RESET-REVOCATION-02: desativação e alteração de perfil invalidam códigos pendentes", () => {
