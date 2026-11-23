@@ -36,11 +36,11 @@ import {
 } from "../lib/print-supplies";
 
 /** Área "Impressoras" (recorte operacional de suprimentos de impressão). */
-export const PRINT_AREA_ID = "q97b7737gv98ajm8qqpmjmzjs18ezb58";
+export const PRINT_AREA_ID = "q97b7737gv98ajm8qqpmjmzjs18ezb58" as Id<"stockAreas">;
 /** Área "TI Geral". */
-export const TI_GERAL_AREA_ID = "q971w9jkmz8rsqr3vsr2as0dps8eyqns";
+export const TI_GERAL_AREA_ID = "q971w9jkmz8rsqr3vsr2as0dps8eyqns" as Id<"stockAreas">;
 /** Categoria "Suprimentos de Impressão". */
-export const SUPPLY_CATEGORY_ID = "k57fk85xwpj3b3xj9dc31jwqpd8dgk3a";
+export const SUPPLY_CATEGORY_ID = "k57fk85xwpj3b3xj9dc31jwqpd8dgk3a" as Id<"categories">;
 
 /**
  * Invariantes GLOBAIS inegociáveis do estoque (snapshot oficial da
@@ -486,19 +486,19 @@ export const getMonthlyConsumption = query({
 });
 
 type SupplyConsumedLot = {
-  lotId: string;
+  lotId: Id<"lots">;
   lotNumber: string;
   qty: number;
-  areaId: string;
-  locationId: string;
-  entryId: string;
+  areaId: Id<"stockAreas">;
+  locationId: Id<"storageLocations">;
+  entryId: Id<"entries">;
   brand?: string;
   model?: string;
   specification?: string;
-  supplierId?: string;
+  supplierId?: Id<"suppliers">;
   invoiceNumber?: string;
   purchaseAuthorizationNumber?: string;
-  photoStorageId?: string;
+  photoStorageId?: Id<"_storage">;
   unitCost?: number;
 };
 
@@ -612,7 +612,7 @@ async function readSupplyAreaLedger(ctx: QueryCtx | MutationCtx, productId: Id<"
 }
 
 async function changeSupplyLocationQuantity(
-  ctx: any, productId: string, locationId: string, delta: number,
+  ctx: MutationCtx, productId: Id<"products">, locationId: Id<"storageLocations">, delta: number,
 ) {
   const rows = await ctx.db.query("stockByLocation")
     .withIndex("by_product", (q) => q.eq("productId", productId)).collect();
@@ -625,9 +625,9 @@ async function changeSupplyLocationQuantity(
   if (matches.length === 0) {
     if (delta < 0) throw new Error("Saldo por local físico não encontrado para o lote consumido.");
     await ctx.db.insert("stockByLocation", {
-      productId: productId as any,
-      locationId: locationId as any,
-      areaId: PRINT_AREA_ID as any,
+      productId,
+      locationId,
+      areaId: PRINT_AREA_ID,
       quantity: delta,
     });
     return;
@@ -638,13 +638,13 @@ async function changeSupplyLocationQuantity(
 }
 
 async function consumeSupplyLotsInArea(
-  ctx: any, productId: string, quantity: number, ledger: SupplyAreaLedger,
+  ctx: MutationCtx, productId: Id<"products">, quantity: number, ledger: SupplyAreaLedger,
 ): Promise<SupplyConsumedLot[]> {
   let remaining = quantity;
   const consumed: SupplyConsumedLot[] = [];
   const lots = [...ledger.areaLots]
     .filter((lot) => lot.active !== false && Number(lot.quantityAvailable) > 0)
-    .sort((a: any, b: any) => a.receivedAt - b.receivedAt);
+    .sort((a, b) => a.receivedAt - b.receivedAt);
   for (const lot of lots) {
     if (remaining <= 1e-9) break;
     const reserved = ledger.reservedByLot.get(String(lot._id)) ?? 0;
@@ -659,8 +659,8 @@ async function consumeSupplyLotsInArea(
     });
     await changeSupplyLocationQuantity(ctx, productId, String(lot.locationId), -take);
     consumed.push({
-      lotId: String(lot._id), lotNumber: lot.lotNumber, qty: take,
-      areaId: PRINT_AREA_ID, locationId: String(lot.locationId), entryId: String(lot.entryId),
+      lotId: lot._id, lotNumber: lot.lotNumber, qty: take,
+      areaId: PRINT_AREA_ID, locationId: lot.locationId, entryId: lot.entryId as Id<"entries">,
       brand: lot.brand, model: lot.model, specification: lot.specification,
       supplierId: lot.supplierId, invoiceNumber: lot.invoiceNumber,
       purchaseAuthorizationNumber: lot.purchaseAuthorizationNumber,
@@ -674,11 +674,11 @@ async function consumeSupplyLotsInArea(
   return consumed;
 }
 
-async function generateReclassificationLotNumber(ctx: any): Promise<string> {
+async function generateReclassificationLotNumber(ctx: MutationCtx): Promise<string> {
   const prefix = `REC-${new Date().getFullYear()}-`;
   const existing = await ctx.db.query("lots")
-    .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix)).collect();
-  const maxSequence = existing.reduce((max: number, lot: any) => {
+    .withIndex("by_number", (q) => q.gte("lotNumber", prefix)).collect();
+  const maxSequence = existing.reduce((max: number, lot) => {
     if (!lot.lotNumber?.startsWith(prefix)) return max;
     const sequence = Number(lot.lotNumber.slice(prefix.length));
     return Number.isSafeInteger(sequence) && sequence > max ? sequence : max;
@@ -687,18 +687,18 @@ async function generateReclassificationLotNumber(ctx: any): Promise<string> {
 }
 
 async function insertSupplyMovement(
-  ctx: any,
+  ctx: MutationCtx,
   input: {
-    productId: string; type: "exit" | "adjustment"; quantity: number;
+    productId: Id<"products">; type: "exit" | "adjustment"; quantity: number;
     previousPhysical: number; newPhysical: number; reserved: number;
-    userId: string; observation: string; consumedLots: SupplyConsumedLot[];
+    userId: Id<"users">; observation: string; consumedLots: SupplyConsumedLot[];
     timestamp: number;
   },
 ) {
   const locations = new Set(input.consumedLots.map((lot) => lot.locationId));
   const locationId = locations.size === 1 ? input.consumedLots[0]?.locationId : undefined;
   const movementId = await ctx.db.insert("stockMovements", {
-    productId: input.productId as any,
+    productId: input.productId,
     type: input.type,
     quantity: input.quantity,
     previousPhysical: input.previousPhysical,
@@ -706,20 +706,20 @@ async function insertSupplyMovement(
     previousReserved: input.reserved,
     newReserved: input.reserved,
     lotId: input.consumedLots[0]?.lotId,
-    userId: input.userId as any,
+    userId: input.userId,
     exitNumber: input.type === "exit" ? await generateExitNumber(ctx) : undefined,
-    areaId: PRINT_AREA_ID as any,
-    locationId: locationId as any,
+    areaId: PRINT_AREA_ID,
+    locationId,
     observation: input.observation,
     timestamp: input.timestamp,
   });
   for (const lot of input.consumedLots) {
     await ctx.db.insert("stockMovementLots", {
       movementId,
-      lotId: lot.lotId as any,
+      lotId: lot.lotId,
       quantity: lot.qty,
-      areaId: lot.areaId as any,
-      locationId: lot.locationId as any,
+      areaId: lot.areaId,
+      locationId: lot.locationId,
     });
   }
   return movementId;
@@ -756,7 +756,7 @@ export const withdraw = mutation({
       throw new Error(`Estoque livre insuficiente na área Impressoras. Disponível: ${before.areaAvailable} ${product.unitOfMeasure}.`);
     }
 
-    const consumedLots = await consumeSupplyLotsInArea(ctx, String(args.productId), quantity, before);
+    const consumedLots = await consumeSupplyLotsInArea(ctx, args.productId, quantity, before);
     const previousPhysical = before.physical;
     const newPhysical = previousPhysical - quantity;
     await ctx.db.patch(before.stock._id, { physicalQuantity: newPhysical });
@@ -765,9 +765,9 @@ export const withdraw = mutation({
     const locationLabel = new Set(consumedLots.map((lot) => lot.locationId)).size === 1
       ? consumedLots[0].locationId : "múltiplos locais";
     const movementId = await insertSupplyMovement(ctx, {
-      productId: String(args.productId), type: "exit", quantity,
+      productId: args.productId, type: "exit", quantity,
       previousPhysical, newPhysical, reserved: before.reserved,
-      userId: String(userId), timestamp: now, consumedLots,
+      userId, timestamp: now, consumedLots,
       observation:
         `Retirada de suprimento — ${args.reason ?? "Sem motivo"} | Área: Impressoras | Local: ${locationLabel} ` +
         `| O.S.: ${args.osNumber ?? "—"} | Destino: ${args.secretariaId ?? "—"} ` +
@@ -1037,7 +1037,7 @@ export const withdrawFamily = mutation({
 
     if (closedPacksToConsume > 0) {
       closedConsumed = await consumeSupplyLotsInArea(
-        ctx, String(closedMember._id), closedPacksToConsume, closedBefore,
+        ctx, closedMember._id, closedPacksToConsume, closedBefore,
       );
       consumedLots.push(...closedConsumed);
     }
@@ -1055,8 +1055,8 @@ export const withdrawFamily = mutation({
         const lotNumber = await generateReclassificationLotNumber(ctx);
         const reclassifiedLotId = await ctx.db.insert("lots", {
           lotNumber,
-          productId: looseMember._id as any,
-          entryId: source.entryId as any,
+          productId: looseMember._id,
+          entryId: source.entryId,
           brand: looseMember.brand ?? source.brand,
           model: looseMember.model ?? source.model,
           specification: source.specification,
@@ -1064,14 +1064,14 @@ export const withdrawFamily = mutation({
           quantityAvailable: reclassifiedQuantity,
           unitCost: source.unitCost != null ? source.unitCost / conversion.factor : undefined,
           receivedAt: now,
-          supplierId: source.supplierId as any,
+          supplierId: source.supplierId,
           invoiceNumber: source.invoiceNumber,
           purchaseAuthorizationNumber: source.purchaseAuthorizationNumber,
           photoStorageId: source.photoStorageId,
           active: true,
-          areaId: PRINT_AREA_ID as any,
-          locationId: source.locationId as any,
-          reclassifiedFromLotId: source.lotId as any,
+          areaId: PRINT_AREA_ID,
+          locationId: source.locationId,
+          reclassifiedFromLotId: source.lotId,
           observation:
             `Reclassificação de ${source.qty} ${conversion.packagingUnit}(s) em ${reclassifiedQuantity} ${conversion.baseUnit}(s). Origem: lote ${source.lotNumber}.`,
         });
@@ -1081,10 +1081,10 @@ export const withdrawFamily = mutation({
           expectedQuantityBefore: 0, allowCreate: true,
         });
         await changeSupplyLocationQuantity(
-          ctx, String(looseMember._id), source.locationId, reclassifiedQuantity,
+          ctx, looseMember._id, source.locationId, reclassifiedQuantity,
         );
         reclassifiedLots.push({
-          lotId: String(reclassifiedLotId),
+          lotId: reclassifiedLotId,
           lotNumber,
           qty: reclassifiedQuantity,
           areaId: PRINT_AREA_ID,
@@ -1103,7 +1103,7 @@ export const withdrawFamily = mutation({
 
     if (looseUnitsToConsume > 0) {
       looseConsumed = await consumeSupplyLotsInArea(
-        ctx, String(looseMember._id), looseUnitsToConsume, looseAfterOpening,
+        ctx, looseMember._id, looseUnitsToConsume, looseAfterOpening,
       );
       consumedLots.push(...looseConsumed);
     }
