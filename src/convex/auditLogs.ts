@@ -65,24 +65,24 @@ export const list = query({
 /** List audit logs by entity, optionally narrowed to one exact entity record. */
 export const byEntity = query({
   args: {
+    paginationOpts: paginationOptsValidator,
     entity: v.string(),
     entityId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireUser(ctx);
     const base = ctx.db.query("auditLogs");
-    const logs = args.entityId
-      ? await base
+    const orderedQuery = args.entityId
+      ? base
           .withIndex("by_entity_entityId", (q: any) =>
             q.eq("entity", args.entity).eq("entityId", args.entityId),
           )
           .order("desc")
-          .collect()
-      : await base
+      : base
           .withIndex("by_entity", (q: any) => q.eq("entity", args.entity))
-          .order("desc")
-          .collect();
-    return attachMinimalUser(ctx, logs);
+          .order("desc");
+    const page = await orderedQuery.paginate(args.paginationOpts);
+    return { ...page, page: await attachMinimalUser(ctx, page.page) };
   },
 });
 
