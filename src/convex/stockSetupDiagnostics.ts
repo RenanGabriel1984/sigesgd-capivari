@@ -1,4 +1,5 @@
 import { internalQuery } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { LEGACY_GENERAL_AREA_CLASSIFICATION_TARGETS } from "../lib/legacy-general-area-classification";
 import { inspectLotLocationBalances } from "../lib/lot-location-balance";
 
@@ -16,9 +17,9 @@ export const legacyGeneralAreaClassificationDiagnostic = internalQuery({
       return { readOnly: true, found: false, reason: "Produto não está no manifesto fechado." };
     }
 
-    const entryMatches: any[] = await ctx.db
+    const entryMatches = await ctx.db
       .query("entries")
-      .withIndex("by_number", (q: any) => q.eq("entryNumber", "ENT-2026-000001"))
+      .withIndex("by_number", (q) => q.eq("entryNumber", "ENT-2026-000001"))
       .collect();
 
     if (entryMatches.length !== 1) {
@@ -32,24 +33,28 @@ export const legacyGeneralAreaClassificationDiagnostic = internalQuery({
         expected: target,
       };
     }
-    const entry: any = entryMatches[0];
+    const entry = entryMatches[0]!;
 
-    const [product, location, lot, localRow, entryItems, productMovements, allMovementLinks]: any[] =
+    const productId = target.productId as Id<"products">;
+    const locationId = target.locationId as Id<"storageLocations">;
+    const lotId = target.lotId as Id<"lots">;
+    const rowId = target.rowId as Id<"stockByLocation">;
+    const [product, location, lot, localRow, entryItems, productMovements, allMovementLinks] =
       await Promise.all([
-        ctx.db.get(target.productId as any),
-        ctx.db.get(target.locationId as any),
-        ctx.db.get(target.lotId as any),
-        ctx.db.get(target.rowId as any),
+        ctx.db.get(productId),
+        ctx.db.get(locationId),
+        ctx.db.get(lotId),
+        ctx.db.get(rowId),
         ctx.db.query("entryItems")
-          .withIndex("by_entry", (q: any) => q.eq("entryId", entry._id))
+          .withIndex("by_entry", (q) => q.eq("entryId", entry._id))
           .collect(),
         ctx.db.query("stockMovements")
-          .withIndex("by_product", (q: any) => q.eq("productId", target.productId))
+          .withIndex("by_product", (q) => q.eq("productId", productId))
           .collect(),
         ctx.db.query("stockMovementLots").collect(),
       ]);
 
-    const itemCandidates = (entryItems as any[])
+    const itemCandidates = entryItems
       .filter((item) => String(item.productId) === target.productId)
       .map((item) => ({
         id: String(item._id),
@@ -61,12 +66,12 @@ export const legacyGeneralAreaClassificationDiagnostic = internalQuery({
         brand: item.brand ?? null,
       }));
 
-    const entryProductMovements = (productMovements as any[])
+    const entryProductMovements = productMovements
       .filter((movement) => String(movement.entryId ?? "") === String(entry._id));
 
     const movementDetails = entryProductMovements.map((movement) => {
       const movementId = String(movement._id);
-      const links = (allMovementLinks as any[])
+      const links = allMovementLinks
         .filter((link) => String(link.movementId) === movementId)
         .map((link) => ({
           id: String(link._id),
