@@ -288,7 +288,7 @@ export const registerGomaqNfe372043 = internalMutation({
       });
       await adjustLotLocationBalance(ctx, {
         lotId, productId: r.productId, locationId: LOCATION_ARMARIO_TI_02,
-        delta: r.qty, allowCreate: true,
+        delta: r.qty, expectedQuantityBefore: 0, allowCreate: true,
       });
 
       await ctx.db.insert("entryItems", {
