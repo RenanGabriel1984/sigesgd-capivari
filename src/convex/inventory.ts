@@ -53,6 +53,36 @@ function assertUniqueInventoryProductCounts(counts: Array<{ productId: unknown }
   }
 }
 
+async function decorateInventorySummary(ctx: any, inv: any) {
+  const [responsible, closedBy, location, area, category, countRows] = await Promise.all([
+    ctx.db.get(inv.responsibleUserId),
+    inv.closedByUserId ? ctx.db.get(inv.closedByUserId) : Promise.resolve(null),
+    inv.locationId ? ctx.db.get(inv.locationId) : Promise.resolve(null),
+    inv.areaId ? ctx.db.get(inv.areaId) : Promise.resolve(null),
+    inv.categoryId ? ctx.db.get(inv.categoryId) : Promise.resolve(null),
+    ctx.db.query("inventoryCounts")
+      .withIndex("by_inventory", (q: any) => q.eq("inventoryId", inv._id))
+      .collect(),
+  ]);
+  assertUniqueInventoryProductCounts(countRows);
+  const total = countRows.length;
+  const uncounted = countRows.filter((count: any) =>
+    count.countedQuantity === null || count.countedQuantity === undefined
+  ).length;
+  const differences = countRows.filter((count: any) =>
+    count.difference !== null && count.difference !== undefined && count.difference !== 0
+  ).length;
+  return {
+    ...inv,
+    responsible,
+    closedBy,
+    location,
+    area,
+    category,
+    countSummary: { total, uncounted, differences },
+  };
+}
+
 async function decorateInventory(ctx: any, inv: any) {
   const responsible = await ctx.db.get(inv.responsibleUserId);
   const closedBy = inv.closedByUserId ? await ctx.db.get(inv.closedByUserId) : null;
@@ -75,7 +105,7 @@ export const list = query({
       .withIndex("by_date")
       .order("desc")
       .paginate(args.paginationOpts);
-    const enriched = await Promise.all(page.page.map((inventory) => decorateInventory(ctx, inventory)));
+    const enriched = await Promise.all(page.page.map((inventory) => decorateInventorySummary(ctx, inventory)));
     return { ...page, page: enriched };
   },
 });
