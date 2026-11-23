@@ -5,6 +5,8 @@
  * e reutilização entre backend e frontend.
  */
 
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+
 export interface LotLike {
   active?: boolean;
   entryId?: string;
@@ -261,24 +263,24 @@ export function nextLotNumber(existingNumbers: string[], year: number): string {
  * Sequências globais compartilhadas: números ENT/LOT nunca dependem da
  * quantidade de documentos de um produto e nunca reutilizam lacunas antigas.
  */
-export async function generateNextEntryNumber(ctx: any): Promise<string> {
+export async function generateNextEntryNumber(ctx: MutationCtx | QueryCtx): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `ENT-${year}-`;
   const existing = await ctx.db
     .query("entries")
-    .withIndex("by_number", (q: any) => q.gte("entryNumber", prefix))
+    .withIndex("by_number", (q) => q.gte("entryNumber", prefix))
     .collect();
-  return nextEntryNumber(existing.map((entry: any) => String(entry.entryNumber ?? "")), year);
+  return nextEntryNumber(existing.map((entry) => String(entry.entryNumber ?? "")), year);
 }
 
-export async function generateNextLotNumber(ctx: any): Promise<string> {
+export async function generateNextLotNumber(ctx: MutationCtx | QueryCtx): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `LOT-${year}-`;
   const existing = await ctx.db
     .query("lots")
-    .withIndex("by_number", (q: any) => q.gte("lotNumber", prefix))
+    .withIndex("by_number", (q) => q.gte("lotNumber", prefix))
     .collect();
-  return nextLotNumber(existing.map((lot: any) => String(lot.lotNumber ?? "")), year);
+  return nextLotNumber(existing.map((lot) => String(lot.lotNumber ?? "")), year);
 }
 
 /**
@@ -300,13 +302,13 @@ export function nextExitNumber(existingExitNumbers: string[], year: number): str
 }
 
 /** Lê as saídas existentes e devolve o próximo número SAI-ANO-SEQ. */
-export async function generateExitNumber(ctx: any): Promise<string> {
+export async function generateExitNumber(ctx: MutationCtx | QueryCtx): Promise<string> {
   const exits = await ctx.db
     .query("stockMovements")
-    .withIndex("by_type", (q: any) => q.eq("type", "exit"))
+    .withIndex("by_type", (q) => q.eq("type", "exit"))
     .collect();
   const numbers = exits
-    .map((m: any) => m.exitNumber as string | undefined)
+    .map((movement) => movement.exitNumber)
     .filter((n: string | undefined): n is string => !!n);
   return nextExitNumber(numbers, new Date().getFullYear());
 }
@@ -320,7 +322,7 @@ export async function generateExitNumber(ctx: any): Promise<string> {
  */
 export async function hasInitialInventoryLot(
   lots: LotLike[],
-  getEntry: (entryId: string) => Promise<any | null | undefined>
+  getEntry: (entryId: string) => Promise<{ originType?: string | null } | null | undefined>
 ): Promise<boolean> {
   for (const lot of lots) {
     if (!lot.active || !lot.entryId) continue;
