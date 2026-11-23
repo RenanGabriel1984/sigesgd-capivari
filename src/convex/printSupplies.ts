@@ -663,6 +663,7 @@ async function consumeSupplyLotsInArea(
     await ctx.db.patch(lot._id, { quantityAvailable: Number(lot.quantityAvailable) - take });
     await adjustLotLocationBalance(ctx, {
       lotId: lot._id, productId: lot.productId, locationId: lot.locationId, delta: -take,
+      expectedQuantityBefore: Number(lot.quantityAvailable),
     });
     await changeSupplyLocationQuantity(ctx, productId, String(lot.locationId), -take);
     consumed.push({
@@ -1084,7 +1085,8 @@ export const withdrawFamily = mutation({
         });
         await adjustLotLocationBalance(ctx, {
           lotId: reclassifiedLotId, productId: looseMember._id,
-          locationId: source.locationId, delta: reclassifiedQuantity, allowCreate: true,
+          locationId: source.locationId, delta: reclassifiedQuantity,
+          expectedQuantityBefore: 0, allowCreate: true,
         });
         await changeSupplyLocationQuantity(
           ctx, String(looseMember._id), source.locationId, reclassifiedQuantity,
