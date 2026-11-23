@@ -1,3 +1,6 @@
+import type { MutationCtx } from "../convex/_generated/server";
+import type { Id } from "../convex/_generated/dataModel";
+
 /**
  * Mantém o saldo derivado lote × armário sincronizado com o lote.
  *
@@ -91,11 +94,11 @@ export function assertLotLocationBalanceMatchesExpected(input: {
 
 /** Aplica a variação dentro da mesma mutation Convex da movimentação de estoque. */
 export async function adjustLotLocationBalance(
-  ctx: any,
+  ctx: MutationCtx,
   input: {
-    lotId: any;
-    productId: any;
-    locationId?: any;
+    lotId: Id<"lots">;
+    productId: Id<"products">;
+    locationId?: Id<"storageLocations"> | null;
     delta: number;
     expectedQuantityBefore: number;
     allowCreate?: boolean;
@@ -105,7 +108,7 @@ export async function adjustLotLocationBalance(
   if (input.delta === 0) return;
   const rows = await ctx.db
     .query("lotLocationBalances")
-    .withIndex("by_lot", (q: any) => q.eq("lotId", input.lotId))
+    .withIndex("by_lot", (q) => q.eq("lotId", input.lotId))
     .collect();
   if (rows.length > 1) {
     throw new Error("Há saldos lote × armário duplicados para este lote. Operação bloqueada.");
@@ -115,12 +118,12 @@ export async function adjustLotLocationBalance(
   const locationId = input.locationId ?? rows[0]?.locationId;
   if (!locationId) return;
   assertLotLocationBalanceMatchesExpected({
-    rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
+    rows,
     lotId: String(input.lotId),
     expectedQuantityBefore: input.expectedQuantityBefore,
   });
   const plan = planLotLocationBalanceChange({
-    rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
+    rows,
     lotId: String(input.lotId),
     productId: String(input.productId),
     locationId: String(locationId),
@@ -131,12 +134,12 @@ export async function adjustLotLocationBalance(
     await ctx.db.insert("lotLocationBalances", {
       lotId: input.lotId,
       productId: input.productId,
-      locationId: input.locationId,
+      locationId,
       quantityAvailable: plan.quantityAvailable,
       updatedAt: Date.now(),
     });
   } else if (plan.kind === "patch") {
-    await ctx.db.patch(plan.rowId as any, {
+    await ctx.db.patch(plan.rowId as Id<"lotLocationBalances">, {
       quantityAvailable: plan.quantityAvailable,
       updatedAt: Date.now(),
     });
@@ -188,21 +191,21 @@ export function planLotLocationBalanceLocationChange(input: {
 }
 
 export async function setLotLocationBalanceLocation(
-  ctx: any,
+  ctx: MutationCtx,
   input: {
-    lotId: any;
-    productId: any;
-    locationId: any;
+    lotId: Id<"lots">;
+    productId: Id<"products">;
+    locationId: Id<"storageLocations">;
     quantityAvailable: number;
     allowCreate?: boolean;
   },
 ): Promise<void> {
   const rows = await ctx.db
     .query("lotLocationBalances")
-    .withIndex("by_lot", (q: any) => q.eq("lotId", input.lotId))
+    .withIndex("by_lot", (q) => q.eq("lotId", input.lotId))
     .collect();
   const plan = planLotLocationBalanceLocationChange({
-    rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
+    rows,
     lotId: String(input.lotId),
     productId: String(input.productId),
     locationId: String(input.locationId),
@@ -218,7 +221,7 @@ export async function setLotLocationBalanceLocation(
       updatedAt: Date.now(),
     });
   } else {
-    await ctx.db.patch(plan.rowId as any, {
+    await ctx.db.patch(plan.rowId as Id<"lotLocationBalances">, {
       locationId: input.locationId,
       quantityAvailable: plan.quantityAvailable,
       updatedAt: Date.now(),
