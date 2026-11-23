@@ -26,7 +26,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { internalMutation } from "./_generated/server";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
-import { v } from "convex/values";
 import {
   decideAreaRepair,
   decideLotAvailabilityRepair,
