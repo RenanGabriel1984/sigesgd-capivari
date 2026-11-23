@@ -538,22 +538,29 @@ export const bootstrapSetPassword = internalMutation({
     assertPasswordPolicy(args.password);
 
     // Find user by email
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
-
-    if (!user) {
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
+    if (userResolution.status === "missing") {
       throw new Error(`Usuário não encontrado com e-mail: ${email}`);
     }
+    if (userResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(userResolution.count));
+    }
+    const user = userResolution.record;
 
     // Check if password already exists
-    const existingPassword = await ctx.db
+    const existingPasswordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
-
-    if (existingPassword) {
+      .collect();
+    const passwordResolution = resolveUniqueRecord(existingPasswordRows);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(passwordResolution.count));
+    }
+    if (passwordResolution.status === "unique") {
       throw new Error(
         `Usuário ${email} já possui senha definida. ` +
         "Use a opção de alteração de senha no painel."
@@ -602,31 +609,24 @@ export const diagnosticListUsers = internalQuery({
   args: {},
   handler: async (ctx) => {
     const users = await ctx.db.query("users").collect();
-    const results: Array<{
-      userId: string;
-      name: string | undefined;
-      email: string | undefined;
-      role: string | undefined;
-      active: boolean | undefined;
-      hasPassword: boolean;
-    }> = [];
-
-    for (const u of users) {
-      const pw = await ctx.db
-        .query("passwords")
-        .withIndex("by_user", (q) => q.eq("userId", u._id))
-        .first();
-      results.push({
-        userId: u._id,
-        name: u.name,
-        email: u.email,
-        role: u.role,
-        active: u.active,
-        hasPassword: !!pw,
-      });
+    const passwordRecords = await ctx.db.query("passwords").collect();
+    const counts = new Map<string, number>();
+    for (const record of passwordRecords) {
+      const key = String(record.userId);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-
-    return results;
+    return users.map((user) => {
+      const passwordRecordCount = counts.get(String(user._id)) ?? 0;
+      return {
+        userId: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        active: user.active,
+        hasPassword: passwordRecordCount === 1,
+        passwordRecordCount,
+      };
+    });
   },
 });
 
@@ -716,13 +716,18 @@ export const requestPasswordReset = mutation({
     }
 
     // Find user by email
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
 
-    // Always return the same message to prevent email enumeration
-    if (!user) return { message: RESET_GENERIC_MESSAGE };
+    // Always return the same message to prevent email enumeration. Duplicate
+    // identities are fail-closed too; a reset must never target an arbitrary account.
+    if (userResolution.status !== "unique") {
+      return { message: RESET_GENERIC_MESSAGE };
+    }
+    const user = userResolution.record;
     if (user.active === false) return { message: RESET_GENERIC_MESSAGE };
     if ((user as { isAnonymous?: boolean }).isAnonymous === true) {
       return { message: RESET_GENERIC_MESSAGE };
@@ -812,10 +817,12 @@ export const confirmPasswordReset = mutation({
     }
     assertPasswordPolicy(args.newPassword);
 
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
+    const user = userResolution.status === "unique" ? userResolution.record : null;
 
     // Generic error to prevent enumeration and prevent disabled/invalid profiles
     // from using a previously issued recovery code after access was revoked.
@@ -879,10 +886,17 @@ export const confirmPasswordReset = mutation({
     const { hash, salt } = await hashPassword(args.newPassword);
 
     // Update or create password record
-    const existingPw = await ctx.db
+    const existingPasswordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
+      .collect();
+    const existingPasswordResolution = resolveUniqueRecord(existingPasswordRows);
+    if (existingPasswordResolution.status === "ambiguous") {
+      throw new Error("Código inválido ou expirado");
+    }
+    const existingPw = existingPasswordResolution.status === "unique"
+      ? existingPasswordResolution.record
+      : null;
 
     if (existingPw) {
       await ctx.db.patch(existingPw._id, {
