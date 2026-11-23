@@ -321,4 +321,13 @@ describe("seleção segura de buckets na classificação de lotes", () => {
       "Mouse",
     )).toThrow(/quantidade física inválida/i);
   });
+
+  it("bloqueia saldo positivo sem local físico antes de classificar", () => {
+    expect(() => getUniqueAreaLocationBuckets(
+      [{ quantity: 3 }],
+      "ti",
+      "cabinet-1",
+      "Mouse",
+    )).toThrow(/sem local definido/i);
+  });
 });
