@@ -541,7 +541,7 @@ export const confirm = mutation({
       if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
         throw new Error(`Quantidade inválida para o item ${item.productId}.`);
       }
-      const product: any = await ctx.db.get(item.productId);
+      const product = await ctx.db.get(item.productId);
       if (!product || !product.active) {
         throw new Error(`Produto ${product?.name ?? item.productId} não encontrado ou inativo.`);
       }
@@ -642,7 +642,7 @@ export const confirm = mutation({
       // o item ao lote que ele gerou.
       await ctx.db.patch(item._id, {
         lotId: lotId as string,
-        areaId: itemAreaId as any,
+        areaId: itemAreaId,
       });
 
       // Update stock (increase physicalQuantity)
@@ -671,7 +671,7 @@ export const confirm = mutation({
         } else {
           await ctx.db.insert("stockByLocation", {
             productId: item.productId, locationId: item.locationId,
-            quantity: item.quantity, areaId: itemAreaId as any,
+            quantity: item.quantity, areaId: itemAreaId,
           });
         }
       }
@@ -688,7 +688,7 @@ export const confirm = mutation({
         userId,
         entryId: args.entryId,
         lotId: lotNumber,
-        areaId: itemAreaId as any,
+        areaId: itemAreaId,
         locationId: item.locationId,
         documentNumber: entry.invoiceNumber,
         observation: `Entrada ${entry.entryNumber} — Lote ${lotNumber}`,
@@ -1094,7 +1094,7 @@ export const reverse = mutation({
             `Não é possível estornar "${product?.name ?? "item"}": o saldo no local físico de origem está ausente ou duplicado para a área correta.`,
           );
         }
-        locationStock = matchingRows[0];
+        locationStock = matchingRows[0]!;
         const scopeReservations = (await ctx.db.query("requestItemReservations")
           .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect())
           .filter((reservation) =>
