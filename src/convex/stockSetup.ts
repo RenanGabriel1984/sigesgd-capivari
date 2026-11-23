@@ -921,7 +921,7 @@ export const applyLegacyPrinterAreaClassification = internalMutation({
     confirmation: v.literal("CONFIRMAR_CLASSIFICACAO_22_SALDOS_IMPRESSORAS_FIRST_HERRING"),
   },
   handler: async (ctx) => {
-    const areaId = "q97b7737gv98ajm8qqpmjmzjs18ezb58";
+    const areaId = "q97b7737gv98ajm8qqpmjmzjs18ezb58" as Id<"stockAreas">;
     const expected = [
       { rowId: "nh70zfec9nvemxf5270pkef8b70btjts", productId: "kd79tf11zqbdtvg8sr8cq86zbtcbvs3f", locationId: "n5711zfag2vgm24hm5qd9yn42s8e54ej", quantity: 700, lotIds: ["n175qg8kj7kkzz3y4mn32zme1sb1ysaa"] },
       { rowId: "nh79vsy23rdr5mb09pvqxq6g69xa19hr", productId: "kd75me863v1ym08hdmrpw7h76eazwxg0", locationId: "n576x4v2v08tyzvzef21qk3m8h8e5y2f", quantity: 13, lotIds: ["n173x352z38x8rrf5fjemc60x8y6ht3h"] },
@@ -948,7 +948,7 @@ export const applyLegacyPrinterAreaClassification = internalMutation({
     ];
     if (expected.length !== 22) throw new Error("Lista autorizada inválida; nenhuma gravação realizada.");
 
-    const area: any = await ctx.db.get(areaId as Id<"stockAreas">);
+    const area = await ctx.db.get(areaId);
     if (!area || !area.active || area.name !== "Impressoras") {
       throw new Error("Área Impressoras ausente, inativa ou alterada; operação abortada.");
     }
@@ -957,17 +957,17 @@ export const applyLegacyPrinterAreaClassification = internalMutation({
       ctx.db.query("lotLocationBalances").collect(),
       ctx.db.query("stockByLocation").collect(),
     ]);
-    const balancesByLot = new Map<string, any[]>();
-    for (const balance of allBalances as any[]) {
+    const balancesByLot = new Map<string, (typeof allBalances)[number][]>();
+    for (const balance of allBalances) {
       const key = String(balance.lotId);
       const list = balancesByLot.get(key) ?? [];
       list.push(balance);
       balancesByLot.set(key, list);
     }
 
-    const patches: Array<{ rowId: string; productId: string; quantity: number; lotIds: string[] }> = [];
+    const patches: Array<{ rowId: Id<"stockByLocation">; productId: Id<"products">; quantity: number; lotIds: string[] }> = [];
     for (const item of expected) {
-      const row: any = await ctx.db.get(item.rowId as any);
+      const row = await ctx.db.get(item.rowId as Id<"stockByLocation">);
       if (!row || String(row.productId) !== item.productId ||
           String(row.locationId) !== item.locationId ||
           row.areaId != null || !Number.isFinite(row.quantity) ||
@@ -975,7 +975,7 @@ export const applyLegacyPrinterAreaClassification = internalMutation({
         throw new Error(`Saldo local ${item.rowId} mudou desde a auditoria; nenhuma classificação foi aplicada.`);
       }
 
-      const productRows = (allLocalRows as any[]).filter((candidate: any) =>
+      const productRows = allLocalRows.filter((candidate) =>
         String(candidate.productId) === item.productId &&
         String(candidate.locationId) === item.locationId
       );
@@ -983,7 +983,7 @@ export const applyLegacyPrinterAreaClassification = internalMutation({
         throw new Error(`Escopo produto/local possui registros adicionais: ${item.productId}; operação abortada.`);
       }
 
-      const positiveLots = (allLots as any[]).filter((lot) => {
+      const positiveLots = allLots.filter((lot) => {
         if (String(lot.productId) !== item.productId || !(Number(lot.quantityAvailable) > 0)) return false;
         const lotBalances = balancesByLot.get(String(lot._id)) ?? [];
         const resolvedLocation = lot.locationId ?? (lotBalances.length === 1 ? lotBalances[0].locationId : null);
@@ -995,7 +995,7 @@ export const applyLegacyPrinterAreaClassification = internalMutation({
         throw new Error(`Conjunto de lotes do produto ${item.productId} mudou; operação abortada.`);
       }
       let lotsQuantity = 0;
-      for (const lot of positiveLots as any[]) {
+      for (const lot of positiveLots) {
         const lotBalances = balancesByLot.get(String(lot._id)) ?? [];
         if (!lot.areaId || String(lot.areaId) !== areaId ||
             lotBalances.length !== 1 ||
@@ -1011,12 +1011,12 @@ export const applyLegacyPrinterAreaClassification = internalMutation({
       if (Math.abs(lotsQuantity - Number(row.quantity)) > 1e-9) {
         throw new Error(`Quantidade dos lotes diverge do saldo de ${item.productId}; operação abortada.`);
       }
-      patches.push({ rowId: item.rowId, productId: item.productId, quantity: Number(row.quantity), lotIds: actualLotIds });
+      patches.push({ rowId: item.rowId as Id<"stockByLocation">, productId: item.productId as Id<"products">, quantity: Number(row.quantity), lotIds: actualLotIds });
     }
 
     // Todas as 22 condições foram verificadas antes da primeira gravação.
     for (const item of patches) {
-      await ctx.db.patch(item.rowId as any, { areaId: areaId as any });
+      await ctx.db.patch(item.rowId, { areaId });
     }
     const now = Date.now();
     await ctx.db.insert("auditLogs", {
