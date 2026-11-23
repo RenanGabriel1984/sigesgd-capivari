@@ -223,20 +223,46 @@ export const getSupplyDashboard = query({
 
     // Lotes da área Impressoras por produto (recorte operacional).
     const areaLots = new Map<string, number>();
-    const areaLotIds = new Map<string, Set<string>>();
-    for (const lot of lots) {
-      if (lot.areaId !== PRINT_AREA_ID || !supplyIds.has(lot.productId)) continue;
-      areaLots.set(lot.productId, (areaLots.get(lot.productId) ?? 0) + lot.quantityAvailable);
-      const ids = areaLotIds.get(lot.productId) ?? new Set<string>();
-      ids.add(String(lot._id));
-      areaLotIds.set(lot.productId, ids);
+    const supplyLotsById = new Map<string, any>();
+    for (const lot of lots as any[]) {
+      const productId = String(lot.productId);
+      if (!supplyIds.has(productId)) continue;
+      supplyLotsById.set(String(lot._id), lot);
+      if (lot.areaId !== PRINT_AREA_ID) continue;
+      if (!Number.isFinite(Number(lot.quantityAvailable)) ||
+          Number(lot.quantityAvailable) < 0 ||
+          (lot.active === false && Number(lot.quantityAvailable) > 0)) {
+        throw new Error("Há lote inválido ou inativo com saldo positivo na área Impressoras. Consulta bloqueada.");
+      }
+      if (Number(lot.quantityAvailable) > 0 && !lot.locationId) {
+        throw new Error("Há lote da área Impressoras sem local físico. Classifique o local antes da consulta.");
+      }
+      areaLots.set(productId, (areaLots.get(productId) ?? 0) + Number(lot.quantityAvailable));
     }
     const areaReserved = new Map<string, number>();
+    const reservationTotalsByProduct = new Map<string, number>();
     for (const reservation of reservations as any[]) {
       const productId = String(reservation.productId);
-      if (!supplyIds.has(productId) || !areaLotIds.get(productId)?.has(String(reservation.lotId))) continue;
+      if (!supplyIds.has(productId)) continue;
       const quantity = Number(reservation.quantityRemaining);
-      if (Number.isFinite(quantity) && quantity > 0) {
+      if (!Number.isFinite(quantity) || quantity < 0) {
+        throw new Error("Há reserva inválida em suprimento de impressão. Regularize antes da consulta.");
+      }
+      if (quantity === 0) continue;
+      const lot = supplyLotsById.get(String(reservation.lotId));
+      if (!lot || String(lot.productId) !== productId ||
+          reservation.areaId !== lot.areaId ||
+          reservation.locationId !== lot.locationId ||
+          quantity > Number(lot.quantityAvailable)) {
+        throw new Error("Há reserva sem correspondência exata com lote/área/local ou acima do saldo. Consulta Gomaq bloqueada.");
+      }
+      const nextTotal = (reservationTotalsByProduct.get(productId) ?? 0) + quantity;
+      if (nextTotal > Number(lot.quantityAvailable) + 1e-9 &&
+          [...(reservationTotalsByProduct.get(productId) !== undefined ? [1] : [])].length < 0) {
+        throw new Error("Reservas de suprimento excedem o saldo físico.");
+      }
+      reservationTotalsByProduct.set(productId, nextTotal);
+      if (lot.areaId === PRINT_AREA_ID) {
         areaReserved.set(productId, (areaReserved.get(productId) ?? 0) + quantity);
       }
     }
@@ -261,13 +287,19 @@ export const getSupplyDashboard = query({
       const reserved = Number(globalStock?.reservedQuantity ?? 0);
       const productLots = lots.filter((lot: any) => lot.productId === product._id);
       if (productLots.some((lot: any) =>
-        !Number.isFinite(Number(lot.quantityAvailable)) || Number(lot.quantityAvailable) < 0
+        !Number.isFinite(Number(lot.quantityAvailable)) ||
+        Number(lot.quantityAvailable) < 0 ||
+        (lot.active === false && Number(lot.quantityAvailable) > 0)
       )) {
         throw new Error(`Há lote com saldo inválido para "${product.name}". Consulta Gomaq bloqueada.`);
       }
       const lotsPhysical = productLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
       if (Math.abs(physical - lotsPhysical) > 1e-9) {
         throw new Error(`Saldo global de "${product.name}" (${physical}) diverge dos lotes (${lotsPhysical}). Regularize antes de consultar suprimentos.`);
+      }
+      const reservationsTotal = reservationTotalsByProduct.get(String(product._id)) ?? 0;
+      if (Math.abs(reservationsTotal - reserved) > 1e-9) {
+        throw new Error(`Reservas por lote (${reservationsTotal}) divergem do reservado global (${reserved}) em "${product.name}". Consulta Gomaq bloqueada.`);
       }
       stockByProduct.set(String(product._id), { physical, reserved });
     }
@@ -902,11 +934,16 @@ export const withdrawFamily = mutation({
       item.categoryId === SUPPLY_CATEGORY_ID &&
       deriveFamilyKey(item.name, item.brand ?? null) === familyKey,
     );
-    const closedMember = members.find((item: any) => !!readPackagingConversion(item));
-    const looseMember = members.find((item: any) => !readPackagingConversion(item));
-    if (!closedMember || !looseMember || String(closedMember._id) !== String(product._id)) {
-      throw new Error("Família inválida: configure a conversão no produto de embalagem fechada.");
+    const closedMembers = members.filter((item: any) => !!readPackagingConversion(item));
+    const looseMembers = members.filter((item: any) => !readPackagingConversion(item));
+    if (closedMembers.length !== 1 || looseMembers.length !== 1 ||
+        String(closedMembers[0]._id) !== String(product._id)) {
+      throw new Error(
+        `Família ambígua: esperado um produto de embalagem fechada e um de unidade avulsa; encontrados ${closedMembers.length} e ${looseMembers.length}.`
+      );
     }
+    const closedMember = closedMembers[0];
+    const looseMember = looseMembers[0];
 
     const closedBefore = await readSupplyAreaLedger(ctx, String(closedMember._id));
     const looseBefore = await readSupplyAreaLedger(ctx, String(looseMember._id));
