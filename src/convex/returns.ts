@@ -458,6 +458,7 @@ export const create = mutation({
         await adjustLotLocationBalance(ctx, {
           lotId: part.lot._id, productId: part.lot.productId,
           locationId: targetLocationId, delta: part.quantity,
+          expectedQuantityBefore: Number(part.lot.quantityAvailable),
         });
       }
       const returnId = await ctx.db.insert("returns", {
