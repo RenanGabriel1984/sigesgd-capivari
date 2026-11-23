@@ -3,8 +3,6 @@ import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
-
 async function requireUser(ctx: any) {
   // RBAC central: histórico/movimentações visíveis a quem consulta estoque.
   return requirePermission(ctx, "movements.view");
@@ -82,7 +80,7 @@ export const createEntry = mutation({
     supplierId: v.optional(v.id("suppliers")),
     documentNumber: v.optional(v.string()), observation: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     await requireStockManagerOrAdmin(ctx);
     throw new Error("Entrada direta legada desativada. Use o módulo Entradas para registrar documento, lote, área e local físico.");
   },
@@ -93,7 +91,7 @@ export const createExit = mutation({
     productId: v.id("products"), quantity: v.number(),
     requestId: v.optional(v.id("requests")), observation: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     await requireStockManagerOrAdmin(ctx);
     throw new Error("Saída direta global desativada. Use Solicitações ou Saída rápida e informe a área/local de origem.");
   },
@@ -101,7 +99,7 @@ export const createExit = mutation({
 
 export const reserveStock = mutation({
   args: { productId: v.id("products"), quantity: v.number(), requestId: v.id("requests") },
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     await requireUser(ctx);
     throw new Error("Reserva manual isolada desativada. As reservas devem ser criadas durante a aprovação da solicitação.");
   },
@@ -114,7 +112,7 @@ export const editEntry = mutation({
     documentNumber: v.optional(v.string()),
     observation: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     await requireStockManagerOrAdmin(ctx);
     throw new Error("Edição direta de entrada legada desativada. Use o módulo Entradas para preservar lote, área e localização.");
   },
@@ -125,7 +123,7 @@ export const reverseEntry = mutation({
     movementId: v.id("stockMovements"),
     reason: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     await requireStockManagerOrAdmin(ctx);
     throw new Error("Estorno direto de entrada legada desativado. Use o estorno do módulo Entradas para preservar lote, área e localização.");
   },
@@ -133,7 +131,7 @@ export const reverseEntry = mutation({
 
 export const createAdjustment = mutation({
   args: { productId: v.id("products"), newQuantity: v.number(), observation: v.string() },
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
     await requireStockManagerOrAdmin(ctx);
     throw new Error("Ajuste global legado desativado. A correção deve ocorrer por inventário/lote/área/local para preservar a rastreabilidade.");
   },
