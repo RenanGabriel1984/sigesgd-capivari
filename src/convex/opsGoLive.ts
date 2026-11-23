@@ -20,6 +20,7 @@
  *  - FUNÇÃO INTERNA: sem rota pública, não substitui a UI de importação.
  */
 import { internalMutation } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import {
@@ -32,7 +33,7 @@ const GOMAQ_ACCESS_KEY = "35260961457941000143550010003720431466669127";
 const GOMAQ_CNPJ = "61457941000143";
 const GOMAQ_LEGAL_NAME = "Gomaq Máquinas para Escritório Ltda";
 const GOMAQ_TRADE_NAME = "Gomaq";
-const LOCATION_ARMARIO_TI_02 = "n576x4v2v08tyzvzef21qk3m8h8e5y2f"; // Armário TI 02
+const LOCATION_ARMARIO_TI_02 = "n576x4v2v08tyzvzef21qk3m8h8e5y2f" as Id<"storageLocations">; // Armário TI 02
 const CATEGORY_SUPRIMENTOS = "Suprimentos de Impressão";
 
 /** Itens da NF-e 372043 (quantidade EXATAMENTE como na NF — sem conversão). */
@@ -134,7 +135,7 @@ export const stampImplementationStock = internalMutation({
 
 export const registerGomaqNfe372043 = internalMutation({
   args: { confirm: v.literal("REGISTRAR-NF-372043") },
-  handler: async (ctx: any, _args: { confirm: "REGISTRAR-NF-372043" }) => {
+  handler: async (ctx: any) => {
     // ── 0. Admin de operação (responsável auditável) ──
     const admin = await ctx.db.get("jx70c3y841fp20pt5qfd5a5tw18dhhd8"); // Renan Gabriel (bootstrap admin)
     if (!admin || admin.role !== "admin") throw new Error("Admin de operação não encontrado");
@@ -149,7 +150,7 @@ export const registerGomaqNfe372043 = internalMutation({
     }
 
     // ── 2. Fornecedor: dedupe por CNPJ ──
-    let supplierId: string | undefined;
+    let supplierId: Id<"suppliers"> | undefined;
     const existingSuppliers = await ctx.db.query("suppliers").collect();
     const gomaq = existingSuppliers.find(
       (s: any) => (s.cnpj ?? "").replace(/\D/g, "") === GOMAQ_CNPJ
@@ -193,7 +194,7 @@ export const registerGomaqNfe372043 = internalMutation({
     }, 0);
 
     const resolved: Array<{
-      productId: string; created: boolean; code: string; qty: number;
+      productId: Id<"products">; created: boolean; code: string; qty: number;
       unit: string; model?: string; brand: string;
     }> = [];
     for (const it of GOMAQ_ITEMS) {
@@ -272,7 +273,7 @@ export const registerGomaqNfe372043 = internalMutation({
 
       const lotId = await ctx.db.insert("lots", {
         lotNumber,
-        productId: r.productId,
+        productId: r.productId as Id<"products">,
         entryId,
         brand: r.brand,
         model: r.model,
@@ -288,7 +289,7 @@ export const registerGomaqNfe372043 = internalMutation({
       });
       await adjustLotLocationBalance(ctx, {
         lotId, productId: r.productId, locationId: LOCATION_ARMARIO_TI_02,
-        delta: r.qty, allowCreate: true,
+        delta: r.qty, expectedQuantityBefore: 0, allowCreate: true,
       });
 
       await ctx.db.insert("entryItems", {

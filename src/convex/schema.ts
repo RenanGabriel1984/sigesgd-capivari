@@ -683,7 +683,8 @@ const schema = defineSchema(
       createdAt: v.number(),
       updatedAt: v.number(),
     }).index("by_status", ["status"])
-      .index("by_date", ["date"]),
+      .index("by_date", ["date"])
+      .index("by_inventoryNumber", ["inventoryNumber"]),
 
     // ── Inventory Counts (Contagens do Inventário) ──
     inventoryCounts: defineTable({

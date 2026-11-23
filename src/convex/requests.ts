@@ -1,20 +1,22 @@
 import { query, mutation } from "./_generated/server";
+import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { verifyPassword } from "./auth/passwords";
 import { generateExitNumber } from "./stockHelpers";
 import { requirePermission, requireRequestAction } from "./rbac";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { planFifoAreaLotAllocation, validateAreaLocationLotBalance } from "../lib/area-stock";
+import type { AreaLotCandidate } from "../lib/area-stock";
 import { isDiscreteStockUnit, requireSingleValidGlobalStock } from "../lib/stock-quantity-rules";
 import { validateRequestItemReservationLedger } from "../lib/request-reservation-ledger";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
-async function requireUser(ctx: any) {
+async function requireUser(ctx: QueryCtx | MutationCtx) {
   // RBAC central: requisições são visíveis a quem pode consultá-las; a query
   // de lista abaixo já restringe o escopo para o solicitante (técnico).
   return requirePermission(ctx, "requests.view");
@@ -26,7 +28,7 @@ function hasFullVisibility(role: UserRole | undefined): boolean {
   return roleHasPermission(role as AppRole, "requests.approve");
 }
 
-async function enrichRequest(ctx: any, r: any) {
+async function enrichRequest(ctx: QueryCtx, r: Doc<"requests">) {
   const requester = await ctx.db.get(r.requesterId);
   const approver = r.approverId ? await ctx.db.get(r.approverId) : null;
   const secretaria = await ctx.db.get(r.secretariaId);
@@ -34,10 +36,10 @@ async function enrichRequest(ctx: any, r: any) {
   const unidade = r.unidadeId ? await ctx.db.get(r.unidadeId) : null;
   const items = await ctx.db
     .query("requestItems")
-    .withIndex("by_request", (q: any) => q.eq("requestId", r._id))
+    .withIndex("by_request", (q) => q.eq("requestId", r._id))
     .collect();
   const itemsWithProduct = await Promise.all(
-    items.map(async (item: any) => {
+    items.map(async (item) => {
       const product = await ctx.db.get(item.productId as Id<"products">);
       const printer = item.targetPrinterId ? await ctx.db.get(item.targetPrinterId) : null;
       const area = item.areaId ? await ctx.db.get(item.areaId) : null;
@@ -267,15 +269,19 @@ export const approve = mutation({
     if (request.status !== "pending") throw new Error("Solicitação não está pendente.");
     assertTextLimits({ observation: args.observation }, MAX_OBSERVATION);
 
-    const stockNeeded = new Map<string, {
+    const stockNeeded = new Map<Id<"products">, {
       quantity: number; productName: string; hasArea: boolean; hasLegacy: boolean;
     }>();
     const allocationPlans: Array<{
-      requestItemId: string; productId: string; lotId: string;
-      areaId: string; locationId: string; quantity: number;
+      requestItemId: Id<"requestItems">;
+      productId: Id<"products">;
+      lotId: Id<"lots">;
+      areaId: Id<"stockAreas">;
+      locationId: Id<"storageLocations">;
+      quantity: number;
     }> = [];
     const stagedByLot = new Map<string, number>();
-    const seenItems = new Set<string>();
+    const seenItems = new Set<Id<"requestItems">>();
     let totalItemsToApprove = 0;
 
     // Fase 1: validar tudo e planejar FIFO sem gravar nada.
@@ -301,7 +307,7 @@ export const approve = mutation({
         throw new Error(`A quantidade aprovada para "${product.name}" deve ser inteira.`);
       }
       const productName = product.name;
-      const productKey = requestItem.productId as string;
+      const productKey = requestItem.productId;
       const isAreaScoped = !!requestItem.areaId;
       const current = stockNeeded.get(productKey) ?? {
         quantity: 0, productName, hasArea: false, hasLegacy: false,
@@ -325,29 +331,29 @@ export const approve = mutation({
       }
 
       const productLots = await ctx.db.query("lots")
-        .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
+        .withIndex("by_product", (q) => q.eq("productId", requestItem.productId))
         .collect();
-      const scopedLots = productLots.filter((lot: any) =>
+      const scopedLots = productLots.filter((lot) =>
         lot.areaId === requestItem.areaId && lot.locationId === requestItem.sourceLocationId
       );
       const locationRows = await ctx.db.query("stockByLocation")
-        .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
+        .withIndex("by_product", (q) => q.eq("productId", requestItem.productId))
         .collect();
-      const matchingLocationRows = locationRows.filter((row: any) =>
+      const matchingLocationRows = locationRows.filter((row) =>
         row.locationId === requestItem.sourceLocationId && row.areaId === requestItem.areaId
       );
-      const candidates = [];
-      const scopedLotBalances = [];
+      const candidates: AreaLotCandidate[] = [];
+      const scopedLotBalances: Array<{ lotNumber: string; quantityAvailable: number; quantityReserved: number; active: boolean }> = [];
       for (const lot of scopedLots) {
         const reservations = await ctx.db.query("requestItemReservations")
-          .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id))
+          .withIndex("by_lot", (q) => q.eq("lotId", lot._id))
           .collect();
-        if (reservations.some((reservation: any) =>
+        if (reservations.some((reservation) =>
           !Number.isFinite(reservation.quantityRemaining) || reservation.quantityRemaining < 0
         )) {
           throw new Error(`O lote ${lot.lotNumber} possui reserva inválida. Regularize antes de aprovar.`);
         }
-        const alreadyReserved = reservations.reduce((sum: number, reservation: any) =>
+        const alreadyReserved = reservations.reduce((sum: number, reservation) =>
           sum + reservation.quantityRemaining, 0);
         scopedLotBalances.push({
           lotNumber: lot.lotNumber,
@@ -357,13 +363,13 @@ export const approve = mutation({
         });
         if (!lot.active) continue;
         candidates.push({
-          lotId: lot._id as string,
+          lotId: String(lot._id),
           lotNumber: lot.lotNumber,
           receivedAt: lot.receivedAt,
           quantityAvailable: lot.quantityAvailable,
           quantityReserved: alreadyReserved + (stagedByLot.get(lot._id as string) ?? 0),
-          areaId: lot.areaId as string | undefined,
-          locationId: lot.locationId as string | undefined,
+          areaId: lot.areaId ? String(lot.areaId) : undefined,
+          locationId: lot.locationId ? String(lot.locationId) : undefined,
           active: lot.active,
         });
       }
@@ -380,7 +386,7 @@ export const approve = mutation({
 
       const allocation = planFifoAreaLotAllocation(
         candidates, input.quantityApproved,
-        requestItem.areaId as string, requestItem.sourceLocationId as string,
+        String(requestItem.areaId), String(requestItem.sourceLocationId),
       );
       if (allocation.remaining > 0) {
         throw new Error(
@@ -391,10 +397,10 @@ export const approve = mutation({
       for (const part of allocation.allocations) {
         allocationPlans.push({
           requestItemId: input.itemId,
-          productId: requestItem.productId as string,
-          lotId: part.lotId,
-          areaId: requestItem.areaId as string,
-          locationId: requestItem.sourceLocationId as string,
+          productId: requestItem.productId,
+          lotId: part.lotId as Id<"lots">,
+          areaId: requestItem.areaId!,
+          locationId: requestItem.sourceLocationId!,
           quantity: part.quantity,
         });
         stagedByLot.set(part.lotId, (stagedByLot.get(part.lotId) ?? 0) + part.quantity);
@@ -405,11 +411,11 @@ export const approve = mutation({
     // Impede que uma chamada parcial marque a solicitação inteira como aprovada
     // deixando linhas sem quantityApproved e sem reserva rastreável.
     const requestItems = await ctx.db.query("requestItems")
-      .withIndex("by_request", (q: any) => q.eq("requestId", args.requestId))
+      .withIndex("by_request", (q) => q.eq("requestId", args.requestId))
       .collect();
     if (
       seenItems.size !== requestItems.length ||
-      requestItems.some((item: any) => !seenItems.has(item._id as string))
+      requestItems.some((item) => !seenItems.has(item._id))
     ) {
       throw new Error("A aprovação deve informar exatamente todos os itens da solicitação. Atualize a tela e tente novamente.");
     }
@@ -424,17 +430,17 @@ export const approve = mutation({
         );
       }
       const stockRows = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", productId as any))
+        .withIndex("by_product", (q) => q.eq("productId", productId))
         .collect();
       const stock = requireSingleValidGlobalStock(stockRows, needed.productName);
 
       if (needed.hasArea) {
         const existingReservations = await ctx.db.query("requestItemReservations")
-          .withIndex("by_product", (q: any) => q.eq("productId", productId as any))
+          .withIndex("by_product", (q) => q.eq("productId", productId))
           .collect();
-        const allocatedToAreas = existingReservations.reduce((sum: number, reservation: any) =>
+        const allocatedToAreas = existingReservations.reduce((sum: number, reservation) =>
           sum + reservation.quantityRemaining, 0);
-        if (existingReservations.some((reservation: any) =>
+        if (existingReservations.some((reservation) =>
           !Number.isFinite(reservation.quantityRemaining) || reservation.quantityRemaining < 0
         )) {
           throw new Error(`"${needed.productName}" possui reserva por lote inválida. Regularize antes de aprovar novas solicitações.`);
@@ -465,7 +471,7 @@ export const approve = mutation({
       await ctx.db.patch(input.itemId, { quantityApproved: input.quantityApproved });
       if (input.quantityApproved <= 0) continue;
       const stockRows = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
+        .withIndex("by_product", (q) => q.eq("productId", requestItem.productId))
         .collect();
       const stock = requireSingleValidGlobalStock(stockRows, String(requestItem.productId));
       await ctx.db.patch(stock._id, {
@@ -475,11 +481,11 @@ export const approve = mutation({
 
     for (const allocation of allocationPlans) {
       await ctx.db.insert("requestItemReservations", {
-        requestItemId: allocation.requestItemId as any,
-        productId: allocation.productId as any,
-        lotId: allocation.lotId as any,
-        areaId: allocation.areaId as any,
-        locationId: allocation.locationId as any,
+        requestItemId: allocation.requestItemId,
+        productId: allocation.productId,
+        lotId: allocation.lotId,
+        areaId: allocation.areaId,
+        locationId: allocation.locationId,
         quantity: allocation.quantity,
         quantityRemaining: allocation.quantity,
         quantityDelivered: 0,
@@ -506,7 +512,7 @@ export const approve = mutation({
 export const reject = mutation({
   args: { requestId: v.id("requests"), observation: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const { userId, user, role } = await requireUser(ctx);
+    const { userId, role } = await requireUser(ctx);
     if (!roleHasPermission(role, "requests.reject")) {
       throw new Error("ACESSO NEGADO: seu perfil não possui a permissão " +
         "de rejeição de requisições.");
@@ -552,7 +558,7 @@ export const deliver = mutation({
     );
 
     const passwordRecords = await ctx.db.query("passwords")
-      .withIndex("by_user", (q: any) => q.eq("userId", userId)).collect();
+      .withIndex("by_user", (q) => q.eq("userId", userId)).collect();
     if (passwordRecords.length === 0) {
       throw new Error("Senha não configurada. Contate o administrador.");
     }
@@ -576,9 +582,14 @@ export const deliver = mutation({
     }
 
     const requestItems = await ctx.db.query("requestItems")
-      .withIndex("by_request", (q: any) => q.eq("requestId", args.requestId)).collect();
-    const byId = new Map(requestItems.map((item: any) => [item._id as string, item]));
-    const deliveredByItem = new Map<string, number>();
+      .withIndex("by_request", (q) => q.eq("requestId", args.requestId)).collect();
+    const byId = new Map(requestItems.map((item) => [item._id, item] as const));
+    const getRequestItem = (itemId: Id<"requestItems">) => {
+      const item = byId.get(itemId);
+      if (!item) throw new Error("Item não pertence a esta solicitação.");
+      return item;
+    };
+    const deliveredByItem = new Map<Id<"requestItems">, number>();
     const seen = new Set<string>();
     const seenSerialNumbers = new Set<string>();
 
@@ -586,7 +597,7 @@ export const deliver = mutation({
     for (const input of inputItems) {
       if (seen.has(input.itemId)) throw new Error("A lista de entrega contém item duplicado.");
       seen.add(input.itemId);
-      const item: any = byId.get(input.itemId);
+      const item = byId.get(input.itemId);
       if (!item) throw new Error("Item não pertence a esta solicitação.");
       if (!Number.isFinite(input.quantityDelivered) || input.quantityDelivered <= 0) {
         throw new Error("Quantidade entregue deve ser um número válido maior que zero.");
@@ -615,7 +626,7 @@ export const deliver = mutation({
       }
 
       const stockRows = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
       const stock = requireSingleValidGlobalStock(stockRows, product.name);
       if (stock.physicalQuantity < input.quantityDelivered || stock.reservedQuantity < input.quantityDelivered) {
         throw new Error("Estoque físico ou reservado insuficiente para concluir a entrega.");
@@ -626,7 +637,7 @@ export const deliver = mutation({
           throw new Error("A solicitação classificada precisa manter o local físico de origem.");
         }
         const reservations = await ctx.db.query("requestItemReservations")
-          .withIndex("by_requestItem", (q: any) => q.eq("requestItemId", input.itemId)).collect();
+          .withIndex("by_requestItem", (q) => q.eq("requestItemId", input.itemId)).collect();
         const reservationLedger = validateRequestItemReservationLedger({
           requestItemId: String(item._id),
           productId: String(item.productId),
@@ -654,21 +665,21 @@ export const deliver = mutation({
             throw new Error("Um lote reservado não pertence mais à área/local ou não possui saldo suficiente. Entrega bloqueada.");
           }
           const lotReservations = await ctx.db.query("requestItemReservations")
-            .withIndex("by_lot", (q: any) => q.eq("lotId", reservation.lotId)).collect();
-          if (lotReservations.some((row: any) =>
+            .withIndex("by_lot", (q) => q.eq("lotId", reservation.lotId)).collect();
+          if (lotReservations.some((row) =>
             !Number.isFinite(row.quantityRemaining) || row.quantityRemaining < 0
           )) {
             throw new Error("O lote possui reserva com quantidade inválida. Entrega bloqueada.");
           }
-          const reservedOnLot = lotReservations.reduce((sum: number, row: any) =>
+          const reservedOnLot = lotReservations.reduce((sum: number, row) =>
             sum + Number(row.quantityRemaining), 0);
           if (!Number.isFinite(reservedOnLot) || reservedOnLot > lot.quantityAvailable + 1e-9) {
             throw new Error("O total reservado no lote excede o saldo físico. Entrega bloqueada.");
           }
         }
         const locationRows = await ctx.db.query("stockByLocation")
-          .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const matchingSourceRows = locationRows.filter((row: any) =>
+          .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
+        const matchingSourceRows = locationRows.filter((row) =>
           row.locationId === item.sourceLocationId && row.areaId === item.areaId
         );
         if (matchingSourceRows.length !== 1) {
@@ -677,23 +688,23 @@ export const deliver = mutation({
             : "Há saldos duplicados no local de origem. Regularize antes de concluir a entrega.");
         }
         const sourceLots = await ctx.db.query("lots")
-          .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+          .withIndex("by_product", (q) => q.eq("productId", item.productId))
           .collect();
-        const scopedLots = sourceLots.filter((lot: any) =>
+        const scopedLots = sourceLots.filter((lot) =>
           lot.areaId === item.areaId && lot.locationId === item.sourceLocationId
         );
-        const scopedLotBalances = [];
+        const scopedLotBalances: Array<{ lotNumber: string; quantityAvailable: number; quantityReserved: number; active: boolean }> = [];
         for (const lot of scopedLots) {
           const lotReservations = await ctx.db.query("requestItemReservations")
-            .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id))
+            .withIndex("by_lot", (q) => q.eq("lotId", lot._id))
             .collect();
-          if (lotReservations.some((row: any) =>
+          if (lotReservations.some((row) =>
             !Number.isFinite(row.quantityRemaining) || row.quantityRemaining < 0
           )) {
             throw new Error(`O lote ${lot.lotNumber} possui reserva inválida. Entrega bloqueada.`);
           }
           const quantityReserved = lotReservations.reduce(
-            (sum: number, row: any) => sum + row.quantityRemaining,
+            (sum: number, row) => sum + row.quantityRemaining,
             0,
           );
           scopedLotBalances.push({
@@ -718,9 +729,9 @@ export const deliver = mutation({
       } else {
         // Solicitação antiga sem origem: nunca consumir lote já atribuído a uma área/local.
         const lots = await ctx.db.query("lots")
-          .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const legacyFree = lots.filter((lot: any) => lot.active && !lot.areaId && !lot.locationId)
-          .reduce((sum: number, lot: any) => sum + lot.quantityAvailable, 0);
+          .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
+        const legacyFree = lots.filter((lot) => lot.active && !lot.areaId && !lot.locationId)
+          .reduce((sum: number, lot) => sum + lot.quantityAvailable, 0);
         if (legacyFree < input.quantityDelivered) {
           throw new Error(
             `Solicitação antiga sem área/local: há apenas ${legacyFree} unidade(s) sem classificação segura. Materiais de áreas definidas não serão consumidos.`
@@ -732,9 +743,9 @@ export const deliver = mutation({
 
     const now = Date.now();
     for (const input of inputItems) {
-      const item: any = byId.get(input.itemId);
+      const item = getRequestItem(input.itemId);
       const stockRows = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
       const stock = requireSingleValidGlobalStock(stockRows, String(item.productId));
       const newPhysical = stock.physicalQuantity - input.quantityDelivered;
       const newReserved = stock.reservedQuantity - input.quantityDelivered;
@@ -758,11 +769,11 @@ export const deliver = mutation({
       let remaining = input.quantityDelivered;
       if (item.areaId) {
         const reservations = await ctx.db.query("requestItemReservations")
-          .withIndex("by_requestItem", (q: any) => q.eq("requestItemId", input.itemId)).collect();
-        const rows = await Promise.all(reservations.map(async (reservation: any) => ({
+          .withIndex("by_requestItem", (q) => q.eq("requestItemId", input.itemId)).collect();
+        const rows = await Promise.all(reservations.map(async (reservation) => ({
           reservation, lot: await ctx.db.get(reservation.lotId as Id<"lots">),
         })));
-        rows.sort((a: any,b: any)=>(a.lot?.receivedAt??0)-(b.lot?.receivedAt??0) ||
+        rows.sort((a,b)=>(a.lot?.receivedAt??0)-(b.lot?.receivedAt??0) ||
           (a.lot?.lotNumber??"").localeCompare(b.lot?.lotNumber??""));
         for (const row of rows) {
           if (remaining <= 0) break;
@@ -781,7 +792,7 @@ export const deliver = mutation({
           });
           await adjustLotLocationBalance(ctx, {
             lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
-            delta: -consume,
+            delta: -consume, expectedQuantityBefore: Number(lot.quantityAvailable),
           });
           await ctx.db.patch(reservation._id, {
             quantityRemaining: reservation.quantityRemaining - consume,
@@ -796,8 +807,8 @@ export const deliver = mutation({
         }
         if (remaining > 0) throw new Error("Reservas por lote insuficientes para concluir a entrega.");
         const locationRows = await ctx.db.query("stockByLocation")
-          .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const matchingSourceRows = locationRows.filter((row: any) =>
+          .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
+        const matchingSourceRows = locationRows.filter((row) =>
           row.locationId === item.sourceLocationId && row.areaId === item.areaId
         );
         if (matchingSourceRows.length !== 1) {
@@ -808,9 +819,9 @@ export const deliver = mutation({
         await ctx.db.patch(source._id, { quantity: source.quantity - input.quantityDelivered });
       } else {
         const lots = await ctx.db.query("lots")
-          .withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const sorted = lots.filter((lot: any)=>lot.active&&!lot.areaId&&!lot.locationId&&lot.quantityAvailable>0)
-          .sort((a: any,b: any)=>a.receivedAt-b.receivedAt||a.lotNumber.localeCompare(b.lotNumber));
+          .withIndex("by_product", (q) => q.eq("productId", item.productId)).collect();
+        const sorted = lots.filter((lot)=>lot.active&&!lot.areaId&&!lot.locationId&&lot.quantityAvailable>0)
+          .sort((a,b)=>a.receivedAt-b.receivedAt||a.lotNumber.localeCompare(b.lotNumber));
         for(const lot of sorted){
           if(remaining<=0)break;
           const consume=Math.min(lot.quantityAvailable,remaining);
@@ -832,13 +843,13 @@ export const deliver = mutation({
 
     // The request is closed after this delivery. Release undelivered quantities so
     // partial lines or lines omitted from this delivery do not leave orphan reservations.
-    const releaseByProduct = new Map<string, number>();
-    for (const item of requestItems as any[]) {
+    const releaseByProduct = new Map<Id<"products">, number>();
+    for (const item of requestItems) {
       if (item.quantityApproved <= 0) continue;
       let release = 0;
       if (item.areaId) {
         const reservations = await ctx.db.query("requestItemReservations")
-          .withIndex("by_requestItem", (q: any) => q.eq("requestItemId", item._id)).collect();
+          .withIndex("by_requestItem", (q) => q.eq("requestItemId", item._id)).collect();
         for (const reservation of reservations) {
           if (reservation.quantityRemaining <= 0) continue;
           release += reservation.quantityRemaining;
@@ -848,17 +859,17 @@ export const deliver = mutation({
           });
         }
       } else {
-        const delivered = deliveredByItem.get(item._id as string) ?? item.quantityDelivered ?? 0;
+        const delivered = deliveredByItem.get(item._id) ?? item.quantityDelivered ?? 0;
         release = Math.max(0, item.quantityApproved - delivered);
       }
       if (release > 0) {
-        const key = item.productId as string;
+        const key = item.productId;
         releaseByProduct.set(key, (releaseByProduct.get(key) ?? 0) + release);
       }
     }
     for (const [productId, release] of releaseByProduct) {
       const stockRows = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", productId as any)).collect();
+        .withIndex("by_product", (q) => q.eq("productId", productId)).collect();
       const stock = requireSingleValidGlobalStock(stockRows, String(productId));
       if (stock.reservedQuantity < release) {
         throw new Error("Inconsistência de reserva global ao liberar quantidade não entregue.");
@@ -875,15 +886,15 @@ export const deliver = mutation({
       reverseLogisticsConfirmed: args.reverseLogisticsConfirmed ?? undefined,
     });
     const deliveredAuditLines = await Promise.all(inputItems.map(async (input) => {
-      const item: any = byId.get(input.itemId);
-      const product: any = await ctx.db.get(item.productId);
-      const area: any = item.areaId ? await ctx.db.get(item.areaId) : null;
-      const location: any = item.sourceLocationId ? await ctx.db.get(item.sourceLocationId) : null;
+      const item = getRequestItem(input.itemId);
+      const product = await ctx.db.get(item.productId);
+      const area = item.areaId ? await ctx.db.get(item.areaId) : null;
+      const location = item.sourceLocationId ? await ctx.db.get(item.sourceLocationId) : null;
       const allocations = await ctx.db.query("requestItemLots")
-        .withIndex("by_requestItem", (q: any) => q.eq("requestItemId", input.itemId))
+        .withIndex("by_requestItem", (q) => q.eq("requestItemId", input.itemId))
         .collect();
-      const lotLabels = await Promise.all(allocations.map(async (allocation: any) => {
-        const lot: any = await ctx.db.get(allocation.lotId);
+      const lotLabels = await Promise.all(allocations.map(async (allocation) => {
+        const lot = await ctx.db.get(allocation.lotId);
         return `${lot?.lotNumber ?? String(allocation.lotId)} x${allocation.quantity}`;
       }));
       const serials = input.serialNumbers?.length ? `; séries: ${input.serialNumbers.join(", ")}` : "";
@@ -916,12 +927,12 @@ export const cancel = mutation({
     }
 
     const now = Date.now();
-    const releaseByProduct = new Map<string, number>();
+    const releaseByProduct = new Map<Id<"products">, number>();
     const details: string[] = [];
     if (request.status === "approved") {
       const items = await ctx.db.query("requestItems")
-        .withIndex("by_request", (q: any) => q.eq("requestId", args.requestId)).collect();
-      for (const item of items as any[]) {
+        .withIndex("by_request", (q) => q.eq("requestId", args.requestId)).collect();
+      for (const item of items) {
         if (item.quantityApproved <= 0) continue;
         let release = 0;
         if (item.areaId) {
@@ -929,7 +940,7 @@ export const cancel = mutation({
             throw new Error("A solicitação aprovada não possui local físico de origem. Regularize antes de cancelar.");
           }
           const reservations = await ctx.db.query("requestItemReservations")
-            .withIndex("by_requestItem", (q: any) => q.eq("requestItemId", item._id)).collect();
+            .withIndex("by_requestItem", (q) => q.eq("requestItemId", item._id)).collect();
           const reservationLedger = validateRequestItemReservationLedger({
             requestItemId: String(item._id),
             productId: String(item.productId),
@@ -958,7 +969,7 @@ export const cancel = mutation({
           release = Math.max(0, item.quantityApproved - (item.quantityDelivered ?? 0));
         }
         if (release > 0) {
-          const key = item.productId as string;
+          const key = item.productId;
           releaseByProduct.set(key, (releaseByProduct.get(key) ?? 0) + release);
           const product = await ctx.db.get(item.productId as Id<"products">);
           details.push(`${product?.name ?? "item"}: -${release}`);
@@ -966,7 +977,7 @@ export const cancel = mutation({
       }
       for (const [productId, release] of releaseByProduct) {
         const stockRows = await ctx.db.query("stock")
-          .withIndex("by_product", (q: any) => q.eq("productId", productId as any)).collect();
+          .withIndex("by_product", (q) => q.eq("productId", productId)).collect();
         const stock = requireSingleValidGlobalStock(stockRows, String(productId));
         if (stock.reservedQuantity < release) {
           throw new Error("Inconsistência de estoque: reserva insuficiente para cancelamento. Nenhuma alteração foi confirmada.");
@@ -1019,7 +1030,7 @@ export const listDelivered = query({
 
     let requests = await ctx.db
       .query("requests")
-      .withIndex("by_status", (q: any) => q.eq("status", "delivered"))
+      .withIndex("by_status", (q) => q.eq("status", "delivered"))
       .order("desc")
       .collect();
 
@@ -1046,7 +1057,7 @@ export const listDelivered = query({
     if (args.serialSearch?.trim()) {
       const term = args.serialSearch.trim().toLowerCase();
       results = results.filter((r) =>
-        r.items?.some((item: any) =>
+        r.items?.some((item) =>
           item.deliveredSerialNumbers?.some((sn: string) => sn.toLowerCase().includes(term))
         )
       );
@@ -1082,25 +1093,32 @@ export const listDeliveredPaginated = query({
     if (args.serialSearch?.trim()) assertShortTextLimits({ serialSearch: args.serialSearch });
 
     const source = ctx.db.query("requests");
-    const query = args.startDate !== undefined || args.endDate !== undefined
-      ? source.withIndex("by_status_deliveredAt", (q: any) => {
-          let range = q.eq("status", "delivered");
-          if (args.startDate !== undefined) range = range.gte("deliveredAt", args.startDate);
-          if (args.endDate !== undefined) range = range.lte("deliveredAt", args.endDate);
-          return range;
-        }).order("desc")
-      : source.withIndex("by_status", (q: any) => q.eq("status", "delivered")).order("desc");
-
-    const page = await query.paginate(args.paginationOpts);
+    const page = await (
+      args.startDate !== undefined && args.endDate !== undefined
+        ? source.withIndex("by_status_deliveredAt", (q) =>
+            q.eq("status", "delivered")
+              .gte("deliveredAt", args.startDate!)
+              .lte("deliveredAt", args.endDate!),
+          ).order("desc")
+        : args.startDate !== undefined
+          ? source.withIndex("by_status_deliveredAt", (q) =>
+              q.eq("status", "delivered").gte("deliveredAt", args.startDate!),
+            ).order("desc")
+          : args.endDate !== undefined
+            ? source.withIndex("by_status_deliveredAt", (q) =>
+                q.eq("status", "delivered").lte("deliveredAt", args.endDate!),
+              ).order("desc")
+            : source.withIndex("by_status", (q) => q.eq("status", "delivered")).order("desc")
+    ).paginate(args.paginationOpts);
     let scoped = page.page;
-    if (!fullVisibility) scoped = scoped.filter((request: any) => request.requesterId === user._id);
-    if (args.secretariaId) scoped = scoped.filter((request: any) => request.secretariaId === args.secretariaId);
+    if (!fullVisibility) scoped = scoped.filter((request) => request.requesterId === user._id);
+    if (args.secretariaId) scoped = scoped.filter((request) => request.secretariaId === args.secretariaId);
 
-    let enriched = await Promise.all(scoped.map((request: any) => enrichRequest(ctx, request)));
+    let enriched = await Promise.all(scoped.map((request) => enrichRequest(ctx, request)));
     if (args.serialSearch?.trim()) {
       const term = args.serialSearch.trim().toLocaleLowerCase("pt-BR");
-      enriched = enriched.filter((request: any) =>
-        request.items?.some((item: any) =>
+      enriched = enriched.filter((request) =>
+        request.items?.some((item) =>
           item.deliveredSerialNumbers?.some((serial: string) => serial.toLocaleLowerCase("pt-BR").includes(term)),
         ),
       );
@@ -1123,7 +1141,7 @@ export const listByOrganization = query({
     // Get all delivered requests that reference this org (as secretaria, departamento, or unidade)
     const allDelivered = await ctx.db
       .query("requests")
-      .withIndex("by_status", (q: any) => q.eq("status", "delivered"))
+      .withIndex("by_status", (q) => q.eq("status", "delivered"))
       .order("desc")
       .collect();
 

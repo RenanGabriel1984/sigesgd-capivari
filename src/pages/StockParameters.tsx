@@ -69,7 +69,6 @@ import {
   buildReplenishmentAlertRows,
   computeReplenishmentCounters,
   readReplenishmentAlertFilter,
-  replenishmentAlertHref,
   type ReplenishmentAlertFilter,
 } from "@/lib/replenishment";
 import { CONSUMPTION_PERIODS, type ConsumptionPeriodKey } from "@/lib/consumption-history";

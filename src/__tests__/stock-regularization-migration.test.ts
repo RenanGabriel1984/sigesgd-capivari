@@ -6,6 +6,9 @@ const ROOT = resolve(__dirname, "../..");
 const read = (path: string) => readFileSync(resolve(ROOT, path), "utf-8");
 const migration = read("src/convex/stockRegularization.ts");
 const manifest = read("src/lib/stock-regularization-manifest.ts");
+const stockSetup = read("src/convex/stockSetup.ts");
+const stockSetupDiagnostic = read("src/convex/stockSetupDiagnostics.ts");
+const entries = read("src/convex/entries.ts");
 
 describe("regularização histórica de área/local", () => {
   it("separa prévia somente leitura da mutation de aplicação", () => {
@@ -32,10 +35,34 @@ describe("regularização histórica de área/local", () => {
     expect(migration).toContain('ctx.db.query("stockTransferLots")');
     expect(migration).toContain("Transferência histórica da movimentação");
     expect(migration).toContain("movementLotPatches");
-    expect(migration).toContain("keyOf(lot.productId as string, lot.lotNumber as string)");
-    expect(migration).toContain("return byId.get(reference) ?? (productId ? byNumber.get(keyOf(productId, reference)) : null) ?? null;");
+    expect(migration).toContain("keyOf(lot.productId, lot.lotNumber)");
+    expect(migration).toContain("return matches.length === 1 ? matches[0] : null;");
+    expect(migration).toContain("Lote duplicado para produto/número");
+    expect(migration).toContain("gomaqEntries.length !== 1");
+    expect(migration).toContain("initialEntries.length !== 1");
+    expect(migration).toContain("areasByName");
+    expect(migration).toContain("locationsByName");
     expect(migration).toContain("returnedByExitLot");
     expect(migration).toContain("informe/vincule o lote exato consumido pela saída original.");
+  });
+
+  it("não escolhe arbitrariamente entradas, áreas, locais ou lotes duplicados", () => {
+    expect(migration).toContain('.withIndex("by_number", (q) => q.eq("entryNumber", INITIAL_ENTRY_NUMBER)).collect()');
+    expect(migration).toContain('.withIndex("by_number", (q) => q.eq("entryNumber", GOMAQ_ENTRY_NUMBER)).collect()');
+    expect(migration).toContain("matches.length === 1 ? matches[0] : null");
+    expect(migration).toContain("Existem");
+  });
+
+  it("diagnósticos e classificação não escolhem registros globais ou entradas duplicadas", () => {
+    expect(stockSetup).toContain("entryMatches.length !== 1");
+    expect(stockSetup).toContain("duplicateGlobalStocks");
+    expect(stockSetup).toContain("stockRows.length > 1");
+    expect(stockSetupDiagnostic).toContain("entryMatches.length !== 1");
+    expect(stockSetupDiagnostic).toContain("candidateIds");
+    expect(stockSetupDiagnostic).not.toContain(".first()");
+    expect(entries).toContain("lotMatches.length > 1");
+    expect(entries).toContain("Número de lote");
+    expect(entries).not.toContain('.withIndex("by_number", (q) => q.eq("lotNumber", args.lotNumber)).first()');
   });
 
   it("preserva saldos globais, lotes e quantidades das movimentações", () => {

@@ -164,7 +164,7 @@ describe("PRINT-EXIT-03 — retirada respeita o backend (autoridade final)", () 
   });
 
   it("FIFO de lotes e lotId estruturado preservados na retirada por família", () => {
-    expect(backend).toContain("sort((a: any, b: any) => a.receivedAt - b.receivedAt)");
+    expect(backend).toContain("sort((a, b) => a.receivedAt - b.receivedAt)");
     expect(backend).toContain("lotId: input.consumedLots[0]?.lotId");
     expect(backend).toContain('ctx.db.insert("stockMovementLots"');
     expect(backend).toContain("Estoque livre insuficiente na área Impressoras");

@@ -21,7 +21,7 @@
 
 import { getAuthUserId } from "@convex-dev/auth/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
   APP_ROLES,
   roleHasPermission,
@@ -58,7 +58,7 @@ export async function requirePermission(
   ctx: MutationCtx | QueryCtx,
   permission: AppPermission,
   opts: { entity?: string; entityId?: string } = {},
-): Promise<{ userId: UserId; user: any; role: AppRole }> {
+): Promise<{ userId: UserId; user: Doc<"users">; role: AppRole }> {
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error("Não autenticado");
 
@@ -124,7 +124,7 @@ export async function requireRequestAction(
   permission: "requests.approve" | "requests.reject" | "requests.deliver",
   requesterId: string,
   opts: { entity?: string; entityId?: string } = {},
-): Promise<{ userId: UserId; user: any; role: AppRole }> {
+): Promise<{ userId: UserId; user: Doc<"users">; role: AppRole }> {
   const auth = await requirePermission(ctx, permission, opts);
   if (auth.userId === requesterId) {
     await logPermissionDenied(ctx, {

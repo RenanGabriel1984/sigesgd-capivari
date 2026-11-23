@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, usePaginatedQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import type { Doc } from "@/convex/_generated/dataModel";
+import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { AppShell } from "@/components/AppShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,19 @@ type InventoryCountView = Doc<"inventoryCounts"> & {
   product: Doc<"products"> | null;
 };
 
+type InventorySummaryView = Doc<"inventories"> & {
+  responsible: Doc<"users"> | null;
+  closedBy: Doc<"users"> | null;
+  location: Doc<"storageLocations"> | null;
+  area: Doc<"stockAreas"> | null;
+  category: Doc<"categories"> | null;
+  countSummary: {
+    total: number;
+    uncounted: number;
+    differences: number;
+  };
+};
+
 type InventoryView = Doc<"inventories"> & {
   responsible: Doc<"users"> | null;
   closedBy: Doc<"users"> | null;
@@ -56,7 +69,15 @@ export default function Inventory() {
   const isAdmin = user?.role === "admin";
   const canInitialLoad = isAdmin || user?.role === "stock_manager";
 
-  const inventories = useQuery(api.inventory.list) as InventoryView[] | undefined;
+  const {
+    results: inventories,
+    status: inventoriesStatus,
+    loadMore: loadMoreInventories,
+  } = usePaginatedQuery(api.inventory.list, {}, { initialNumItems: 30 }) as {
+    results: InventorySummaryView[];
+    status: string;
+    loadMore: (count: number) => void;
+  };
   const locations = useQuery(api.storageLocations.listActive);
   const areas = useQuery(api.stockAreas.listActive);
   const products = useQuery(api.products.listActive);
@@ -114,7 +135,12 @@ export default function Inventory() {
 
   const [loadingInitial, setLoadingInitial] = useState(false);
 
-  const viewInventory = inventories?.find((i) => i._id === viewId);
+  // The list response contains only compact summaries. Full count rows and
+  // product joins are fetched for the single inventory currently expanded.
+  const viewInventory = useQuery(
+    api.inventory.get,
+    viewId ? { inventoryId: viewId as Id<"inventories"> } : "skip",
+  ) as InventoryView | null | undefined;
   const counts = viewInventory?.counts ?? [];
 
   // Count editing state
@@ -146,7 +172,7 @@ export default function Inventory() {
     });
   }, [sheetText, locations, areas, products]);
 
-  if (inventories === undefined) {
+  if (inventoriesStatus === "LoadingFirstPage") {
     return (
       <AppShell>
         <div className="space-y-6 max-w-7xl mx-auto">
@@ -162,7 +188,7 @@ export default function Inventory() {
     );
   }
 
-  const filtered = inventories?.filter((i) => {
+  const filtered = inventories.filter((i) => {
     if (filter === "active") return i.status !== "closed" && i.status !== "cancelled";
     if (filter === "closed") return i.status === "closed";
     if (filter === "cancelled") return i.status === "cancelled";
@@ -264,9 +290,6 @@ export default function Inventory() {
     }
   };
 
-  const getUncounted = (c: InventoryCountView[]) => c.filter((ct) => ct.countedQuantity === null || ct.countedQuantity === undefined);
-  const getDiffs = (c: InventoryCountView[]) => c.filter((ct) => ct.difference !== null && ct.difference !== undefined && ct.difference !== 0);
-
   // ─── Implantação inicial ───
   const loadedByProduct = new Map(
     (initialStatus ?? []).map((s) => [s.productId as string, s.loaded])
@@ -292,7 +315,7 @@ export default function Inventory() {
     if (!npName.trim()) { toast.error("Informe o nome do produto"); return; }
     if (!npCatId) { toast.error("Selecione ou crie uma categoria"); return; }
     try {
-      const id = await createProduct({
+      await createProduct({
         name: npName.trim(),
         categoryId: npCatId as any,
         unitOfMeasure: npUnit,
@@ -420,9 +443,8 @@ export default function Inventory() {
               </Card>
             ) : (
               <div className="space-y-3">
-                {filtered?.map((inv) => {
-                  const uncounted = getUncounted(inv.counts);
-                  const diffs = getDiffs(inv.counts);
+                {filtered.map((inv) => {
+                  const { total, uncounted, differences } = inv.countSummary;
                   const isActive = viewId === inv._id;
 
                   return (
@@ -467,27 +489,27 @@ export default function Inventory() {
                           {inv.area && <span>Área: {inv.area.name}</span>}
                           {inv.location && <span>Local físico: {inv.location.name}</span>}
                           {inv.category && <span>Categoria: {inv.category.name}</span>}
-                          <span>{inv.counts.length} itens</span>
-                          {uncounted.length > 0 && (
-                            <Badge variant="destructive" className="text-[10px]">{uncounted.length} não contado(s)</Badge>
+                          <span>{total} itens</span>
+                          {uncounted > 0 && (
+                            <Badge variant="destructive" className="text-[10px]">{uncounted} não contado(s)</Badge>
                           )}
-                          {diffs.length > 0 && (
-                            <Badge variant="secondary" className="text-[10px]">{diffs.length} diferença(s)</Badge>
+                          {differences > 0 && (
+                            <Badge variant="secondary" className="text-[10px]">{differences} diferença(s)</Badge>
                           )}
                         </div>
                         {/* Progress indicator for counting/review */}
-                        {(inv.status === "counting" || inv.status === "review") && inv.counts.length > 0 && (
+                        {(inv.status === "counting" || inv.status === "review") && total > 0 && (
                           <div className="mt-3 space-y-1">
                             <div className="flex items-center justify-between text-xs">
                               <span className="text-muted-foreground">
-                                {inv.counts.length - uncounted.length} de {inv.counts.length} produtos conferidos
+                                {total - uncounted} de {total} produtos conferidos
                               </span>
                               <span className="font-medium">
-                                {Math.round(((inv.counts.length - uncounted.length) / inv.counts.length) * 100)}%
+                                {Math.round(((total - uncounted) / total) * 100)}%
                               </span>
                             </div>
                             <Progress
-                              value={((inv.counts.length - uncounted.length) / inv.counts.length) * 100}
+                              value={((total - uncounted) / total) * 100}
                               className="h-2"
                             />
                           </div>
@@ -496,6 +518,15 @@ export default function Inventory() {
 
                       {isActive && (
                         <CardContent className="pt-0">
+                          {viewInventory === undefined ? (
+                            <div className="space-y-2 py-4">
+                              <Skeleton className="h-8 w-full" />
+                              <Skeleton className="h-8 w-full" />
+                              <Skeleton className="h-8 w-full" />
+                            </div>
+                          ) : !viewInventory ? (
+                            <p className="py-4 text-sm text-muted-foreground">Este inventário não está mais disponível.</p>
+                          ) : (
                           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
                             <Table>
                               <TableHeader>
@@ -512,7 +543,6 @@ export default function Inventory() {
                               </TableHeader>
                               <TableBody>
                                 {counts.map((c) => {
-                                  const isEditing = countEdits[c._id] !== undefined;
                                   const diff = c.difference;
                                   return (
                                     <TableRow key={c._id}>
@@ -568,6 +598,7 @@ export default function Inventory() {
                               </TableBody>
                             </Table>
                           </div>
+                          )}
                         </CardContent>
                       )}
                     </Card>
@@ -575,6 +606,17 @@ export default function Inventory() {
                 })}
               </div>
             )}
+            {inventoriesStatus !== "Exhausted" ? (
+              <div className="flex justify-center pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => loadMoreInventories(30)}
+                  disabled={inventoriesStatus === "LoadingMore"}
+                >
+                  {inventoriesStatus === "LoadingMore" ? "Carregando..." : "Carregar mais inventários"}
+                </Button>
+              </div>
+            ) : null}
           </TabsContent>
 
           {/* ═══ Implantação Inicial ═══ */}

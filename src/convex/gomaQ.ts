@@ -1,26 +1,27 @@
 import { query, mutation, internalMutation } from "./_generated/server";
+import type { QueryCtx, MutationCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { PRINT_AREA_ID } from "./printSupplies";
 import { attachStorageFile } from "./storage";
 import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import { getOptionalSingleValidGlobalStock } from "../lib/stock-quantity-rules";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
-
-async function requireUser(ctx: any) {
+async function requireUser(ctx: QueryCtx) {
   // RBAC central: consultas GomaQ (suprimentos de impressão).
   return requirePermission(ctx, "gomaq.view");
 }
 
-async function requireManagerOrAdmin(ctx: any) {
+async function requireManagerOrAdmin(ctx: MutationCtx) {
   // RBAC central: operações GomaQ (trocas, coletas, pedidos).
   return requirePermission(ctx, "gomaq.manage", { entity: "gomaQ" });
 }
 
-async function generateCollectionNumber(ctx: any): Promise<string> {
+async function generateCollectionNumber(ctx: MutationCtx): Promise<string> {
   const prefix = `COL-${new Date().getFullYear()}-`;
   const collections = await ctx.db.query("gomaQCollections").collect();
-  const maxSequence = collections.reduce((max: number, item: any) => {
+  const maxSequence = collections.reduce((max: number, item) => {
     if (!item.collectionNumber?.startsWith(prefix)) return max;
     const sequence = Number(item.collectionNumber.slice(prefix.length));
     return Number.isSafeInteger(sequence) && sequence > max ? sequence : max;
@@ -43,17 +44,17 @@ export const listExchanges = query({
     await requireUser(ctx);
     let exchanges = await ctx.db.query("gomaQExchanges").order("desc").take(501);
 
-    if (args.startDate) exchanges = exchanges.filter((e: any) => e.exchangedAt >= args.startDate!);
-    if (args.endDate) exchanges = exchanges.filter((e: any) => e.exchangedAt <= args.endDate!);
-    if (args.productId) exchanges = exchanges.filter((e: any) => e.productId === args.productId);
-    if (args.printerId) exchanges = exchanges.filter((e: any) => e.printerId === args.printerId);
+    if (args.startDate) exchanges = exchanges.filter((exchange) => exchange.exchangedAt >= args.startDate!);
+    if (args.endDate) exchanges = exchanges.filter((exchange) => exchange.exchangedAt <= args.endDate!);
+    if (args.productId) exchanges = exchanges.filter((exchange) => exchange.productId === args.productId);
+    if (args.printerId) exchanges = exchanges.filter((exchange) => exchange.printerId === args.printerId);
 
-    return Promise.all(exchanges.map(async (e: any) => {
+    return Promise.all(exchanges.map(async (e) => {
       const product = await ctx.db.get(e.productId);
       const printer = await ctx.db.get(e.printerId);
       const lot = e.lotId ? await ctx.db.get(e.lotId) : null;
       const deliveredBy = await ctx.db.get(e.deliveredByUserId);
-      const receivedBy = await ctx.db.get(e.receivedByUserId);
+      const receivedBy = e.receivedByUserId ? await ctx.db.get(e.receivedByUserId) : null;
       return { ...e, product, printer, lot, deliveredBy, receivedBy };
     }));
   },
@@ -76,7 +77,7 @@ export const listEmptyCartridges = query({
       cartridges = await ctx.db.query("gomaQEmptyCartridges").order("desc").take(500);
     }
 
-    return Promise.all(cartridges.map(async (c: any) => {
+    return Promise.all(cartridges.map(async (c) => {
       const product = await ctx.db.get(c.productId);
       const printer = c.printerId ? await ctx.db.get(c.printerId) : null;
       const location = c.storageLocationId ? await ctx.db.get(c.storageLocationId) : null;
@@ -93,7 +94,7 @@ export const awaitingCollectionCount = query({
       .query("gomaQEmptyCartridges")
       .withIndex("by_status", (q) => q.eq("status", "awaiting_collection"))
       .collect();
-    return cartridges.reduce((sum: number, c: any) => sum + c.quantity, 0);
+    return cartridges.reduce((sum: number, cartridge) => sum + cartridge.quantity, 0);
   },
 });
 
@@ -120,7 +121,7 @@ export const dashboardSummary = query({
     ]);
 
     return {
-      awaitingCollectionQuantity: awaiting.reduce((total: number, item: any) => total + item.quantity, 0),
+      awaitingCollectionQuantity: awaiting.reduce((total: number, item) => total + item.quantity, 0),
       exchangesThisMonth: exchanges.length,
       collectionsCount: collections.length,
     };
@@ -144,9 +145,9 @@ export const listCollections = query({
   handler: async (ctx) => {
     await requireUser(ctx);
     const collections = await ctx.db.query("gomaQCollections").order("desc").take(101);
-    return Promise.all(collections.map(async (c: any) => {
-      const responsible = await ctx.db.get(c.responsibleUserId);
-      return { ...c, responsible };
+    return Promise.all(collections.map(async (collection) => {
+      const responsible = await ctx.db.get(collection.responsibleUserId);
+      return { ...collection, responsible };
     }));
   },
 });
@@ -158,12 +159,12 @@ export const listRecentExchanges = query({
   handler: async (ctx) => {
     await requireUser(ctx);
     const exchanges = await ctx.db.query("gomaQExchanges").order("desc").take(6);
-    return Promise.all(exchanges.map(async (exchange: any) => {
+    return Promise.all(exchanges.map(async (exchange) => {
       const product = await ctx.db.get(exchange.productId);
       const printer = await ctx.db.get(exchange.printerId);
       const lot = exchange.lotId ? await ctx.db.get(exchange.lotId) : null;
       const deliveredBy = await ctx.db.get(exchange.deliveredByUserId);
-      const receivedBy = await ctx.db.get(exchange.receivedByUserId);
+      const receivedBy = exchange.receivedByUserId ? await ctx.db.get(exchange.receivedByUserId) : null;
       return { ...exchange, product, printer, lot, deliveredBy, receivedBy };
     }));
   },
@@ -174,7 +175,7 @@ export const listRecentCollections = query({
   handler: async (ctx) => {
     await requireUser(ctx);
     const collections = await ctx.db.query("gomaQCollections").order("desc").take(6);
-    return Promise.all(collections.map(async (collection: any) => {
+    return Promise.all(collections.map(async (collection) => {
       const responsible = await ctx.db.get(collection.responsibleUserId);
       return { ...collection, responsible };
     }));
@@ -188,33 +189,70 @@ export const monthlyOrder = query({
 
     // Get all products that are GOMAQ supplies (have printer compatibility)
     const allCompat = await ctx.db.query("printerCompatibility").collect();
-    const productIds = [...new Set(allCompat.map((c: any) => c.productId as string))];
+    const productIds = [...new Set(allCompat.map((compatibility) => compatibility.productId))];
 
-    const items = await Promise.all(productIds.map(async (pid: string) => {
-      const rawProduct = await ctx.db.get(pid as any);
-      if (!rawProduct) return null;
-      // Narrow to product document
-      const product = rawProduct as any;
+    const items = await Promise.all(productIds.map(async (productId) => {
+      const product = await ctx.db.get(productId);
+      if (!product) return null;
       if (!product.name || !product.categoryId) return null;
 
-      const [stock, lots, reservations] = await Promise.all([
-        ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", pid)).first(),
-        ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", pid)).collect(),
-        ctx.db.query("requestItemReservations").withIndex("by_product", (q: any) => q.eq("productId", pid)).collect(),
+      const [stockRows, lots, reservations] = await Promise.all([
+        ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", productId)).collect(),
+        ctx.db.query("lots").withIndex("by_product", (q) => q.eq("productId", productId)).collect(),
+        ctx.db.query("requestItemReservations").withIndex("by_product", (q) => q.eq("productId", productId)).collect(),
       ]);
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
 
-      const compatEntries = allCompat.filter((c: any) => c.productId === pid);
-      const compatibleModels = compatEntries.map((c: any) => c.printerModel);
+      const compatEntries = allCompat.filter((compatibility) => compatibility.productId === productId);
+      const compatibleModels = compatEntries.map((compatibility) => compatibility.printerModel);
 
-      const physical = stock?.physicalQuantity ?? 0;
-      const reserved = stock?.reservedQuantity ?? 0;
+      if (lots.some((lot) =>
+        !Number.isFinite(Number(lot.quantityAvailable)) ||
+        Number(lot.quantityAvailable) < 0 ||
+        (lot.active === false && Number(lot.quantityAvailable) > 0)
+      )) {
+        throw new Error(`Há lote com saldo inválido ou inativo com saldo positivo em "${product.name}". Pedido Gomaq bloqueado.`);
+      }
+      const physical = Number(stock?.physicalQuantity ?? 0);
+      const reserved = Number(stock?.reservedQuantity ?? 0);
+      const lotsPhysical = lots.reduce((sum: number, lot) => sum + Number(lot.quantityAvailable), 0);
+      if (Math.abs(physical - lotsPhysical) > 1e-9) {
+        throw new Error(`Saldo global de "${product.name}" (${physical}) diverge dos lotes (${lotsPhysical}). Regularize antes de calcular o pedido Gomaq.`);
+      }
+
+      const lotById = new Map<string, Doc<"lots">>(lots.map((lot) => [String(lot._id), lot]));
+      const reservationTotalsByLot = new Map<string, number>();
+      let reservationsTotal = 0;
+      for (const reservation of reservations) {
+        const remaining = Number(reservation.quantityRemaining);
+        if (!Number.isFinite(remaining) || remaining < 0) {
+          throw new Error(`Reserva inválida para "${product.name}". Regularize as solicitações antes do pedido Gomaq.`);
+        }
+        if (remaining === 0) continue;
+        const lot = lotById.get(String(reservation.lotId));
+        if (!lot || reservation.areaId !== lot.areaId ||
+            reservation.locationId !== lot.locationId ||
+            remaining > Number(lot.quantityAvailable)) {
+          throw new Error(`Reserva do produto "${product.name}" não corresponde ao lote/área/local ou excede o saldo. Pedido Gomaq bloqueado.`);
+        }
+        const lotId = String(reservation.lotId);
+        const reservedForLot = (reservationTotalsByLot.get(lotId) ?? 0) + remaining;
+        if (reservedForLot > Number(lot.quantityAvailable) + 1e-9) {
+          throw new Error(`Reservas acumuladas do lote ${lot.lotNumber} excedem o saldo físico. Pedido Gomaq bloqueado.`);
+        }
+        reservationTotalsByLot.set(lotId, reservedForLot);
+        reservationsTotal += remaining;
+      }
+      if (Math.abs(reservationsTotal - reserved) > 1e-9) {
+        throw new Error(`Reservas por lote (${reservationsTotal}) divergem do reservado global (${reserved}) em "${product.name}". Pedido Gomaq bloqueado.`);
+      }
       const available = physical - reserved;
-      const areaLots = lots.filter((lot: any) => lot.areaId === PRINT_AREA_ID);
-      const areaLotIds = new Set(areaLots.map((lot: any) => String(lot._id)));
-      const areaPhysical = areaLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
-      const areaReserved = (reservations as any[])
-        .filter((reservation: any) => areaLotIds.has(String(reservation.lotId)))
-        .reduce((sum: number, reservation: any) => {
+      const areaLots = lots.filter((lot) => lot.areaId === PRINT_AREA_ID);
+      const areaLotIds = new Set(areaLots.map((lot) => String(lot._id)));
+      const areaPhysical = areaLots.reduce((sum: number, lot) => sum + Number(lot.quantityAvailable), 0);
+      const areaReserved = reservations
+        .filter((reservation) => areaLotIds.has(String(reservation.lotId)))
+        .reduce((sum: number, reservation) => {
           const remaining = Number(reservation.quantityRemaining);
           return Number.isFinite(remaining) && remaining > 0 ? sum + remaining : sum;
         }, 0);
@@ -231,7 +269,7 @@ export const monthlyOrder = query({
       }
 
       return {
-        productId: pid,
+        productId,
         productName: product.name,
         brand: product.brand,
         model: product.model,
@@ -276,7 +314,7 @@ export const createExchange = internalMutation({
     organizationId: v.optional(v.id("organizations")),
     observation: v.optional(v.string()),
   },
-  handler: async (_ctx, _args) => {
+  handler: async () => {
     throw new Error("Fluxo legado de troca desativado. Registre a retirada pela Gestão de Suprimentos de Impressão.");
   },
 });
@@ -328,7 +366,7 @@ export const createCollection = mutation({
       await ctx.db.patch(cartridgeId, {
         status: "collected",
         collectedAt: now,
-        collectionId: collectionId as any,
+        collectionId,
       });
     }
 
@@ -357,11 +395,6 @@ export const exportMonthlyOrder = mutation({
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
     const now = Date.now();
-
-    const summary = args.items
-      .filter((i) => i.finalQuantity > 0)
-      .map((i) => `Produto ${i.productId}: ${i.finalQuantity}`)
-      .join(", ");
 
     await ctx.db.insert("auditLogs", {
       userId,

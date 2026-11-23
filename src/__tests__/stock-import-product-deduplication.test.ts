@@ -5,14 +5,16 @@ import { resolve } from "node:path";
 const source = readFileSync(resolve(__dirname, "../convex/stockSetup.ts"), "utf8");
 
 describe("importação de planilha — reutilização de produtos criados na própria importação", () => {
-  it("mantém o nome do produto recém-criado no catálogo local para as linhas seguintes", () => {
-    const start = source.indexOf("products.push({", source.indexOf("export const importInitialSheet"));
-    const end = source.indexOf("productId = id;", start);
-    const block = source.slice(start, end);
+  it("mantém o documento completo do produto recém-criado no catálogo local para as linhas seguintes", () => {
+    const importStart = source.indexOf("export const importInitialSheet");
+    const importEnd = source.indexOf("export const productLocationSummary", importStart);
+    const block = source.slice(importStart, importEnd);
 
-    expect(start).toBeGreaterThan(-1);
-    expect(block).toContain("name,");
-    expect(block).toContain("unitOfMeasure:");
+    expect(importStart).toBeGreaterThan(-1);
+    expect(block).toContain("const createdProduct = await ctx.db.get(id);");
+    expect(block).toContain("if (!createdProduct)");
+    expect(block).toContain("products.push(createdProduct);");
+    expect(block).not.toContain("products.push({");
   });
 
   it("reconhece a segunda linha com o mesmo nome sem criar um segundo produto", () => {

@@ -292,7 +292,7 @@ describe("PRINT-DISP — A retirada é uma SAÍDA real, não transferência", ()
 
   it("PRINT-DISP-04: FIFO e lotId preservados", () => {
     // Lotes consumidos em ordem de recebimento (FIFO)…
-    expect(backend).toContain("sort((a: any, b: any) => a.receivedAt - b.receivedAt)");
+    expect(backend).toContain("sort((a, b) => a.receivedAt - b.receivedAt)");
     expect(backend).toContain("Number(lot.quantityAvailable) - take");
     // …e o lotId do 1º lote consumido vai para a movimentação.
     expect(backend).toContain("lotId: input.consumedLots[0]?.lotId");

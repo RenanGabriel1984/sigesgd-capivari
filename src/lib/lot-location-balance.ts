@@ -1,3 +1,6 @@
+import type { MutationCtx } from "../convex/_generated/server";
+import type { Id } from "../convex/_generated/dataModel";
+
 /**
  * Mantém o saldo derivado lote × armário sincronizado com o lote.
  *
@@ -56,14 +59,48 @@ export function planLotLocationBalanceChange(input: {
   return { kind: "patch", rowId: current._id, quantityAvailable: Math.max(0, next) };
 }
 
+/**
+ * Confere o saldo derivado antes da alteração do lote.
+ * expectedQuantityBefore é capturado do documento do lote antes da escrita,
+ * mesmo quando a mutation já aplicou o patch ao documento antes desta chamada.
+ */
+export function assertLotLocationBalanceMatchesExpected(input: {
+  rows: Array<LotLocationBalanceRow & { _id: string }>;
+  lotId: string;
+  expectedQuantityBefore: number;
+}): void {
+  const { rows, lotId, expectedQuantityBefore } = input;
+  if (!Number.isFinite(expectedQuantityBefore) || expectedQuantityBefore < 0) {
+    throw new Error("O saldo esperado do lote antes da movimentação é inválido.");
+  }
+  const matching = rows.filter((row) => String(row.lotId) === lotId);
+  if (matching.length > 1) {
+    throw new Error("Há saldos lote × armário duplicados para este lote. Operação bloqueada.");
+  }
+  if (matching.length === 0) {
+    if (expectedQuantityBefore > 1e-9) {
+      throw new Error("O lote já possui saldo, mas não tem saldo lote × armário correspondente. Operação bloqueada.");
+    }
+    return;
+  }
+  const current = matching[0];
+  if (!Number.isFinite(current.quantityAvailable) || current.quantityAvailable < 0) {
+    throw new Error("O saldo lote × armário atual é inválido.");
+  }
+  if (Math.abs(current.quantityAvailable - expectedQuantityBefore) > 1e-9) {
+    throw new Error("O saldo lote × armário diverge do saldo do lote antes da movimentação.");
+  }
+}
+
 /** Aplica a variação dentro da mesma mutation Convex da movimentação de estoque. */
 export async function adjustLotLocationBalance(
-  ctx: any,
+  ctx: MutationCtx,
   input: {
-    lotId: any;
-    productId: any;
-    locationId?: any;
+    lotId: Id<"lots">;
+    productId: Id<"products">;
+    locationId?: Id<"storageLocations"> | null;
     delta: number;
+    expectedQuantityBefore: number;
     allowCreate?: boolean;
   },
 ): Promise<void> {
@@ -71,7 +108,7 @@ export async function adjustLotLocationBalance(
   if (input.delta === 0) return;
   const rows = await ctx.db
     .query("lotLocationBalances")
-    .withIndex("by_lot", (q: any) => q.eq("lotId", input.lotId))
+    .withIndex("by_lot", (q) => q.eq("lotId", input.lotId))
     .collect();
   if (rows.length > 1) {
     throw new Error("Há saldos lote × armário duplicados para este lote. Operação bloqueada.");
@@ -80,8 +117,13 @@ export async function adjustLotLocationBalance(
   // possuam o vínculo conciliado na tabela nova. Nesse caso, usa-se o vínculo.
   const locationId = input.locationId ?? rows[0]?.locationId;
   if (!locationId) return;
+  assertLotLocationBalanceMatchesExpected({
+    rows,
+    lotId: String(input.lotId),
+    expectedQuantityBefore: input.expectedQuantityBefore,
+  });
   const plan = planLotLocationBalanceChange({
-    rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
+    rows,
     lotId: String(input.lotId),
     productId: String(input.productId),
     locationId: String(locationId),
@@ -92,12 +134,12 @@ export async function adjustLotLocationBalance(
     await ctx.db.insert("lotLocationBalances", {
       lotId: input.lotId,
       productId: input.productId,
-      locationId: input.locationId,
+      locationId,
       quantityAvailable: plan.quantityAvailable,
       updatedAt: Date.now(),
     });
   } else if (plan.kind === "patch") {
-    await ctx.db.patch(plan.rowId as any, {
+    await ctx.db.patch(plan.rowId as Id<"lotLocationBalances">, {
       quantityAvailable: plan.quantityAvailable,
       updatedAt: Date.now(),
     });
@@ -149,21 +191,21 @@ export function planLotLocationBalanceLocationChange(input: {
 }
 
 export async function setLotLocationBalanceLocation(
-  ctx: any,
+  ctx: MutationCtx,
   input: {
-    lotId: any;
-    productId: any;
-    locationId: any;
+    lotId: Id<"lots">;
+    productId: Id<"products">;
+    locationId: Id<"storageLocations">;
     quantityAvailable: number;
     allowCreate?: boolean;
   },
 ): Promise<void> {
   const rows = await ctx.db
     .query("lotLocationBalances")
-    .withIndex("by_lot", (q: any) => q.eq("lotId", input.lotId))
+    .withIndex("by_lot", (q) => q.eq("lotId", input.lotId))
     .collect();
   const plan = planLotLocationBalanceLocationChange({
-    rows: rows as Array<LotLocationBalanceRow & { _id: string }>,
+    rows,
     lotId: String(input.lotId),
     productId: String(input.productId),
     locationId: String(input.locationId),
@@ -179,10 +221,127 @@ export async function setLotLocationBalanceLocation(
       updatedAt: Date.now(),
     });
   } else {
-    await ctx.db.patch(plan.rowId as any, {
+    await ctx.db.patch(plan.rowId as Id<"lotLocationBalances">, {
       locationId: input.locationId,
       quantityAvailable: plan.quantityAvailable,
       updatedAt: Date.now(),
     });
   }
+}
+
+export type LotLocationIntegrityLot = {
+  _id: string;
+  productId: string;
+  quantityAvailable: number;
+  locationId?: string | null;
+  lotNumber?: string;
+  active?: boolean;
+};
+
+export type LotLocationIntegrityRow = LotLocationBalanceRow & {
+  _id: string;
+};
+
+export type LotLocationBalanceIntegrity = {
+  consistent: boolean;
+  fullyReconciled: boolean;
+  checkedLots: number;
+  checkedRows: number;
+  matchedLots: number;
+  issues: string[];
+  limitations: string[];
+};
+
+/**
+ * Concilia o saldo atual de cada lote com seu vínculo derivado lote × local.
+ * Não infere localização: um lote positivo sem locationId e sem vínculo
+ * explícito permanece como limitação a ser regularizada.
+ */
+export function inspectLotLocationBalances(
+  lots: readonly LotLocationIntegrityLot[],
+  rows: readonly LotLocationIntegrityRow[],
+): LotLocationBalanceIntegrity {
+  const issues: string[] = [];
+  const limitations: string[] = [];
+  const lotsById = new Map<string, LotLocationIntegrityLot>();
+  for (const lot of lots) {
+    lotsById.set(String(lot._id), lot);
+  }
+
+  const rowsByLot = new Map<string, LotLocationIntegrityRow[]>();
+  for (const row of rows) {
+    const lotId = String(row.lotId);
+    const group = rowsByLot.get(lotId) ?? [];
+    group.push(row);
+    rowsByLot.set(lotId, group);
+
+    if (!Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0) {
+      issues.push(`O saldo lote × local do registro ${row._id} é inválido.`);
+    }
+    if (!row.locationId) {
+      issues.push(`O saldo lote × local do registro ${row._id} não possui localização.`);
+    }
+    if (!lotsById.has(lotId)) {
+      issues.push(`O vínculo lote × local ${row._id} aponta para lote inexistente (${lotId}).`);
+    }
+  }
+
+  let matchedLots = 0;
+  for (const lot of lots) {
+    const lotId = String(lot._id);
+    const lotNumber = lot.lotNumber ?? lotId;
+    const quantity = lot.quantityAvailable;
+    const matchingRows = rowsByLot.get(lotId) ?? [];
+
+    if (!Number.isFinite(quantity) || quantity < 0) {
+      issues.push(`O lote ${lotNumber} possui saldo inválido.`);
+      continue;
+    }
+    if (lot.active === false && quantity > 1e-9) {
+      issues.push(`O lote ${lotNumber} está inativo com saldo positivo.`);
+    }
+    if (matchingRows.length > 1) {
+      issues.push(`O lote ${lotNumber} possui vínculos lote × local duplicados.`);
+      continue;
+    }
+
+    const balance = matchingRows[0];
+    if (!balance) {
+      if (quantity > 1e-9) {
+        if (lot.locationId) {
+          issues.push(`O lote ${lotNumber} possui saldo positivo, mas não possui vínculo lote × local.`);
+        } else {
+          limitations.push(`O lote ${lotNumber} possui saldo positivo sem localização atual explícita nem vínculo lote × local.`);
+        }
+      }
+      continue;
+    }
+
+    if (String(balance.productId) !== String(lot.productId)) {
+      issues.push(`O vínculo lote × local do lote ${lotNumber} aponta para outro produto.`);
+    }
+    if (lot.locationId && String(balance.locationId) !== String(lot.locationId)) {
+      issues.push(`A localização do vínculo lote × local diverge da localização registrada no lote ${lotNumber}.`);
+    }
+    if (
+      Number.isFinite(balance.quantityAvailable) &&
+      Math.abs(balance.quantityAvailable - quantity) > 1e-9
+    ) {
+      issues.push(`O saldo lote × local diverge do saldo atual do lote ${lotNumber}.`);
+    }
+    matchedLots += 1;
+  }
+
+  const uniqueIssues = [...new Set(issues)];
+  const uniqueLimitations = [...new Set(limitations)];
+  return {
+    consistent: uniqueIssues.length === 0,
+    fullyReconciled: uniqueIssues.length === 0 && uniqueLimitations.length === 0 &&
+      matchedLots === lots.filter((lot) => Number.isFinite(lot.quantityAvailable) && lot.quantityAvailable > 1e-9).length,
+    checkedLots: lots.length,
+    checkedRows: rows.length,
+    matchedLots,
+    issues: uniqueIssues,
+    limitations: uniqueLimitations,
+  };
 }

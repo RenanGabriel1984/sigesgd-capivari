@@ -28,10 +28,10 @@ describe("devoluções — identificação inequívoca de lote legado", () => {
     const start = source.indexOf("export const create = mutation({");
     const end = source.indexOf("\n});", start);
     const mutation = source.slice(start, end < 0 ? undefined : end);
-    expect(mutation).toContain('.withIndex("by_number", (q: any) => q.eq("lotNumber", rawLotId))');
+    expect(mutation).toContain('.withIndex("by_number", (q) => q.eq("lotNumber", rawLotId))');
     expect(mutation).toContain(".collect()");
     expect(mutation).toContain("matchingLots.length > 1");
     expect(mutation).toContain("fallbackLot = matchingLots[0] ?? null");
-    expect(mutation).not.toContain('.withIndex("by_number", (q: any) => q.eq("lotNumber", rawLotId))\n            .first()');
+    expect(mutation).not.toContain('.withIndex("by_number", (q) => q.eq("lotNumber", rawLotId))\n            .first()');
   });
 });

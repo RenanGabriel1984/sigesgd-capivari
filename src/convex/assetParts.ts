@@ -6,8 +6,6 @@ import { groupAssetPartConsumptionByLocation, planAssetPartFifoConsumption } fro
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
-
 async function requireUser(ctx: any) {
   // RBAC central: consulta de peças (visão de equipamentos).
   return requirePermission(ctx, "equipment.view");
@@ -215,6 +213,7 @@ export const installPart = mutation({
       await adjustLotLocationBalance(ctx, {
         lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
         delta: -allocation.quantity,
+        expectedQuantityBefore: Number(lot.quantityAvailable),
       });
     }
     for (const update of locationUpdates) {

@@ -51,18 +51,18 @@ describe("integração da classificação com entries.confirm", () => {
     expect(entries).toContain("resolveEntryItemAreaId(item.areaId, entry.areaId)");
     expect(entries).toContain("if (!effectiveAreaId)");
     expect(entries).toContain("if (!area || !area.active)");
-    expect(entries).toContain("areaId: itemAreaId as any,");
-    expect(entries).toContain('await ctx.db.patch(item._id, {\n        lotId: lotId as string,\n        areaId: itemAreaId as any,');
+    expect(entries).toContain("areaId: itemAreaId,");
+    expect(entries).toContain('await ctx.db.patch(item._id, {\n        lotId: lotId as string,\n        areaId: itemAreaId,');
   });
 
   it("grava a área efetiva no saldo por local e na movimentação", () => {
-    expect(entries).toMatch(/stockByLocation[\s\S]*?areaId: itemAreaId as any/);
-    expect(entries).toMatch(/stockMovements[\s\S]*?areaId: itemAreaId as any/);
-    expect(entries).toContain("itemAreas.set(item._id as string, effectiveAreaId as string)");
+    expect(entries).toMatch(/stockByLocation[\s\S]*?areaId: itemAreaId/);
+    expect(entries).toMatch(/stockMovements[\s\S]*?areaId: itemAreaId/);
+    expect(entries).toContain("itemAreas.set(item._id, areaId)");
   });
 
   it("mantém também o ledger físico lote × armário na confirmação", () => {
-    expect(entries).toMatch(/await adjustLotLocationBalance\(ctx, \{\s*lotId,\s*productId: item\.productId,\s*locationId: item\.locationId,\s*delta: item\.quantity,\s*allowCreate: true,/);
+    expect(entries).toMatch(/await adjustLotLocationBalance\(ctx, \{\s*lotId,\s*productId: item\.productId,\s*locationId: item\.locationId,\s*delta: item\.quantity,\s*expectedQuantityBefore: 0,\s*allowCreate: true,/);
     expect(entries.indexOf("await adjustLotLocationBalance(ctx, {"))
       .toBeLessThan(entries.indexOf("// Update stock (increase physicalQuantity)"));
   });
@@ -110,7 +110,7 @@ describe("integração da compatibilidade histórica com entries.reverse", () =>
   });
 
   it("recupera localização legada e aplica o estorno no mesmo armário", () => {
-    expect(reverseBody).toContain("withIndex(\"by_lot\", (q: any) => q.eq(\"lotId\", lot._id))");
+    expect(reverseBody).toContain("withIndex(\"by_lot\", (q) => q.eq(\"lotId\", lot._id))");
     expect(reverseBody).toContain("resolveEntryLotLocationId(lot.locationId, lotLocationRows[0]?.locationId, item.locationId)");
     expect(reverseBody).toContain("locationId: lotLocationId");
     expect(reverseBody).toContain("locationStock.quantity - item.quantity");

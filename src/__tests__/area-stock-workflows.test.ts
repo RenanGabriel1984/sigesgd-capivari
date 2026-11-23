@@ -60,7 +60,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(approve).toContain('ctx.db.query("requestItems")');
     expect(approve).toContain('q.eq("requestId", args.requestId)');
     expect(approve).toContain("seenItems.size !== requestItems.length");
-    expect(approve).toContain("requestItems.some((item: any) => !seenItems.has(item._id as string))");
+    expect(approve).toContain("requestItems.some((item) => !seenItems.has(item._id))");
   });
 
   it("registra na auditoria da entrega usuário, item, quantidade, área, local, lotes e séries", () => {
@@ -143,7 +143,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
     expect(create).toContain("destinationLotId");
     expect(create).toContain('ctx.db.insert("stockMovementLots"');
     expect(create).toContain("lotId: part.lotId");
-    expect(create).toContain('withIndex("by_number", (q: any) => q.gte("lotNumber", prefix))');
+    expect(create).toContain('withIndex("by_number", (q) => q.gte("lotNumber", prefix))');
     expect(stockMovements).toContain("const toArea = m.toAreaId ? await ctx.db.get(m.toAreaId) : null");
   });
 
@@ -234,7 +234,7 @@ describe("estoque por área e local físico — regressões de segurança", () =
 describe("unicidade operacional de áreas de estoque", () => {
   it("garante áreas padrão somente quando não há duplicidade pelo nome", () => {
     const ensure = mutationBlock(stockAreas, "ensureBaselineAreas");
-    expect(ensure).toContain('.withIndex("by_name", (q: any) => q.eq("name", area.name))');
+    expect(ensure).toContain('.withIndex("by_name", (q) => q.eq("name", area.name))');
     expect(ensure).toContain(".collect()");
     expect(ensure).toContain("existingRows.length > 1");
     expect(ensure).toContain("existingRows.length === 1");

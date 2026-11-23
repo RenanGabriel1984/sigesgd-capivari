@@ -17,6 +17,8 @@
  */
 
 import { query, mutation } from "./_generated/server";
+import type { QueryCtx, MutationCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import {
@@ -30,76 +32,115 @@ import {
 
 const CONFIRMATION = "REGULARIZAR_SIGESGD_AREA_LOCAL_V1";
 
-type AreaLocation = { areaId: string; locationId: string };
-type Patch = { id: string; fields: Record<string, any> };
+type AreaLocation = { areaId: Id<"stockAreas">; locationId: Id<"storageLocations"> };
+type PatchableTable = "lots" | "entryItems" | "stockMovements" | "stockMovementLots" | "returns" | "stockByLocation";
+type Patch<T extends PatchableTable> = { id: Id<T>; fields: Partial<Doc<T>> };
 
 const keyOf = (...parts: string[]) => parts.join("|");
 const normalize = (value?: string | null) => (value ?? "").trim().toLocaleLowerCase("pt-BR");
 
-function addPatch(target: Patch[], id: string, current: Record<string, any>, fields: Record<string, any>) {
-  const changed: Record<string, any> = {};
+function addPatch<T extends PatchableTable>(
+  target: Patch<T>[],
+  id: Id<T>,
+  current: Doc<T>,
+  fields: Partial<Doc<T>>,
+): void {
+  const changed: Partial<Doc<T>> = {};
   for (const [key, value] of Object.entries(fields)) {
-    if (current[key] !== value) changed[key] = value;
+    if (current[key as keyof Doc<T>] !== value) Object.assign(changed, { [key]: value });
   }
   if (Object.keys(changed).length) target.push({ id, fields: changed });
 }
 
-function resolveLot(reference: unknown, byId: Map<string, any>, byNumber: Map<string, any>, productId?: string) {
+function resolveLot(
+  reference: unknown,
+  byId: Map<string, Doc<"lots">>,
+  byNumber: Map<string, Doc<"lots">[]>,
+  productId?: Id<"products">,
+): Doc<"lots"> | null {
   if (typeof reference !== "string" || !reference.trim()) return null;
-  return byId.get(reference) ?? (productId ? byNumber.get(keyOf(productId, reference)) : null) ?? null;
+  const exactId = byId.get(reference);
+  if (exactId) return exactId;
+  if (!productId) return null;
+  const matches = byNumber.get(keyOf(productId, reference)) ?? [];
+  return matches.length === 1 ? matches[0] : null;
 }
 
-async function buildRegularizationPlan(ctx: any) {
+async function buildRegularizationPlan(ctx: QueryCtx | MutationCtx) {
   const blockers: string[] = [];
   const addBlocker = (message: string) => {
     if (!blockers.includes(message)) blockers.push(message);
   };
 
   const areas = await ctx.db.query("stockAreas").collect();
-  const areaByName = new Map(areas.map((area: any) => [normalize(area.name), area]));
-  const generalArea: any = areaByName.get(normalize("TI Geral"));
-  const printerArea: any = areaByName.get(normalize("Impressoras"));
-  if (!generalArea?.active) addBlocker('Área ativa "TI Geral" não encontrada.');
-  if (!printerArea?.active) addBlocker('Área ativa "Impressoras" não encontrada.');
+  const areasByName = new Map<string, (typeof areas)[number][]>();
+  for (const area of areas) {
+    const key = normalize(area.name);
+    const matches = areasByName.get(key) ?? [];
+    matches.push(area);
+    areasByName.set(key, matches);
+  }
+  const resolveUniqueArea = (name: string) => {
+    const matches = areasByName.get(normalize(name)) ?? [];
+    if (matches.length > 1) addBlocker(`Existem ${matches.length} cadastros da área "${name}"; regularize a duplicidade.`);
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const generalArea = resolveUniqueArea("TI Geral");
+  const printerArea = resolveUniqueArea("Impressoras");
+  if (!generalArea?.active) addBlocker('Área ativa "TI Geral" não encontrada ou ambígua.');
+  if (!printerArea?.active) addBlocker('Área ativa "Impressoras" não encontrada ou ambígua.');
 
   const locations = await ctx.db.query("storageLocations").collect();
-  const locationByName = new Map(locations.map((location: any) => [normalize(location.name), location]));
-  const cabinet1: any = locationByName.get(normalize("Armário TI 01"));
-  const cabinet2: any = locationByName.get(normalize("Armário TI 02"));
-  if (!cabinet1?.active) addBlocker('Local físico ativo "Armário TI 01" não encontrado.');
-  if (!cabinet2?.active) addBlocker('Local físico ativo "Armário TI 02" não encontrado.');
+  const locationsByName = new Map<string, (typeof locations)[number][]>();
+  for (const location of locations) {
+    const key = normalize(location.name);
+    const matches = locationsByName.get(key) ?? [];
+    matches.push(location);
+    locationsByName.set(key, matches);
+  }
+  const resolveUniqueLocation = (name: string) => {
+    const matches = locationsByName.get(normalize(name)) ?? [];
+    if (matches.length > 1) addBlocker(`Existem ${matches.length} cadastros do local "${name}"; regularize a duplicidade.`);
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const cabinet1 = resolveUniqueLocation("Armário TI 01");
+  const cabinet2 = resolveUniqueLocation("Armário TI 02");
+  if (!cabinet1?.active) addBlocker('Local físico ativo "Armário TI 01" não encontrado ou ambíguo.');
+  if (!cabinet2?.active) addBlocker('Local físico ativo "Armário TI 02" não encontrado ou ambíguo.');
 
-  const initialEntry: any = await ctx.db.query("entries")
-    .withIndex("by_number", (q: any) => q.eq("entryNumber", INITIAL_ENTRY_NUMBER)).first();
-  const gomaqEntry: any = await ctx.db.query("entries")
-    .withIndex("by_number", (q: any) => q.eq("entryNumber", GOMAQ_ENTRY_NUMBER)).first();
-  if (!initialEntry) addBlocker(`Entrada ${INITIAL_ENTRY_NUMBER} não encontrada.`);
-  if (!gomaqEntry) addBlocker(`Entrada ${GOMAQ_ENTRY_NUMBER} não encontrada.`);
+  const initialEntries = await ctx.db.query("entries")
+    .withIndex("by_number", (q) => q.eq("entryNumber", INITIAL_ENTRY_NUMBER)).collect();
+  const gomaqEntries = await ctx.db.query("entries")
+    .withIndex("by_number", (q) => q.eq("entryNumber", GOMAQ_ENTRY_NUMBER)).collect();
+  if (initialEntries.length !== 1) addBlocker(`Esperada exatamente uma entrada ${INITIAL_ENTRY_NUMBER}; encontradas ${initialEntries.length}.`);
+  if (gomaqEntries.length !== 1) addBlocker(`Esperada exatamente uma entrada ${GOMAQ_ENTRY_NUMBER}; encontradas ${gomaqEntries.length}.`);
+  const initialEntry = initialEntries.length === 1 ? initialEntries[0] : null;
+  const gomaqEntry = gomaqEntries.length === 1 ? gomaqEntries[0] : null;
 
-  const lotPatches: Patch[] = [];
-  const itemPatches: Patch[] = [];
-  const movementPatches: Patch[] = [];
-  const movementLotPatches: Patch[] = [];
-  const returnPatches: Patch[] = [];
-  const sblPatches: Patch[] = [];
-  const sblInserts: Array<{ productId: string; locationId: string; areaId: string; quantity: number }> = [];
+  const lotPatches: Patch<"lots">[] = [];
+  const itemPatches: Patch<"entryItems">[] = [];
+  const movementPatches: Patch<"stockMovements">[] = [];
+  const movementLotPatches: Patch<"stockMovementLots">[] = [];
+  const returnPatches: Patch<"returns">[] = [];
+  const sblPatches: Patch<"stockByLocation">[] = [];
+  const sblInserts: Array<{ productId: Id<"products">; locationId: Id<"storageLocations">; areaId: Id<"stockAreas">; quantity: number }> = [];
   const targetLotMeta = new Map<string, AreaLocation>();
-  const allTouchedProductIds = new Set<string>();
+  const allTouchedProductIds = new Set<Id<"products">>();
   const itemUomChanges: Array<{ productName: string; from: string; to: string }> = [];
   const itemLocationDistribution = new Map<string, { rows: number; quantity: number }>();
   const areaDistribution = new Map<string, { rows: number; quantity: number }>();
 
-  const initialItems: any[] = initialEntry
-    ? await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", initialEntry._id)).collect()
+  const initialItems = initialEntry
+    ? await ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", initialEntry._id)).collect()
     : [];
-  const initialLots: any[] = initialEntry
-    ? await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", initialEntry._id)).collect()
+  const initialLots = initialEntry
+    ? await ctx.db.query("lots").withIndex("by_entry", (q) => q.eq("entryId", initialEntry._id)).collect()
     : [];
-  const gomaqItems: any[] = gomaqEntry
-    ? await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", gomaqEntry._id)).collect()
+  const gomaqItems = gomaqEntry
+    ? await ctx.db.query("entryItems").withIndex("by_entry", (q) => q.eq("entryId", gomaqEntry._id)).collect()
     : [];
-  const gomaqLots: any[] = gomaqEntry
-    ? await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", gomaqEntry._id)).collect()
+  const gomaqLots = gomaqEntry
+    ? await ctx.db.query("lots").withIndex("by_entry", (q) => q.eq("entryId", gomaqEntry._id)).collect()
     : [];
 
   if (initialEntry && (initialEntry.status !== "confirmed" || initialEntry.originType !== "initial_inventory")) {
@@ -120,19 +161,28 @@ async function buildRegularizationPlan(ctx: any) {
   if (gomaqEntry && printerArea && gomaqEntry.areaId !== printerArea._id) {
     addBlocker('A entrada Gomaq 372043 não está vinculada à área "Impressoras".');
   }
-  const gomaqItemQuantity = gomaqItems.reduce((sum: number, item: any) => sum + Number(item.quantity), 0);
-  const gomaqLotQuantity = gomaqLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityReceived), 0);
+  const gomaqItemQuantity = gomaqItems.reduce((sum: number, item) => sum + Number(item.quantity), 0);
+  const gomaqLotQuantity = gomaqLots.reduce((sum: number, lot) => sum + Number(lot.quantityReceived), 0);
   if (gomaqItemQuantity !== 535 || gomaqLotQuantity !== 535) {
     addBlocker(`NF Gomaq 372043 diverge do total físico auditado de 535 unidades (itens: ${gomaqItemQuantity}; lotes: ${gomaqLotQuantity}).`);
   }
 
   const manifestByName = new Map(INITIAL_STOCK_MANIFEST.map((row) => [normalize(row.productName), row]));
   const usedManifestNames = new Set<string>();
-  const initialLotById = new Map(initialLots.map((lot: any) => [lot._id as string, lot]));
-  const initialLotByNumber = new Map(initialLots.map((lot: any) => [keyOf(lot.productId as string, lot.lotNumber as string), lot]));
+  const initialLotById = new Map(initialLots.map((lot) => [String(lot._id), lot] as const));
+  const initialLotByNumber = new Map<string, Doc<"lots">[]>();
+  for (const lot of initialLots) {
+    const key = keyOf(lot.productId, lot.lotNumber);
+    const matches = initialLotByNumber.get(key) ?? [];
+    matches.push(lot);
+    initialLotByNumber.set(key, matches);
+    if (matches.length > 1) {
+      addBlocker(`Lote da entrada inicial duplicado para produto/número ${lot.productId}/${lot.lotNumber}; referência por número não será inferida.`);
+    }
+  }
 
   for (const item of initialItems) {
-    const product: any = await ctx.db.get(item.productId);
+    const product = await ctx.db.get(item.productId);
     if (!product) {
       addBlocker(`Produto do item inicial ${item._id} não encontrado.`);
       continue;
@@ -168,10 +218,10 @@ async function buildRegularizationPlan(ctx: any) {
       }
     }
 
-    const location: any = item.locationId ? await ctx.db.get(item.locationId) : null;
-    const expectedLocation = locationByName.get(normalize(manifest.locationName)) as any;
+    const location = item.locationId ? await ctx.db.get(item.locationId) : null;
+    const expectedLocation = resolveUniqueLocation(manifest.locationName);
     if (!expectedLocation?.active) {
-      addBlocker(`Local físico esperado "${manifest.locationName}" não está ativo.`);
+      addBlocker(`Local físico esperado "${manifest.locationName}" não está ativo ou é ambíguo.`);
     }
     if (!location || !location.active) {
       addBlocker(`Item "${productName}" não possui local físico válido registrado.`);
@@ -179,7 +229,7 @@ async function buildRegularizationPlan(ctx: any) {
       addBlocker(`Local físico de "${productName}" diverge da planilha (${location.name} / ${manifest.locationName}).`);
     }
 
-    const lot = resolveLot(item.lotId, initialLotById, initialLotByNumber, item.productId as string);
+    const lot = resolveLot(item.lotId, initialLotById, initialLotByNumber, item.productId);
     if (!lot) {
       addBlocker(`Item "${productName}" não aponta para lote verificável.`);
       continue;
@@ -190,8 +240,12 @@ async function buildRegularizationPlan(ctx: any) {
     }
     if (!location || !expectedLocation?.active || !generalArea?.active || !printerArea?.active) continue;
 
-    const area: any = areaByName.get(normalize(manifest.areaName));
-    const target = { areaId: area._id as string, locationId: location._id as string };
+    const area = resolveUniqueArea(manifest.areaName);
+    if (!area?.active) {
+      addBlocker(`Área esperada "${manifest.areaName}" não está ativa ou é ambígua.`);
+      continue;
+    }
+    const target: AreaLocation = { areaId: area._id, locationId: location._id };
     if (lot.areaId && lot.areaId !== target.areaId) {
       addBlocker(`Lote ${lot.lotNumber} já possui área diferente do manifesto.`);
     }
@@ -202,11 +256,11 @@ async function buildRegularizationPlan(ctx: any) {
       addBlocker(`Item da entrada "${productName}" já possui outra área.`);
     }
 
-    targetLotMeta.set(lot._id as string, target);
+    targetLotMeta.set(String(lot._id), target);
     addPatch(lotPatches, lot._id, lot, target);
     addPatch(itemPatches, item._id, item, { areaId: target.areaId });
 
-    allTouchedProductIds.add(item.productId as string);
+    allTouchedProductIds.add(item.productId);
     const areaSummary = areaDistribution.get(manifest.areaName) ?? { rows: 0, quantity: 0 };
     areaSummary.rows += 1;
     areaSummary.quantity += manifest.quantity;
@@ -235,19 +289,28 @@ async function buildRegularizationPlan(ctx: any) {
     addBlocker("Distribuição de TI Geral da entrada inicial não fecha com o manifesto 36 lotes / 1.919 unidades.");
   }
 
-  const gomaqLotById = new Map(gomaqLots.map((lot: any) => [lot._id as string, lot]));
-  const gomaqLotByNumber = new Map(gomaqLots.map((lot: any) => [keyOf(lot.productId as string, lot.lotNumber as string), lot]));
+  const gomaqLotById = new Map(gomaqLots.map((lot) => [String(lot._id), lot] as const));
+  const gomaqLotByNumber = new Map<string, Doc<"lots">[]>();
+  for (const lot of gomaqLots) {
+    const key = keyOf(lot.productId, lot.lotNumber);
+    const matches = gomaqLotByNumber.get(key) ?? [];
+    matches.push(lot);
+    gomaqLotByNumber.set(key, matches);
+    if (matches.length > 1) {
+      addBlocker(`Lote Gomaq duplicado para produto/número ${lot.productId}/${lot.lotNumber}; vínculo legado não será inferido.`);
+    }
+  }
   for (const item of gomaqItems) {
-    const product: any = await ctx.db.get(item.productId);
+    const product = await ctx.db.get(item.productId);
     if (!product) {
       addBlocker(`Produto do item Gomaq ${item._id} não encontrado.`);
       continue;
     }
-    const location: any = item.locationId ? await ctx.db.get(item.locationId) : null;
+    const location = item.locationId ? await ctx.db.get(item.locationId) : null;
     if (!location || !location.active || normalize(location.name) !== normalize("Armário TI 02")) {
       addBlocker(`Item Gomaq "${product.name}" não aponta para o Armário TI 02 ativo.`);
     }
-    const lot = resolveLot(item.lotId, gomaqLotById, gomaqLotByNumber, item.productId as string);
+    const lot = resolveLot(item.lotId, gomaqLotById, gomaqLotByNumber, item.productId);
     if (!lot) {
       addBlocker(`Item Gomaq "${product.name}" não aponta para lote verificável.`);
       continue;
@@ -266,26 +329,26 @@ async function buildRegularizationPlan(ctx: any) {
       addBlocker(`Item Gomaq "${product.name}" já possui outra área.`);
     }
     if (location?.active && printerArea?.active) {
-      const target = { areaId: printerArea._id as string, locationId: location._id as string };
-      targetLotMeta.set(lot._id as string, target);
+      const target: AreaLocation = { areaId: printerArea._id, locationId: location._id };
+      targetLotMeta.set(String(lot._id), target);
       addPatch(lotPatches, lot._id, lot, target);
       addPatch(itemPatches, item._id, item, { areaId: target.areaId });
-      allTouchedProductIds.add(item.productId as string);
+      allTouchedProductIds.add(item.productId);
     }
   }
 
   if (initialItems.length === 53 && initialLots.length === 53 && gomaqItems.length === 8 && gomaqLots.length === 8) {
     const allTargetLots = [...initialLots, ...gomaqLots];
-    if (new Set(allTargetLots.map((lot: any) => lot._id)).size !== 61) {
+    if (new Set(allTargetLots.map((lot) => lot._id)).size !== 61) {
       addBlocker("Os dois escopos não contêm 61 lotes distintos.");
     }
   }
 
   // Reservas por lote também bloqueiam a regularização, mesmo se o contador global estiver divergente.
-  const activeReservations: any[] = await ctx.db.query("requestItemReservations").collect();
+  const activeReservations = await ctx.db.query("requestItemReservations").collect();
   for (const reservation of activeReservations) {
     if (
-      allTouchedProductIds.has(reservation.productId as string) &&
+      allTouchedProductIds.has(reservation.productId) &&
       Number(reservation.quantityRemaining) > 0
     ) {
       addBlocker(`Há ${reservation.quantityRemaining} unidade(s) reservada(s) no lote ${reservation.lotId}; conclua/cancele a solicitação antes da regularização.`);
@@ -295,14 +358,14 @@ async function buildRegularizationPlan(ctx: any) {
   // Solicitações aprovadas com saldo pendente bloqueiam a regularização.
   // Mesmo que o saldo reservado global esteja zerado, não se deve reclassificar
   // a origem física enquanto houver entrega aprovada ainda não concluída.
-  const approvedRequests: any[] = await ctx.db.query("requests")
-    .withIndex("by_status", (q: any) => q.eq("status", "approved")).collect();
+  const approvedRequests = await ctx.db.query("requests")
+    .withIndex("by_status", (q) => q.eq("status", "approved")).collect();
   for (const request of approvedRequests) {
-    const requestItems: any[] = await ctx.db.query("requestItems")
-      .withIndex("by_request", (q: any) => q.eq("requestId", request._id)).collect();
+    const requestItems = await ctx.db.query("requestItems")
+      .withIndex("by_request", (q) => q.eq("requestId", request._id)).collect();
     for (const item of requestItems) {
       if (
-        allTouchedProductIds.has(item.productId as string) &&
+        allTouchedProductIds.has(item.productId) &&
         Number(item.quantityApproved) > Number(item.quantityDelivered ?? 0)
       ) {
         addBlocker(`Há solicitação aprovada ${request._id} com entrega pendente do produto ${item.productId}; conclua/cancele antes da regularização.`);
@@ -312,33 +375,33 @@ async function buildRegularizationPlan(ctx: any) {
 
   // Validate and prepare area-aware stockByLocation rows. The sum for each
   // product/location pair MUST remain exactly the same after splitting areas.
-  const expectedGroups = new Map<string, { productId: string; locationId: string; areaId: string; quantity: number }>();
-  const allLotsByProduct = new Map<string, any[]>();
+  const expectedGroups = new Map<string, { productId: Id<"products">; locationId: Id<"storageLocations">; areaId: Id<"stockAreas">; quantity: number }>();
+  const allLotsByProduct = new Map<Id<"products">, Doc<"lots">[]>();
   for (const productId of allTouchedProductIds) {
-    const lots = await ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", productId as any)).collect();
+    const lots = await ctx.db.query("lots").withIndex("by_product", (q) => q.eq("productId", productId)).collect();
     allLotsByProduct.set(productId, lots);
     for (const lot of lots) {
       if (!lot.active || Number(lot.quantityAvailable) <= 0) continue;
-      const override = targetLotMeta.get(lot._id as string);
+      const override = targetLotMeta.get(String(lot._id));
       const areaId = override?.areaId ?? lot.areaId;
       const locationId = override?.locationId ?? lot.locationId;
       if (!areaId || !locationId) {
         addBlocker(`Produto ${productId}: lote ativo ${lot.lotNumber} com saldo ${lot.quantityAvailable} sem área/local; conciliação cancelada.`);
         continue;
       }
-      const k = keyOf(productId, locationId as string, areaId as string);
+      const k = keyOf(productId, locationId, areaId);
       const group = expectedGroups.get(k) ?? {
-        productId, locationId: locationId as string, areaId: areaId as string, quantity: 0,
+        productId, locationId, areaId, quantity: 0,
       };
       group.quantity += Number(lot.quantityAvailable);
       expectedGroups.set(k, group);
     }
 
-    const stocks = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId as any)).collect();
+    const stocks = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", productId)).collect();
     if (stocks.length !== 1) {
       addBlocker(`Produto ${productId}: esperado exatamente um registro global de estoque; encontrados ${stocks.length}.`);
     } else {
-      const lotTotal = lots.filter((lot: any) => lot.active).reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+      const lotTotal = lots.filter((lot) => lot.active).reduce((sum: number, lot) => sum + Number(lot.quantityAvailable), 0);
       if (Number(stocks[0].physicalQuantity) !== lotTotal) {
         addBlocker(`Produto ${productId}: saldo global (${stocks[0].physicalQuantity}) difere da soma dos lotes (${lotTotal}).`);
       }
@@ -348,7 +411,7 @@ async function buildRegularizationPlan(ctx: any) {
     }
   }
 
-  const expectedPairs = new Map<string, Array<{ productId: string; locationId: string; areaId: string; quantity: number }>>();
+  const expectedPairs = new Map<string, Array<{ productId: Id<"products">; locationId: Id<"storageLocations">; areaId: Id<"stockAreas">; quantity: number }>>();
   for (const group of expectedGroups.values()) {
     const pair = keyOf(group.productId, group.locationId);
     const values = expectedPairs.get(pair) ?? [];
@@ -357,17 +420,17 @@ async function buildRegularizationPlan(ctx: any) {
   }
 
   for (const productId of allTouchedProductIds) {
-    const rows: any[] = await ctx.db.query("stockByLocation")
-      .withIndex("by_product", (q: any) => q.eq("productId", productId as any)).collect();
-    const byLocation = new Map<string, any[]>();
+    const rows = await ctx.db.query("stockByLocation")
+      .withIndex("by_product", (q) => q.eq("productId", productId)).collect();
+    const byLocation = new Map<string, (typeof rows)[number][]>();
     for (const row of rows) {
-      const list = byLocation.get(row.locationId as string) ?? [];
+      const list = byLocation.get(String(row.locationId)) ?? [];
       list.push(row);
-      byLocation.set(row.locationId as string, list);
+      byLocation.set(String(row.locationId), list);
     }
     const locationIds = new Set<string>([
-      ...rows.map((row: any) => row.locationId as string),
-      ...Array.from(expectedGroups.values()).filter((group) => group.productId === productId).map((group) => group.locationId),
+      ...rows.map((row) => String(row.locationId)),
+      ...Array.from(expectedGroups.values()).filter((group) => group.productId === productId).map((group) => String(group.locationId)),
     ]);
 
     for (const locationId of locationIds) {
@@ -386,30 +449,30 @@ async function buildRegularizationPlan(ctx: any) {
         continue;
       }
 
-      const groupByArea = new Map(groups.map((group) => [group.areaId, group]));
-      const assigned = new Map<string, any>();
-      const unassigned: any[] = [];
+      const groupByArea = new Map(groups.map((group) => [String(group.areaId), group] as const));
+      const assigned = new Map<string, (typeof existingRows)[number]>();
+      const unassigned: (typeof existingRows)[number][] = [];
       for (const row of existingRows) {
         if (!row.areaId) {
           unassigned.push(row);
           continue;
         }
-        if (!groupByArea.has(row.areaId)) {
+        if (!groupByArea.has(String(row.areaId))) {
           addBlocker(`Produto ${productId} / local ${locationId}: saldo já classificado em área sem lote correspondente.`);
           continue;
         }
-        if (assigned.has(row.areaId)) {
+        if (assigned.has(String(row.areaId))) {
           addBlocker(`Produto ${productId} / local ${locationId}: linhas duplicadas para a mesma área.`);
           continue;
         }
-        assigned.set(row.areaId, row);
+        assigned.set(String(row.areaId), row);
       }
 
       for (const group of groups) {
-        let row = assigned.get(group.areaId);
+        let row = assigned.get(String(group.areaId));
         if (!row && unassigned.length) {
-          row = unassigned.shift();
-          assigned.set(group.areaId, row);
+          row = unassigned.shift()!;
+          assigned.set(String(group.areaId), row);
         }
         if (row) {
           addPatch(sblPatches, row._id, row, { areaId: group.areaId, quantity: group.quantity });
@@ -423,19 +486,25 @@ async function buildRegularizationPlan(ctx: any) {
     }
   }
 
-  const lotById = new Map<string, any>();
-  const lotByNumber = new Map<string, any>();
+  const lotById = new Map<string, Doc<"lots">>();
+  const lotByNumber = new Map<string, Doc<"lots">[]>();
   for (const lots of allLotsByProduct.values()) {
     for (const lot of lots) {
-      lotById.set(lot._id as string, lot);
-      lotByNumber.set(keyOf(lot.productId as string, lot.lotNumber as string), lot);
+      lotById.set(String(lot._id), lot);
+      const key = keyOf(lot.productId, lot.lotNumber);
+      const matches = lotByNumber.get(key) ?? [];
+      matches.push(lot);
+      lotByNumber.set(key, matches);
+      if (matches.length > 1) {
+        addBlocker(`Lote duplicado para produto/número ${lot.productId}/${lot.lotNumber}; referências por número ficam bloqueadas.`);
+      }
     }
   }
 
-  const movements: any[] = await ctx.db.query("stockMovements").collect();
-  const movementById = new Map(movements.map((movement: any) => [movement._id as string, movement]));
-  const movementLotLinks: any[] = await ctx.db.query("stockMovementLots").collect();
-  const linksByMovement = new Map<string, any[]>();
+  const movements = await ctx.db.query("stockMovements").collect();
+  const movementById = new Map(movements.map((movement) => [String(movement._id), movement] as const));
+  const movementLotLinks = await ctx.db.query("stockMovementLots").collect();
+  const linksByMovement = new Map<string, (typeof movementLotLinks)[number][]>();
   for (const link of movementLotLinks) {
     const key = String(link.movementId);
     const current = linksByMovement.get(key) ?? [];
@@ -444,9 +513,9 @@ async function buildRegularizationPlan(ctx: any) {
   }
   // Movimentações antigas de transferência não tinham stockMovementLots.
   // Recupera a origem pelo vínculo histórico stockTransfers → stockTransferLots.
-  const transfers: any[] = await ctx.db.query("stockTransfers").collect();
-  const transferLots: any[] = await ctx.db.query("stockTransferLots").collect();
-  const transferLotsByTransfer = new Map<string, any[]>();
+  const transfers = await ctx.db.query("stockTransfers").collect();
+  const transferLots = await ctx.db.query("stockTransferLots").collect();
+  const transferLotsByTransfer = new Map<string, (typeof transferLots)[number][]>();
   for (const link of transferLots) {
     const key = String(link.transferId);
     const current = transferLotsByTransfer.get(key) ?? [];
@@ -455,17 +524,17 @@ async function buildRegularizationPlan(ctx: any) {
   }
 
   for (const movement of movements) {
-    if (!allTouchedProductIds.has(movement.productId as string)) continue;
+    if (!allTouchedProductIds.has(movement.productId)) continue;
     const links = linksByMovement.get(String(movement._id)) ?? [];
-    const sources: Array<{ lot: any; link?: any }> = [];
+    const sources: Array<{ lot: Doc<"lots">; link?: Doc<"stockMovementLots"> }> = [];
 
     if (links.length > 0) {
-      const linkedQuantity = links.reduce((sum: number, link: any) => sum + Number(link.quantity), 0);
+      const linkedQuantity = links.reduce((sum: number, link) => sum + Number(link.quantity), 0);
       if (Math.abs(linkedQuantity - Number(movement.quantity)) > 1e-9) {
         addBlocker(`Movimentação ${movement._id}: soma dos lotes vinculados (${linkedQuantity}) diverge da quantidade (${movement.quantity}).`);
       }
       for (const link of links) {
-        const lot = resolveLot(link.lotId, lotById, lotByNumber, movement.productId as string);
+        const lot = resolveLot(link.lotId, lotById, lotByNumber, movement.productId);
         if (!lot || lot.productId !== movement.productId) {
           addBlocker(`Movimentação ${movement._id} possui vínculo com lote ausente ou de outro produto.`);
           continue;
@@ -473,7 +542,7 @@ async function buildRegularizationPlan(ctx: any) {
         sources.push({ lot, link });
       }
     } else if (movement.type === "transfer") {
-      const matches = transfers.filter((transfer: any) =>
+      const matches = transfers.filter((transfer) =>
         transfer.productId === movement.productId &&
         Number(transfer.quantity) === Number(movement.quantity) &&
         transfer.fromLocationId === movement.locationId &&
@@ -489,12 +558,12 @@ async function buildRegularizationPlan(ctx: any) {
       const transfer = matches[0];
       const transferLinks = transferLotsByTransfer.get(String(transfer._id)) ?? [];
       if (transferLinks.length > 0) {
-        const linkedQuantity = transferLinks.reduce((sum: number, link: any) => sum + Number(link.quantity), 0);
+        const linkedQuantity = transferLinks.reduce((sum: number, link) => sum + Number(link.quantity), 0);
         if (Math.abs(linkedQuantity - Number(movement.quantity)) > 1e-9) {
           addBlocker(`Transferência ${transfer._id}: soma dos lotes de origem diverge da movimentação.`);
         }
         for (const link of transferLinks) {
-          const lot = resolveLot(link.sourceLotId, lotById, lotByNumber, movement.productId as string);
+          const lot = resolveLot(link.sourceLotId, lotById, lotByNumber, movement.productId);
           if (!lot || lot.productId !== movement.productId) {
             addBlocker(`Transferência ${transfer._id} possui lote de origem ausente ou de outro produto.`);
             continue;
@@ -502,7 +571,7 @@ async function buildRegularizationPlan(ctx: any) {
           sources.push({ lot });
         }
       } else {
-        const lot = resolveLot(transfer.lotId, lotById, lotByNumber, movement.productId as string);
+        const lot = resolveLot(transfer.lotId, lotById, lotByNumber, movement.productId);
         if (!lot || lot.productId !== movement.productId) {
           addBlocker(`Transferência ${transfer._id} não possui vínculo verificável com lote de origem.`);
           continue;
@@ -510,7 +579,7 @@ async function buildRegularizationPlan(ctx: any) {
         sources.push({ lot });
       }
     } else {
-      const lot = resolveLot(movement.lotId, lotById, lotByNumber, movement.productId as string);
+      const lot = resolveLot(movement.lotId, lotById, lotByNumber, movement.productId);
       if (!lot || lot.productId !== movement.productId) {
         addBlocker(`Movimentação ${movement._id} sem lote verificável correspondente ao produto.`);
         continue;
@@ -520,7 +589,7 @@ async function buildRegularizationPlan(ctx: any) {
 
     const pairs: AreaLocation[] = [];
     for (const source of sources) {
-      const override = targetLotMeta.get(source.lot._id as string);
+      const override = targetLotMeta.get(String(source.lot._id));
       const areaId = override?.areaId ?? source.lot.areaId;
       const locationId = override?.locationId ?? source.lot.locationId;
       if (!areaId || !locationId) {
@@ -536,7 +605,7 @@ async function buildRegularizationPlan(ctx: any) {
         }
         addPatch(movementLotPatches, source.link._id, source.link, { areaId, locationId });
       }
-      pairs.push({ areaId: String(areaId), locationId: String(locationId) });
+      pairs.push({ areaId, locationId });
     }
 
     const uniquePairs = new Map(pairs.map((pair) => [keyOf(pair.areaId, pair.locationId), pair]));
@@ -556,39 +625,39 @@ async function buildRegularizationPlan(ctx: any) {
     }
   }
 
-  const returns: any[] = await ctx.db.query("returns").collect();
+  const returns = await ctx.db.query("returns").collect();
   const returnedByExit = new Map<string, number>();
   const returnedByExitLot = new Map<string, { exitId: string; lotId: string; quantity: number }>();
   for (const returnRow of returns) {
-    if (!allTouchedProductIds.has(returnRow.productId as string)) continue;
+    if (!allTouchedProductIds.has(returnRow.productId)) continue;
     if (!returnRow.exitMovementId) {
       addBlocker(`Devolução ${returnRow._id} não possui vínculo com a saída original.`);
       continue;
     }
-    const exit: any = movementById.get(returnRow.exitMovementId as string);
+    const exit = movementById.get(String(returnRow.exitMovementId));
     if (!exit || exit.type !== "exit" || exit.productId !== returnRow.productId) {
       addBlocker(`Devolução ${returnRow._id} não aponta para uma saída válida do mesmo produto.`);
       continue;
     }
     const exitLinks = linksByMovement.get(String(exit._id)) ?? [];
     const exitLots = exitLinks
-      .map((link: any) => resolveLot(link.lotId, lotById, lotByNumber, exit.productId as string))
-      .filter((lot: any) => lot && lot.productId === exit.productId);
+      .map((link) => resolveLot(link.lotId, lotById, lotByNumber, exit.productId))
+      .filter((lot): lot is Doc<"lots"> => lot !== null && lot.productId === exit.productId);
     if (exitLinks.length > 0 && exitLots.length !== exitLinks.length) {
       addBlocker(`Devolução ${returnRow._id}: a trilha multi-lote da saída original está incompleta.`);
       continue;
     }
     const candidateLots = exitLots.length > 0
       ? exitLots
-      : [resolveLot(exit.lotId, lotById, lotByNumber, exit.productId as string)].filter(Boolean);
+      : [resolveLot(exit.lotId, lotById, lotByNumber, exit.productId)].filter((candidate): candidate is Doc<"lots"> => candidate !== null);
     const lot = returnRow.lotId
-      ? resolveLot(returnRow.lotId, lotById, lotByNumber, returnRow.productId as string)
+      ? resolveLot(returnRow.lotId, lotById, lotByNumber, returnRow.productId)
       : candidateLots.length === 1 ? candidateLots[0] : null;
-    if (!lot || lot.productId !== exit.productId || !candidateLots.some((candidate: any) => candidate._id === lot._id)) {
+    if (!lot || lot.productId !== exit.productId || !candidateLots.some((candidate) => candidate._id === lot._id)) {
       addBlocker(`Devolução ${returnRow._id}: informe/vincule o lote exato consumido pela saída original.`);
       continue;
     }
-    const override = targetLotMeta.get(lot._id as string);
+    const override = targetLotMeta.get(String(lot._id));
     const areaId = override?.areaId ?? lot.areaId;
     const locationId = override?.locationId ?? lot.locationId;
     if (!areaId || !locationId) {
@@ -616,7 +685,11 @@ async function buildRegularizationPlan(ctx: any) {
     });
   }
   for (const [exitId, returned] of returnedByExit) {
-    const exit: any = movementById.get(exitId);
+    const exit = movementById.get(exitId);
+    if (!exit) {
+      addBlocker(`Saída ${exitId} referenciada por devolução não foi encontrada.`);
+      continue;
+    }
     if (returned > Number(exit.quantity)) {
       addBlocker(`Devoluções vinculadas à saída ${exitId} (${returned}) excedem a quantidade da saída (${exit.quantity}).`);
     }
@@ -624,8 +697,8 @@ async function buildRegularizationPlan(ctx: any) {
   for (const returned of returnedByExitLot.values()) {
     const exitLinks = linksByMovement.get(returned.exitId) ?? [];
     const consumedFromLot = exitLinks.length > 0
-      ? exitLinks.filter((link: any) => String(link.lotId) === returned.lotId)
-          .reduce((sum: number, link: any) => sum + Number(link.quantity), 0)
+      ? exitLinks.filter((link) => String(link.lotId) === returned.lotId)
+          .reduce((sum: number, link) => sum + Number(link.quantity), 0)
       : Number(movementById.get(returned.exitId)?.quantity ?? 0);
     if (returned.quantity > consumedFromLot) {
       addBlocker(`Devoluções da saída ${returned.exitId} para o lote ${returned.lotId} (${returned.quantity}) excedem o consumo desse lote (${consumedFromLot}).`);
@@ -682,7 +755,8 @@ export const preview = query({
   handler: async (ctx) => {
     await requirePermission(ctx, "stock.view", { entity: "stockRegularization" });
     const plan = await buildRegularizationPlan(ctx);
-    const { internal: _internal, ...report } = plan;
+    const { internal, ...report } = plan;
+    void internal;
     return report;
   },
 });
@@ -710,13 +784,13 @@ export const apply = mutation({
       lotPatches, itemPatches, movementPatches, movementLotPatches,
       returnPatches, sblPatches, sblInserts,
     } = plan.internal;
-    for (const update of lotPatches) await ctx.db.patch(update.id as any, update.fields);
-    for (const update of itemPatches) await ctx.db.patch(update.id as any, update.fields);
-    for (const update of sblPatches) await ctx.db.patch(update.id as any, update.fields);
-    for (const row of sblInserts) await ctx.db.insert("stockByLocation", row as any);
-    for (const update of movementLotPatches) await ctx.db.patch(update.id as any, update.fields);
-    for (const update of movementPatches) await ctx.db.patch(update.id as any, update.fields);
-    for (const update of returnPatches) await ctx.db.patch(update.id as any, update.fields);
+    for (const update of lotPatches) await ctx.db.patch(update.id, update.fields);
+    for (const update of itemPatches) await ctx.db.patch(update.id, update.fields);
+    for (const update of sblPatches) await ctx.db.patch(update.id, update.fields);
+    for (const row of sblInserts) await ctx.db.insert("stockByLocation", row);
+    for (const update of movementLotPatches) await ctx.db.patch(update.id, update.fields);
+    for (const update of movementPatches) await ctx.db.patch(update.id, update.fields);
+    for (const update of returnPatches) await ctx.db.patch(update.id, update.fields);
 
     if (plan.changes.totalWrites > 0) {
       await ctx.db.insert("auditLogs", {

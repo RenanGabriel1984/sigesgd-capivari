@@ -1,5 +1,7 @@
 import { internalQuery } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { LEGACY_GENERAL_AREA_CLASSIFICATION_TARGETS } from "../lib/legacy-general-area-classification";
+import { inspectLotLocationBalances } from "../lib/lot-location-balance";
 
 /**
  * Diagnóstico estritamente somente leitura da divergência que bloqueou a
@@ -15,36 +17,44 @@ export const legacyGeneralAreaClassificationDiagnostic = internalQuery({
       return { readOnly: true, found: false, reason: "Produto não está no manifesto fechado." };
     }
 
-    const entry: any = await ctx.db
+    const entryMatches = await ctx.db
       .query("entries")
-      .withIndex("by_number", (q: any) => q.eq("entryNumber", "ENT-2026-000001"))
-      .first();
+      .withIndex("by_number", (q) => q.eq("entryNumber", "ENT-2026-000001"))
+      .collect();
 
-    if (!entry) {
+    if (entryMatches.length !== 1) {
       return {
         readOnly: true,
         found: false,
-        reason: "Entrada ENT-2026-000001 não encontrada.",
+        reason: entryMatches.length === 0
+          ? "Entrada ENT-2026-000001 não encontrada."
+          : `Entrada ENT-2026-000001 ambígua: ${entryMatches.length} registros encontrados.`,
+        candidateIds: entryMatches.map((candidate) => String(candidate._id)),
         expected: target,
       };
     }
+    const entry = entryMatches[0]!;
 
-    const [product, location, lot, localRow, entryItems, productMovements, allMovementLinks]: any[] =
+    const productId = target.productId as Id<"products">;
+    const locationId = target.locationId as Id<"storageLocations">;
+    const lotId = target.lotId as Id<"lots">;
+    const rowId = target.rowId as Id<"stockByLocation">;
+    const [product, location, lot, localRow, entryItems, productMovements, allMovementLinks] =
       await Promise.all([
-        ctx.db.get(target.productId as any),
-        ctx.db.get(target.locationId as any),
-        ctx.db.get(target.lotId as any),
-        ctx.db.get(target.rowId as any),
+        ctx.db.get(productId),
+        ctx.db.get(locationId),
+        ctx.db.get(lotId),
+        ctx.db.get(rowId),
         ctx.db.query("entryItems")
-          .withIndex("by_entry", (q: any) => q.eq("entryId", entry._id))
+          .withIndex("by_entry", (q) => q.eq("entryId", entry._id))
           .collect(),
         ctx.db.query("stockMovements")
-          .withIndex("by_product", (q: any) => q.eq("productId", target.productId))
+          .withIndex("by_product", (q) => q.eq("productId", productId))
           .collect(),
         ctx.db.query("stockMovementLots").collect(),
       ]);
 
-    const itemCandidates = (entryItems as any[])
+    const itemCandidates = entryItems
       .filter((item) => String(item.productId) === target.productId)
       .map((item) => ({
         id: String(item._id),
@@ -56,12 +66,12 @@ export const legacyGeneralAreaClassificationDiagnostic = internalQuery({
         brand: item.brand ?? null,
       }));
 
-    const entryProductMovements = (productMovements as any[])
+    const entryProductMovements = productMovements
       .filter((movement) => String(movement.entryId ?? "") === String(entry._id));
 
     const movementDetails = entryProductMovements.map((movement) => {
       const movementId = String(movement._id);
-      const links = (allMovementLinks as any[])
+      const links = allMovementLinks
         .filter((link) => String(link.movementId) === movementId)
         .map((link) => ({
           id: String(link._id),
@@ -143,6 +153,49 @@ export const legacyGeneralAreaClassificationDiagnostic = internalQuery({
           canceled: movement.canceled,
         })),
       },
+    };
+  },
+});
+
+/**
+ * Diagnóstico read-only do livro derivado lote × localização.
+ * Não tenta corrigir ou inferir locais para lotes legados sem vínculo explícito.
+ */
+export const lotLocationBalanceIntegrityDiagnostic = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const [lots, balances] = await Promise.all([
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+    ]);
+
+    const result = inspectLotLocationBalances(
+      lots.map((lot) => ({
+        _id: String(lot._id),
+        productId: String(lot.productId),
+        lotNumber: lot.lotNumber,
+        quantityAvailable: lot.quantityAvailable,
+        locationId: lot.locationId == null ? null : String(lot.locationId),
+        active: lot.active,
+      })),
+      balances.map((balance) => ({
+        _id: String(balance._id),
+        lotId: String(balance.lotId),
+        productId: String(balance.productId),
+        locationId: String(balance.locationId),
+        quantityAvailable: balance.quantityAvailable,
+      })),
+    );
+
+    return {
+      readOnly: true,
+      ...result,
+      issueCount: result.issues.length,
+      limitationCount: result.limitations.length,
+      issues: result.issues.slice(0, 100),
+      limitations: result.limitations.slice(0, 100),
+      issuesTruncated: result.issues.length > 100,
+      limitationsTruncated: result.limitations.length > 100,
     };
   },
 });

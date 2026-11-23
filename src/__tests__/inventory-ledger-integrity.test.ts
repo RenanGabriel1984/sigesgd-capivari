@@ -18,6 +18,7 @@ describe("integridade do fechamento de inventário", () => {
   });
 
   it("confere área/local e não mistura saldos de armários diferentes", () => {
+    expect(close).toContain("resolveScopedInventoryQuantity(");
     expect(close).toContain("row.areaId ??");
     expect(close).toContain("row.locationId");
     expect(close).toContain("lot.areaId === inv.areaId && lot.locationId === inv.locationId");
@@ -45,7 +46,7 @@ describe("integridade do fechamento de inventário", () => {
     expect(close).toContain('ctx.db.insert("entryItems"');
     expect(close).toContain('ctx.db.insert("lots"');
     expect(close).toContain("quantityReceived: delta");
-    expect(close).toContain("lotId: adjustmentLotId as string");
+    expect(close).toContain("lotId: adjustmentLotId ?? plannedReductions[0]?.lot._id");
   });
 
   it("toda diferença gera movimento e vínculo com cada lote ajustado", () => {
@@ -66,5 +67,43 @@ describe("integridade da abertura de inventário", () => {
     expect(create).toContain('ctx.db.query("stockByLocation")');
     expect(create).toContain('ctx.db.query("lots")');
     expect(create).not.toContain(".reduce((sum: number, s: any) => sum + s.quantity, 0)");
+  });
+});
+
+describe("trilha de auditoria do ciclo de inventário", () => {
+  it("registra o operador e a transição para revisão após validar todas as contagens", () => {
+    const reviewStart = inventory.indexOf("export const startReview = mutation({");
+    const closeStart = inventory.indexOf("export const close = mutation({", reviewStart);
+    const review = inventory.slice(reviewStart, closeStart);
+    expect(review).toContain("const { userId } = await requireStockManagerOrAdmin(ctx)");
+    expect(review).toContain('if (inv.status !== "counting")');
+    expect(review).toContain("assertUniqueInventoryProductCounts(counts)");
+    expect(review).toContain("const uncounted = counts.filter");
+    const closeMutationStart = inventory.indexOf("export const close = mutation({");
+    const closeEnd = inventory.indexOf("export const cancel = mutation({", closeMutationStart);
+    const close = inventory.slice(closeMutationStart, closeEnd);
+    expect(close).toContain("assertUniqueInventoryProductCounts(counts)");
+    expect(review).toContain('status: "review", updatedAt: now');
+    expect(review).toContain('ctx.db.insert("auditLogs", {');
+    expect(review).toContain('action: "count_inventory"');
+    expect(review).toContain('entity: "inventories"');
+    expect(review).toContain("entityId: args.inventoryId");
+    expect(review).toContain("userId,");
+    expect(review).toContain("contagem concluída e encaminhada para revisão");
+    expect(review).toContain("timestamp: now");
+    expect(review.indexOf("if (uncounted.length > 0)")).toBeLessThan(review.indexOf('ctx.db.insert("auditLogs", {'));
+  });
+});
+
+describe("escalabilidade da abertura de inventário", () => {
+  it("verifica inventários ativos pelo índice de status sem varrer o histórico", () => {
+    const createStart = inventory.indexOf("export const create = mutation({");
+    const closeStart = inventory.indexOf("export const startCounting = mutation({", createStart);
+    const create = inventory.slice(createStart, closeStart);
+    expect(create).toContain('const activeStatuses = ["draft", "counting", "review"] as const;');
+    expect(create).toContain('.withIndex("by_status", (q) => q.eq("status", status))');
+    expect(create).toContain(".take(1)");
+    expect(create).toContain("activeInventoryRows.some((rows) => rows.length > 0)");
+    expect(create).not.toContain('ctx.db.query("inventories").collect()');
   });
 });

@@ -1,13 +1,16 @@
-import { getAuthUserId, getAuthSessionId, invalidateSessions } from "@convex-dev/auth/server";
+import { getAuthSessionId, invalidateSessions } from "@convex-dev/auth/server";
 import { requirePermission } from "./rbac";
 import { mutation, internalQuery, internalMutation, internalAction } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword, verifyPassword, nextResetAttempt, verifyResetCode, isValidRecoveryEmail } from "./auth/passwords";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
-
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
+import {
+  describeDuplicateCredential,
+  resolveUniqueRecord,
+} from "../lib/credential-integrity";
 
 /** Política de senha (§12). Todas as cinco ACTIONS de definição exigem este mínimo. */
 export const MIN_PASSWORD_LENGTH = 8;
@@ -44,7 +47,7 @@ function assertPasswordPolicy(password: string): void {
   }
 }
 
-async function requireUser(ctx: any) {
+async function requireUser(ctx: MutationCtx) {
   // Hardening B-01: a gestão da PRÓPRIA senha também exige um cadastro SIGESGD
   // válido (não anônimo, ativo, com `role` reconhecido). `settings.view` está
   // presente em todos os cinco perfis — a checagem aqui é de IDENTIDADE, não de
@@ -52,15 +55,15 @@ async function requireUser(ctx: any) {
   return requirePermission(ctx, "settings.view", { entity: "passwords" });
 }
 
-async function requireAdmin(ctx: any) {
+async function requireAdmin(ctx: MutationCtx) {
   // RBAC central: operações administrativas de senha = gestão de usuários.
   return requirePermission(ctx, "users.manage", { entity: "passwords" });
 }
 /** Invalida OTPs pendentes quando a credencial ou o acesso muda. */
-async function invalidatePendingPasswordResets(ctx: any, userId: Id<"users">): Promise<void> {
+async function invalidatePendingPasswordResets(ctx: MutationCtx, userId: Id<"users">): Promise<void> {
   const resets = await ctx.db
     .query("passwordResets")
-    .withIndex("by_user", (q: any) => q.eq("userId", userId))
+    .withIndex("by_user", (q) => q.eq("userId", userId))
     .collect();
   const now = Date.now();
   for (const reset of resets) {
@@ -88,12 +91,17 @@ export const createPassword = mutation({
     if (!user) throw new Error("Usuário não encontrado");
 
     // Check if password already exists
-    const existing = await ctx.db
+    const existingRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .first();
-
-    if (existing) throw new Error("Usuário já possui senha definida. Use alteração de senha.");
+      .collect();
+    const existing = resolveUniqueRecord(existingRows);
+    if (existing.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(existing.count));
+    }
+    if (existing.status === "unique") {
+      throw new Error("Usuário já possui senha definida. Use alteração de senha.");
+    }
 
     assertPasswordPolicy(args.password);
 
@@ -141,12 +149,18 @@ export const changePassword = mutation({
       throw new Error("A nova senha deve ser diferente da atual");
     }
 
-    const passwordRecord = await ctx.db
+    const passwordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", userId))
-      .first();
-
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRows);
+    if (passwordResolution.status === "missing") {
+      throw new Error("Senha não configurada. Contate o administrador.");
+    }
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(passwordResolution.count));
+    }
+    const passwordRecord = passwordResolution.record;
 
     const valid = await verifyPassword(
       args.currentPassword,
@@ -199,21 +213,32 @@ export const adminResetPassword = mutation({
 
     assertPasswordPolicy(args.newPassword);
 
-    const passwordRecord = await ctx.db
+    const passwordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .first();
+      .collect();
 
     const { hash, salt } = await hashPassword(args.newPassword);
-
-    if (passwordRecord) {
-      await ctx.db.patch(passwordRecord._id, {
+    let passwordRecordId: Id<"passwords">;
+    if (passwordRows.length > 1) {
+      // A deliberate administrator reset establishes a fresh, single
+      // credential; no arbitrary duplicate hash is treated as canonical.
+      await Promise.all(passwordRows.map((record) => ctx.db.delete(record._id)));
+      passwordRecordId = await ctx.db.insert("passwords", {
+        userId: args.userId,
+        passwordHash: hash,
+        salt,
+        requiresReset: true,
+      });
+    } else if (passwordRows.length === 1) {
+      passwordRecordId = passwordRows[0]._id;
+      await ctx.db.patch(passwordRecordId, {
         passwordHash: hash,
         salt,
         requiresReset: true,
       });
     } else {
-      await ctx.db.insert("passwords", {
+      passwordRecordId = await ctx.db.insert("passwords", {
         userId: args.userId,
         passwordHash: hash,
         salt,
@@ -229,8 +254,9 @@ export const adminResetPassword = mutation({
       userId: adminId,
       action: "password_reset",
       entity: "passwords",
-      entityId: args.userId,
-      details: `Senha redefinida pelo administrador para ${user.name ?? user.email}`,
+      entityId: passwordRecordId,
+      details: `Senha redefinida pelo administrador para ${user.name ?? user.email}` +
+        (passwordRows.length > 1 ? ` | ${passwordRows.length - 1} credencial(is) duplicada(s) removida(s) por redefinição autorizada.` : ""),
       timestamp: Date.now(),
     });
     await ctx.scheduler.runAfter(0, internal.passwords.invalidateUserSessionsInternal, {
@@ -252,12 +278,18 @@ export const forceChangePassword = mutation({
 
     assertPasswordPolicy(args.newPassword);
 
-    const passwordRecord = await ctx.db
+    const passwordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", userId))
-      .first();
-
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRows);
+    if (passwordResolution.status === "missing") {
+      throw new Error("Senha não configurada. Contate o administrador.");
+    }
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(passwordResolution.count));
+    }
+    const passwordRecord = passwordResolution.record;
     if (user.requiresPasswordReset !== true && passwordRecord.requiresReset !== true) {
       throw new Error("A troca obrigatória de senha não está pendente. Use a opção Alterar Senha.");
     }
@@ -301,17 +333,20 @@ export const verifyCredentials = internalQuery({
   },
   handler: async (ctx, args) => {
     // Find user by email
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", args.email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
+    if (userResolution.status !== "unique") {
+      return await rejectCredentials(args.password);
+    }
+    const user = userResolution.record;
 
     // ── ANTI-ENUMERAÇÃO (§11) ────────────────────────────────────────────
     // TODOS os caminhos de falha devolvem EXATAMENTE a mesma mensagem, com a
     // mesma forma. O chamador não consegue distinguir "e-mail não existe",
     // "usuário inativo", "sem senha", "sem perfil de acesso" ou "senha errada".
-    if (!user) return await rejectCredentials(args.password);
-
     // Check if user is active
     if (user.active === false) {
       return await rejectCredentials(args.password);
@@ -328,14 +363,15 @@ export const verifyCredentials = internalQuery({
     }
 
     // Find password record
-    const passwordRecord = await ctx.db
+    const passwordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
-
-    if (!passwordRecord) {
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRows);
+    if (passwordResolution.status !== "unique") {
       return await rejectCredentials(args.password);
     }
+    const passwordRecord = passwordResolution.record;
 
     // Verify password
     const valid = await verifyPassword(
@@ -362,11 +398,11 @@ export const verifyCredentials = internalQuery({
 export const hasPassword = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
-    const record = await ctx.db
+    const records = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .first();
-    return !!record;
+      .collect();
+    return records.length === 1;
   },
 });
 
@@ -504,22 +540,29 @@ export const bootstrapSetPassword = internalMutation({
     assertPasswordPolicy(args.password);
 
     // Find user by email
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
-
-    if (!user) {
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
+    if (userResolution.status === "missing") {
       throw new Error(`Usuário não encontrado com e-mail: ${email}`);
     }
+    if (userResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(userResolution.count));
+    }
+    const user = userResolution.record;
 
     // Check if password already exists
-    const existingPassword = await ctx.db
+    const existingPasswordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
-
-    if (existingPassword) {
+      .collect();
+    const passwordResolution = resolveUniqueRecord(existingPasswordRows);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(passwordResolution.count));
+    }
+    if (passwordResolution.status === "unique") {
       throw new Error(
         `Usuário ${email} já possui senha definida. ` +
         "Use a opção de alteração de senha no painel."
@@ -541,10 +584,14 @@ export const bootstrapSetPassword = internalMutation({
     const failedAttempts = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
-    if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined, lastAuditAt: undefined });
-    }
+      .collect();
+    await Promise.all(failedAttempts.map((record) =>
+      ctx.db.patch(record._id, {
+        attempts: 0,
+        lockedUntil: undefined,
+        lastAuditAt: undefined,
+      }),
+    ));
 
     // Audit
     await ctx.db.insert("auditLogs", {
@@ -568,31 +615,24 @@ export const diagnosticListUsers = internalQuery({
   args: {},
   handler: async (ctx) => {
     const users = await ctx.db.query("users").collect();
-    const results: Array<{
-      userId: string;
-      name: string | undefined;
-      email: string | undefined;
-      role: string | undefined;
-      active: boolean | undefined;
-      hasPassword: boolean;
-    }> = [];
-
-    for (const u of users) {
-      const pw = await ctx.db
-        .query("passwords")
-        .withIndex("by_user", (q) => q.eq("userId", u._id))
-        .first();
-      results.push({
-        userId: u._id,
-        name: u.name,
-        email: u.email,
-        role: u.role,
-        active: u.active,
-        hasPassword: !!pw,
-      });
+    const passwordRecords = await ctx.db.query("passwords").collect();
+    const counts = new Map<string, number>();
+    for (const record of passwordRecords) {
+      const key = String(record.userId);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
-
-    return results;
+    return users.map((user) => {
+      const passwordRecordCount = counts.get(String(user._id)) ?? 0;
+      return {
+        userId: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        active: user.active,
+        hasPassword: passwordRecordCount === 1,
+        passwordRecordCount,
+      };
+    });
   },
 });
 
@@ -682,13 +722,18 @@ export const requestPasswordReset = mutation({
     }
 
     // Find user by email
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
 
-    // Always return the same message to prevent email enumeration
-    if (!user) return { message: RESET_GENERIC_MESSAGE };
+    // Always return the same message to prevent email enumeration. Duplicate
+    // identities are fail-closed too; a reset must never target an arbitrary account.
+    if (userResolution.status !== "unique") {
+      return { message: RESET_GENERIC_MESSAGE };
+    }
+    const user = userResolution.record;
     if (user.active === false) return { message: RESET_GENERIC_MESSAGE };
     if ((user as { isAnonymous?: boolean }).isAnonymous === true) {
       return { message: RESET_GENERIC_MESSAGE };
@@ -778,10 +823,12 @@ export const confirmPasswordReset = mutation({
     }
     assertPasswordPolicy(args.newPassword);
 
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
+    const user = userResolution.status === "unique" ? userResolution.record : null;
 
     // Generic error to prevent enumeration and prevent disabled/invalid profiles
     // from using a previously issued recovery code after access was revoked.
@@ -845,38 +892,32 @@ export const confirmPasswordReset = mutation({
     const { hash, salt } = await hashPassword(args.newPassword);
 
     // Update or create password record
-    const existingPw = await ctx.db
+    const existingPasswordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
-
-    if (existingPw) {
-      await ctx.db.patch(existingPw._id, {
-        passwordHash: hash,
-        salt,
-        requiresReset: false,
-      });
-    } else {
-      await ctx.db.insert("passwords", {
-        userId: user._id,
-        passwordHash: hash,
-        salt,
-        requiresReset: false,
-      });
-    }
+      .collect();
+    // A successful one-time email challenge authorizes a complete credential
+    // reset. Replacing the full set repairs duplicates without trusting one.
+    await Promise.all(existingPasswordRows.map((record) => ctx.db.delete(record._id)));
+    const passwordRecordId = await ctx.db.insert("passwords", {
+      userId: user._id,
+      passwordHash: hash,
+      salt,
+      requiresReset: false,
+    });
 
     // Clear residual failed-login counters after successful recovery.
     const failedAttempts = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
-    if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, {
+      .collect();
+    await Promise.all(failedAttempts.map((record) =>
+      ctx.db.patch(record._id, {
         attempts: 0,
         lockedUntil: undefined,
         lastAuditAt: undefined,
-      });
-    }
+      }),
+    ));
 
     // Clear requiresPasswordReset flag
     await ctx.db.patch(user._id, { requiresPasswordReset: false });
@@ -889,8 +930,11 @@ export const confirmPasswordReset = mutation({
     await ctx.db.insert("auditLogs", {
       action: "password_reset",
       entity: "passwords",
-      entityId: user._id,
-      details: `Senha redefinida via recuperação para ${email}`,
+      entityId: passwordRecordId,
+      details: `Senha redefinida via recuperação para ${email}` +
+        (existingPasswordRows.length > 1
+          ? ` | ${existingPasswordRows.length} credenciais duplicadas consolidadas após validação do código.`
+          : ""),
       timestamp: Date.now(),
     });
 
@@ -917,17 +961,25 @@ export const recordFailedLogin = internalMutation({
     // Não persistir identificadores arbitrários enviados por visitantes.
     // Sem esta verificação, uma enxurrada de logins inexistentes criaria
     // linhas ilimitadas em failedLoginAttempts e auditLogs.
-    const account = await ctx.db
+    const accountRows = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
-    if (!account) return;
+      .collect();
+    const accountResolution = resolveUniqueRecord(accountRows);
+    if (accountResolution.status !== "unique") return;
+    const account = accountResolution.record;
 
     const now = Date.now();
-    const existing = await ctx.db
+    const existingRows = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    const existingResolution = resolveUniqueRecord(existingRows);
+    // This counter is audit-only. Never update an arbitrary duplicate row.
+    if (existingResolution.status === "ambiguous") return;
+    const existing = existingResolution.status === "unique"
+      ? existingResolution.record
+      : null;
 
     const auditIntervalMs = 15 * 60 * 1000;
     let shouldAudit = false;
@@ -980,12 +1032,13 @@ export const recordSuccessfulLogin = internalMutation({
     if (!email) return { cleared: false };
 
     const now = Date.now();
-    const account = await ctx.db
+    const accountRows = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
-
-    if (account) {
+      .collect();
+    const accountResolution = resolveUniqueRecord(accountRows);
+    if (accountResolution.status === "unique") {
+      const account = accountResolution.record;
       await ctx.db.insert("auditLogs", {
         userId: account._id,
         action: "login",
@@ -996,17 +1049,26 @@ export const recordSuccessfulLogin = internalMutation({
       });
     }
 
-    const existing = await ctx.db
+    const existingRows = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
+      .collect();
+    if (existingRows.length === 0) return { cleared: false };
 
-    if (!existing) return { cleared: false };
-    if ((existing.attempts ?? 0) === 0 && existing.lockedUntil === undefined) {
-      return { cleared: false };
-    }
+    const needsClearing = existingRows.filter(
+      (record) => (record.attempts ?? 0) !== 0 || record.lockedUntil !== undefined,
+    );
+    if (needsClearing.length === 0) return { cleared: false };
 
-    await ctx.db.patch(existing._id, { attempts: 0, lockedUntil: undefined, lastAuditAt: undefined });
+    // This is an audit counter, not an authentication secret. Clear every
+    // duplicate row together instead of arbitrarily leaving stale state.
+    await Promise.all(existingRows.map((record) =>
+      ctx.db.patch(record._id, {
+        attempts: 0,
+        lockedUntil: undefined,
+        lastAuditAt: undefined,
+      }),
+    ));
     return { cleared: true };
   },
 });
@@ -1051,12 +1113,18 @@ export const bootstrapResetPassword = internalMutation({
     if (!email) throw new Error("E-mail é obrigatório");
     assertPasswordPolicy(args.newPassword);
 
-    const user = await ctx.db
+    const matchingUsers = await ctx.db
       .query("users")
       .withIndex("email", (q) => q.eq("email", email))
-      .first();
-
-    if (!user) throw new Error(`Usuário não encontrado: ${email}`);
+      .collect();
+    const userResolution = resolveUniqueRecord(matchingUsers);
+    if (userResolution.status === "missing") {
+      throw new Error(`Usuário não encontrado: ${email}`);
+    }
+    if (userResolution.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(userResolution.count));
+    }
+    const user = userResolution.record;
 
     // Safety: only allow reset for admin/stock_manager
     if (user.role !== "admin" && user.role !== "stock_manager") {
@@ -1066,19 +1134,28 @@ export const bootstrapResetPassword = internalMutation({
     const { hash, salt } = await hashPassword(args.newPassword);
 
     // Check if password record exists
-    const existingPw = await ctx.db
+    const existingPasswordRows = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
-
-    if (existingPw) {
-      await ctx.db.patch(existingPw._id, {
+      .collect();
+    let passwordRecordId: Id<"passwords">;
+    if (existingPasswordRows.length > 1) {
+      await Promise.all(existingPasswordRows.map((record) => ctx.db.delete(record._id)));
+      passwordRecordId = await ctx.db.insert("passwords", {
+        userId: user._id,
+        passwordHash: hash,
+        salt,
+        requiresReset: false,
+      });
+    } else if (existingPasswordRows.length === 1) {
+      passwordRecordId = existingPasswordRows[0]._id;
+      await ctx.db.patch(passwordRecordId, {
         passwordHash: hash,
         salt,
         requiresReset: false,
       });
     } else {
-      await ctx.db.insert("passwords", {
+      passwordRecordId = await ctx.db.insert("passwords", {
         userId: user._id,
         passwordHash: hash,
         salt,
@@ -1097,16 +1174,23 @@ export const bootstrapResetPassword = internalMutation({
     const failedAttempts = await ctx.db
       .query("failedLoginAttempts")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .first();
-    if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined, lastAuditAt: undefined });
-    }
+      .collect();
+    await Promise.all(failedAttempts.map((record) =>
+      ctx.db.patch(record._id, {
+        attempts: 0,
+        lockedUntil: undefined,
+        lastAuditAt: undefined,
+      }),
+    ));
 
     await ctx.db.insert("auditLogs", {
       action: "password_reset",
       entity: "passwords",
-      entityId: user._id,
-      details: `Bootstrap: senha redefinida para ${user.name ?? email}`,
+      entityId: passwordRecordId,
+      details: `Bootstrap: senha redefinida para ${user.name ?? email}` +
+        (existingPasswordRows.length > 1
+          ? ` | ${existingPasswordRows.length - 1} credencial(is) duplicada(s) removida(s) por redefinição administrativa.`
+          : ""),
       timestamp: Date.now(),
     });
 

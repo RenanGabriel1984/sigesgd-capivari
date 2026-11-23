@@ -1,8 +1,10 @@
 import { query, mutation } from "./_generated/server";
+import type { QueryCtx, MutationCtx } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
-import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import { assertTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { isDiscreteStockUnit, requireValidScopedStockQuantity } from "../lib/stock-quantity-rules";
 import {
   validateReturnQuantity,
@@ -20,53 +22,83 @@ import {
 } from "../lib/returns-rules";
 import { adjustLotLocationBalance } from "../lib/lot-location-balance";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
-
-async function requireUser(ctx: any) {
+async function requireUser(ctx: QueryCtx) {
   // RBAC central: consulta de devoluções.
   return requirePermission(ctx, "returns.view");
 }
 
 /** RBAC central: registrar devolução (opera estoque). */
-async function requireReturnCreate(ctx: any) {
+async function requireReturnCreate(ctx: MutationCtx) {
   return requirePermission(ctx, "returns.create", { entity: "returns" });
 }
 
 /**
- * Carrega todas as devoluções (para cálculo de saldo por saída).
- * Inclui devoluções legadas sem `exitMovementId` (vinculadas por solicitação).
+ * Carrega somente devoluções relacionadas à saída consultada.
+ * O índice por saída atende registros atuais; o índice por solicitação cobre
+ * o legado sem exitMovementId, limitado à solicitação e ao produto.
  */
-async function loadReturns(ctx: any) {
-  return await ctx.db.query("returns").collect();
+async function loadReturnsForExit(
+  ctx: QueryCtx | MutationCtx,
+  exit: Doc<"stockMovements">,
+): Promise<Doc<"returns">[]> {
+  const [directReturns, requestReturns] = await Promise.all([
+    ctx.db.query("returns")
+      .withIndex("by_exitMovement", (q) => q.eq("exitMovementId", exit._id))
+      .collect(),
+    exit.requestId
+      ? ctx.db.query("returns")
+          .withIndex("by_request", (q) => q.eq("requestId", exit.requestId))
+          .collect()
+      : Promise.resolve([]),
+  ]);
+  const legacyReturns = requestReturns.filter((record) =>
+    !record.exitMovementId &&
+    (!record.productId || record.productId === exit.productId)
+  );
+  return [...directReturns, ...legacyReturns];
+}
+
+async function buildReturnableExitRow(
+  ctx: QueryCtx,
+  movement: Doc<"stockMovements">,
+) {
+  if (movement.type !== "exit" || movement.canceled) return null;
+  const [product, user, request, area, location, relatedReturns] = await Promise.all([
+    ctx.db.get(movement.productId),
+    ctx.db.get(movement.userId),
+    movement.requestId ? ctx.db.get(movement.requestId) : Promise.resolve(null),
+    movement.areaId ? ctx.db.get(movement.areaId) : Promise.resolve(null),
+    movement.locationId ? ctx.db.get(movement.locationId) : Promise.resolve(null),
+    loadReturnsForExit(ctx, movement),
+  ]);
+  const requester = request?.requesterId
+    ? await ctx.db.get(request.requesterId)
+    : null;
+  const returned = returnedQuantityForExit(relatedReturns, movement);
+  const available = returnableQuantity(movement.quantity, returned);
+  if (available <= 0) return null;
+  return {
+    ...movement,
+    product,
+    user,
+    area,
+    location,
+    requesterName: requester?.name ?? user?.name ?? null,
+    osNumber: request?.osNumber ?? null,
+    requestReason: request?.reason ?? null,
+    returned,
+    available,
+  };
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
-
-export const list = query({
-  args: {},
-  handler: async (ctx) => {
-    await requireUser(ctx);
-    const returns = await ctx.db.query("returns").order("desc").collect();
-    return Promise.all(returns.map(async (r: any) => {
-      const product = await ctx.db.get(r.productId);
-      const lot = r.lotId ? await ctx.db.get(r.lotId) : null;
-      const returnedBy = await ctx.db.get(r.returnedByUserId);
-      const receivedBy = r.receivedByUserId ? await ctx.db.get(r.receivedByUserId) : null;
-      const request = r.requestId ? await ctx.db.get(r.requestId) : null;
-      const exit = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
-      const location = r.locationId ? await ctx.db.get(r.locationId) : null;
-      const area = r.areaId ? await ctx.db.get(r.areaId) : null;
-      return { ...r, product, lot, returnedBy, receivedBy, request, exit, location, area };
-    }));
-  },
-});
 
 export const listPage = query({
   args: { paginationOpts: paginationOptsValidator },
   handler: async (ctx, args) => {
     await requireUser(ctx);
     const page = await ctx.db.query("returns").order("desc").paginate(args.paginationOpts);
-    const enriched = await Promise.all(page.page.map(async (r: any) => {
+    const enriched = await Promise.all(page.page.map(async (r) => {
       const product = await ctx.db.get(r.productId);
       const lot = r.lotId ? await ctx.db.get(r.lotId) : null;
       const returnedBy = await ctx.db.get(r.returnedByUserId);
@@ -87,61 +119,48 @@ export const listPage = query({
  * Mostra somente materiais que possuem quantidade efetivamente disponível:
  *   retirado − já devolvido = disponível para devolver
  */
-export const returnable = query({
-  args: {},
-  handler: async (ctx) => {
+export const returnablePage = query({
+  args: { paginationOpts: paginationOptsValidator },
+  handler: async (ctx, args) => {
     await requireUser(ctx);
-    const exits = await ctx.db
-      .query("stockMovements")
-      .withIndex("by_type", (q: any) => q.eq("type", "exit"))
+    const page = await ctx.db.query("stockMovements")
+      .withIndex("by_type", (q) => q.eq("type", "exit"))
       .order("desc")
-      .collect();
-    const allReturns = await loadReturns(ctx);
+      .paginate(args.paginationOpts);
+    const rows = await Promise.all(
+      page.page.map((movement) => buildReturnableExitRow(ctx, movement))
+    );
+    return { ...page, page: rows.filter((row): row is NonNullable<typeof row> => row !== null) };
+  },
+});
 
-    // Saídas canceladas não representam retirada válida e nunca podem aparecer
-    // como disponíveis para devolução. A mutation já as rejeita; filtrá-las
-    // aqui mantém a lista coerente e evita oferecer uma ação impossível.
-    const activeExits = exits.filter((movement: any) => !movement.canceled);
-    const rows = await Promise.all(activeExits.map(async (m: any) => {
-      const product: any = await ctx.db.get(m.productId);
-      const user: any = await ctx.db.get(m.userId);
-      const request: any = m.requestId ? await ctx.db.get(m.requestId) : null;
-      const requester: any = request?.requesterId ? await ctx.db.get(request.requesterId) : null;
-      const area = m.areaId ? await ctx.db.get(m.areaId) : null;
-      const location = m.locationId ? await ctx.db.get(m.locationId) : null;
-      const returned = returnedQuantityForExit(allReturns, m);
-      const available = returnableQuantity(m.quantity, returned);
-      return {
-        ...m,
-        product,
-        user,
-        area,
-        location,
-        requesterName: requester?.name ?? user?.name ?? null,
-        osNumber: request?.osNumber ?? null,
-        requestReason: request?.reason ?? null,
-        returned,
-        available,
-      };
-    }));
-
-    return rows.filter((r) => r.available > 0);
+export const returnableByExit = query({
+  args: { exitMovementId: v.id("stockMovements") },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    const movement = await ctx.db.get(args.exitMovementId);
+    if (!movement) return null;
+    return buildReturnableExitRow(ctx, movement);
   },
 });
 
 export const listByRequest = query({
-  args: { requestId: v.id("requests") },
+  args: {
+    requestId: v.id("requests"),
+    paginationOpts: paginationOptsValidator,
+  },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    const returns = await ctx.db
-      .query("returns")
+    const page = await ctx.db.query("returns")
       .withIndex("by_request", (q) => q.eq("requestId", args.requestId))
-      .collect();
-    return Promise.all(returns.map(async (r: any) => {
-      const product = await ctx.db.get(r.productId);
-      const lot = r.lotId ? await ctx.db.get(r.lotId) : null;
-      return { ...r, product, lot };
+      .order("desc")
+      .paginate(args.paginationOpts);
+    const enriched = await Promise.all(page.page.map(async (record) => {
+      const product = await ctx.db.get(record.productId);
+      const lot = record.lotId ? await ctx.db.get(record.lotId) : null;
+      return { ...record, product, lot };
     }));
+    return { ...page, page: enriched };
   },
 });
 
@@ -178,19 +197,19 @@ export const create = mutation({
     if (!reason) throw new Error("O motivo da devolução é obrigatório");
     assertTextLimits({ observation: reason, description: args.observation }, MAX_OBSERVATION);
 
-    const exit: any = await ctx.db.get(args.exitMovementId);
+    const exit = await ctx.db.get(args.exitMovementId);
     if (!exit) throw new Error("Saída original não encontrada");
     if (exit.type !== "exit") throw new Error("A movimentação informada não é uma saída");
     if (exit.canceled) throw new Error("A saída original foi cancelada — devolução não permitida");
 
-    const product: any = await ctx.db.get(exit.productId);
+    const product = await ctx.db.get(exit.productId);
     if (!product) throw new Error("Produto da saída não encontrado");
     if (isDiscreteStockUnit(product.unitOfMeasure, product.hasSerial) && !Number.isSafeInteger(args.quantity)) {
       throw new Error(`A quantidade devolvida deve ser inteira para a unidade ${product.unitOfMeasure}.`);
     }
 
-    const allReturns = await loadReturns(ctx);
-    const alreadyReturned = returnedQuantityForExit(allReturns, exit);
+    const relatedReturns = await loadReturnsForExit(ctx, exit);
+    const alreadyReturned = returnedQuantityForExit(relatedReturns, exit);
     const quantityError = validateReturnQuantity({
       exitQuantity: exit.quantity,
       alreadyReturned,
@@ -200,12 +219,12 @@ export const create = mutation({
 
     // Devoluções de saídas classificadas permanecem na mesma área e no mesmo
     // local físico de origem. Mudança de local deve ser uma transferência.
-    let targetLocationId: any = undefined;
+    let targetLocationId: Id<"storageLocations"> | undefined = undefined;
     if (exit.areaId) {
       if (!exit.locationId) {
         throw new Error("A saída não possui local físico registrado. Não é seguro devolver para um subestoque sem origem identificada.");
       }
-      const sourceLocation: any = await ctx.db.get(exit.locationId);
+      const sourceLocation = await ctx.db.get(exit.locationId);
       if (!sourceLocation || !sourceLocation.active) {
         throw new Error("O local físico da saída original não existe ou está inativo.");
       }
@@ -224,21 +243,21 @@ export const create = mutation({
     // Preferir a trilha completa de lotes consumidos. Ela permite devolver
     // corretamente uma saída que utilizou dois ou mais lotes FIFO.
     const movementLots = await ctx.db.query("stockMovementLots")
-      .withIndex("by_movement", (q: any) => q.eq("movementId", exit._id))
+      .withIndex("by_movement", (q) => q.eq("movementId", exit._id))
       .collect();
-    const sourceLots: Array<{ lot: any; quantity: number }> = [];
+    const sourceLots: Array<{ lot: Doc<"lots">; quantity: number }> = [];
 
     if (movementLots.length > 0) {
       const linkError = validateExitLotLinks(
         Number(exit.quantity),
-        movementLots.map((link: any) => ({
+        movementLots.map((link) => ({
           lotId: link.lotId ? String(link.lotId) : "",
           quantity: Number(link.quantity),
         })),
       );
       if (linkError) throw new Error(linkError);
       for (const link of movementLots) {
-        const lot: any = await ctx.db.get(link.lotId);
+        const lot = await ctx.db.get(link.lotId);
         if (!lot || lot.productId !== exit.productId ||
             !Number.isFinite(lot.quantityReceived) || link.quantity > lot.quantityReceived) {
           throw new Error("A trilha de lotes da saída está incompleta ou excede o lote recebido. Devolução bloqueada para preservar a rastreabilidade.");
@@ -254,24 +273,24 @@ export const create = mutation({
       }
     } else {
       const productLots = await ctx.db.query("lots")
-        .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+        .withIndex("by_product", (q) => q.eq("productId", exit.productId))
         .collect();
       const rawLotId = args.lotId ?? exit.lotId ?? null;
-      let fallbackLot: any = args.lotId ? await ctx.db.get(args.lotId) : null;
+      let fallbackLot: Doc<"lots"> | null = args.lotId ? await ctx.db.get(args.lotId) : null;
       if (!fallbackLot && rawLotId) {
         if (String(rawLotId).startsWith("LOT-")) {
           const matchingLots = await ctx.db.query("lots")
-            .withIndex("by_number", (q: any) => q.eq("lotNumber", rawLotId))
+            .withIndex("by_number", (q) => q.eq("lotNumber", rawLotId))
             .collect();
           if (matchingLots.length > 1) {
             throw new Error(`O número de lote "${rawLotId}" está duplicado. Regularize a identificação antes de registrar a devolução.`);
           }
           fallbackLot = matchingLots[0] ?? null;
         } else {
-          fallbackLot = await ctx.db.get(rawLotId as any);
+          fallbackLot = await ctx.db.get(rawLotId as Id<"lots">);
         }
       }
-      const requiresLot = !!rawLotId || productLots.some((lot: any) => lot.active);
+      const requiresLot = !!rawLotId || productLots.some((lot) => lot.active);
       const lotGuard = resolveReturnLotGuard({
         exitLotId: fallbackLot?._id ? String(fallbackLot._id) : null,
         requiresLot,
@@ -307,7 +326,7 @@ export const create = mutation({
     // Distribuir a quantidade a devolver entre os mesmos lotes consumidos,
     // abatendo devoluções anteriores lote a lote.
     const returnedByLot = new Map<string, number>();
-    for (const record of allReturns as any[]) {
+    for (const record of relatedReturns) {
       if (record.lotId && (record.exitMovementId === exit._id ||
         (!record.exitMovementId && !!exit.requestId && record.requestId === exit.requestId &&
           record.productId === exit.productId))) {
@@ -322,18 +341,18 @@ export const create = mutation({
     // Registros históricos de devolução podem não ter exitMovementId nem lotId.
     // Sua quantidade já reduz o total devolvível; abatemos conservadoramente
     // essa parte dos primeiros lotes FIFO para não restaurar saldo em duplicidade.
-    let unassignedLegacyReturned = (allReturns as any[])
+    let unassignedLegacyReturned = relatedReturns
       .filter((record) => !record.exitMovementId && !record.lotId &&
         !!exit.requestId && record.requestId === exit.requestId &&
         record.productId === exit.productId)
-      .reduce((sum: number, record: any) => sum + record.quantity, 0);
+      .reduce((sum, record) => sum + record.quantity, 0);
     const legacyReturnedByLot = new Map<string, number>();
     for (const source of orderedSources) {
       const assignedLegacyReturn = Math.min(source.quantity, unassignedLegacyReturned);
       unassignedLegacyReturned -= assignedLegacyReturn;
-      legacyReturnedByLot.set(source.lot._id as string, assignedLegacyReturn);
+      legacyReturnedByLot.set(String(source.lot._id), assignedLegacyReturn);
     }
-    const parts: Array<{ lot: any | null; quantity: number }> = [];
+    const parts: Array<{ lot: Doc<"lots"> | null; quantity: number }> = [];
     let remaining = args.quantity;
     if (orderedSources.length > 0) {
       const candidates = args.lotId
@@ -344,8 +363,8 @@ export const create = mutation({
       }
       for (const source of candidates) {
         if (remaining <= 0) break;
-        const assignedLegacyReturn = legacyReturnedByLot.get(source.lot._id as string) ?? 0;
-        const alreadyForLot = (returnedByLot.get(source.lot._id as string) ?? 0) + assignedLegacyReturn;
+        const assignedLegacyReturn = legacyReturnedByLot.get(String(source.lot._id)) ?? 0;
+        const alreadyForLot = (returnedByLot.get(String(source.lot._id)) ?? 0) + assignedLegacyReturn;
         const availableFromLot = Math.max(0, source.quantity - alreadyForLot);
         const quantity = Math.min(availableFromLot, remaining);
         if (quantity <= 0) continue;
@@ -368,13 +387,13 @@ export const create = mutation({
 
     const [stockRows, productLots, locationRows] = await Promise.all([
       ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+        .withIndex("by_product", (q) => q.eq("productId", exit.productId))
         .collect(),
       ctx.db.query("lots")
-        .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+        .withIndex("by_product", (q) => q.eq("productId", exit.productId))
         .collect(),
       ctx.db.query("stockByLocation")
-        .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+        .withIndex("by_product", (q) => q.eq("productId", exit.productId))
         .collect(),
     ]);
     if (stockRows.length !== 1) {
@@ -388,17 +407,17 @@ export const create = mutation({
         stock.physicalQuantity < stock.reservedQuantity) {
       throw new Error("O saldo global está inconsistente. Regularize o estoque antes de registrar a devolução.");
     }
-    if (productLots.some((lot: any) =>
+    if (productLots.some((lot) =>
       !Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0 ||
       (lot.active === false && lot.quantityAvailable > 0)
     )) {
       throw new Error("Há lote com saldo inválido ou inativo com quantidade positiva. Regularize antes de devolver.");
     }
 
-    let locationStock: any = null;
+    let locationStock: Doc<"stockByLocation"> | null = null;
     let locationStockQuantity = 0;
     if (targetLocationId) {
-      const matchingRows = locationRows.filter((row: any) =>
+      const matchingRows = locationRows.filter((row) =>
         row.locationId === targetLocationId &&
         (row.areaId ?? undefined) === (exit.areaId ?? undefined)
       );
@@ -410,9 +429,9 @@ export const create = mutation({
         ? requireValidScopedStockQuantity(locationStock.quantity, "área/local de origem")
         : 0;
       const lotsAtLocation = productLots
-        .filter((lot: any) => lot.locationId === targetLocationId &&
+        .filter((lot) => lot.locationId === targetLocationId &&
           (lot.areaId ?? undefined) === (exit.areaId ?? undefined))
-        .reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable), 0);
+        .reduce((sum: number, lot) => sum + Number(lot.quantityAvailable), 0);
       if (!Number.isFinite(lotsAtLocation) ||
           Math.abs(lotsAtLocation - locationStockQuantity) > 1e-9) {
         throw new Error("O saldo físico da área/local diverge dos lotes. Regularize antes de devolver.");
@@ -447,7 +466,7 @@ export const create = mutation({
       }
     }
 
-    const returnIds: string[] = [];
+    const returnIds: Id<"returns">[] = [];
     let runningPhysical = stock.physicalQuantity;
     for (const part of parts) {
       if (restocked && part.lot) {
@@ -458,6 +477,7 @@ export const create = mutation({
         await adjustLotLocationBalance(ctx, {
           lotId: part.lot._id, productId: part.lot.productId,
           locationId: targetLocationId, delta: part.quantity,
+          expectedQuantityBefore: Number(part.lot.quantityAvailable),
         });
       }
       const returnId = await ctx.db.insert("returns", {
@@ -476,7 +496,7 @@ export const create = mutation({
         observation: args.observation,
         createdAt: now,
       });
-      returnIds.push(returnId as string);
+      returnIds.push(returnId);
 
       const nextPhysical = runningPhysical + (restocked ? part.quantity : 0);
       await ctx.db.insert("stockMovements", {
@@ -502,9 +522,9 @@ export const create = mutation({
     }
 
     const exitLabel = exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
-    const area: any = exit.areaId ? await ctx.db.get(exit.areaId) : null;
-    const location: any = targetLocationId ? await ctx.db.get(targetLocationId) : null;
-    const returnedLotDetails = parts.map((part: any) =>
+    const area = exit.areaId ? await ctx.db.get(exit.areaId) : null;
+    const location = targetLocationId ? await ctx.db.get(targetLocationId) : null;
+    const returnedLotDetails = parts.map((part) =>
       `${part.lot?.lotNumber ?? "lote não identificado"} x${part.quantity}`
     ).join(", ");
     await ctx.db.insert("auditLogs", {

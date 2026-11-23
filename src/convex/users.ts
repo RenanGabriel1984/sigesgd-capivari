@@ -1,19 +1,22 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { query, mutation, internalMutation, QueryCtx } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
 import { requirePermission } from "./rbac";
 import { internal } from "./_generated/api";
+import {
+  describeDuplicateCredential,
+  resolveUniqueRecord,
+} from "../lib/credential-integrity";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
-
-async function requireUser(ctx: any) {
+async function requireUser(ctx: QueryCtx | MutationCtx) {
   // Compatibilidade: wrapper fino sobre a camada central src/lib/rbac.ts
   const auth = await requirePermission(ctx, "users.view");
   return auth;
 }
 
-async function requireUserManager(ctx: any) {
+async function requireUserManager(ctx: MutationCtx) {
   // Admin e secretary têm o mesmo conjunto de permissões na matriz central.
   // A autorização deve seguir users.manage, sem restringir indevidamente ao
   // rótulo literal "admin".
@@ -105,15 +108,21 @@ export const listUsers = query({
     // nome/ID para pickers usam `listUserOptions`.
     await requirePermission(ctx, "users.manage", { entity: "users" });
     const users = await ctx.db.query("users").collect();
-    return Promise.all(
-      users.map(async (u: any) => {
-        const [org, passwordRecord] = await Promise.all([
-          u.organizationId ? ctx.db.get(u.organizationId) : Promise.resolve(null),
-          ctx.db.query("passwords").withIndex("by_user", (q: any) => q.eq("userId", u._id)).first(),
-        ]);
-        return { ...u, organization: org, hasPassword: !!passwordRecord };
-      })
-    );
+    return Promise.all(users.map(async (user) => {
+      const [organization, passwordRecords] = await Promise.all([
+        user.organizationId ? ctx.db.get(user.organizationId) : Promise.resolve(null),
+        ctx.db.query("passwords")
+          .withIndex("by_user", (q) => q.eq("userId", user._id))
+          .collect(),
+      ]);
+      const passwordRecordCount = passwordRecords.length;
+      return {
+        ...user,
+        organization,
+        hasPassword: passwordRecordCount > 0,
+        passwordRecordCount,
+      };
+    }));
   },
 });
 
@@ -127,8 +136,8 @@ export const listUserOptions = query({
     await requirePermission(ctx, "requests.view");
     const users = await ctx.db.query("users").collect();
     return users
-      .filter((u: any) => u.active !== false && !!u.role)
-      .map((u: any) => ({ _id: u._id as string, name: (u.name ?? null) as string | null, role: (u.role ?? null) as string | null, active: (u.active ?? true) as boolean }));
+      .filter((u) => u.active !== false && !!u.role)
+      .map((u) => ({ _id: u._id, name: u.name ?? null, role: u.role ?? null, active: u.active ?? true }));
   },
 });
 
@@ -153,10 +162,16 @@ export const createUserWithPassword = mutation({
     if (args.temporaryPassword.length < 8 || args.temporaryPassword.length > 200) {
       throw new Error("A senha temporária deve ter entre 8 e 200 caracteres.");
     }
-    const existing = await ctx.db.query("users")
-      .withIndex("email", (q: any) => q.eq("email", email))
-      .first();
-    if (existing) throw new Error("Já existe um usuário com este e-mail.");
+    const existingRows = await ctx.db.query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .collect();
+    const existing = resolveUniqueRecord(existingRows);
+    if (existing.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(existing.count));
+    }
+    if (existing.status === "unique") {
+      throw new Error("Já existe um usuário com este e-mail.");
+    }
 
     if (args.organizationId) {
       const organization = await ctx.db.get(args.organizationId);
@@ -214,8 +229,16 @@ export const createUser = mutation({
     const { userId } = await requireUserManager(ctx);
     const name = normalizeUserName(args.name);
     const email = normalizeUserEmail(args.email);
-    const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).first();
-    if (existing) throw new Error("Já existe um usuário com este e-mail");
+    const existingRows = await ctx.db.query("users")
+      .withIndex("email", (q) => q.eq("email", email))
+      .collect();
+    const existing = resolveUniqueRecord(existingRows);
+    if (existing.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(existing.count));
+    }
+    if (existing.status === "unique") {
+      throw new Error("Já existe um usuário com este e-mail");
+    }
     if (args.organizationId) {
       const organization = await ctx.db.get(args.organizationId);
       if (!organization || organization.active === false) {
@@ -262,11 +285,11 @@ export const updateUser = mutation({
       (updates.active === false || (updates.role !== undefined && !remainsUserManager));
     if (removesActiveAdmin) {
       const [admins, secretaries] = await Promise.all([
-        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect(),
-        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "secretary")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "admin")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "secretary")).collect(),
       ]);
       const activeUserManagers = [...admins, ...secretaries]
-        .filter((manager: any) => manager.active !== false);
+        .filter((manager) => manager.active !== false);
       if (activeUserManagers.length <= 1) {
         throw new Error("Não é possível desativar ou rebaixar o último administrador/secretário com acesso integral");
       }
@@ -276,8 +299,15 @@ export const updateUser = mutation({
     }
     if (updates.email !== undefined) {
       const email = normalizeUserEmail(updates.email);
-      const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).first();
-      if (existing && existing._id !== userId) throw new Error("Já existe outro usuário com este e-mail");
+      const existingRows = await ctx.db.query("users")
+        .withIndex("email", (q) => q.eq("email", email))
+        .collect();
+      const otherAccounts = existingRows.filter((record) => record._id !== userId);
+      if (otherAccounts.length > 0) {
+        throw new Error(otherAccounts.length > 1
+          ? describeDuplicateCredential(otherAccounts.length + 1)
+          : "Já existe outro usuário com este e-mail");
+      }
       updates.email = email;
     }
     if (updates.organizationId) {
@@ -334,11 +364,11 @@ export const deactivateUser = mutation({
     if (!user) throw new Error("Usuário não encontrado");
     if ((user.role === "admin" || user.role === "secretary") && user.active !== false) {
       const [admins, secretaries] = await Promise.all([
-        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect(),
-        ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "secretary")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "admin")).collect(),
+        ctx.db.query("users").withIndex("by_role", (q) => q.eq("role", "secretary")).collect(),
       ]);
       const activeUserManagers = [...admins, ...secretaries]
-        .filter((manager: any) => manager.active !== false);
+        .filter((manager) => manager.active !== false);
       if (activeUserManagers.length <= 1) {
         throw new Error("Não é possível desativar o último administrador/secretário com acesso integral");
       }

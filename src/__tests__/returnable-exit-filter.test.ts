@@ -5,12 +5,18 @@ import { resolve } from "node:path";
 describe("saídas disponíveis para devolução", () => {
   it("não oferece saídas canceladas na consulta returnable", () => {
     const source = readFileSync(resolve(__dirname, "../convex/returns.ts"), "utf8");
+    const helper = source.slice(
+      source.indexOf("async function buildReturnableExitRow"),
+      source.indexOf("export const returnablePage"),
+    );
     const endpoint = source.slice(
-      source.indexOf("export const returnable"),
-      source.indexOf("export const listByRequest"),
+      source.indexOf("export const returnablePage"),
+      source.indexOf("export const returnableByExit"),
     );
 
-    expect(endpoint).toContain("const activeExits = exits.filter((movement: any) => !movement.canceled)");
-    expect(endpoint).toContain("Promise.all(activeExits.map");
+    expect(helper).toContain('movement.type !== "exit" || movement.canceled');
+    expect(endpoint).toContain("paginationOptsValidator");
+    expect(endpoint).toContain("buildReturnableExitRow(ctx, movement)");
+    expect(endpoint).not.toContain("activeExits");
   });
 });

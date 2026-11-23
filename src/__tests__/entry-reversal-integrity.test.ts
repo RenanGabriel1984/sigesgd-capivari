@@ -11,7 +11,7 @@ const reverse = entries.slice(reverseStart, reverseEnd);
 describe("integridade do estorno de entradas", () => {
   it("resolve o lote criado pelo item da entrada, sem usar outro lote do mesmo produto", () => {
     expect(reverse).toContain('ctx.db.get(item.lotId as Id<"lots">)');
-    expect(reverse).toContain("entryLots.filter((candidate: any) => candidate.productId === item.productId)");
+    expect(reverse).toContain("entryLots.filter((candidate) => candidate.productId === item.productId)");
     expect(reverse).toContain("candidates.length === 1");
     expect(reverse).toContain("reversedLotIds.has(String(lot._id))");
   });
@@ -45,8 +45,8 @@ describe("integridade do estorno de entradas", () => {
     expect(reverse).toContain("quantityAvailable: lotAfter");
     expect(reverse).toContain("active: lotAfter > 0");
     expect(reverse).toContain("lotId: lot._id as string");
-    expect(reverse).toContain("areaId: lotAreaId as any");
-    expect(reverse).toContain("locationId: lotLocationId as any");
+    expect(reverse).toContain("areaId: lotAreaId ? lotAreaId as Id<\"stockAreas\"> : undefined");
+    expect(reverse).toContain("locationId: lotLocationId as Id<\"storageLocations\">");
     expect(reverse).not.toContain("ctx.db.delete(lot");
   });
 });
