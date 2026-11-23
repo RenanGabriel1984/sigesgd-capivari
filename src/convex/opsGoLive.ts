@@ -150,7 +150,7 @@ export const registerGomaqNfe372043 = internalMutation({
     }
 
     // ── 2. Fornecedor: dedupe por CNPJ ──
-    let supplierId: string | undefined;
+    let supplierId: Id<"suppliers"> | undefined;
     const existingSuppliers = await ctx.db.query("suppliers").collect();
     const gomaq = existingSuppliers.find(
       (s: any) => (s.cnpj ?? "").replace(/\D/g, "") === GOMAQ_CNPJ
@@ -194,7 +194,7 @@ export const registerGomaqNfe372043 = internalMutation({
     }, 0);
 
     const resolved: Array<{
-      productId: string; created: boolean; code: string; qty: number;
+      productId: Id<"products">; created: boolean; code: string; qty: number;
       unit: string; model?: string; brand: string;
     }> = [];
     for (const it of GOMAQ_ITEMS) {
