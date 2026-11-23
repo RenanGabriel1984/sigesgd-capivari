@@ -39,7 +39,10 @@ describe("integridade do estoque global nos suprimentos de impressão", () => {
     );
     expect(dashboard).toContain("stockRowsByProduct");
     expect(dashboard).toContain("getOptionalSingleValidGlobalStock(");
+    expect(dashboard).toContain("reservationTotalsByLot");
+    expect(dashboard).toContain("reservationTotalsByProduct");
     expect(dashboard).toContain("diverge dos lotes");
+    expect(dashboard).toContain("Consulta Gomaq bloqueada");
     expect(dashboard).not.toContain("stockByProduct.set(s.productId");
   });
 
@@ -50,6 +53,8 @@ describe("integridade do estoque global nos suprimentos de impressão", () => {
       "export const getGlobalIntegrity = query({",
     );
     expect(preview).toContain(".collect()");
+    expect(preview).toContain("closedMembers.length !== 1");
+    expect(preview).toContain("looseMembers.length !== 1");
     expect(preview).toContain("getOptionalSingleValidGlobalStock(rows, productName)");
     expect(preview).not.toContain('.withIndex("by_product", (q: any) => q.eq("productId", productId)).first()');
   });
@@ -65,6 +70,7 @@ describe("integridade do estoque global nos suprimentos de impressão", () => {
     expect(monthlyOrder).toContain("reservationsTotal");
     expect(monthlyOrder).toContain("reservation.areaId !== lot.areaId");
     expect(monthlyOrder).toContain("reservation.locationId !== lot.locationId");
+    expect(monthlyOrder).toContain("reservationsTotal - reserved");
     expect(monthlyOrder).not.toContain('.withIndex("by_product", (q: any) => q.eq("productId", pid)).first()');
   });
 });
