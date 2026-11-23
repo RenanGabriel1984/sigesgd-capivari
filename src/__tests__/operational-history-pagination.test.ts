@@ -212,3 +212,31 @@ describe("paginação de consultas históricas segmentadas", () => {
     expect(generator).not.toContain('query("inventories").collect()');
   });
 });
+
+describe("resumo leve e detalhe sob demanda de inventários", () => {
+  it("a página de inventários calcula indicadores sem enriquecer produtos de cada contagem", () => {
+    const backend = read("convex/inventory.ts");
+    const list = backend.slice(
+      backend.indexOf("export const list = query({"),
+      backend.indexOf("export const get = query({"),
+    );
+    const summary = backend.slice(
+      backend.indexOf("async function decorateInventorySummary"),
+      backend.indexOf("async function decorateInventory("),
+    );
+    expect(list).toContain("decorateInventorySummary(ctx, inventory)");
+    expect(list).not.toContain("decorateInventory(ctx, inventory)");
+    expect(summary).toContain("countSummary: { total, uncounted, differences }");
+    expect(summary).not.toContain("ctx.db.get(count.productId)");
+    expect(summary).toContain("assertUniqueInventoryProductCounts(countRows)");
+  });
+
+  it("a consulta completa só é ligada quando o usuário expande um inventário", () => {
+    const page = read("pages/Inventory.tsx");
+    expect(page).toContain("api.inventory.get");
+    expect(page).toContain('viewId ? { inventoryId: viewId as Id<"inventories"> } : "skip"');
+    expect(page).toContain("viewInventory?.counts ?? []");
+    expect(page).toContain("inv.countSummary");
+    expect(page).not.toContain("inv.counts");
+  });
+});
