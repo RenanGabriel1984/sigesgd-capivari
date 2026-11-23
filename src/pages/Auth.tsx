@@ -135,7 +135,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   const handleFirstAccess = async () => {
     if (!faNewPassword.trim() || faNewPassword.trim().length < 8) {
-      toast.error("A nova senha deve ter pelo menos 6 caracteres");
+      toast.error("A nova senha deve ter pelo menos 8 caracteres");
       return;
     }
     if (faNewPassword !== faConfirmPassword) {
@@ -397,7 +397,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     type={faShowPassword ? "text" : "password"}
                     value={faNewPassword}
                     onChange={(e) => setFaNewPassword(e.target.value)}
-                    placeholder="Mínimo 6 caracteres"
+                    placeholder="Mínimo 8 caracteres"
                     className="pl-9 pr-9"
                     disabled={faLoading}
                   />
