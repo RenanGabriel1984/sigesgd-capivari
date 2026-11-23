@@ -215,6 +215,7 @@ export const installPart = mutation({
       await adjustLotLocationBalance(ctx, {
         lotId: lot._id, productId: lot.productId, locationId: lot.locationId,
         delta: -allocation.quantity,
+        expectedQuantityBefore: Number(lot.quantityAvailable),
       });
     }
     for (const update of locationUpdates) {
