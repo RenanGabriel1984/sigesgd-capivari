@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Pencil, Users as UsersIcon, Search, Plus, UserCheck, UserX, Key, Shield } from "lucide-react";
+import { Pencil, Users as UsersIcon, Plus, UserCheck, UserX, Key, Shield } from "lucide-react";
 import { ROLE_LABELS, type UserRole } from "@/types/constants";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { Skeleton } from "@/components/ui/skeleton";
