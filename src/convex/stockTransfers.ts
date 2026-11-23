@@ -295,10 +295,12 @@ export const create = mutation({
       await adjustLotLocationBalance(ctx, {
         lotId: sourceLot._id, productId: sourceLot.productId,
         locationId: sourceLot.locationId, delta: -part.quantity,
+        expectedQuantityBefore: Number(sourceLot.quantityAvailable),
       });
       await adjustLotLocationBalance(ctx, {
         lotId: destinationLotId, productId: sourceLot.productId,
-        locationId: toLocation._id, delta: part.quantity, allowCreate: true,
+        locationId: toLocation._id, delta: part.quantity,
+        expectedQuantityBefore: 0, allowCreate: true,
       });
       await ctx.db.patch(sourceLot._id, { quantityAvailable: sourceLot.quantityAvailable - part.quantity });
       await ctx.db.insert("stockTransferLots", { transferId, sourceLotId: sourceLot._id, destinationLotId, quantity: part.quantity });
@@ -495,10 +497,12 @@ export const reverse = mutation({
       await adjustLotLocationBalance(ctx, {
         lotId: part.destinationLot._id, productId: transfer.productId,
         locationId: transfer.toLocationId, delta: -part.link.quantity,
+        expectedQuantityBefore: Number(part.destinationLot.quantityAvailable),
       });
       await adjustLotLocationBalance(ctx, {
         lotId: part.sourceLot._id, productId: transfer.productId,
-        locationId: transfer.fromLocationId, delta: part.link.quantity, allowCreate: true,
+        locationId: transfer.fromLocationId, delta: part.link.quantity,
+        expectedQuantityBefore: Number(part.sourceLot.quantityAvailable), allowCreate: true,
       });
     }
     await ctx.db.patch(sourceStock._id, { quantity: sourceQuantity + transfer.quantity });
