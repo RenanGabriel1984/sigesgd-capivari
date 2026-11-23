@@ -290,9 +290,6 @@ export default function Inventory() {
     }
   };
 
-  const getUncounted = (c: InventoryCountView[]) => c.filter((ct) => ct.countedQuantity === null || ct.countedQuantity === undefined);
-  const getDiffs = (c: InventoryCountView[]) => c.filter((ct) => ct.difference !== null && ct.difference !== undefined && ct.difference !== 0);
-
   // ─── Implantação inicial ───
   const loadedByProduct = new Map(
     (initialStatus ?? []).map((s) => [s.productId as string, s.loaded])
