@@ -328,7 +328,7 @@ export const create = mutation({
     // Distribuir a quantidade a devolver entre os mesmos lotes consumidos,
     // abatendo devoluções anteriores lote a lote.
     const returnedByLot = new Map<string, number>();
-    for (const record of allReturns as any[]) {
+    for (const record of relatedReturns as any[]) {
       if (record.lotId && (record.exitMovementId === exit._id ||
         (!record.exitMovementId && !!exit.requestId && record.requestId === exit.requestId &&
           record.productId === exit.productId))) {
@@ -343,7 +343,7 @@ export const create = mutation({
     // Registros históricos de devolução podem não ter exitMovementId nem lotId.
     // Sua quantidade já reduz o total devolvível; abatemos conservadoramente
     // essa parte dos primeiros lotes FIFO para não restaurar saldo em duplicidade.
-    let unassignedLegacyReturned = (allReturns as any[])
+    let unassignedLegacyReturned = (relatedReturns as any[])
       .filter((record) => !record.exitMovementId && !record.lotId &&
         !!exit.requestId && record.requestId === exit.requestId &&
         record.productId === exit.productId)
