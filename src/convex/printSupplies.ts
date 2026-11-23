@@ -239,11 +239,14 @@ export const getSupplyDashboard = query({
       if (Number(lot.quantityAvailable) > 0 && !lot.locationId) {
         throw new Error("Há lote da área Impressoras sem local físico. Classifique o local antes da consulta.");
       }
-      areaLots.set(productId, (areaLots.get(productId) ?? 0) + Number(lot.quantityAvailable));
-      const locationId = String(lot.locationId);
-      const perLocation = areaLotsByLocation.get(productId) ?? new Map<string, number>();
-      perLocation.set(locationId, (perLocation.get(locationId) ?? 0) + Number(lot.quantityAvailable));
-      areaLotsByLocation.set(productId, perLocation);
+      const lotQuantity = Number(lot.quantityAvailable);
+      areaLots.set(productId, (areaLots.get(productId) ?? 0) + lotQuantity);
+      if (lotQuantity > 0) {
+        const locationId = String(lot.locationId);
+        const perLocation = areaLotsByLocation.get(productId) ?? new Map<string, number>();
+        perLocation.set(locationId, (perLocation.get(locationId) ?? 0) + lotQuantity);
+        areaLotsByLocation.set(productId, perLocation);
+      }
     }
 
     // O painel mostra saldo por lotes, mas precisa confirmar que cada lote da
