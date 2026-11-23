@@ -62,8 +62,12 @@ describe("cadastro seguro de usuários e credenciais", () => {
     const start = users.indexOf("export const listUsers = query({");
     const end = users.indexOf("export const listUserOptions", start);
     const listing = users.slice(start, end);
-    expect(listing).toContain("hasPassword: !!passwordRecord");
+    expect(listing).toContain("hasPassword: passwordRecordCount > 0");
+    expect(listing).toContain("passwordRecordCount");
     expect(listing).not.toContain("passwordHash");
+    expect(page).toContain("u.passwordRecordCount > 1");
+    expect(page).toContain("senhas duplicadas");
+    expect(page).toContain("Redefinir senha e corrigir duplicidade");
     expect(page).toContain('openPassword(u._id, u.name ?? u.email, !u.hasPassword)');
     expect(page).toContain('u.hasPassword ? "Redefinir senha" : "Definir senha"');
   });
