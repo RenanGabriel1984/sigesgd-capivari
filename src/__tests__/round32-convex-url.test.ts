@@ -1,8 +1,9 @@
 /**
  * Resolução segura das URLs Convex por ambiente.
  *
- * Produção usa savory-sockeye-292; desenvolvimento usa first-herring-264;
- * homologação usa exclusivamente tame-alligator-797.
+ * first-herring-264 é o backend operacional confirmado pelo responsável do
+ * SIGESGD. Homologação usa exclusivamente tame-alligator-797. Não se presume
+ * um deployment de desenvolvimento diferente sem confirmação operacional.
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -22,29 +23,30 @@ const read = (path: string) => readFileSync(resolve(__dirname, "..", "..", path)
 const MAIN = read("src/main.tsx");
 const SCRIPT = read("scripts/build-homolog.mjs");
 
-describe("ambientes Convex oficiais", () => {
-  it("build de produção aponta para savory-sockeye-292", () => {
-    expect(PRODUCTION_CONVEX_URL).toBe("https://savory-sockeye-292.convex.cloud");
-    expect(ACTIVE_OPERATIONAL_CONVEX_URL).toBe(PRODUCTION_CONVEX_URL);
-    expect(resolveConvexUrl({})).toBe(PRODUCTION_CONVEX_URL);
-    expect(resolveConvexUrl({ MODE: "production" })).toBe(PRODUCTION_CONVEX_URL);
+describe("backend operacional confirmado", () => {
+  it("produção e destino operacional usam first-herring-264", () => {
+    const official = "https://first-herring-264.convex.cloud";
+    expect(PRODUCTION_CONVEX_URL).toBe(official);
+    expect(ACTIVE_OPERATIONAL_CONVEX_URL).toBe(official);
+    expect(resolveConvexUrl({})).toBe(official);
+    expect(resolveConvexUrl({ MODE: "production" })).toBe(official);
     expect(resolveConvexUrl({
-      VITE_APP_ENV: "production",
-      VITE_CONVEX_URL: DEVELOPMENT_CONVEX_URL,
-    })).toBe(PRODUCTION_CONVEX_URL);
+      MODE: "production",
+      VITE_CONVEX_URL: "https://savory-sockeye-292.convex.cloud",
+    })).toBe(official);
   });
 
-  it("vite dev aponta para first-herring-264 e recusa outros deployments", () => {
-    expect(DEVELOPMENT_CONVEX_URL).toBe("https://first-herring-264.convex.cloud");
-    expect(resolveConvexUrl({ MODE: "development" })).toBe(DEVELOPMENT_CONVEX_URL);
-    expect(resolveConvexUrl({ VITE_APP_ENV: "development" })).toBe(DEVELOPMENT_CONVEX_URL);
+  it("preserva o destino atual em desenvolvimento até existir backend isolado confirmado", () => {
+    expect(DEVELOPMENT_CONVEX_URL).toBe(PRODUCTION_CONVEX_URL);
+    expect(resolveConvexUrl({ MODE: "development" })).toBe(PRODUCTION_CONVEX_URL);
+    expect(resolveConvexUrl({ VITE_APP_ENV: "development" })).toBe(PRODUCTION_CONVEX_URL);
     expect(resolveConvexUrl({
       MODE: "development",
       VITE_CONVEX_URL: DEVELOPMENT_CONVEX_URL,
-    })).toBe(DEVELOPMENT_CONVEX_URL);
+    })).toBe(PRODUCTION_CONVEX_URL);
     expect(() => resolveConvexUrl({
       MODE: "development",
-      VITE_CONVEX_URL: PRODUCTION_CONVEX_URL,
+      VITE_CONVEX_URL: "https://unexpected-preview.convex.cloud",
     })).toThrow(/desenvolvimento só pode usar/i);
   });
 
@@ -55,13 +57,6 @@ describe("ambientes Convex oficiais", () => {
     })).toThrow(/Build de produção não pode usar o backend de desenvolvimento/i);
   });
 
-  it("ignora override de URL em produção", () => {
-    expect(resolveConvexUrl({
-      MODE: "production",
-      VITE_CONVEX_URL: DEVELOPMENT_CONVEX_URL,
-    })).toBe(PRODUCTION_CONVEX_URL);
-  });
-
   it("recusa ambiente desconhecido", () => {
     expect(() => resolveConvexUrl({ VITE_APP_ENV: "staging" })).toThrow(/VITE_APP_ENV desconhecido/i);
   });
@@ -69,6 +64,7 @@ describe("ambientes Convex oficiais", () => {
 
 describe("homologação isolada e fail-closed", () => {
   it("aceita exclusivamente tame-alligator-797", () => {
+    expect(HOMOLOGATION_CONVEX_URL).toBe("https://tame-alligator-797.convex.cloud");
     expect(resolveConvexUrl({
       VITE_APP_ENV: "homologacao",
       VITE_CONVEX_URL: HOMOLOGATION_CONVEX_URL,
@@ -80,10 +76,10 @@ describe("homologação isolada e fail-closed", () => {
     expect(() => resolveConvexUrl({ VITE_APP_ENV: "homologacao" })).toThrow(/VITE_CONVEX_URL/i);
   });
 
-  it("recusa deployments de produção, desenvolvimento e previews", () => {
+  it("recusa backend operacional, savory e deployments de preview", () => {
     const forbidden = [
       PRODUCTION_CONVEX_URL,
-      DEVELOPMENT_CONVEX_URL,
+      "https://savory-sockeye-292.convex.cloud",
       "https://first-starling-943.convex.cloud",
       "https://brilliant-bullfrog-982.convex.cloud",
       "https://first-dinosaur-625.convex.cloud",
