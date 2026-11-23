@@ -107,7 +107,7 @@ export const listByLocation = query({
       entries.map((entry) => entry.productId),
     );
     return Promise.all(entries.map(async (entry) => ({
-      ...await enrichLocationStock(ctx, entry, reservationsByProduct.get(entry.productId as string) ?? []),
+      ...await enrichLocationStock(ctx, entry, reservationsByProduct.get(entry.productId) ?? []),
       product: await ctx.db.get(entry.productId),
     })));
   },
