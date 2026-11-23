@@ -101,18 +101,18 @@ export function buildLotLocationMigrationPlan(
   assert(summary.lotLocationBalances.invalidRecords === 0, "há saldos lote × armário inválidos.");
   assert(
     summary.lots.withAvailableQuantity === baseline.lotCount,
-    `esperados ${expected.lotCount} lotes com saldo; encontrados ${summary.lots.withAvailableQuantity}.`,
+    `esperados ${baseline.lotCount} lotes com saldo; encontrados ${summary.lots.withAvailableQuantity}.`,
   );
   assert(
     Math.abs(summary.lots.quantityAvailableTotal - baseline.totalQuantity) <= EPSILON,
-    `saldo dos lotes esperado ${expected.totalQuantity}; encontrado ${summary.lots.quantityAvailableTotal}.`,
+    `saldo dos lotes esperado ${baseline.totalQuantity}; encontrado ${summary.lots.quantityAvailableTotal}.`,
   );
   assert(
-    Math.abs(summary.globalStock.physicalQuantityTotal - expected.totalQuantity) <= EPSILON,
+    Math.abs(summary.globalStock.physicalQuantityTotal - baseline.totalQuantity) <= EPSILON,
     "o total global não corresponde ao total esperado.",
   );
   assert(
-    Math.abs(summary.stockByLocation.physicalQuantityTotal - expected.totalQuantity) <= EPSILON,
+    Math.abs(summary.stockByLocation.physicalQuantityTotal - baseline.totalQuantity) <= EPSILON,
     "o total por armário não corresponde ao total esperado.",
   );
   assert(
@@ -197,9 +197,9 @@ export function buildLotLocationMigrationPlan(
     }
   }
 
-  assert(rows.length === expected.lotCount, `o plano contém ${rows.length} lotes, mas deveria conter ${expected.lotCount}.`);
+  assert(rows.length === baseline.lotCount, `o plano contém ${rows.length} lotes, mas deveria conter ${baseline.lotCount}.`);
   const totalQuantity = rows.reduce((sum, row) => sum + row.quantityAvailable, 0);
-  assert(Math.abs(totalQuantity - expected.totalQuantity) <= EPSILON, "a soma dos vínculos não corresponde ao total esperado.");
+  assert(Math.abs(totalQuantity - baseline.totalQuantity) <= EPSILON, "a soma dos vínculos não corresponde ao total esperado.");
 
   assert(
     summary.lotLocationBalances.records === alreadyMapped,
