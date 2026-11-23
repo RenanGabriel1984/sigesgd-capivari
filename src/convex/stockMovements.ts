@@ -1,14 +1,15 @@
 import { query, mutation } from "./_generated/server";
+import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { requirePermission } from "./rbac";
 
-async function requireUser(ctx: any) {
+async function requireUser(ctx: QueryCtx) {
   // RBAC central: histórico/movimentações visíveis a quem consulta estoque.
   return requirePermission(ctx, "movements.view");
 }
 
-async function requireStockManagerOrAdmin(ctx: any) {
+async function requireStockManagerOrAdmin(ctx: MutationCtx) {
   // RBAC central: movimentação direta de estoque.
   return requirePermission(ctx, "stock.mutate", { entity: "stockMovements" });
 }
