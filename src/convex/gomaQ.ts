@@ -1,6 +1,6 @@
 import { query, mutation, internalMutation } from "./_generated/server";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { PRINT_AREA_ID } from "./printSupplies";
