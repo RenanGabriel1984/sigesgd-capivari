@@ -53,19 +53,26 @@ export const listPaginated = query({
 });
 
 export const byProduct = query({
-  args: { productId: v.id("products") },
+  args: {
+    productId: v.id("products"),
+    paginationOpts: paginationOptsValidator,
+  },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    const movements = await ctx.db.query("stockMovements").withIndex("by_product", (q) => q.eq("productId", args.productId)).order("desc").collect();
-    return Promise.all(movements.map(async (m) => {
-      const user = await ctx.db.get(m.userId);
-      const supplier = m.supplierId ? await ctx.db.get(m.supplierId) : null;
-      const area = m.areaId ? await ctx.db.get(m.areaId) : null;
-      const location = m.locationId ? await ctx.db.get(m.locationId) : null;
-      const toLocation = m.toLocationId ? await ctx.db.get(m.toLocationId) : null;
-      const toArea = m.toAreaId ? await ctx.db.get(m.toAreaId) : null;
-      return { ...m, user, supplier, area, location, toLocation, toArea };
+    const page = await ctx.db.query("stockMovements")
+      .withIndex("by_product", (q) => q.eq("productId", args.productId))
+      .order("desc")
+      .paginate(args.paginationOpts);
+    const enriched = await Promise.all(page.page.map(async (movement) => {
+      const user = await ctx.db.get(movement.userId);
+      const supplier = movement.supplierId ? await ctx.db.get(movement.supplierId) : null;
+      const area = movement.areaId ? await ctx.db.get(movement.areaId) : null;
+      const location = movement.locationId ? await ctx.db.get(movement.locationId) : null;
+      const toLocation = movement.toLocationId ? await ctx.db.get(movement.toLocationId) : null;
+      const toArea = movement.toAreaId ? await ctx.db.get(movement.toAreaId) : null;
+      return { ...movement, user, supplier, area, location, toLocation, toArea };
     }));
+    return { ...page, page: enriched };
   },
 });
 
