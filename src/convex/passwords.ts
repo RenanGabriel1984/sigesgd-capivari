@@ -118,12 +118,18 @@ export const changePassword = mutation({
       throw new Error("A nova senha deve ser diferente da atual");
     }
 
-    const passwordRecord = await ctx.db
+    const passwordRecords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", userId))
-      .first();
-
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRecords);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error("Credenciais duplicadas. Contate o administrador para regularizar o acesso.");
+    }
+    if (passwordResolution.status === "missing") {
+      throw new Error("Senha não configurada. Contate o administrador.");
+    }
+    const passwordRecord = passwordResolution.record;
 
     const valid = await verifyPassword(
       args.currentPassword,
@@ -171,14 +177,18 @@ export const adminResetPassword = mutation({
 
     assertPasswordPolicy(args.newPassword);
 
-    const passwordRecord = await ctx.db
+    const passwordRecords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
-      .first();
-
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRecords);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error("Credenciais duplicadas. Regularize o cadastro antes de redefinir a senha.");
+    }
     const { hash, salt } = await hashPassword(args.newPassword);
 
-    if (passwordRecord) {
+    if (passwordResolution.status === "unique") {
+      const passwordRecord = passwordResolution.record;
       await ctx.db.patch(passwordRecord._id, {
         passwordHash: hash,
         salt,
@@ -219,12 +229,18 @@ export const forceChangePassword = mutation({
 
     assertPasswordPolicy(args.newPassword);
 
-    const passwordRecord = await ctx.db
+    const passwordRecords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", userId))
-      .first();
-
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+      .collect();
+    const passwordResolution = resolveUniqueRecord(passwordRecords);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error("Credenciais duplicadas. Contate o administrador para regularizar o acesso.");
+    }
+    if (passwordResolution.status === "missing") {
+      throw new Error("Senha não configurada. Contate o administrador.");
+    }
+    const passwordRecord = passwordResolution.record;
 
     const { hash, salt } = await hashPassword(args.newPassword);
 
@@ -934,12 +950,17 @@ export const bootstrapResetPassword = internalMutation({
     const { hash, salt } = await hashPassword(args.newPassword);
 
     // Check if password record exists
-    const existingPw = await ctx.db
+    const existingPasswords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .first();
+      .collect();
+    const passwordResolution = resolveUniqueRecord(existingPasswords);
+    if (passwordResolution.status === "ambiguous") {
+      throw new Error("Credenciais duplicadas. Regularize o cadastro antes de redefinir a senha.");
+    }
 
-    if (existingPw) {
+    if (passwordResolution.status === "unique") {
+      const existingPw = passwordResolution.record;
       await ctx.db.patch(existingPw._id, {
         passwordHash: hash,
         salt,
