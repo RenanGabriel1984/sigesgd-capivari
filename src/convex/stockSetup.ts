@@ -10,7 +10,7 @@ import {
 } from "../lib/stock-consumption";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { getOptionalSingleValidGlobalStock, isDiscreteStockUnit } from "../lib/stock-quantity-rules";
 import {
@@ -412,9 +412,8 @@ export const importInitialSheet = mutation({
 
     // Categoria padrão para produtos novos (idempotente)
     const allCategories = await ctx.db.query("categories").collect();
-    let fallbackCategory: any = allCategories.find(
-      (c: any) => c.name.toLowerCase() === "diversos"
-    );
+    let fallbackCategory: Doc<"categories"> | null =
+      allCategories.find((category) => category.name.toLowerCase() === "diversos") ?? null;
     if (!fallbackCategory) {
       const catId = await ctx.db.insert("categories", {
         name: "Diversos",
@@ -423,18 +422,21 @@ export const importInitialSheet = mutation({
       });
       fallbackCategory = await ctx.db.get(catId);
     }
+    if (!fallbackCategory) {
+      throw new Error("Não foi possível preparar a categoria padrão Diversos.");
+    }
 
     const products = await ctx.db
       .query("products")
-      .withIndex("by_active", (q: any) => q.eq("active", true))
+      .withIndex("by_active", (q) => q.eq("active", true))
       .collect();
 
     const items: Array<{
-      productId: string;
-      locationId: string;
+      productId: Id<"products">;
+      locationId: Id<"storageLocations">;
       quantity: number;
       unitOfMeasure?: string;
-      areaId?: string;
+      areaId?: Id<"stockAreas">;
       brand?: string;
       observation?: string;
     }> = [];
@@ -446,7 +448,7 @@ export const importInitialSheet = mutation({
       if (!name || row.quantity <= 0) continue;
 
       const existing = products.find(
-        (p: any) => p.name.trim().toLowerCase() === name.toLowerCase()
+        (product) => product.name.trim().toLowerCase() === name.toLowerCase()
       );
       // Toner de kit original de 4 cores (VersaLink, AltaLink, Lexmark CX735,
       // Lexmark XM5365): a observação padrão é aplicada (informação
@@ -455,7 +457,7 @@ export const importInitialSheet = mutation({
         name,
         brand: row.brand,
       });
-      let productId: string;
+      let productId: Id<"products">;
       if (existing) {
         productId = existing._id;
         matched++;
@@ -490,15 +492,13 @@ export const importInitialSheet = mutation({
           details: `Produto criado pela importação da planilha inicial: ${name}`,
           timestamp: Date.now(),
         });
-        // Manter o produto recém-criado no catálogo local com os campos
-        // usados pela busca por nome. Sem isso, uma segunda linha da mesma
-        // planilha não o encontra e cria um produto duplicado.
-        products.push({
-          _id: id,
-          name,
-          unitOfMeasure: row.unitOfMeasure ?? "un",
-          brand: row.brand || undefined,
-        } as any);
+        // Manter o documento completo no catálogo local. Sem isso, uma segunda
+        // linha da mesma planilha não encontra o produto recém-criado.
+        const createdProduct = await ctx.db.get(id);
+        if (!createdProduct) {
+          throw new Error("O produto recém-criado não pôde ser recuperado.");
+        }
+        products.push(createdProduct);
         productId = id;
         created++;
       }
