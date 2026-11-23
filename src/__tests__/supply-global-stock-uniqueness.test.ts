@@ -41,6 +41,9 @@ describe("integridade do estoque global nos suprimentos de impressão", () => {
     expect(dashboard).toContain("getOptionalSingleValidGlobalStock(");
     expect(dashboard).toContain("reservationTotalsByLot");
     expect(dashboard).toContain("reservationTotalsByProduct");
+    expect(dashboard).toContain("areaLotsByLocation");
+    expect(dashboard).toContain("areaRowsByProduct");
+    expect(dashboard).toContain("Buckets duplicados de área/local");
     expect(dashboard).toContain("diverge dos lotes");
     expect(dashboard).toContain("Consulta Gomaq bloqueada");
     expect(dashboard).not.toContain("stockByProduct.set(s.productId");
