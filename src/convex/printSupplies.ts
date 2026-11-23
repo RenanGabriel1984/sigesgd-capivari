@@ -105,14 +105,14 @@ export const migrateTIGeralToImpressorasInternal = internalMutation({
 });
 
 async function migrateTIGeralToImpressorasImpl(
-  ctx: any,
+  ctx: MutationCtx,
   opts: { viaCli?: boolean } = {},
 ) {
   {
-    let userId: string | null = null;
+    let userId: Id<"users"> | null = null;
     if (!opts.viaCli) {
       const auth = await requirePermission(ctx, "stock.mutate", { entity: "lots" });
-      userId = auth.userId as string;
+      userId = auth.userId;
     } else {
       userId = await getAuthUserId(ctx).catch(() => null);
     }
@@ -817,7 +817,7 @@ export const configurePackaging = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requirePermission(ctx, "products.manage", { entity: "products", entityId: args.productId });
-    return configurePackagingImpl(ctx, userId as string, args.productId, {
+    return configurePackagingImpl(ctx, userId, args.productId, {
       baseUnit: args.baseUnit,
       packagingUnit: args.packagingUnit,
       conversionFactor: args.conversionFactor,
@@ -826,9 +826,9 @@ export const configurePackaging = mutation({
 });
 
 async function configurePackagingImpl(
-  ctx: any,
-  userId: string,
-  productId: string,
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  productId: Id<"products">,
   packaging: { baseUnit?: string | null; packagingUnit?: string | null; conversionFactor?: number | null },
 ) {
   const product = await ctx.db.get(productId);
@@ -858,9 +858,9 @@ async function configurePackagingImpl(
     updates.conversionFactor = conversionFactor;
   }      // Consistência: a conversão só é considerada válida com os TRÊS campos.
   const candidate = {
-    baseUnit: updates.baseUnit ?? (product as any).baseUnit ?? null,
-    packagingUnit: updates.packagingUnit ?? (product as any).packagingUnit ?? null,
-    conversionFactor: updates.conversionFactor ?? (product as any).conversionFactor ?? null,
+    baseUnit: updates.baseUnit ?? product.baseUnit ?? null,
+    packagingUnit: updates.packagingUnit ?? product.packagingUnit ?? null,
+    conversionFactor: updates.conversionFactor ?? product.conversionFactor ?? null,
   };
   const present = [candidate.baseUnit, candidate.packagingUnit, candidate.conversionFactor];
   const partiallySet = present.some((x) => x != null) && present.some((x) => x == null);
@@ -980,12 +980,12 @@ export const withdrawFamily = mutation({
 
     const products = await ctx.db.query("products").collect();
     const familyKey = deriveFamilyKey(product.name, product.brand ?? null);
-    const members = products.filter((item: any) =>
+    const members = products.filter((item) =>
       item.categoryId === SUPPLY_CATEGORY_ID &&
       deriveFamilyKey(item.name, item.brand ?? null) === familyKey,
     );
-    const closedMembers = members.filter((item: any) => !!readPackagingConversion(item));
-    const looseMembers = members.filter((item: any) => !readPackagingConversion(item));
+    const closedMembers = members.filter((item) => !!readPackagingConversion(item));
+    const looseMembers = members.filter((item) => !readPackagingConversion(item));
     if (closedMembers.length !== 1 || looseMembers.length !== 1 ||
         String(closedMembers[0]._id) !== String(product._id)) {
       throw new Error(
@@ -1199,7 +1199,7 @@ export const withdrawFamily = mutation({
       userId: userId as never,
       action: "move_stock",
       entity: "stockMovements",
-      entityId: primaryMovementId as any,
+      entityId: primaryMovementId,
       details:
         `Retirada por família "${familyKey}": ${quantity} ${conversion.baseUnit}(s). ` +
         `Operação: ${plan.operation}; caixas consumidas/abertas: ${closedPacksToConsume}. ` +
@@ -1248,7 +1248,7 @@ export const previewFamilyWithdrawalInternal = internalQuery({
   handler: async (ctx, args) => previewFamilyWithdrawalImpl(ctx, args),
 });
 
-async function previewFamilyWithdrawalImpl(ctx: any, args: { productId: string; quantity: number }) {
+async function previewFamilyWithdrawalImpl(ctx: QueryCtx, args: { productId: Id<"products">; quantity: number }) {
     const quantity = Number(args.quantity);
     const product = await ctx.db.get(args.productId);
     if (!product) throw new Error("Produto não encontrado");
@@ -1258,10 +1258,7 @@ async function previewFamilyWithdrawalImpl(ctx: any, args: { productId: string; 
     const conv = readPackagingConversion(product);
     if (!conv) throw new Error("Produto sem conversão de embalagem configurada.");
 
-    const all = (await ctx.db.query("products").collect()) as Array<{
-      _id: string; name: string; brand?: string | null; categoryId: string;
-      unitOfMeasure: string; baseUnit?: string | null; packagingUnit?: string | null; conversionFactor?: number | null;
-    }>;
+    const all = await ctx.db.query("products").collect();
     const familyKey = deriveFamilyKey(product.name, product.brand ?? null);
     const members = all.filter(
       (p) => p.categoryId === SUPPLY_CATEGORY_ID && deriveFamilyKey(p.name, p.brand ?? null) === familyKey,
@@ -1276,14 +1273,11 @@ async function previewFamilyWithdrawalImpl(ctx: any, args: { productId: string; 
     const closedMember = closedMembers[0];
     const looseMember = looseMembers[0];
 
-    const stockOf = async (productId: string, productName: string) => {
+    const stockOf = async (productId: Id<"products">, productName: string) => {
       const rows = await ctx.db.query("stock")
         .withIndex("by_product", (q) => q.eq("productId", productId))
         .collect();
-      return getOptionalSingleValidGlobalStock<SupplyGlobalStockRow>(
-        rows as SupplyGlobalStockRow[],
-        productName,
-      );
+      return getOptionalSingleValidGlobalStock(rows, productName);
     };
     const closedStock = closedMember ? await stockOf(closedMember._id, closedMember.name) : null;
     const looseStock = looseMember ? await stockOf(looseMember._id, looseMember.name) : null;
