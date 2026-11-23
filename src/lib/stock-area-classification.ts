@@ -52,6 +52,15 @@ export function buildHistoricalAreaClassificationPlan(
 
   for (const lot of lots) {
     const block = (reason: string) => blockers.push({ lotId: lot.lotId, lotNumber: lot.lotNumber, reason });
+    if (lot.areaId) {
+      const existingArea = activeAreas.find((area) => area.areaId === lot.areaId && area.active);
+      if (existingArea) {
+        alreadyClassified++;
+        continue;
+      }
+      block("Área atual inexistente ou inativa; não será substituída automaticamente.");
+      continue;
+    }
     const source = lot.sourceEntry;
     const item = lot.entryItemEvidence.length === 1 ? lot.entryItemEvidence[0] : null;
     if (!source || !item || item.lotId !== lot.lotId || normalize(item.productName) !== normalize(lot.productName)) {
