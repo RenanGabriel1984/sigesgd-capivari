@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "src/convex/requests.ts"
+      - "src/pages/Requests.tsx"
       - "src/lib/request-approval-validation.ts"
       - "src/__tests__/request-approval-validation.test.ts"
       - ".github/workflows/request-approval-integrity.yml"
@@ -14,6 +15,7 @@ on:
       - main
     paths:
       - "src/convex/requests.ts"
+      - "src/pages/Requests.tsx"
       - "src/lib/request-approval-validation.ts"
       - "src/__tests__/request-approval-validation.test.ts"
       - ".github/workflows/request-approval-integrity.yml"
