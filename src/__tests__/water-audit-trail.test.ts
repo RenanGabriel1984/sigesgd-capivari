@@ -38,7 +38,7 @@ describe("trilha de auditoria do controle de água mineral", () => {
     const helper = water.slice(helperStart, helperEnd + 2);
     expect(helper).toContain("userId, action, entity, entityId, details");
     expect(helper).toContain("timestamp: Date.now()");
-    expect(helper).toContain('ctx.db.insert("auditLogs")');
+    expect(helper).toContain('ctx.db.insert("auditLogs", {');
   });
 
   it("estornos mantêm identificação do registro original e motivo na auditoria", () => {
