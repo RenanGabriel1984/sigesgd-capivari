@@ -80,3 +80,21 @@ describe("user creation enforces backend password policy before writing the acco
     expect(source).not.toContain("Mínimo 6 caracteres");
   });
 });
+
+
+describe("atomic user and temporary password creation", () => {
+  it("creates the user and initial credential inside the same Convex mutation", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const backend = readFileSync(resolve(__dirname, "../convex/users.ts"), "utf8");
+    const ui = readFileSync(resolve(__dirname, "../pages/Users.tsx"), "utf8");
+    const start = backend.indexOf("export const createUser = mutation({");
+    const end = backend.indexOf("\\nexport const updateUser", start);
+    const block = backend.slice(start, end);
+    expect(block).toContain("temporaryPassword: v.optional(v.string())");
+    expect(block).toContain('ctx.db.insert("passwords"');
+    expect(block).toContain("requiresReset: true");
+    expect(ui).toContain("temporaryPassword: tempPassword");
+    expect(ui).not.toContain("await createPassword({ userId: newUserId");
+  });
+});
