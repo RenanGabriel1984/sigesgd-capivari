@@ -1,7 +1,8 @@
 import { ConvexCredentials } from "@convex-dev/auth/providers/ConvexCredentials";
 import { ConvexError } from "convex/values";
 import { internal } from "../_generated/api";
-import type { DataModel } from "../_generated/dataModel";
+import type { DataModel, Id } from "../_generated/dataModel";
+import type { ActionCtx } from "../_generated/server";
 
 // IMPORTANT: `auth:signIn` is implemented as a Convex ACTION, and Convex
 // redacts plain `Error`s thrown inside actions to the generic message
@@ -19,7 +20,7 @@ import type { DataModel } from "../_generated/dataModel";
 //   usuário inativo, sem senha, sem perfil de acesso ou senha incorreta.
 export const credentials = ConvexCredentials<DataModel>({
   id: "credentials",
-  authorize: async (params: Record<string, unknown>, ctx: any): Promise<{ userId: any } | null> => {
+  authorize: async (params: Record<string, unknown>, ctx: ActionCtx): Promise<{ userId: Id<"users"> } | null> => {
     const email = params.email;
     const password = params.password;
 
@@ -44,7 +45,7 @@ export const credentials = ConvexCredentials<DataModel>({
     // endereço de e-mail, evitando negação de serviço remota contra terceiros.
 
     // Use the existing verifyCredentials query to validate
-    const result: { success: boolean; error?: string; userId?: any } = await ctx.runQuery(
+    const result = await ctx.runQuery(
       internal.passwords.verifyCredentials,
       { email: normalizedEmail, password },
     );
