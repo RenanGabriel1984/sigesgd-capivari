@@ -231,7 +231,7 @@ async function performInitialLoad(
       });
       await adjustLotLocationBalance(ctx, {
         lotId, productId: item.productId, locationId: item.locationId,
-        delta: item.quantity, allowCreate: true,
+        delta: item.quantity, expectedQuantityBefore: 0, allowCreate: true,
       });
 
       // ── 2. Create entry item ──
