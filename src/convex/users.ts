@@ -4,6 +4,10 @@ import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
 import { requirePermission } from "./rbac";
 import { internal } from "./_generated/api";
+import {
+  describeDuplicateCredential,
+  resolveUniqueRecord,
+} from "../lib/credential-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -104,16 +108,27 @@ export const listUsers = query({
     // (admin/secretary). Consumidores operacionais que só precisam de
     // nome/ID para pickers usam `listUserOptions`.
     await requirePermission(ctx, "users.manage", { entity: "users" });
-    const users = await ctx.db.query("users").collect();
-    return Promise.all(
-      users.map(async (u: any) => {
-        const [org, passwordRecord] = await Promise.all([
-          u.organizationId ? ctx.db.get(u.organizationId) : Promise.resolve(null),
-          ctx.db.query("passwords").withIndex("by_user", (q: any) => q.eq("userId", u._id)).first(),
-        ]);
-        return { ...u, organization: org, hasPassword: !!passwordRecord };
-      })
-    );
+    const [users, passwordRecords] = await Promise.all([
+      ctx.db.query("users").collect(),
+      ctx.db.query("passwords").collect(),
+    ]);
+    const passwordCounts = new Map<string, number>();
+    for (const record of passwordRecords) {
+      const key = String(record.userId);
+      passwordCounts.set(key, (passwordCounts.get(key) ?? 0) + 1);
+    }
+    return Promise.all(users.map(async (user) => {
+      const organization = user.organizationId
+        ? await ctx.db.get(user.organizationId)
+        : null;
+      const passwordRecordCount = passwordCounts.get(String(user._id)) ?? 0;
+      return {
+        ...user,
+        organization,
+        hasPassword: passwordRecordCount === 1,
+        passwordRecordCount,
+      };
+    }));
   },
 });
 
@@ -153,10 +168,16 @@ export const createUserWithPassword = mutation({
     if (args.temporaryPassword.length < 8 || args.temporaryPassword.length > 200) {
       throw new Error("A senha temporária deve ter entre 8 e 200 caracteres.");
     }
-    const existing = await ctx.db.query("users")
+    const existingRows = await ctx.db.query("users")
       .withIndex("email", (q: any) => q.eq("email", email))
-      .first();
-    if (existing) throw new Error("Já existe um usuário com este e-mail.");
+      .collect();
+    const existing = resolveUniqueRecord(existingRows);
+    if (existing.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(existing.count));
+    }
+    if (existing.status === "unique") {
+      throw new Error("Já existe um usuário com este e-mail.");
+    }
 
     if (args.organizationId) {
       const organization = await ctx.db.get(args.organizationId);
@@ -214,8 +235,16 @@ export const createUser = mutation({
     const { userId } = await requireUserManager(ctx);
     const name = normalizeUserName(args.name);
     const email = normalizeUserEmail(args.email);
-    const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).first();
-    if (existing) throw new Error("Já existe um usuário com este e-mail");
+    const existingRows = await ctx.db.query("users")
+      .withIndex("email", (q: any) => q.eq("email", email))
+      .collect();
+    const existing = resolveUniqueRecord(existingRows);
+    if (existing.status === "ambiguous") {
+      throw new Error(describeDuplicateCredential(existing.count));
+    }
+    if (existing.status === "unique") {
+      throw new Error("Já existe um usuário com este e-mail");
+    }
     if (args.organizationId) {
       const organization = await ctx.db.get(args.organizationId);
       if (!organization || organization.active === false) {
@@ -276,8 +305,15 @@ export const updateUser = mutation({
     }
     if (updates.email !== undefined) {
       const email = normalizeUserEmail(updates.email);
-      const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).first();
-      if (existing && existing._id !== userId) throw new Error("Já existe outro usuário com este e-mail");
+      const existingRows = await ctx.db.query("users")
+        .withIndex("email", (q: any) => q.eq("email", email))
+        .collect();
+      const otherAccounts = existingRows.filter((record: any) => record._id !== userId);
+      if (otherAccounts.length > 0) {
+        throw new Error(otherAccounts.length > 1
+          ? describeDuplicateCredential(otherAccounts.length + 1)
+          : "Já existe outro usuário com este e-mail");
+      }
       updates.email = email;
     }
     if (updates.organizationId) {
