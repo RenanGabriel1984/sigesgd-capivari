@@ -118,27 +118,26 @@ async function migrateTIGeralToImpressorasImpl(
     }
 
     // Snapshot ANTES (soma global de todos os saldos — deve permanecer igual).
-    const stockBefore = (await ctx.db.query("stock").collect()) as Array<{ physicalQuantity: number; reservedQuantity: number }>;
-    const lotsBefore = (await ctx.db.query("lots").collect()) as Array<{ quantityAvailable: number }>;
+    const stockBefore = await ctx.db.query("stock").collect();
+    const lotsBefore = await ctx.db.query("lots").collect();
     const totalsBefore = {
       physical: stockBefore.reduce((s: number, x: { physicalQuantity: number }) => s + x.physicalQuantity, 0),
       reserved: stockBefore.reduce((s: number, x: { reservedQuantity: number }) => s + x.reservedQuantity, 0),
       lotsAvailable: lotsBefore.reduce((s: number, l: { quantityAvailable: number }) => s + l.quantityAvailable, 0),
     };
 
+    const allProducts = await ctx.db.query("products").collect();
     const supplyProducts = new Set(
-      ((await ctx.db.query("products").collect()) as Array<{ _id: string; categoryId: string }>)
-        .filter((p: { categoryId: string }) => p.categoryId === SUPPLY_CATEGORY_ID)
-        .map((p: { _id: string }) => p._id),
+      allProducts
+        .filter((product) => product.categoryId === SUPPLY_CATEGORY_ID)
+        .map((product) => product._id),
     );
     if (supplyProducts.size === 0) {
       return { applied: false, reason: "Nenhum produto na categoria Suprimentos de Impressão.", moved: [] };
     }
 
     // Lotes elegíveis: da categoria alvo, área != Impressoras.
-    const allLots = (await ctx.db.query("lots").collect()) as Array<{
-      _id: string; productId: string; areaId?: string | null; lotNumber: string;
-    }>;
+    const allLots = await ctx.db.query("lots").collect();
     const lots = allLots.filter(
       (l) => supplyProducts.has(l.productId) && l.areaId !== PRINT_AREA_ID,
     );
@@ -156,7 +155,7 @@ async function migrateTIGeralToImpressorasImpl(
 
     const moved: Array<{ lotNumber: string; productName: string; from: string }> = [];
     for (const lot of lots) {
-      await ctx.db.patch(lot._id, { areaId: PRINT_AREA_ID as never });
+      await ctx.db.patch(lot._id, { areaId: PRINT_AREA_ID });
       const product = await ctx.db.get(lot.productId);
       moved.push({
         lotNumber: lot.lotNumber,
@@ -166,8 +165,8 @@ async function migrateTIGeralToImpressorasImpl(
     }
 
     // Guarda absoluta: a migração não pode alterar nenhum saldo global.
-    const stockAfter = (await ctx.db.query("stock").collect()) as Array<{ physicalQuantity: number; reservedQuantity: number }>;
-    const lotsAfter = (await ctx.db.query("lots").collect()) as Array<{ quantityAvailable: number }>;
+    const stockAfter = await ctx.db.query("stock").collect();
+    const lotsAfter = await ctx.db.query("lots").collect();
     const totalsAfter = {
       physical: stockAfter.reduce((s: number, x: { physicalQuantity: number }) => s + x.physicalQuantity, 0),
       reserved: stockAfter.reduce((s: number, x: { reservedQuantity: number }) => s + x.reservedQuantity, 0),
@@ -185,7 +184,7 @@ async function migrateTIGeralToImpressorasImpl(
     }
 
     await ctx.db.insert("auditLogs", {
-      userId: userId as never,
+      userId,
       action: "transfer_stock",
       entity: "lots",
       entityId: PRINT_AREA_ID,
@@ -498,7 +497,7 @@ type SupplyConsumedLot = {
   supplierId?: Id<"suppliers">;
   invoiceNumber?: string;
   purchaseAuthorizationNumber?: string;
-  photoStorageId?: Id<"_storage">;
+  photoStorageId?: string;
   unitCost?: number;
 };
 
@@ -657,10 +656,10 @@ async function consumeSupplyLotsInArea(
       lotId: lot._id, productId: lot.productId, locationId: lot.locationId, delta: -take,
       expectedQuantityBefore: Number(lot.quantityAvailable),
     });
-    await changeSupplyLocationQuantity(ctx, productId, String(lot.locationId), -take);
+    await changeSupplyLocationQuantity(ctx, productId, lot.locationId, -take);
     consumed.push({
       lotId: lot._id, lotNumber: lot.lotNumber, qty: take,
-      areaId: PRINT_AREA_ID, locationId: lot.locationId, entryId: lot.entryId as Id<"entries">,
+      areaId: PRINT_AREA_ID, locationId: lot.locationId, entryId: lot.entryId,
       brand: lot.brand, model: lot.model, specification: lot.specification,
       supplierId: lot.supplierId, invoiceNumber: lot.invoiceNumber,
       purchaseAuthorizationNumber: lot.purchaseAuthorizationNumber,
@@ -827,7 +826,7 @@ export const configurePackaging = mutation({
 
 async function configurePackagingImpl(
   ctx: MutationCtx,
-  userId: Id<"users">,
+  userId: Id<"users"> | undefined,
   productId: Id<"products">,
   packaging: { baseUnit?: string | null; packagingUnit?: string | null; conversionFactor?: number | null },
 ) {
@@ -837,20 +836,20 @@ async function configurePackagingImpl(
     throw new Error('Produto não pertence à categoria "Suprimentos de Impressão".');
   }
 
-  const updates: { baseUnit?: string | null; packagingUnit?: string | null; conversionFactor?: number | null } = {};
+  const updates: { baseUnit?: string; packagingUnit?: string; conversionFactor?: number } = {};
   const { baseUnit, packagingUnit, conversionFactor } = packaging;
 
-  if (baseUnit === null) updates.baseUnit = null;
+  if (baseUnit === null) updates.baseUnit = undefined;
   else if (baseUnit != null) {
     if (!baseUnit.trim()) throw new Error("Unidade-base inválida");
     updates.baseUnit = baseUnit.trim();
   }
-  if (packagingUnit === null) updates.packagingUnit = null;
+  if (packagingUnit === null) updates.packagingUnit = undefined;
   else if (packagingUnit != null) {
     if (!packagingUnit.trim()) throw new Error("Unidade de embalagem inválida");
     updates.packagingUnit = packagingUnit.trim();
   }
-  if (conversionFactor === null) updates.conversionFactor = null;
+  if (conversionFactor === null) updates.conversionFactor = undefined;
   else if (conversionFactor != null) {
     if (!Number.isFinite(conversionFactor) || conversionFactor <= 0 || !Number.isInteger(conversionFactor)) {
       throw new Error("Fator de conversão deve ser inteiro positivo");
@@ -858,9 +857,9 @@ async function configurePackagingImpl(
     updates.conversionFactor = conversionFactor;
   }      // Consistência: a conversão só é considerada válida com os TRÊS campos.
   const candidate = {
-    baseUnit: updates.baseUnit ?? product.baseUnit ?? null,
-    packagingUnit: updates.packagingUnit ?? product.packagingUnit ?? null,
-    conversionFactor: updates.conversionFactor ?? product.conversionFactor ?? null,
+    baseUnit: baseUnit === null ? null : updates.baseUnit ?? product.baseUnit ?? null,
+    packagingUnit: packagingUnit === null ? null : updates.packagingUnit ?? product.packagingUnit ?? null,
+    conversionFactor: conversionFactor === null ? null : updates.conversionFactor ?? product.conversionFactor ?? null,
   };
   const present = [candidate.baseUnit, candidate.packagingUnit, candidate.conversionFactor];
   const partiallySet = present.some((x) => x != null) && present.some((x) => x == null);
@@ -920,7 +919,7 @@ export const configureBadgeProtectorPackaging = internalMutation({
     if (already) {
       return { applied: false, reason: "Protetor de crachá já configurado (1 caixa = 50 un) — idempotente." };
     }
-    await configurePackagingImpl(ctx, null as unknown as string, closed._id, {
+    await configurePackagingImpl(ctx, undefined, closed._id, {
       baseUnit: "un", packagingUnit: "caixa", conversionFactor: 50,
     });
     await ctx.db.insert("auditLogs", {
@@ -1126,13 +1125,13 @@ export const withdrawFamily = mutation({
 
     if (closedPacksToConsume > 0) {
       const movementId = await insertSupplyMovement(ctx, {
-        productId: String(closedMember._id),
+        productId: closedMember._id,
         type: "exit",
         quantity: closedPacksToConsume,
         previousPhysical: closedBefore.physical,
         newPhysical: closedNewPhysical,
         reserved: closedBefore.reserved,
-        userId: String(userId),
+        userId,
         timestamp: now,
         consumedLots: closedConsumed,
         observation:
@@ -1144,13 +1143,13 @@ export const withdrawFamily = mutation({
 
     if (openPacks > 0) {
       const movementId = await insertSupplyMovement(ctx, {
-        productId: String(looseMember._id),
+        productId: looseMember._id,
         type: "adjustment",
         quantity: openedUnits,
         previousPhysical: looseBefore.physical,
         newPhysical: looseBefore.physical + openedUnits,
         reserved: looseBefore.reserved,
-        userId: String(userId),
+        userId,
         timestamp: now,
         consumedLots: reclassifiedLots,
         observation:
@@ -1169,7 +1168,7 @@ export const withdrawFamily = mutation({
         previousPhysical: loosePreviousPhysical,
         newPhysical: looseNewPhysical,
         reserved: looseBefore.reserved,
-        userId: String(userId),
+        userId,
         timestamp: now,
         consumedLots: looseConsumed,
         observation:
