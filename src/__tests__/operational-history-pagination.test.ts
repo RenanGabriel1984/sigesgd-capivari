@@ -129,7 +129,7 @@ describe("paginação e escopo do histórico de devoluções", () => {
     expect(page).toContain("api.returns.returnablePage");
     expect(page).toContain("loadMoreExits(50)");
     expect(page).toContain("api.returns.returnableByExit");
-    expect(page).toContain('exitParam ? { exitMovementId: exitParam as any } : "skip"');
+    expect(page).toContain('exitParam ? { exitMovementId: exitParam as Id<"stockMovements"> } : "skip"');
     expect(page).toContain("Carregar mais saídas");
   });
 });
