@@ -14,6 +14,8 @@
  * é criado, alterado ou removido por esta suíte.
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   resolveNfeDestination,
@@ -387,5 +389,34 @@ describe("Devoluções: condição do material e saldo disponível", () => {
 
   it("mantém condição não classificada em quarentena", () => {
     expect(returnConditionReturnsToAvailableStock("other")).toBe(false);
+  });
+});
+
+
+const returnsMutationSource = readFileSync(resolve(process.cwd(), "src/convex/returns.ts"), "utf8");
+
+describe("Devolução: materiais não utilizáveis não entram no saldo disponível", () => {
+  it("desvia condições não utilizáveis para quarentena antes de consultar ou alterar o estoque", () => {
+    const quarantineStart = returnsMutationSource.indexOf("if (!returnConditionReturnsToAvailableStock(condition))");
+    const availableStockStart = returnsMutationSource.indexOf("// 2) Repor estoque físico global");
+    expect(quarantineStart).toBeGreaterThan(-1);
+    expect(availableStockStart).toBeGreaterThan(quarantineStart);
+    const quarantineBranch = returnsMutationSource.slice(quarantineStart, availableStockStart);
+    expect(quarantineBranch).toContain('ctx.db.insert("returnLotAllocations"');
+    expect(quarantineBranch).toContain('ctx.db.insert("auditLogs"');
+    expect(quarantineBranch).toContain("destino: quarentena");
+    expect(quarantineBranch).toContain("return returnId");
+    expect(quarantineBranch).not.toContain('ctx.db.patch(stock._id');
+    expect(quarantineBranch).not.toContain('ctx.db.insert("stockByLocation"');
+    expect(quarantineBranch).not.toContain('ctx.db.insert("stockMovements"');
+    expect(quarantineBranch).not.toContain("quantityAvailable + allocation.quantity");
+  });
+
+  it("exige localização física para material recebido em quarentena", () => {
+    const quarantineStart = returnsMutationSource.indexOf("if (!returnConditionReturnsToAvailableStock(condition))");
+    const availableStockStart = returnsMutationSource.indexOf("// 2) Repor estoque físico global");
+    const quarantineBranch = returnsMutationSource.slice(quarantineStart, availableStockStart);
+    expect(quarantineBranch).toContain("if (!args.locationId)");
+    expect(quarantineBranch).toContain("armário de destino");
   });
 });
