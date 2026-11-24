@@ -8,7 +8,7 @@ import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
 import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
-import { assertUniqueApprovalItemIds, assertCompleteDeliveryItemIds, getDeliveryStockAdjustment } from "../lib/request-approval-validation";
+import { assertUniqueApprovalItemIds, assertCompleteApprovalItemIds, assertCompleteDeliveryItemIds, getDeliveryStockAdjustment } from "../lib/request-approval-validation";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -234,6 +234,13 @@ export const approve = mutation({
     });
     if (request.status !== "pending") throw new Error("Solicitação não está pendente. Verifique se já foi aprovada, rejeitada ou cancelada.");
     assertUniqueApprovalItemIds(args.items);
+    const allRequestItemsForApproval = await ctx.db.query("requestItems")
+      .withIndex("by_request", (q: any) => q.eq("requestId", args.requestId))
+      .collect();
+    assertCompleteApprovalItemIds(
+      allRequestItemsForApproval.map((item: any) => ({ itemId: item._id as string })),
+      args.items.map((item) => ({ itemId: item.itemId as string })),
+    );
 
     // ─── PHASE 1: Validate ALL items and calculate total reservation per product ───
     // Group by productId to handle multiple request items for the same product
@@ -264,14 +271,12 @@ export const approve = mutation({
     if (totalItemsToApprove === 0) throw new Error("Nenhum item com quantidade aprovada maior que zero.");
 
     // Validate stock for each product (fresh read)
-    const stockMap: Record<string, any> = {};
     for (const [productId, needed] of Object.entries(stockNeeded)) {
-      const stock = await ctx.db
+      const stockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", productId as any))
-        .first();
-
-      if (!stock) throw new Error(`Registro de estoque não encontrado para "${needed.productName}"`);
+        .collect();
+      const stock = requireSingleValidGlobalStock(stockRows, productId);
 
       const available = stock.physicalQuantity - stock.reservedQuantity;
       if (available < needed.quantity) {
@@ -281,7 +286,6 @@ export const approve = mutation({
           `Nenhum item foi reservado — operação abortada.`
         );
       }
-      stockMap[productId] = stock;
     }
 
     // ─── PHASE 2: Apply ALL reservations atomically (no partial approval) ───
@@ -300,10 +304,11 @@ export const approve = mutation({
       await ctx.db.patch(item.itemId, { quantityApproved: item.quantityApproved });
 
       // Reserve stock (re-read for safety)
-      const freshStock = await ctx.db
+      const freshStockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
-        .first();
+        .collect();
+      const freshStock = requireSingleValidGlobalStock(freshStockRows, String(requestItem.productId));
 
       if (freshStock) {
         const newReserved = freshStock.reservedQuantity + item.quantityApproved;
