@@ -399,9 +399,9 @@ export default function Reports() {
                           <TableCell className="text-sm font-medium">{item.name}</TableCell>
                           <TableCell className="text-xs">{item.categoryName}</TableCell>
                           <TableCell className="text-xs">{[item.brand, item.model].filter(Boolean).join(" — ") || "—"}</TableCell>
-                          <TableCell className="text-sm text-right font-mono">{item.physicalQuantity ?? item.currentStock}</TableCell>
-                          <TableCell className="text-xs text-right font-mono">{item.reservedQuantity ?? 0}</TableCell>
-                          <TableCell className="text-sm text-right font-mono">{item.availableQuantity ?? ((item.physicalQuantity ?? item.currentStock) - (item.reservedQuantity ?? 0))}</TableCell>
+                          <TableCell className="text-sm text-right font-mono">{item.currentStock}</TableCell>
+                          <TableCell className="text-xs text-right font-mono">{item.reservedQuantity}</TableCell>
+                          <TableCell className="text-sm text-right font-mono">{item.currentStock - item.reservedQuantity}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.minimumStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.idealStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.maximumStock}</TableCell>
