@@ -25,12 +25,39 @@ describe("segurança e precisão dos relatórios", () => {
     }
   });
 
-  it("dashboard carrega os saldos de estoque uma vez e reutiliza o mapa nos indicadores", () => {
+  it("dashboard concilia saldo global, local e lotes antes de calcular indicadores", () => {
     const stats = queryBlock("stats", "export const stockPosition");
     expect(stats).toContain('ctx.db.query("stock").collect()');
-    expect(stats).toContain("const stockByProduct = new Map(stockRows.map");
-    expect(stats).toContain("stockByProduct.get(p._id)");
+    expect(stats).toContain('ctx.db.query("stockByLocation").collect()');
+    expect(stats).toContain('ctx.db.query("lots").collect()');
+    expect(stats).toContain("inspectProductStockIntegrity");
+    expect(stats).toContain("integrity.consistent");
+    expect(stats).toContain("integrity.globalStock?.physicalQuantity");
+    expect(stats).toContain("divergentStock");
+    expect(stats).toContain("integrityAlerts");
     expect(stats).not.toContain('.withIndex("by_product", (q) => q.eq("productId", p._id))');
+  });
+
+  it("posição geral não escolhe arbitrariamente o primeiro saldo e sinaliza divergências", () => {
+    const block = queryBlock("stockPosition", "export const stockPositionByArea");
+    expect(block).toContain('ctx.db.query("stock").collect()');
+    expect(block).toContain('ctx.db.query("stockByLocation").collect()');
+    expect(block).toContain('ctx.db.query("lots").collect()');
+    expect(block).toContain("inspectProductStockIntegrity");
+    expect(block).toContain('status = "Inconsistente"');
+    expect(block).toContain("currentStock: qty");
+    expect(block).toContain("integrityIssues: integrity.issues");
+    expect(block).not.toContain(".first()");
+  });
+
+  it("relatório de posição distingue saldo não confiável e limitações de rastreabilidade", () => {
+    const page = readFileSync(resolve(root, "src/pages/Reports.tsx"), "utf8");
+    expect(page).toContain('item.currentStock ?? "—"');
+    expect(page).toContain('item.status === "Inconsistente"');
+    expect(page).toContain("item.integrityIssues.join");
+    expect(page).toContain("item.integrityLimitations.join");
+    expect(page).toContain("Alertas de integridade");
+    expect(page).toContain("Limitações de rastreio");
   });
 
   it("dashboard conta todas as trocas GomaQ da competência pelo índice de data, sem limite arbitrário", () => {
@@ -52,6 +79,19 @@ describe("segurança e precisão dos relatórios", () => {
     expect(page).toContain("api.dashboard.stockPositionByArea");
     expect(page).toContain("Posição por área e local físico");
     expect(page).toContain("CSV detalhado");
+  });
+
+  it("posição por área/local não apresenta soma ambígua de linhas duplicadas", () => {
+    const block = queryBlock("stockPositionByArea", "export const movementReport");
+    const page = readFileSync(resolve(root, "src/pages/Reports.tsx"), "utf8");
+    expect(block).toContain("hasDuplicateRows");
+    expect(block).toContain("validPhysicalQuantity ? physicalQuantity : null");
+    expect(block).toContain("validAvailableQuantity ? physicalQuantity - reservedQuantity : null");
+    expect(block).toContain("integrityIssues");
+    expect(page).toContain('item.physicalQuantity ?? "—"');
+    expect(page).toContain('item.availableQuantity ?? "—"');
+    expect(page).toContain("item.integrityIssues.join");
+    expect(page).toContain("Não confiável");
   });
 
   it("filtra as duas extremidades no índice antes do limite de registros", () => {
