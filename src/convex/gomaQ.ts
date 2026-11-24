@@ -252,6 +252,9 @@ export const createExchange = mutation({
   },
   handler: async (ctx, args) => {
     const { userId, user } = await requireManagerOrAdmin(ctx);
+    if (args.requestId) {
+      throw new Error("Trocas GomaQ vinculadas a requisições devem ser registradas pela entrega oficial da solicitação, que baixa o físico e libera a reserva em conjunto.");
+    }
 
     if (!Number.isFinite(args.quantityDelivered) || args.quantityDelivered <= 0) throw new Error("Quantidade entregue deve ser um número finito maior que zero");
     if (!Number.isFinite(args.quantityEmptyReceived) || args.quantityEmptyReceived < 0) throw new Error("Quantidade de carcaças deve ser um número finito não negativo");
@@ -270,6 +273,7 @@ export const createExchange = mutation({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
     const stock = requireSingleValidGlobalStock(stockRows, product.name);
+    await assertProductReservationConsistent(ctx, args.productId, product.name, stock);
     const availableStock = stock.physicalQuantity - stock.reservedQuantity;
     if (availableStock < args.quantityDelivered) {
       throw new Error(`Estoque insuficiente. Disponível: ${availableStock} (físico: ${stock.physicalQuantity}, reservado: ${stock.reservedQuantity}). Necessário: ${args.quantityDelivered}`);
@@ -308,6 +312,7 @@ export const createExchange = mutation({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
     const freshStock = requireSingleValidGlobalStock(freshStockRows, product.name);
+    await assertProductReservationConsistent(ctx, args.productId, product.name, freshStock);
     if (freshStock.physicalQuantity < args.quantityDelivered) {
       throw new Error(`Estoque insuficiente (concorrência). Físico: ${freshStock.physicalQuantity}. Necessário: ${args.quantityDelivered}.`);
     }
