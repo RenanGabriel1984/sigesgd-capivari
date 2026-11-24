@@ -595,10 +595,8 @@ export const requestPasswordReset = mutation({
 
     // A recovery email must resolve to exactly one account. Keep the public
     // response identical for missing and ambiguous identities.
-    const matchingUsers = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", email))
-      .collect();
+    const allUsers = await ctx.db.query("users").collect();
+    const matchingUsers = findUsersByNormalizedEmail(allUsers, email);
     const userResolution = resolveUniqueRecord(matchingUsers);
     if (userResolution.status !== "unique") {
       return { message: RESET_GENERIC_MESSAGE };
@@ -690,10 +688,8 @@ export const confirmPasswordReset = mutation({
     if (!email) throw new Error("E-mail é obrigatório");
     assertPasswordPolicy(args.newPassword);
 
-    const matchingUsers = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", email))
-      .collect();
+    const allUsers = await ctx.db.query("users").collect();
+    const matchingUsers = findUsersByNormalizedEmail(allUsers, email);
     const userResolution = resolveUniqueRecord(matchingUsers);
 
     // Missing or ambiguous identity: same public failure.
@@ -925,10 +921,8 @@ export const bootstrapResetPassword = internalMutation({
     if (!email) throw new Error("E-mail é obrigatório");
     assertPasswordPolicy(args.newPassword);
 
-    const matchingUsers = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", email))
-      .collect();
+    const allUsers = await ctx.db.query("users").collect();
+    const matchingUsers = findUsersByNormalizedEmail(allUsers, email);
     const userResolution = resolveUniqueRecord(matchingUsers);
 
     if (userResolution.status !== "unique") {
