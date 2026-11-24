@@ -716,6 +716,8 @@ const schema = defineSchema(
       reason: v.string(),
       // Condição do material devolvido
       condition: v.optional(returnConditionValidator),
+      // Resultado da devolução no saldo utilizável; ausente em registros legados.
+      stockDisposition: v.optional(v.union(v.literal("available"), v.literal("quarantine"))),
       // Local físico de destino da devolução (opcional)
       locationId: v.optional(v.id("storageLocations")),
       returnedByUserId: v.id("users"),
