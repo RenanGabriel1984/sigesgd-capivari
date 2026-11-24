@@ -9,7 +9,7 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { buildLotLocationMigrationPlan } from "../lib/lot-location-migration";
 import { buildHistoricalAreaClassificationPlan } from "../lib/stock-area-classification";
-import { assertProductLedgerConsistent, resolveWithdrawalLocation, consumeLotLocationStock, recordLotMovementAllocations } from "./lotLocationLedger";
+import { assertProductLedgerConsistent, assertProductReservationConsistent, resolveWithdrawalLocation, consumeLotLocationStock, recordLotMovementAllocations } from "./lotLocationLedger";
 import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 import { v } from "convex/values";
 import {
@@ -540,6 +540,7 @@ export const quickExit = mutation({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
     const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
+    await assertProductReservationConsistent(ctx, args.productId, product.name, stock);
 
     const available =
       (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
