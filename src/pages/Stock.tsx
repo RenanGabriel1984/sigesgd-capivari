@@ -267,6 +267,15 @@ export default function Stock() {
                               ))}
                               {dimension.lots.length > 4 && <p className="text-muted-foreground">+ {dimension.lots.length - 4} lote(s)</p>}
                             </div>
+                          ) : dimension?.untrackedLocations?.length ? (
+                            <div className="space-y-1 text-xs">
+                              <p className="text-muted-foreground">Saldo legado sem lote classificado</p>
+                              {dimension.untrackedLocations.map((location: any) => (
+                                <div key={location.locationId}>
+                                  <span className="font-medium">{location.locationName}</span>: {location.quantityAvailable}
+                                </div>
+                              ))}
+                            </div>
                           ) : <span className="text-xs text-muted-foreground">Sem saldo por lote/local</span>}
                           {(dimension?.unmappedLotQuantity > 1e-9 || dimension?.invalidBalanceCount > 0 || Math.abs(dimension?.globalVsLocationDifference ?? 0) > 1e-9 || Math.abs(dimension?.globalVsLotsDifference ?? 0) > 1e-9) && (
                             <Badge variant="destructive" className="mt-1 text-[10px]">Conciliação pendente</Badge>
