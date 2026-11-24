@@ -187,6 +187,9 @@ export const recordMovement = mutation({
     if (args.costAmount !== undefined && (!Number.isFinite(args.costAmount) || args.costAmount < 0)) {
       throw new Error("O custo informado é inválido.");
     }
+    if (!["supplier_delivery", "supplier_exchange"].includes(args.movementType) && args.costAmount !== undefined) {
+      throw new Error("O custo de aquisição só pode ser informado em recebimentos ou trocas com fornecedor.");
+    }
     if (!args.observation.trim()) throw new Error("Informe a observação da movimentação.");
     if (args.movementType === "opening_balance") {
       const existing = await ctx.db.query("waterMovements").collect();
