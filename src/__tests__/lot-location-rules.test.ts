@@ -194,7 +194,7 @@ describe("lot location transfer rules", () => {
 
   it("rejects arithmetic overflow in the destination balance", () => {
     expect(() => planLotLocationTransfer({
-      sourceQuantity: 1,
+      sourceQuantity: Number.MAX_VALUE,
       destinationQuantity: Number.MAX_VALUE,
       quantity: Number.MAX_VALUE,
     })).toThrow(/limites numéricos/i);
