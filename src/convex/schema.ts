@@ -959,6 +959,8 @@ const schema = defineSchema(
       assetId: v.id("assets"),
       productId: v.id("products"),
       lotId: v.optional(v.string()),
+      movementId: v.optional(v.id("stockMovements")),
+      locationId: v.optional(v.id("storageLocations")),
       quantity: v.number(),
       installedAt: v.number(),
       removedAt: v.optional(v.number()),
