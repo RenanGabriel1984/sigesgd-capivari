@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildHistoricalAreaClassificationPlan, type HistoricalAreaLotEvidence } from "@/lib/stock-area-classification";
+import { INITIAL_STOCK_MANIFEST } from "@/lib/stock-regularization-manifest";
 
 const areas = [
   { areaId: "area-ti", name: "TI Geral", active: true },
@@ -36,6 +37,32 @@ describe("classificação histórica de áreas por evidência documental", () =>
       areaName: "TI Geral",
     }]);
     expect(plan.blockers).toHaveLength(0);
+  });
+
+
+  it("reconcilia integralmente os 53 itens da carga inicial do manifesto", () => {
+    const lots = INITIAL_STOCK_MANIFEST.map((row, index) => ({
+      lotId: `lot-${index + 1}`,
+      lotNumber: `LOT-${index + 1}`,
+      productName: row.productName,
+      areaId: null,
+      sourceEntry: { entryNumber: "ENT-2026-000001", invoiceNumber: null },
+      entryItemEvidence: [{
+        entryItemId: `entry-item-${index + 1}`,
+        productName: row.productName,
+        quantity: row.quantity,
+        unitOfMeasure: row.unitOfMeasure,
+        locationId: row.locationName === "Armário TI 01" ? "location-1" : "location-2",
+        locationName: row.locationName,
+        lotId: `lot-${index + 1}`,
+      }],
+    }));
+    const plan = buildHistoricalAreaClassificationPlan(lots, areas);
+    expect(plan.blockers).toHaveLength(0);
+    expect(plan.patches).toHaveLength(53);
+    expect(plan.patches.filter((row) => row.areaName === "TI Geral")).toHaveLength(36);
+    expect(plan.patches.filter((row) => row.areaName === "Impressoras")).toHaveLength(17);
+    expect(INITIAL_STOCK_MANIFEST.reduce((sum, row) => sum + row.quantity, 0)).toBe(2803);
   });
 
   it("classifica material da NF Gomaq 372043 como Impressoras", () => {
