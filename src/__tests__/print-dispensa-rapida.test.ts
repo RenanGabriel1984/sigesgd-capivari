@@ -298,7 +298,7 @@ describe("PRINT-DISP — A retirada é uma SAÍDA real, não transferência", ()
     // e aplicado ao lote e ao bucket do armário selecionado.
     expect(withdrawBlock).toContain("consumeLotLocationStock");
     expect(withdrawBlock).toContain("resolveWithdrawalLocation");
-    expect(withdrawBlock).toContain("lotId: consumedLots[0].lotId");
+    expect(withdrawBlock).toContain("lotId: consumedLots[0]?.lotId");
     expect(ledger).toContain("planFifoLotLocationConsumption");
     expect(ledger).toContain("quantityAvailable");
     expect(ledger).toContain("lotLocationBalances");
