@@ -468,7 +468,7 @@ const schema = defineSchema(
       lotId: v.id("lots"),
       locationId: v.id("storageLocations"),
       quantity: v.number(),
-      allocationType: v.union(v.literal("withdrawal"), v.literal("reclassification")),
+      allocationType: v.union(v.literal("withdrawal"), v.literal("reclassification"), v.literal("reversal")),
       createdAt: v.number(),
     }).index("by_movement", ["movementId"])
       .index("by_lot", ["lotId"])
