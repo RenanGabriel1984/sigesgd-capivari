@@ -482,3 +482,12 @@ describe("liberação de quarentena exige conciliação prévia", () => {
     expect(quarantine).toContain("A inspeção foi bloqueada: a soma dos lotes diverge do saldo do armário.");
   });
 });
+
+describe("interface de devolução exige armário para todo retorno", () => {
+  it("não permite enviar devolução sem localização física mesmo para material sem lote", () => {
+    const ui = readFileSync(resolve(__dirname, "../pages/Returns.tsx"), "utf8");
+    expect(ui).toContain("if (!locationId)");
+    expect(ui).toContain("<Label>Armário de destino *</Label>");
+    expect(ui).not.toContain("Sem alteração de local");
+  });
+});
