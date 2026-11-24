@@ -7,7 +7,13 @@ import { requirePermission, requireRequestAction } from "./rbac";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
-import { assertProductLedgerConsistent, consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
+import {
+  assertProductLedgerConsistent,
+  assertProductReservationConsistent,
+  consumeLotLocationStock,
+  recordLotMovementAllocations,
+  resolveWithdrawalLocation,
+} from "./lotLocationLedger";
 import { assertUniqueApprovalItemIds, assertCompleteApprovalItemIds, assertCompleteDeliveryItemIds, getDeliveryStockAdjustment } from "../lib/request-approval-validation";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
@@ -294,6 +300,7 @@ export const approve = mutation({
         throw new Error(`Registro global de estoque não encontrado para "${needed.productName}".`);
       }
 
+      await assertProductReservationConsistent(ctx, productId, needed.productName, stock);
       const available = stock.physicalQuantity - stock.reservedQuantity;
       if (available < needed.quantity) {
         throw new Error(
@@ -429,6 +436,16 @@ export const deliver = mutation({
       approvedRequestItems.map((item: any) => ({ itemId: item._id as string })),
       inputItems.map((item) => ({ itemId: item.itemId as string })),
     );
+
+    // Pré-valida TODO o escopo antes da primeira escrita: o saldo reservado
+    // deve coincidir com todas as linhas de solicitações ainda aprovadas.
+    const deliveryProductIds = [...new Set(approvedRequestItems.map((item: any) => String(item.productId)))];
+    for (const productId of deliveryProductIds) {
+      const product = await ctx.db.get(productId as Id<"products">);
+      const label = product?.name ?? productId;
+      const stock = await assertProductLedgerConsistent(ctx, productId, label);
+      await assertProductReservationConsistent(ctx, productId, label, stock);
+    }
 
     // Validate receiver
     if (args.receivedByUserId) {
@@ -577,6 +594,15 @@ export const cancel = mutation({
         .collect();
 
       const releaseDetails: string[] = [];
+      const cancellationProductIds = [...new Set(items
+        .filter((item: any) => item.quantityApproved > 0)
+        .map((item: any) => String(item.productId)))];
+      for (const productId of cancellationProductIds) {
+        const product = await ctx.db.get(productId as Id<"products">);
+        const label = product?.name ?? productId;
+        const stock = await assertProductLedgerConsistent(ctx, productId, label);
+        await assertProductReservationConsistent(ctx, productId, label, stock);
+      }
 
       for (const item of items) {
         if (item.quantityApproved <= 0) continue;
