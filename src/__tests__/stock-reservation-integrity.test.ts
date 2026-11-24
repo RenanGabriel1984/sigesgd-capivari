@@ -120,3 +120,18 @@ describe("integração da conciliação de reservas nos fluxos operacionais", ()
     expect(source("convex/returns.ts")).toContain("assertProductReservationConsistent(ctx, returned.productId, product.name, stock)");
   });
 });
+
+
+describe("reconciliação administrativa respeita livros-razão e reservas", () => {
+  it("não escolhe arbitrariamente um registro global e valida reservas/lotes antes de corrigir físico", () => {
+    const diagnostics = source("convex/diagnostics.ts");
+    const start = diagnostics.indexOf("async function reconcileCore");
+    const end = diagnostics.indexOf("export const environmentCheckInternal", start);
+    const core = diagnostics.slice(start, end);
+    expect(core).toContain("productStocks.length > 1");
+    expect(core).toContain("assertProductReservationConsistent(ctx, product._id, product.name, st ?? null)");
+    expect(core).toContain("assertProductLedgerSnapshot(");
+    expect(core).not.toContain("stocks.find((s: any) => s.productId === product._id)");
+    expect(core).toContain("reason: structuralError");
+  });
+});
