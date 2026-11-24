@@ -136,6 +136,24 @@ describe("planejamento da migração lote × armário", () => {
     expect(() => buildLotLocationMigrationPlan(report(override as Partial<LotLocationMigrationReport>))).toThrow(/Migração lote × armário bloqueada/);
   });
 
+
+  it("ignora áreas e locais inativos sem saldo ou referência em lote", () => {
+    const base = report();
+    const withUnusedInactive = {
+      ...base,
+      summary: {
+        ...base.summary,
+        stockAreas: {
+          areas: [...base.summary.stockAreas.areas, { areaId: "old-area", name: "Área antiga", active: false }],
+        },
+        storageLocations: {
+          locations: [...base.summary.storageLocations.locations, { locationId: "old-location", name: "Local antigo", active: false }],
+        },
+      },
+    };
+    expect(buildLotLocationMigrationPlan(withUnusedInactive).insertions).toHaveLength(61);
+  });
+
   it("bloqueia lote ambíguo", () => {
     const base = report();
     const changed = {
