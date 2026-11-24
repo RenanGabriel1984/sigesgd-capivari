@@ -6,7 +6,7 @@ import { hashPassword, verifyPassword } from "./auth/passwords";
 import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
-import { resolveUniqueRecord } from "../lib/credential-integrity";
+import { findUsersByNormalizedEmail, resolveUniqueRecord } from "../lib/credential-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -277,10 +277,8 @@ export const verifyCredentials = internalQuery({
   handler: async (ctx, args) => {
     // An email is also expected to identify exactly one account. Never
     // authenticate whichever duplicate happens to be returned first.
-    const matchingUsers = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", args.email))
-      .collect();
+    const allUsers = await ctx.db.query("users").collect();
+    const matchingUsers = findUsersByNormalizedEmail(allUsers, args.email);
     const userResolution = resolveUniqueRecord(matchingUsers);
 
     // ── ANTI-ENUMERAÇÃO (§11) ────────────────────────────────────────────
@@ -400,12 +398,10 @@ export const bootstrapAdmin = internalMutation({
     assertPasswordPolicy(args.password);
 
     // ── Check for duplicate email ──
-    const existingUser = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", email))
-      .first();
+    const allUsers = await ctx.db.query("users").collect();
+    const existingUsers = findUsersByNormalizedEmail(allUsers, email);
 
-    if (existingUser) {
+    if (existingUsers.length > 0) {
       throw new Error("Já existe um usuário com este e-mail");
     }
 
@@ -487,10 +483,8 @@ export const bootstrapSetPassword = internalMutation({
     assertPasswordPolicy(args.password);
 
     // Find user by email
-    const matchingUsers = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", email))
-      .collect();
+    const allUsers = await ctx.db.query("users").collect();
+    const matchingUsers = findUsersByNormalizedEmail(allUsers, email);
     const userResolution = resolveUniqueRecord(matchingUsers);
 
     if (userResolution.status !== "unique") {
@@ -601,10 +595,8 @@ export const requestPasswordReset = mutation({
 
     // A recovery email must resolve to exactly one account. Keep the public
     // response identical for missing and ambiguous identities.
-    const matchingUsers = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", email))
-      .collect();
+    const allUsers = await ctx.db.query("users").collect();
+    const matchingUsers = findUsersByNormalizedEmail(allUsers, email);
     const userResolution = resolveUniqueRecord(matchingUsers);
     if (userResolution.status !== "unique") {
       return { message: RESET_GENERIC_MESSAGE };
@@ -696,10 +688,8 @@ export const confirmPasswordReset = mutation({
     if (!email) throw new Error("E-mail é obrigatório");
     assertPasswordPolicy(args.newPassword);
 
-    const matchingUsers = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", email))
-      .collect();
+    const allUsers = await ctx.db.query("users").collect();
+    const matchingUsers = findUsersByNormalizedEmail(allUsers, email);
     const userResolution = resolveUniqueRecord(matchingUsers);
 
     // Missing or ambiguous identity: same public failure.
@@ -931,10 +921,8 @@ export const bootstrapResetPassword = internalMutation({
     if (!email) throw new Error("E-mail é obrigatório");
     assertPasswordPolicy(args.newPassword);
 
-    const matchingUsers = await ctx.db
-      .query("users")
-      .withIndex("email", (q) => q.eq("email", email))
-      .collect();
+    const allUsers = await ctx.db.query("users").collect();
+    const matchingUsers = findUsersByNormalizedEmail(allUsers, email);
     const userResolution = resolveUniqueRecord(matchingUsers);
 
     if (userResolution.status !== "unique") {
