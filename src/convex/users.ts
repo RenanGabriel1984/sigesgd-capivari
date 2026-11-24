@@ -3,6 +3,7 @@ import { query, mutation, internalMutation, QueryCtx } from "./_generated/server
 import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
 import { requirePermission } from "./rbac";
+import { findUsersByNormalizedEmail, normalizeLoginEmail } from "../lib/credential-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -118,17 +119,33 @@ export const createUser = mutation({
     name: v.string(), email: v.string(),
     role: v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician")),
     organizationId: v.optional(v.id("organizations")),
+    temporaryPassword: v.string(),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireAdmin(ctx);
-    const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", args.email.toLowerCase())).first();
-    if (existing) throw new Error("Já existe um usuário com este e-mail");
+    const email = normalizeLoginEmail(args.email);
+    if (!email) throw new Error("E-mail é obrigatório");
+    const allUsers = await ctx.db.query("users").collect();
+    const existing = findUsersByNormalizedEmail(allUsers, email);
+    if (existing.length > 0) throw new Error("Já existe um usuário com este e-mail");
+
+    if (args.temporaryPassword.trim().length < 8 || args.temporaryPassword.length > 200) {
+      throw new Error("A senha temporária deve ter entre 8 e 200 caracteres.");
+    }
 
     const now = Date.now();
     const newUserId = await ctx.db.insert("users", {
-      name: args.name, email: args.email.toLowerCase(), role: args.role,
+      name: args.name.trim(), email, role: args.role,
       organizationId: args.organizationId, active: true,
+      requiresPasswordReset: true,
       createdAt: now, updatedAt: now,
+    });
+    const { hash, salt } = await hashPassword(args.temporaryPassword);
+    await ctx.db.insert("passwords", {
+      userId: newUserId,
+      passwordHash: hash,
+      salt,
+      requiresReset: true,
     });
     await ctx.db.insert("auditLogs", {
       userId, action: "create", entity: "users", entityId: newUserId,
@@ -158,10 +175,15 @@ export const updateUser = mutation({
         if (admins.length <= 1) throw new Error("Não é possível alterar o perfil do único administrador");
       }
     }
-    if (updates.email) {
-      const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", updates.email!.toLowerCase())).first();
-      if (existing && existing._id !== userId) throw new Error("Já existe outro usuário com este e-mail");
-      updates.email = updates.email.toLowerCase();
+    if (updates.email !== undefined) {
+      const email = normalizeLoginEmail(updates.email);
+      if (!email) throw new Error("E-mail é obrigatório");
+      const allUsers = await ctx.db.query("users").collect();
+      const existing = findUsersByNormalizedEmail(allUsers, email);
+      if (existing.some((record: any) => record._id !== userId)) {
+        throw new Error("Já existe outro usuário com este e-mail");
+      }
+      updates.email = email;
     }
 
     await ctx.db.patch(userId, { ...updates, updatedAt: Date.now() });
