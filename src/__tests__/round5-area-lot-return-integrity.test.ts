@@ -420,3 +420,37 @@ describe("Devolução: materiais não utilizáveis não entram no saldo disponí
     expect(quarantineBranch).toContain("armário de destino");
   });
 });
+
+
+describe("Inspeção de quarentena: liberação ou descarte auditados", () => {
+  it("só permite resolver devoluções explicitamente em quarentena", () => {
+    expect(returnsMutationSource).toContain('if (returned.stockDisposition !== "quarantine")');
+    expect(returnsMutationSource).toContain("Somente devoluções pendentes em quarentena podem ser inspecionadas.");
+  });
+
+  it("exige justificativa e armário ativo antes da decisão", () => {
+    expect(returnsMutationSource).toContain("A justificativa da inspeção é obrigatória.");
+    expect(returnsMutationSource).toContain("if (!location || !location.active)");
+  });
+
+  it("ao liberar, recompõe saldo global, armário e lote com rastreabilidade", () => {
+    const start = returnsMutationSource.indexOf("export const resolveQuarantine");
+    const mutation = returnsMutationSource.slice(start);
+    expect(mutation).toContain("requireSingleValidGlobalStock");
+    expect(mutation).toContain('ctx.db.patch(stock._id, { physicalQuantity: newPhysical })');
+    expect(mutation).toContain('ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable + allocation.quantity })');
+    expect(mutation).toContain('type: "return"');
+    expect(mutation).toContain('stockDisposition: args.disposition');
+    expect(mutation).toContain('inspectedByUserId: userId');
+    expect(mutation).toContain('ctx.db.insert("auditLogs"');
+  });
+
+  it("o descarte não entra no ramo de recomposição do estoque", () => {
+    const start = returnsMutationSource.indexOf("if (args.disposition === \"available\")");
+    const end = returnsMutationSource.indexOf("await ctx.db.patch(args.returnId", start);
+    const availableBranch = returnsMutationSource.slice(start, end);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(availableBranch).toContain('ctx.db.patch(stock._id, { physicalQuantity: newPhysical })');
+  });
+});
