@@ -119,7 +119,7 @@ export const createUser = mutation({
     name: v.string(), email: v.string(),
     role: v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician")),
     organizationId: v.optional(v.id("organizations")),
-    temporaryPassword: v.optional(v.string()),
+    temporaryPassword: v.string(),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireAdmin(ctx);
@@ -129,28 +129,24 @@ export const createUser = mutation({
     const existing = findUsersByNormalizedEmail(allUsers, email);
     if (existing.length > 0) throw new Error("Já existe um usuário com este e-mail");
 
-    if (args.temporaryPassword !== undefined) {
-      if (args.temporaryPassword.trim().length < 8 || args.temporaryPassword.length > 200) {
-        throw new Error("A senha temporária deve ter entre 8 e 200 caracteres.");
-      }
+    if (args.temporaryPassword.trim().length < 8 || args.temporaryPassword.length > 200) {
+      throw new Error("A senha temporária deve ter entre 8 e 200 caracteres.");
     }
 
     const now = Date.now();
     const newUserId = await ctx.db.insert("users", {
       name: args.name.trim(), email, role: args.role,
       organizationId: args.organizationId, active: true,
-      requiresPasswordReset: args.temporaryPassword !== undefined,
+      requiresPasswordReset: true,
       createdAt: now, updatedAt: now,
     });
-    if (args.temporaryPassword !== undefined) {
-      const { hash, salt } = await hashPassword(args.temporaryPassword);
-      await ctx.db.insert("passwords", {
-        userId: newUserId,
-        passwordHash: hash,
-        salt,
-        requiresReset: true,
-      });
-    }
+    const { hash, salt } = await hashPassword(args.temporaryPassword);
+    await ctx.db.insert("passwords", {
+      userId: newUserId,
+      passwordHash: hash,
+      salt,
+      requiresReset: true,
+    });
     await ctx.db.insert("auditLogs", {
       userId, action: "create", entity: "users", entityId: newUserId,
       details: `Usuário "${args.name}" criado com perfil "${args.role}"`, timestamp: Date.now(),
