@@ -20,7 +20,7 @@
  *  - FUNÇÃO INTERNA: sem rota pública, não substitui a UI de importação.
  */
 import { internalMutation } from "./_generated/server";
-import { assertProductLedgerConsistent } from "./lotLocationLedger";
+import { assertProductLedgerConsistent, assertProductReservationConsistent } from "./lotLocationLedger";
 import { v } from "convex/values";
 import {
   applyImplementationStockStamp,
@@ -273,6 +273,7 @@ export const registerGomaqNfe372043 = internalMutation({
       const productBefore = await ctx.db.get(r.productId);
       if (!productBefore) throw new Error("Produto da NF-e Gomaq não encontrado.");
       const prevStock = await assertProductLedgerConsistent(ctx, r.productId, productBefore.name);
+      await assertProductReservationConsistent(ctx, r.productId, productBefore.name, prevStock);
       const prevPhysical = prevStock?.physicalQuantity ?? 0;
       const prevReserved = prevStock?.reservedQuantity ?? 0;
 
