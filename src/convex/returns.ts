@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { assertProductReservationConsistent } from "./lotLocationLedger";
 import { planLotReturnAllocations } from "../lib/return-lot-allocation";
 import {
   validateReturnQuantity,
@@ -454,6 +455,7 @@ export const create = mutation({
       .withIndex("by_product", (q) => q.eq("productId", exit.productId))
       .collect();
     const stock = requireSingleValidGlobalStock(stockRows, String(exit.productId));
+    await assertProductReservationConsistent(ctx, exit.productId, product.name, stock);
     const sblList = await ctx.db.query("stockByLocation")
       .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
       .collect();
@@ -626,6 +628,7 @@ export const resolveQuarantine = mutation({
       const stockRows = await ctx.db.query("stock")
         .withIndex("by_product", (q) => q.eq("productId", returned.productId)).collect();
       const stock = requireSingleValidGlobalStock(stockRows, String(returned.productId));
+      await assertProductReservationConsistent(ctx, returned.productId, product.name, stock);
       const locationRows = await ctx.db.query("stockByLocation")
         .withIndex("by_product", (q) => q.eq("productId", returned.productId)).collect();
       validateUniqueScopedStockRows(locationRows, String(returned.productId));
