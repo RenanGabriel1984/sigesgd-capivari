@@ -557,3 +557,125 @@ export const create = mutation({
     return returnId;
   },
 });
+
+
+/**
+ * Conclui a inspeção de uma devolução em quarentena. A liberação recompõe
+ * estoque global, armário e lotes de forma atômica; o descarte não recompõe.
+ */
+export const resolveQuarantine = mutation({
+  args: {
+    returnId: v.id("returns"),
+    disposition: v.union(v.literal("available"), v.literal("disposed")),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePermission(ctx, "stock.mutate", { entity: "returns" });
+    const reason = args.reason.trim();
+    if (!reason) throw new Error("A justificativa da inspeção é obrigatória.");
+    const returned: any = await ctx.db.get(args.returnId);
+    if (!returned) throw new Error("Devolução não encontrada.");
+    if (returned.stockDisposition !== "quarantine") {
+      throw new Error("Somente devoluções pendentes em quarentena podem ser inspecionadas.");
+    }
+    const product: any = await ctx.db.get(returned.productId);
+    if (!product) throw new Error("Produto da devolução não encontrado.");
+    const location: any = returned.locationId ? await ctx.db.get(returned.locationId) : null;
+    if (!location || !location.active) throw new Error("O armário de destino não existe ou está inativo.");
+
+    const now = Date.now();
+    if (args.disposition === "available") {
+      const stockRows = await ctx.db.query("stock")
+        .withIndex("by_product", (q) => q.eq("productId", returned.productId)).collect();
+      const stock = requireSingleValidGlobalStock(stockRows, String(returned.productId));
+      const locationRows = await ctx.db.query("stockByLocation")
+        .withIndex("by_product", (q) => q.eq("productId", returned.productId)).collect();
+      validateUniqueScopedStockRows(locationRows, String(returned.productId));
+      const locationBalance = locationRows.find((row: any) => row.locationId === returned.locationId);
+      const allocations = await ctx.db.query("returnLotAllocations")
+        .withIndex("by_return", (q: any) => q.eq("returnId", args.returnId)).collect();
+      const activeLots = await ctx.db.query("lots")
+        .withIndex("by_product", (q: any) => q.eq("productId", returned.productId)).collect();
+
+      if (allocations.length > 0) {
+        const allocatedTotal = allocations.reduce((sum: number, row: any) => sum + row.quantity, 0);
+        if (allocatedTotal !== returned.quantity) {
+          throw new Error("As alocações de quarentena não correspondem à quantidade devolvida. Regularize antes de liberar.");
+        }
+        for (const allocation of allocations) {
+          const lot: any = await ctx.db.get(allocation.lotId);
+          if (!lot || !lot.active || lot.productId !== returned.productId) {
+            throw new Error("Lote da quarentena inexistente, inativo ou incompatível com o produto.");
+          }
+          const balances = await ctx.db.query("lotLocationBalances")
+            .withIndex("by_lot", (q: any) => q.eq("lotId", allocation.lotId)).collect();
+          const matching = balances.filter((row: any) => row.locationId === returned.locationId);
+          if (matching.length > 1) throw new Error("Há saldos duplicados do lote no armário de destino.");
+          await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable + allocation.quantity });
+          if (matching[0]) {
+            await ctx.db.patch(matching[0]._id, {
+              quantityAvailable: matching[0].quantityAvailable + allocation.quantity,
+              updatedAt: now,
+            });
+          } else {
+            await ctx.db.insert("lotLocationBalances", {
+              lotId: lot._id,
+              productId: returned.productId,
+              locationId: returned.locationId,
+              quantityAvailable: allocation.quantity,
+              updatedAt: now,
+            });
+          }
+        }
+      } else if (activeLots.some((lot: any) => lot.active)) {
+        throw new Error("O produto possui rastreio por lote, mas a devolução em quarentena não tem alocação. Regularize antes de liberar.");
+      }
+
+      const newPhysical = stock.physicalQuantity + returned.quantity;
+      await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+      if (locationBalance) {
+        await ctx.db.patch(locationBalance._id, { quantity: locationBalance.quantity + returned.quantity });
+      } else {
+        await ctx.db.insert("stockByLocation", {
+          productId: returned.productId,
+          locationId: returned.locationId,
+          quantity: returned.quantity,
+        });
+      }
+      await ctx.db.insert("stockMovements", {
+        productId: returned.productId,
+        type: "return",
+        quantity: returned.quantity,
+        previousPhysical: stock.physicalQuantity,
+        newPhysical,
+        previousReserved: stock.reservedQuantity,
+        newReserved: stock.reservedQuantity,
+        userId,
+        requestId: returned.requestId,
+        exitMovementId: returned.exitMovementId,
+        locationId: returned.locationId,
+        lotId: allocations.length === 1 ? (await ctx.db.get(allocations[0].lotId) as any)?.lotNumber : undefined,
+        observation: "Liberação de quarentena após inspeção — " + reason,
+        timestamp: now,
+      });
+    }
+
+    await ctx.db.patch(args.returnId, {
+      stockDisposition: args.disposition,
+      inspectedAt: now,
+      inspectedByUserId: userId,
+      inspectionReason: reason,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "return_stock",
+      entity: "returns",
+      entityId: args.returnId,
+      details: args.disposition === "available"
+        ? "Inspeção aprovou " + returned.quantity + " unidade(s) de " + product.name + "; material liberado da quarentena e reincorporado ao estoque. Motivo: " + reason
+        : "Inspeção determinou descarte de " + returned.quantity + " unidade(s) de " + product.name + "; material não reincorporado ao estoque. Motivo: " + reason,
+      timestamp: now,
+    });
+    return args.returnId;
+  },
+});
