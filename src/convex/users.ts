@@ -3,7 +3,7 @@ import { query, mutation, internalMutation, QueryCtx } from "./_generated/server
 import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
 import { requirePermission } from "./rbac";
-import { normalizeLoginEmail } from "../lib/credential-integrity";
+import { findUsersByNormalizedEmail, normalizeLoginEmail } from "../lib/credential-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -125,7 +125,8 @@ export const createUser = mutation({
     const { userId } = await requireAdmin(ctx);
     const email = normalizeLoginEmail(args.email);
     if (!email) throw new Error("E-mail é obrigatório");
-    const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).collect();
+    const allUsers = await ctx.db.query("users").collect();
+    const existing = findUsersByNormalizedEmail(allUsers, email);
     if (existing.length > 0) throw new Error("Já existe um usuário com este e-mail");
 
     if (args.temporaryPassword !== undefined) {
@@ -181,7 +182,8 @@ export const updateUser = mutation({
     if (updates.email !== undefined) {
       const email = normalizeLoginEmail(updates.email);
       if (!email) throw new Error("E-mail é obrigatório");
-      const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", email)).collect();
+      const allUsers = await ctx.db.query("users").collect();
+      const existing = findUsersByNormalizedEmail(allUsers, email);
       if (existing.some((record: any) => record._id !== userId)) {
         throw new Error("Já existe outro usuário com este e-mail");
       }
