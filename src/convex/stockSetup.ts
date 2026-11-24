@@ -1928,10 +1928,14 @@ export const stockDimensionOverview = query({
         }
         keys.add(key);
         const areaId = lot.areaId ? String(lot.areaId) : null;
-        const areaName = areaId ? ((areaById.get(areaId) as any)?.name ?? "Área não encontrada") : "Sem área";
+        const area = areaId ? areaById.get(areaId) as any : null;
+        if (areaId && (!area || area.active === false)) invalidBalanceCount++;
+        const areaName = areaId ? (area?.name ?? "Área não encontrada") : "Sem área";
         const areaKey = areaId ?? "unclassified";
-        const group = areasMap.get(areaKey) ?? { areaId, areaName, quantityAvailable: 0, locations: new Map<string, number>() };
         const locationId = String(balance.locationId);
+        const location = locationById.get(locationId) as any;
+        if (!location || location.active === false) invalidBalanceCount++;
+        const group = areasMap.get(areaKey) ?? { areaId, areaName, quantityAvailable: 0, locations: new Map<string, number>() };
         group.quantityAvailable += balance.quantityAvailable;
         group.locations.set(locationId, (group.locations.get(locationId) ?? 0) + balance.quantityAvailable);
         areasMap.set(areaKey, group);
