@@ -1,6 +1,7 @@
 name: Auditoria operacional de produção — somente leitura
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - codex/stock-ledger-integration
