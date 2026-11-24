@@ -688,28 +688,6 @@ export const close = mutation({
       throw new Error(
         `O inventário antigo de "${productName}" não identifica armários. Cancele-o e abra um novo inventário com contagem por local físico.`,
       );
-      const counted = legacyCount.countedQuantity;
-      if (!Number.isFinite(counted) || counted < 0) throw new Error(`A contagem de "${productName}" está inválida.`);
-      const delta = counted - currentPhysical;
-      if (counted < reserved) throw new Error(`A contagem de "${productName}" ficaria abaixo das reservas (${reserved}).`);
-      if (stock) await ctx.db.patch(stock._id, { physicalQuantity: counted });
-      else await ctx.db.insert("stock", { productId, physicalQuantity: counted, reservedQuantity: 0 });
-      if (Math.abs(delta) > EPSILON) {
-        await ctx.db.insert("stockMovements", {
-          productId,
-          type: "adjustment",
-          quantity: Math.abs(delta),
-          previousPhysical: currentPhysical,
-          newPhysical: counted,
-          previousReserved: reserved,
-          newReserved: reserved,
-          userId,
-          observation: `Ajuste agregado via inventário ${inv.inventoryNumber}${scopeSuffix}. Justificativa: ${justification}`,
-          timestamp: now,
-        });
-        adjustments += 1;
-        adjustmentDetails.push(`${productName}: ${currentPhysical} → ${counted}`);
-      }
     }
 
     await ctx.db.patch(args.inventoryId, {
