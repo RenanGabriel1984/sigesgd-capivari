@@ -151,6 +151,7 @@ export default function StockTransfersPage() {
                     <TableRow>
                       <TableHead>Data</TableHead>
                       <TableHead>Produto</TableHead>
+                      <TableHead>Lote</TableHead>
                       <TableHead>Qtd</TableHead>
                       <TableHead>Origem</TableHead>
                       <TableHead>Destino</TableHead>
@@ -165,6 +166,9 @@ export default function StockTransfersPage() {
                         </TableCell>
                         <TableCell className="text-sm font-medium">
                           {t.product?.name ?? "\u2014"}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {t.lot?.lotNumber ?? "\u2014"}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline">{t.quantity}</Badge>
