@@ -42,7 +42,7 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     await requireUser(ctx);
-    const returns = await ctx.db.query("returns").order("desc").take(200);
+    const returns = await ctx.db.query("returns").order("desc").collect();
     return Promise.all(returns.map(async (r: any) => {
       const product = await ctx.db.get(r.productId);
       const lot = r.lotId ? await ctx.db.get(r.lotId) : null;
@@ -88,7 +88,7 @@ export const returnable = query({
       .query("stockMovements")
       .withIndex("by_type", (q: any) => q.eq("type", "exit"))
       .order("desc")
-      .take(300);
+      .collect();
     const allReturns = await loadReturns(ctx);
 
     const rows = await Promise.all(exits.map(async (m: any) => {
