@@ -65,7 +65,7 @@ function downloadCSV(filename: string, csvContent: string) {
 }
 
 function exportStockPositionCSV(data: any[]) {
-  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade";
+  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Físico;Reservado;Disponível;Mínimo;Ideal;Máximo;Status;Unidade";
   const rows = data.map((r) =>
     [
       r.internalCode,
@@ -73,7 +73,9 @@ function exportStockPositionCSV(data: any[]) {
       r.categoryName,
       r.brand ?? "",
       r.model ?? "",
-      r.currentStock,
+      r.physicalQuantity ?? r.currentStock,
+      r.reservedQuantity ?? 0,
+      r.availableQuantity ?? ((r.physicalQuantity ?? r.currentStock) - (r.reservedQuantity ?? 0)),
       r.minimumStock,
       r.idealStock,
       r.maximumStock,
@@ -381,7 +383,9 @@ export default function Reports() {
                         <TableHead className="text-xs">Nome</TableHead>
                         <TableHead className="text-xs">Categoria</TableHead>
                         <TableHead className="text-xs">Marca/Modelo</TableHead>
-                        <TableHead className="text-xs text-right">Saldo</TableHead>
+                        <TableHead className="text-xs text-right">Físico</TableHead>
+                        <TableHead className="text-xs text-right">Reservado</TableHead>
+                        <TableHead className="text-xs text-right">Disponível</TableHead>
                         <TableHead className="text-xs text-right">Mínimo</TableHead>
                         <TableHead className="text-xs text-right">Ideal</TableHead>
                         <TableHead className="text-xs text-right">Máximo</TableHead>
@@ -395,7 +399,9 @@ export default function Reports() {
                           <TableCell className="text-sm font-medium">{item.name}</TableCell>
                           <TableCell className="text-xs">{item.categoryName}</TableCell>
                           <TableCell className="text-xs">{[item.brand, item.model].filter(Boolean).join(" — ") || "—"}</TableCell>
-                          <TableCell className="text-sm text-right font-mono">{item.currentStock}</TableCell>
+                          <TableCell className="text-sm text-right font-mono">{item.physicalQuantity ?? item.currentStock}</TableCell>
+                          <TableCell className="text-xs text-right font-mono">{item.reservedQuantity ?? 0}</TableCell>
+                          <TableCell className="text-sm text-right font-mono">{item.availableQuantity ?? ((item.physicalQuantity ?? item.currentStock) - (item.reservedQuantity ?? 0))}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.minimumStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.idealStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.maximumStock}</TableCell>
@@ -417,7 +423,7 @@ export default function Reports() {
                       ))}
                       {!stockPosition && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={11} className="text-center py-8 text-muted-foreground text-sm">
                             Carregando…
                           </TableCell>
                         </TableRow>
