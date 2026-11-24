@@ -10,6 +10,10 @@ const runner = readFileSync(
   resolve(__dirname, "../../scripts/audit-operational-stock-readonly.sh"),
   "utf8",
 );
+const windowsRunner = readFileSync(
+  resolve(__dirname, "../../scripts/audit-operational-stock-readonly.ps1"),
+  "utf8",
+);
 
 describe("auditoria operacional do estoque — somente leitura", () => {
   it("consulta as dimensões operacionais necessárias", () => {
