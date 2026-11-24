@@ -306,9 +306,9 @@ export async function recordLotMovementAllocations(
   input: {
     movementId: any;
     productId: any;
-    locationId: any;
-    allocations: Array<{ lotId: any; quantity: number }>;
-    allocationType?: "withdrawal" | "reclassification";
+    locationId?: any;
+    allocations: Array<{ lotId: any; quantity: number; locationId?: any }>;
+    allocationType?: "withdrawal" | "reclassification" | "reversal";
   },
 ): Promise<void> {
   const allocationType = input.allocationType ?? "withdrawal";
@@ -318,11 +318,13 @@ export async function recordLotMovementAllocations(
     throw new Error("Alocação de lote inválida para a movimentação.");
   }
   for (const allocation of input.allocations) {
+    const locationId = allocation.locationId ?? input.locationId;
+    if (!locationId) throw new Error("A alocação de lote da movimentação precisa identificar o armário.");
     await ctx.db.insert("stockMovementLotAllocations", {
       movementId: input.movementId,
       productId: input.productId,
       lotId: allocation.lotId,
-      locationId: input.locationId,
+      locationId,
       quantity: allocation.quantity,
       allocationType,
       createdAt: Date.now(),
