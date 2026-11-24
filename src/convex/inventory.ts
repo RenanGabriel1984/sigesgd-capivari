@@ -161,7 +161,9 @@ export const create = mutation({
 
       for (const locationId of targetLocationIds) {
         const location = await ctx.db.get(locationId as any);
-        if (!location) throw new Error("Um dos armários do inventário não existe mais.");
+        if (!location || location.active === false) {
+          throw new Error("Um dos armários do inventário não existe ou está inativo. Reabra o inventário usando apenas locais ativos.");
+        }
       }
 
       if (trackedLots.length > 0) {
@@ -412,6 +414,17 @@ export const close = mutation({
           if (!lot || lot.productId !== productId) {
             throw new Error(`Lote de contagem inválido para "${productName}".`);
           }
+          if (!lot.areaId) {
+            throw new Error(`O lote ${lot.lotNumber} ainda não possui área classificada. Classifique-o antes de fechar o inventário.`);
+          }
+          const lotArea: any = await ctx.db.get(lot.areaId);
+          if (!lotArea || lotArea.active === false) {
+            throw new Error(`O lote ${lot.lotNumber} aponta para uma área inexistente ou inativa.`);
+          }
+          const countLocation: any = await ctx.db.get(count.locationId);
+          if (!countLocation || countLocation.active === false) {
+            throw new Error(`O armário da contagem do lote ${lot.lotNumber} não existe ou está inativo.`);
+          }
           const key = `${String(lot._id)}::${String(count.locationId)}`;
           if (seen.has(key)) throw new Error(`Contagem duplicada para o lote ${lot.lotNumber} no mesmo armário.`);
           seen.add(key);
@@ -591,6 +604,10 @@ export const close = mutation({
           const locationId = String(count.locationId);
           if (seenLocations.has(locationId)) throw new Error(`Contagem duplicada de "${productName}" no mesmo armário.`);
           seenLocations.add(locationId);
+          const countLocation: any = await ctx.db.get(count.locationId);
+          if (!countLocation || countLocation.active === false) {
+            throw new Error(`O armário da contagem de "${productName}" não existe ou está inativo.`);
+          }
           const counted = count.countedQuantity;
           if (!Number.isFinite(counted) || counted < 0) throw new Error(`A contagem de "${productName}" está inválida.`);
           const currentRow = sbls.find((row: any) => String(row.locationId) === locationId);
@@ -668,10 +685,9 @@ export const close = mutation({
       if (trackedLots.length > 0) {
         throw new Error(`Não é seguro fechar inventário agregado de "${productName}" porque há lotes ativos.`);
       }
-      const currentLocalTotal = sbls.reduce((sum: number, row: any) => sum + row.quantity, 0);
-      if (currentLocalTotal > EPSILON) {
-        throw new Error(`O inventário antigo de "${productName}" não identifica armários. Recrie-o com contagem por local.`);
-      }
+      throw new Error(
+        `O inventário antigo de "${productName}" não identifica armários. Cancele-o e abra um novo inventário com contagem por local físico.`,
+      );
       const counted = legacyCount.countedQuantity;
       if (!Number.isFinite(counted) || counted < 0) throw new Error(`A contagem de "${productName}" está inválida.`);
       const delta = counted - currentPhysical;
