@@ -28,9 +28,9 @@ describe("R33 — roteamento dos ambientes", () => {
   });
 
   it("ignora VITE_CONVEX_URL externo no build de produção", () => {
-    expect(
-      resolveConvexUrl({ VITE_CONVEX_URL: DEVELOPMENT_CONVEX_URL }),
-    ).toBe(OFFICIAL_CONVEX_URL);
+    expect(resolveConvexUrl({ VITE_CONVEX_URL: DEVELOPMENT_CONVEX_URL })).toBe(
+      OFFICIAL_CONVEX_URL,
+    );
     expect(
       resolveConvexUrl({
         VITE_APP_ENV: "production",
