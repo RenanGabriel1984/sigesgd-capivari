@@ -22,3 +22,23 @@ describe("integridade da seleção de inventário", () => {
     expect(source).toContain("Nenhum produto ativo corresponde ao escopo do inventário.");
   });
 });
+
+
+describe("integridade do fechamento do inventário", () => {
+  it("bloqueia saldos positivos de lote/armário que surgiram após a abertura e não foram contados", () => {
+    const closeStart = source.indexOf("export const close = mutation({");
+    const lotBranchStart = source.indexOf("if (lotCounts.length > 0)", closeStart);
+    const coverageStart = source.indexOf("const currentPositiveLotBalances", lotBranchStart);
+    const reconciliationStart = source.indexOf("// Recalcula os totais dos lotes", coverageStart);
+    expect(closeStart).toBeGreaterThan(-1);
+    expect(lotBranchStart).toBeGreaterThan(closeStart);
+    expect(coverageStart).toBeGreaterThan(lotBranchStart);
+    expect(reconciliationStart).toBeGreaterThan(coverageStart);
+    const guard = source.slice(coverageStart, reconciliationStart);
+    expect(guard).toContain('withIndex("by_product"');
+    expect(guard).toContain("balance.quantityAvailable <= EPSILON");
+    expect(guard).toContain("if (inv.locationId && String(balance.locationId) !== String(inv.locationId)) continue");
+    expect(guard).toContain("if (!seen.has(key))");
+    expect(guard).toContain("não foi contado");
+  });
+});
