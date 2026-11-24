@@ -83,7 +83,7 @@ export default function WaterManagement() {
   const submitMovement = async () => {
     const full = Number(fullQuantity);
     const empty = Number(emptyQuantity);
-    if (!Number.isFinite(full) || !Number.isFinite(empty) || full < 0 || empty < 0) {
+    if (!Number.isFinite(full) || !Number.isFinite(empty) || (movementType !== "adjustment" && (full < 0 || empty < 0))) {
       return toast.error("Informe quantidades válidas e não negativas.");
     }
     let fullDelta = full;
