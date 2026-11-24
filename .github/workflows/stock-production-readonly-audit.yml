@@ -128,7 +128,7 @@ jobs:
             "- Produtos sinalizados para revisão: " + flagged.length,
             "",
           ];
-          appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\\n"));
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n"));
           console.log("STOCK_PRODUCTION_READONLY_AUDIT_BEGIN");
           console.log(JSON.stringify(report));
           console.log("STOCK_PRODUCTION_READONLY_AUDIT_END");
