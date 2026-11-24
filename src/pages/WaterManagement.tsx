@@ -101,8 +101,10 @@ export default function WaterManagement() {
         movementType,
         fullDelta,
         emptyDelta,
-        supplierName: supplierName.trim() || undefined,
-        costAmount: movementCost.trim() ? Number(movementCost) : undefined,
+        supplierName: movementType === "supplier_delivery" || movementType === "supplier_exchange" ? supplierName.trim() || undefined : undefined,
+        costAmount: movementType === "supplier_delivery" || movementType === "supplier_exchange"
+          ? movementCost.trim() ? Number(movementCost) : undefined
+          : undefined,
         observation: movementObservation.trim(),
       });
       resetMovement();
@@ -197,7 +199,7 @@ export default function WaterManagement() {
               </SelectContent></Select></div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2"><Label>{movementType === "adjustment" ? "Ajuste de cheios (+/-)" : movementType === "consumption" ? "Cheios consumidos" : "Garrafões cheios"}</Label><Input type="number" step="1" value={fullQuantity} onChange={(event) => setFullQuantity(event.target.value)} placeholder="0" /></div>
-                <div className="space-y-2"><Label>{movementType === "adjustment" ? "Ajuste de vazios (+/-)" : movementType === "consumption" ? "Vazios recebidos" : movementType === "supplier_exchange" ? "Vazios devolvidos ao fornecedor" : "Garrafões vazios"}</Label><Input type="number" step="1" value={emptyQuantity} onChange={(event) => setEmptyQuantity(event.target.value)} placeholder="0" /></div>
+                {movementType !== "supplier_delivery" && <div className="space-y-2"><Label>{movementType === "adjustment" ? "Ajuste de vazios (+/-)" : movementType === "consumption" ? "Vazios recebidos" : movementType === "supplier_exchange" ? "Vazios devolvidos ao fornecedor" : "Garrafões vazios"}</Label><Input type="number" step="1" value={emptyQuantity} onChange={(event) => setEmptyQuantity(event.target.value)} placeholder="0" /></div>}
               </div>
               {(movementType === "supplier_delivery" || movementType === "supplier_exchange") && <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-2"><Label>Fornecedor</Label><Input value={supplierName} onChange={(event) => setSupplierName(event.target.value)} placeholder="Nome do fornecedor" /></div><div className="space-y-2"><Label>Custo manual (R$)</Label><Input type="number" min="0" step="0.01" value={movementCost} onChange={(event) => setMovementCost(event.target.value)} placeholder="0,00" /></div></div>}
               <div className="space-y-2"><Label>Observação / justificativa</Label><Textarea value={movementObservation} onChange={(event) => setMovementObservation(event.target.value)} placeholder="Informe o recebimento, consumo, troca ou motivo do ajuste." /></div>
