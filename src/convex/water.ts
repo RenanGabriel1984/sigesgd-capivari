@@ -51,6 +51,7 @@ export const dashboard = query({
     const balances = calculateWaterBalances(movements);
     const paymentsByCharge = new Map<string, number>();
     for (const payment of payments) {
+      if (payment.reversedAt) continue;
       const key = `${String(payment.periodId)}|${String(payment.participantId)}`;
       paymentsByCharge.set(key, (paymentsByCharge.get(key) ?? 0) + payment.amount);
     }
@@ -115,7 +116,7 @@ export const dashboard = query({
 
     const purchasedCost = movements.reduce((sum: number, row: any) => sum + (row.costAmount ?? 0), 0);
     const allocatedCost = periods.reduce((sum: number, row: any) => sum + row.totalCost, 0);
-    const paidCost = payments.reduce((sum: number, row: any) => sum + row.amount, 0);
+    const paidCost = payments.filter((row: any) => !row.reversedAt).reduce((sum: number, row: any) => sum + row.amount, 0);
     const movementRows = movements
       .slice()
       .sort((a: any, b: any) => b.createdAt - a.createdAt)
@@ -342,6 +343,33 @@ export const createPeriod = mutation({
   },
 });
 
+export const reversePayment = mutation({
+  args: {
+    paymentId: v.id("waterPayments"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireWaterManage(ctx);
+    const reason = args.reason.trim();
+    if (!reason) throw new Error("Informe o motivo do estorno do pagamento.");
+    const payment = await ctx.db.get(args.paymentId);
+    if (!payment) throw new Error("Pagamento não encontrado.");
+    if (payment.reversedAt) throw new Error("Este pagamento já foi estornado.");
+    const now = Date.now();
+    await ctx.db.patch(args.paymentId, {
+      reversedAt: now,
+      reversedByUserId: userId,
+      reversalReason: reason,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId, action: "cancel", entity: "waterPayments", entityId: args.paymentId,
+      details: `Pagamento de água estornado. Valor: R$ ${payment.amount.toFixed(2)}. Motivo: ${reason}`,
+      timestamp: now,
+    });
+    return args.paymentId;
+  },
+});
+
 export const recordPayment = mutation({
   args: {
     periodId: v.id("waterPeriods"),
@@ -365,7 +393,7 @@ export const recordPayment = mutation({
     const charge = charges.find((row: any) => row.participantId === args.participantId);
     if (!charge) throw new Error("Este participante não faz parte do rateio selecionado.");
     const participantPayments = payments
-      .filter((row: any) => row.participantId === args.participantId)
+      .filter((row: any) => row.participantId === args.participantId && !row.reversedAt)
       .map((row: any) => row.amount);
     const remaining = remainingWaterShare(charge.shareAmount, participantPayments);
     if (normalizedAmount > remaining + 0.000001) {
