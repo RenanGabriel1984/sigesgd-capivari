@@ -45,6 +45,8 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import { verifyPassword } from "./auth/passwords";
+import { assertProductLedgerSnapshot } from "../lib/stock-read-integrity";
+import { assertProductReservationConsistent } from "./lotLocationLedger";
 
 const OFFICIAL_ENTRY_NUMBER = "ENT-2026-000001";
 
@@ -224,8 +226,12 @@ export const reconcileFromLocationsInternal = internalMutation({
 
 async function reconcileCore(ctx: any, userId: string | null) {
   const products = await ctx.db.query("products").collect();
-  const sbl = await ctx.db.query("stockByLocation").collect();
-  const stocks = await ctx.db.query("stock").collect();
+  const [sbl, stocks, lots, lotLocationBalances] = await Promise.all([
+    ctx.db.query("stockByLocation").collect(),
+    ctx.db.query("stock").collect(),
+    ctx.db.query("lots").collect(),
+    ctx.db.query("lotLocationBalances").collect(),
+  ]);
 
   const sblPerProduct = new Map<string, number>();
   for (const r of sbl) {
@@ -250,6 +256,7 @@ async function reconcileCore(ctx: any, userId: string | null) {
     byLocation: number;
     lots: number;
     physical: number;
+    reason: string;
   }> = [];
   const negatives: Array<{ productId: string; name: string; physical: number }> = [];
   const reservedTotal = { before: 0, after: 0 };
@@ -257,11 +264,65 @@ async function reconcileCore(ctx: any, userId: string | null) {
   for (const product of products) {
     analyzed++;
     const byLocation = sblPerProduct.get(product._id) ?? 0;
-    const st = stocks.find((s: any) => s.productId === product._id);
+    const productStocks = stocks.filter((row: any) => row.productId === product._id);
+    const productLocations = sbl.filter((row: any) => row.productId === product._id);
+    const productLots = lots.filter((row: any) => row.productId === product._id);
+    const productLotBalances = lotLocationBalances.filter((row: any) => row.productId === product._id);
+    const st = productStocks.length === 1 ? productStocks[0] : undefined;
     const physical = Number(st?.physicalQuantity ?? 0);
     reservedTotal.before += Number(st?.reservedQuantity ?? 0);
     reservedTotal.after += Number(st?.reservedQuantity ?? 0);
     globalBefore += physical;
+
+    // A reconciliação só pode corrigir o saldo global quando não há duplicidade
+    // e os livros por armário e por lote estão coerentes entre si. Ela não
+    // corrige estrutura de lote, alocação física ou reservas.
+    let structuralError: string | null = null;
+    if (productStocks.length > 1) {
+      structuralError = "Há registros globais duplicados para o produto.";
+    } else {
+      try {
+        await assertProductReservationConsistent(ctx, product._id, product.name, st ?? null);
+        assertProductLedgerSnapshot({
+          globalRows: [{
+            physicalQuantity: byLocation,
+            reservedQuantity: Number(st?.reservedQuantity ?? 0),
+          }],
+          locationRows: productLocations.map((row: any) => ({
+            productId: String(row.productId),
+            locationId: String(row.locationId),
+            quantity: Number(row.quantity),
+          })),
+          lots: productLots.map((lot: any) => ({
+            lotId: String(lot._id),
+            productId: String(lot.productId),
+            lotNumber: lot.lotNumber,
+            quantityAvailable: Number(lot.quantityAvailable),
+            active: lot.active,
+          })),
+          lotLocationBalances: productLotBalances.map((balance: any) => ({
+            lotId: String(balance.lotId),
+            productId: String(balance.productId),
+            locationId: String(balance.locationId),
+            quantityAvailable: Number(balance.quantityAvailable),
+          })),
+        }, product.name);
+      } catch (error) {
+        structuralError = error instanceof Error ? error.message : "Falha na conciliação dimensional.";
+      }
+    }
+    if (structuralError) {
+      const lotsTotal = productLots.reduce((sum: number, lot: any) => sum + Number(lot.quantityAvailable ?? 0), 0);
+      structuralDivergences.push({
+        productId: product._id,
+        name: product.name,
+        byLocation,
+        lots: lotsTotal,
+        physical,
+        reason: structuralError,
+      });
+      continue;
+    }
 
     if (byLocation < 0) {
       structuralDivergences.push({
@@ -270,6 +331,7 @@ async function reconcileCore(ctx: any, userId: string | null) {
         byLocation,
         lots: -1,
         physical,
+        reason: "O saldo físico por armário está negativo.",
       });
       continue;
     }
@@ -277,10 +339,6 @@ async function reconcileCore(ctx: any, userId: string | null) {
     if (physical !== byLocation) {
       // Divergência só é corrigível se confinada ao stock: a soma por
       // localização precisa bater com os lotes ativos.
-      const productLots = await ctx.db
-        .query("lots")
-        .withIndex("by_product", (q: any) => q.eq("productId", product._id))
-        .collect();
       const lotsTotal = (productLots as Array<{ active?: boolean; quantityAvailable: number }>)
         .filter((l) => l.active)
         .reduce((sum, l) => sum + Number(l.quantityAvailable), 0);
@@ -291,6 +349,7 @@ async function reconcileCore(ctx: any, userId: string | null) {
           byLocation,
           lots: lotsTotal,
           physical,
+          reason: "A soma dos armários diverge do total dos lotes.",
         });
         continue; // reporta e NÃO inventa correção
       }
@@ -350,7 +409,7 @@ async function reconcileCore(ctx: any, userId: string | null) {
         `Antes: ${globalBefore} → Depois: ${globalAfter}. ` +
         `Detalhes: ${corrections.map((c) => `${c.name}: ${c.globalBefore}→${c.byLocation}`).join("; ")}` +
         (structuralDivergences.length > 0
-          ? ` | Estruturais NÃO corrigidas: ${structuralDivergences.map((d) => `${d.name} (sbl=${d.byLocation}, lotes=${d.lots}, stock=${d.physical})`).join("; ")}`
+          ? ` | Estruturais NÃO corrigidas: ${structuralDivergences.map((d) => `${d.name} (sbl=${d.byLocation}, lotes=${d.lots}, stock=${d.physical}; motivo=${d.reason})`).join("; ")}`
           : ""),
       timestamp: Date.now(),
     });
