@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/rbac-audit-hardening
+      - codex/stock-ledger-integration
   pull_request:
     branches:
       - main
