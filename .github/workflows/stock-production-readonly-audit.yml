@@ -1,0 +1,145 @@
+name: Auditoria operacional de produção — somente leitura
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/stock-ledger-integration
+    paths:
+      - ".github/workflows/stock-production-readonly-audit.yml"
+      - "scripts/stock-operational-readonly-audit.inline.ts"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stock-production-readonly-audit-savory-sockeye
+  cancel-in-progress: false
+
+jobs:
+  production-read-only-audit:
+    name: Consultar produção savory-sockeye-292 sem escrita
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TARGET_DEPLOYMENT: savory-sockeye-292
+      CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_MAINTENANCE_KEY_SAVORY_SOCKEYE }}
+    steps:
+      - name: Checkout da branch auditada sem credenciais persistidas
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: codex/stock-ledger-integration
+          persist-credentials: false
+
+      - name: Bun 1.3.14
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: "1.3.14"
+
+      - name: Validar credencial de produção e fixar deployment
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/codex/stock-ledger-integration" ]; then
+            echo "::error::Branch inesperada; consulta de produção cancelada."
+            exit 1
+          fi
+          if [ -z "${CONVEX_DEPLOY_KEY:-}" ]; then
+            echo "enabled=false" >> "${GITHUB_OUTPUT}"
+            {
+              echo "### Auditoria de produção — não executada"
+              echo ""
+              echo "O secret CONVEX_MAINTENANCE_KEY_SAVORY_SOCKEYE não está configurado no repositório."
+              echo "Nenhuma conexão/consulta foi tentada e nenhum dado foi alterado."
+              echo "Configure uma deploy key restrita a prod:savory-sockeye-292 para habilitar a leitura."
+            } >> "${GITHUB_STEP_SUMMARY}"
+            echo "::notice::Secret de produção ausente; leitura não executada."
+            exit 0
+          fi
+          if [ -n "${CONVEX_DEPLOYMENT:-}" ]; then
+            echo "::error::CONVEX_DEPLOYMENT está definida; destino pode ser sobrescrito."
+            exit 1
+          fi
+          prefix="${CONVEX_DEPLOY_KEY%%|*}"
+          token="${CONVEX_DEPLOY_KEY#*|}"
+          if [ "${prefix}" != "prod:${TARGET_DEPLOYMENT}" ]; then
+            echo "::error::A deploy key não corresponde exatamente a prod:${TARGET_DEPLOYMENT}. Nenhuma consulta executada."
+            exit 1
+          fi
+          if [[ "${token}" != eyJ* || "${token}" == *'|'* || "${token}" =~ [[:space:]] ]]; then
+            echo "::error::Formato da deploy key inválido. Nenhuma consulta executada."
+            exit 1
+          fi
+          echo "enabled=true" >> "${GITHUB_OUTPUT}"
+          echo "Destino validado: prod:${TARGET_DEPLOYMENT}. A chave não será exibida."
+
+      - name: Instalar dependências pelo lockfile
+        if: steps.target.outputs.enabled == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Executar a mesma consulta operacional inline somente leitura
+        if: steps.target.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_query="scripts/stock-operational-readonly-audit.inline.ts"
+          query="${RUNNER_TEMP}/stock-operational-readonly-audit-production.inline.ts"
+          report="${RUNNER_TEMP}/stock-operational-readonly-audit-production.json"
+          sed 's/deploymentRequested: "first-herring-264"/deploymentRequested: "savory-sockeye-292"/' "${source_query}" > "${query}"
+          if [ "$(grep -Fc 'deploymentRequested: "savory-sockeye-292"' "${query}")" -ne 1 ]; then
+            echo "::error::A consulta não foi fixada para savory-sockeye-292."
+            exit 1
+          fi
+          if grep -Eq 'ctx\.db\.(insert|patch|replace|delete)[[:space:]]*\(|runMutation|internalMutation|mutation[[:space:]]*\(' "${query}"; then
+            echo "::error::A consulta contém padrão de escrita; execução cancelada."
+            exit 1
+          fi
+          # A própria deploy key validada define o destino. Sem --prod,
+          # --push, deploy, mutation ou action: apenas convex run --inline-query.
+          bunx convex run --inline-query "$(cat "${query}")" > "${report}"
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync } from "node:fs";
+          const path = process.env.RUNNER_TEMP + "/stock-operational-readonly-audit-production.json";
+          const raw = readFileSync(path, "utf8");
+          const start = raw.indexOf("{");
+          const end = raw.lastIndexOf("}");
+          if (start < 0 || end <= start) throw new Error("A consulta de produção não retornou JSON válido.");
+          const report = JSON.parse(raw.slice(start, end + 1));
+          if (report.readOnly !== true || report.deploymentRequested !== process.env.TARGET_DEPLOYMENT) {
+            throw new Error("O destino/contrato read-only não foi confirmado.");
+          }
+          const flagged = report.products.filter((product) => product.flags.length > 0);
+          const lines = [
+            "### Auditoria operacional de produção — somente leitura",
+            "",
+            "- Deployment validado pela deploy key: `prod:" + process.env.TARGET_DEPLOYMENT + "`",
+            "- Consulta inline read-only executada: **sim**",
+            "- Escritas no backend: **zero**",
+            "- Produtos cadastrados: " + report.totals.products,
+            "- Produtos ativos: " + report.totals.activeProducts,
+            "- Saldo físico global: " + report.totals.globalPhysical,
+            "- Saldo físico por armário: " + report.totals.stockByLocationPhysical,
+            "- Diferença global × armários: " + (report.totals.globalPhysical - report.totals.stockByLocationPhysical),
+            "- Saldo disponível em lotes: " + report.totals.lotAvailable,
+            "- Saldo lote × armário: " + report.totals.lotLocationBalancePhysical,
+            "- Reservado global: " + report.totals.globalReserved,
+            "- Solicitações aprovadas: " + report.totals.approvedRequests,
+            "- Movimentações: " + report.totals.movements,
+            "- Produtos sinalizados para revisão: " + flagged.length,
+            "",
+          ];
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n"));
+          console.log("STOCK_PRODUCTION_READONLY_AUDIT_BEGIN");
+          console.log(JSON.stringify(report));
+          console.log("STOCK_PRODUCTION_READONLY_AUDIT_END");
+          NODE
+
+      - name: Publicar artefato da leitura de produção
+        if: steps.target.outputs.enabled == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: stock-production-readonly-audit-savory-sockeye
+          path: ${{ runner.temp }}/stock-operational-readonly-audit-production.json
+          if-no-files-found: error
+          retention-days: 7

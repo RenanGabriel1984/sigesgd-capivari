@@ -249,8 +249,9 @@ describe("Entrega autenticada e autoaprovação", () => {
   });
 
   it("a entrega baixa físico e reservado juntos (FIFO por lote)", () => {
-    expect(reqSrc).toMatch(/newPhysical = freshStock\.physicalQuantity - input\.quantityDelivered/);
-    expect(reqSrc).toMatch(/newReserved = freshStock\.reservedQuantity - input\.quantityDelivered/);
+    expect(reqSrc).toContain("getDeliveryStockAdjustment(requestItem.quantityApproved, input.quantityDelivered)");
+    expect(reqSrc).toContain("newPhysical = freshStock.physicalQuantity - adjustment.physicalToRemove");
+    expect(reqSrc).toContain("newReserved = freshStock.reservedQuantity - adjustment.reservedToRelease");
     expect(reqSrc).toMatch(/requestItemLots/);
   });
 

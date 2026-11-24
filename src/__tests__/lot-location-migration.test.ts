@@ -1,0 +1,222 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildLotLocationMigrationPlan,
+  type LotLocationMigrationReport,
+} from "@/lib/lot-location-migration";
+
+function report(overrides: Partial<LotLocationMigrationReport> = {}): LotLocationMigrationReport {
+  const lots = Array.from({ length: 61 }, (_, index) => ({
+    lotId: `lot-${index + 1}`,
+    lotNumber: `LOT-${String(index + 1).padStart(6, "0")}`,
+    areaId: index < 40 ? "area-1" : "area-2",
+    quantityAvailable: index === 0 ? 3278 : 1,
+    status: "candidate",
+    candidateLocationId: index < 40 ? "loc-1" : "loc-2",
+    mappedLocations: [],
+  }));
+  return {
+    readOnly: true,
+    migrationApplied: false,
+    summary: {
+      lots: { withAvailableQuantity: 61, quantityAvailableTotal: 3338 },
+      globalStock: { physicalQuantityTotal: 3338, reservedQuantityTotal: 0, invalidRecords: 0 },
+      stockByLocation: { physicalQuantityTotal: 3338, invalidRecords: 0 },
+      lotLocationBalances: { records: 0, quantityAvailableTotal: 0, invalidRecords: 0 },
+      stockAreas: { areas: [{ areaId: "area-1", name: "TI Geral", active: true }, { areaId: "area-2", name: "Impressoras", active: true }] },
+      storageLocations: { locations: [{ locationId: "loc-1", name: "Armário TI 01", active: true }, { locationId: "loc-2", name: "Armário TI 02", active: true }] },
+    },
+    products: [{
+      productId: "product-1",
+      productName: "Produto de teste",
+      globalPhysical: 3338,
+      globalReserved: 0,
+      globalError: null,
+      localPhysicalTotal: 3338,
+      lotsAvailableTotal: 3338,
+      mappedLotTotal: 0,
+      candidateLotTotal: 3338,
+      candidateTotalsAlign: true,
+      invalidLotCount: 0,
+      invalidBalanceCount: 0,
+      duplicateBalanceScopeCount: 0,
+      orphanBalanceCount: 0,
+      localComparison: [
+        { locationId: "loc-1", physicalQuantity: 3317, mappedLotQuantity: 0, candidateLotQuantity: 3317, duplicatePhysicalRows: 0 },
+        { locationId: "loc-2", physicalQuantity: 21, mappedLotQuantity: 0, candidateLotQuantity: 21, duplicatePhysicalRows: 0 },
+      ],
+      lots,
+    }],
+    ...overrides,
+  };
+}
+
+describe("planejamento da migração lote × armário", () => {
+  it("monta 61 vínculos sem escrever dados e preserva o total de 3.338", () => {
+    const plan = buildLotLocationMigrationPlan(report());
+    expect(plan.totalLots).toBe(61);
+    expect(plan.totalQuantity).toBe(3338);
+    expect(plan.insertions).toHaveLength(61);
+    expect(plan.alreadyMapped).toBe(0);
+  });
+
+  it("usa o saldo atual conciliado, sem fixar o snapshot histórico de 61 lotes", () => {
+    const base = report();
+    const current = {
+      ...base,
+      summary: {
+        ...base.summary,
+        lots: { withAvailableQuantity: 62, quantityAvailableTotal: 3339 },
+        globalStock: { ...base.summary.globalStock, physicalQuantityTotal: 3339 },
+        stockByLocation: { ...base.summary.stockByLocation, physicalQuantityTotal: 3339 },
+      },
+      products: [{
+        ...base.products[0],
+        globalPhysical: 3339,
+        localPhysicalTotal: 3339,
+        lotsAvailableTotal: 3339,
+        candidateLotTotal: 3339,
+        localComparison: base.products[0].localComparison.map((row) => ({
+          ...row,
+          physicalQuantity: row.locationId === "loc-1" ? row.physicalQuantity + 1 : row.physicalQuantity,
+          candidateLotQuantity: row.locationId === "loc-1" ? row.candidateLotQuantity + 1 : row.candidateLotQuantity,
+        })),
+        lots: [
+          ...base.products[0].lots,
+          { lotId: "lot-62", lotNumber: "LOT-000062", areaId: "area-1", quantityAvailable: 1, status: "candidate", candidateLocationId: "loc-1", mappedLocations: [] },
+        ],
+      }],
+    };
+    const plan = buildLotLocationMigrationPlan(current);
+    expect(plan.totalLots).toBe(62);
+    expect(plan.totalQuantity).toBe(3339);
+    expect(plan.insertions).toHaveLength(62);
+  });
+
+  it("é idempotente: reconhece os 61 vínculos já mapeados e não propõe inserções", () => {
+    const base = report();
+    const mappedLots = base.products[0].lots.map((lot) => ({
+      ...lot,
+      status: "mapped",
+      candidateLocationId: null,
+      mappedLocations: [{
+        locationId: lot.candidateLocationId!,
+        quantity: lot.quantityAvailable,
+      }],
+    }));
+    const mappedReport = {
+      ...base,
+      summary: {
+        ...base.summary,
+        lotLocationBalances: { records: 61, quantityAvailableTotal: 3338, invalidRecords: 0 },
+        storageLocations: base.summary.storageLocations,
+      },
+      products: [{
+        ...base.products[0],
+        mappedLotTotal: 3338,
+        candidateLotTotal: 0,
+        localComparison: base.products[0].localComparison.map((row) => ({
+          ...row,
+          mappedLotQuantity: row.candidateLotQuantity,
+          candidateLotQuantity: 0,
+        })),
+        lots: mappedLots,
+      }],
+    } as LotLocationMigrationReport;
+    const plan = buildLotLocationMigrationPlan(mappedReport);
+    expect(plan.insertions).toHaveLength(0);
+    expect(plan.alreadyMapped).toBe(61);
+  });
+
+  it.each([
+    ["diagnóstico não read-only", { readOnly: false }],
+    ["saldo global divergente", { summary: { ...report().summary, globalStock: { ...report().summary.globalStock, physicalQuantityTotal: 3337 } } }],
+    ["registro global inválido", { summary: { ...report().summary, globalStock: { ...report().summary.globalStock, invalidRecords: 1 } } }],
+    ["quantidade de lotes divergente", { summary: { ...report().summary, lots: { ...report().summary.lots, withAvailableQuantity: 60 } } }],
+  ])("bloqueia quando há %s", (_name, override) => {
+    expect(() => buildLotLocationMigrationPlan(report(override as Partial<LotLocationMigrationReport>))).toThrow(/Migração lote × armário bloqueada/);
+  });
+
+
+  it("ignora áreas e locais inativos sem saldo ou referência em lote", () => {
+    const base = report();
+    const withUnusedInactive = {
+      ...base,
+      summary: {
+        ...base.summary,
+        stockAreas: {
+          areas: [...base.summary.stockAreas.areas, { areaId: "old-area", name: "Área antiga", active: false }],
+        },
+        storageLocations: {
+          locations: [...base.summary.storageLocations.locations, { locationId: "old-location", name: "Local antigo", active: false }],
+        },
+      },
+    };
+    expect(buildLotLocationMigrationPlan(withUnusedInactive).insertions).toHaveLength(61);
+  });
+
+  it("bloqueia lote ambíguo", () => {
+    const base = report();
+    const changed = {
+      ...base,
+      products: [{
+        ...base.products[0],
+        lots: base.products[0].lots.map((lot, index) => index === 0 ? { ...lot, status: "ambiguous" } : lot),
+      }],
+    };
+    expect(() => buildLotLocationMigrationPlan(changed)).toThrow(/estado "ambiguous"/);
+  });
+
+  it("bloqueia quantidade mapeada divergente", () => {
+    const base = report();
+    const mapped = {
+      ...base,
+      summary: {
+        ...base.summary,
+        lotLocationBalances: { records: 1, quantityAvailableTotal: 3277, invalidRecords: 0 },
+        storageLocations: base.summary.storageLocations,
+      },
+      products: [{
+        ...base.products[0],
+        lots: base.products[0].lots.map((lot, index) => index === 0 ? {
+          ...lot,
+          status: "mapped",
+          candidateLocationId: null,
+          mappedLocations: [{ locationId: "loc-1", quantity: 3277 }],
+        } : lot),
+        localComparison: base.products[0].localComparison.map((row) => ({
+          ...row,
+          mappedLotQuantity: row.locationId === "loc-1" ? 3277 : 0,
+          candidateLotQuantity: row.locationId === "loc-1" ? 40 : 21,
+        })),
+      }],
+    } as LotLocationMigrationReport;
+    expect(() => buildLotLocationMigrationPlan(mapped)).toThrow(/quantidade mapeada divergente/);
+  });
+});
+
+
+describe("classificação de área antes da migração lote × armário", () => {
+  it("bloqueia lotes sem área/subestoque", () => {
+    const base = report();
+    const changed = {
+      ...base,
+      products: [{
+        ...base.products[0],
+        lots: base.products[0].lots.map((lot, index) => index === 0 ? { ...lot, areaId: null } : lot),
+      }],
+    };
+    expect(() => buildLotLocationMigrationPlan(changed)).toThrow(/não possui área\/subestoque classificado/i);
+  });
+
+  it("bloqueia lote apontando para área inexistente ou inativa", () => {
+    const base = report();
+    const changed = {
+      ...base,
+      products: [{
+        ...base.products[0],
+        lots: base.products[0].lots.map((lot, index) => index === 0 ? { ...lot, areaId: "area-inativa" } : lot),
+      }],
+    };
+    expect(() => buildLotLocationMigrationPlan(changed)).toThrow(/área inexistente ou inativa/i);
+  });
+});

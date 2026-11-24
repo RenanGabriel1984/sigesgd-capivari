@@ -252,20 +252,22 @@ describe("VALIDAÇÃO — quantidades finitas em operações de estoque", () => 
 describe("SEGURANÇA — limpeza destrutiva de dados de teste", () => {
   it("não expõe cleanupTestData como mutation pública", () => {
     const src = read("src/convex/stockSetup.ts");
-    expect(src).toContain('import { internalMutation, mutation, query } from "./_generated/server";');
+    expect(src).toContain('import { internalMutation, internalQuery, mutation, query } from "./_generated/server";');
     expect(src).toContain("export const cleanupTestData = internalMutation({");
     expect(src).not.toContain("export const cleanupTestData = mutation({");
   });
 });
 
-describe("RBAC-07B — reserva de estoque protegida no backend", () => {
-  it("não usa movements.view para reservar e valida solicitação/quantidade", () => {
+describe("RBAC-07B — reserva somente pela aprovação de requisição", () => {
+  it("desativa a reserva direta legada e não permite gravação paralela no estoque", () => {
     const src = read("src/convex/stockMovements.ts");
     const start = src.indexOf("export const reserveStock = mutation({");
-    const end = src.indexOf("\n});", start);
+    const end = src.indexOf("export const editEntry = mutation({", start);
     const handler = src.slice(start, end);
     expect(handler).toContain('requireStockManagerOrAdmin(ctx)');
-    expect(handler).toContain("Number.isFinite(args.quantity)");
+    expect(handler).toContain("Reserva direta legada desativada");
+    expect(handler).not.toContain("ctx.db.patch(");
+    expect(handler).not.toContain("ctx.db.insert(");
     expect(roleHasPermission("director", "stock.mutate")).toBe(false);
     expect(roleHasPermission("technician", "stock.mutate")).toBe(false);
   });

@@ -192,11 +192,11 @@ export const create = mutation({
     const name = args.name.trim();
     if (!name) throw new Error("Nome da área é obrigatório");
 
-    const existing = await ctx.db
-      .query("stockAreas")
-      .withIndex("by_name", (q: any) => q.eq("name", name))
-      .first();
-    if (existing) throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
+    const existing = await ctx.db.query("stockAreas").collect();
+    const normalizedName = name.toLocaleLowerCase("pt-BR");
+    if (existing.some((area: any) => area.name.trim().toLocaleLowerCase("pt-BR") === normalizedName)) {
+      throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
+    }
 
     const id = await ctx.db.insert("stockAreas", {
       name,
@@ -232,16 +232,25 @@ export const update = mutation({
       const name = args.name.trim();
       if (!name) throw new Error("Nome da área é obrigatório");
       if (name !== area.name) {
-        const dup = await ctx.db
-          .query("stockAreas")
-          .withIndex("by_name", (q: any) => q.eq("name", name))
-          .first();
-        if (dup) throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
+        const allAreas = await ctx.db.query("stockAreas").collect();
+        const normalizedName = name.toLocaleLowerCase("pt-BR");
+        if (allAreas.some((candidate: any) =>
+          candidate._id !== args.id &&
+          candidate.name.trim().toLocaleLowerCase("pt-BR") === normalizedName
+        )) {
+          throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
+        }
       }
       updates.name = name;
     }
     if (args.description !== undefined) updates.description = args.description.trim() || undefined;
     if (args.active !== undefined) updates.active = args.active;
+    if (updates.active === false && area.active !== false) {
+      const assignedLots = await ctx.db.query("lots").collect();
+      if (assignedLots.some((lot: any) => lot.areaId === args.id && lot.quantityAvailable > 0)) {
+        throw new Error("Não é possível desativar uma área com lotes que ainda possuem saldo. Transfira ou consuma o saldo antes.");
+      }
+    }
 
     await ctx.db.patch(args.id, updates);
     const action = args.active === false ? "deactivate" : args.active === true ? "activate" : "update";

@@ -26,6 +26,9 @@ const reqSrc = readFileSync(resolve(ROOT, "src/convex/requests.ts"), "utf-8");
 const movSrc = readFileSync(resolve(ROOT, "src/convex/stockMovements.ts"), "utf-8");
 const rbacSrc = readFileSync(resolve(ROOT, "src/convex/rbac.ts"), "utf-8");
 const repSrc = readFileSync(resolve(ROOT, "src/convex/dataRepairs.ts"), "utf-8");
+const stockSetupSrc = readFileSync(resolve(ROOT, "src/convex/stockSetup.ts"), "utf-8");
+const transferUiSrc = readFileSync(resolve(ROOT, "src/pages/StockTransfers.tsx"), "utf-8");
+const printSuppliesSrc = readFileSync(resolve(ROOT, "src/convex/printSupplies.ts"), "utf-8");
 
 describe("etapa 1 — técnico consulta estoque e cria requisição", () => {
   it("técnico tem stock.view/products.view mas não pode mutar estoque", () => {
@@ -55,7 +58,8 @@ describe("etapa 2 — diretor/gestor aprovado reserva estoque", () => {
 
   it("aprovação RESERVA (reservedQuantity += aprovado) com revalidação fresh", () => {
     expect(reqSrc).toContain("const newReserved = freshStock.reservedQuantity + item.quantityApproved;");
-    expect(reqSrc).toMatch(/const freshStock = await ctx\.db\./);
+    expect(reqSrc).toContain("const freshStockRows = await ctx.db");
+    expect(reqSrc).toContain("requireSingleValidGlobalStock(freshStockRows, String(requestItem.productId))");
   });
 
   it("auditoria 'approve' registrada com usuário e itens", () => {
@@ -71,8 +75,9 @@ describe("etapa 3 — entrega baixa físico e libera reserva", () => {
   });
 
   it("baixa efetiva SOMENTE na entrega: físico e reservado descem JUNTOS", () => {
-    expect(reqSrc).toContain("const newPhysical = freshStock.physicalQuantity - input.quantityDelivered;");
-    expect(reqSrc).toContain("const newReserved = freshStock.reservedQuantity - input.quantityDelivered;");
+    expect(reqSrc).toContain("getDeliveryStockAdjustment(requestItem.quantityApproved, input.quantityDelivered)");
+    expect(reqSrc).toContain("const newPhysical = freshStock.physicalQuantity - adjustment.physicalToRemove;");
+    expect(reqSrc).toContain("const newReserved = freshStock.reservedQuantity - adjustment.reservedToRelease;");
   });
 
   it("valida reserva suficiente antes de baixar (nunca reservado < 0)", () => {
@@ -113,12 +118,71 @@ describe("etapa 4 — autoaprovação bloqueada em qualquer papel", () => {
   });
 });
 
+describe("saída rápida e transferência rastreada por lote", () => {
+  it("saída rápida exige a permissão operacional exits.create, não admin fixo", () => {
+    const quickExit = stockSetupSrc.slice(
+      stockSetupSrc.indexOf("export const quickExit"),
+      stockSetupSrc.indexOf("export const cleanupTestData"),
+    );
+    expect(quickExit).toContain('requirePermission(ctx, "exits.create"');
+    expect(quickExit).not.toContain("requireAdmin(ctx)");
+    expect(roleHasPermission("stock_manager", "exits.create")).toBe(true);
+    expect(roleHasPermission("technician", "exits.create")).toBe(false);
+  });
+
+  it("transferência apresenta lotes ativos, envia lotId e mostra o lote no histórico", () => {
+    expect(transferUiSrc).toContain("api.lots.listActiveByProduct");
+    expect(transferUiSrc).toContain('Selecione o lote que será transferido.');
+    expect(transferUiSrc).toContain("lotId: lotId ? (lotId as any) : undefined");
+    expect(transferUiSrc).toContain("<TableHead>Lote</TableHead>");
+    expect(transferUiSrc).toContain("t.lot?.lotNumber");
+  });
+
+  it("backend bloqueia transferência sem lote para produtos rastreados e armários inativos", () => {
+    const transferSrc = readFileSync(resolve(ROOT, "src/convex/stockTransfers.ts"), "utf-8");
+    expect(transferSrc).toContain("productLots.length > 0 || existingLotBalances.length > 0");
+    expect(transferSrc).toContain("histórico de lotes. Selecione o lote da transferência");
+    expect(transferSrc).toContain("fromLocation.active === false");
+    expect(transferSrc).toContain("toLocation.active === false");
+    expect(transferSrc).toContain("planLotLocationTransfer");
+  });
+
+  it("retirada simples GomaQ consome exclusivamente lotes da área Impressoras", () => {
+    const withdraw = printSuppliesSrc.slice(
+      printSuppliesSrc.indexOf("export const withdraw = mutation"),
+      printSuppliesSrc.indexOf("export const configurePackaging"),
+    );
+    expect(withdraw).toContain("areaId: PRINT_AREA_ID as Id<\"stockAreas\">");
+  });
+});
+
+describe("relatórios operacionais refletem saldos conciliados", () => {
+  it("posição de estoque distingue físico, reservado e disponível e rejeita saldos globais duplicados", () => {
+    const dashboard = readFileSync(resolve(ROOT, "src/convex/dashboard.ts"), "utf-8");
+    const position = dashboard.slice(dashboard.indexOf("export const stockPosition"), dashboard.indexOf("export const movementReport"));
+    expect(position).toContain("getOptionalSingleValidGlobalStock(stockRows, p.name)");
+    expect(position).toContain("const availableQuantity = physicalQuantity - reservedQuantity");
+    expect(position).toContain("availableQuantity <= (p.minimumStock ?? 0)");
+  });
+
+  it("relatório de movimentações não trunca silenciosamente o histórico em 500 linhas", () => {
+    const dashboard = readFileSync(resolve(ROOT, "src/convex/dashboard.ts"), "utf-8");
+    const report = dashboard.slice(dashboard.indexOf("export const movementReport"));
+    expect(report).toContain("const movements = await q.collect()");
+    expect(report).not.toContain("q.take(500)");
+  });
+});
+
 describe("invariantes globais de estoque preservadas no código", () => {
   it("reserva usa revalidação fresh (evita condição de corrida)", () => {
     expect(reqSrc).toMatch(/freshStock\.reservedQuantity \+ item\.quantityApproved/);
   });
 
   it("cancellation libera reserva com guarda de inconsistência explícita", () => {
+    const cancel = reqSrc.slice(reqSrc.indexOf("export const cancel"), reqSrc.indexOf("export const pendingCount"));
+    expect(cancel).toContain('.collect()');
+    expect(cancel).toContain("requireSingleValidGlobalStock(stockRows, String(item.productId))");
+    expect(cancel).not.toContain(".first();");
     expect(reqSrc).toContain("Inconsistência de estoque: reservado");
   });
 

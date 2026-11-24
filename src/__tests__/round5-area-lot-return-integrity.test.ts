@@ -14,6 +14,8 @@
  * é criado, alterado ou removido por esta suíte.
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import {
   resolveNfeDestination,
@@ -31,6 +33,7 @@ import {
 import {
   resolveReturnLotGuard,
   buildUnresolvableLotMessage,
+  returnConditionReturnsToAvailableStock,
 } from "@/lib/returns-rules";
 
 import {
@@ -367,5 +370,139 @@ describe("Tela de Produtos: 'Reservado 0' é apresentado como '—'", () => {
     const s = stockSummary({ physicalQuantity: 0, reservedQuantity: 0 });
     expect(formatStockQuantity(s.physical)).toBe("0");
     expect(formatStockQuantity(s.reserved, { zeroAsEmpty: true })).toBe("—");
+  });
+});
+
+
+describe("Devoluções: condição do material e saldo disponível", () => {
+  it("reintegra automaticamente somente material não utilizado", () => {
+    expect(returnConditionReturnsToAvailableStock("unused")).toBe(true);
+  });
+
+  it("mantém material parcialmente utilizado em quarentena", () => {
+    expect(returnConditionReturnsToAvailableStock("partially_used")).toBe(false);
+  });
+
+  it("mantém material defeituoso em quarentena", () => {
+    expect(returnConditionReturnsToAvailableStock("defective")).toBe(false);
+  });
+
+  it("mantém condição não classificada em quarentena", () => {
+    expect(returnConditionReturnsToAvailableStock("other")).toBe(false);
+  });
+});
+
+
+const returnsMutationSource = readFileSync(resolve(process.cwd(), "src/convex/returns.ts"), "utf8");
+
+describe("Devolução: materiais não utilizáveis não entram no saldo disponível", () => {
+  it("desvia condições não utilizáveis para quarentena antes de consultar ou alterar o estoque", () => {
+    const quarantineStart = returnsMutationSource.indexOf("if (!returnConditionReturnsToAvailableStock(condition))");
+    const availableStockStart = returnsMutationSource.indexOf("// 2) Repor estoque físico global");
+    expect(quarantineStart).toBeGreaterThan(-1);
+    expect(availableStockStart).toBeGreaterThan(quarantineStart);
+    const quarantineBranch = returnsMutationSource.slice(quarantineStart, availableStockStart);
+    expect(quarantineBranch).toContain('ctx.db.insert("returnLotAllocations"');
+    expect(quarantineBranch).toContain('ctx.db.insert("auditLogs"');
+    expect(quarantineBranch).toContain("destino: quarentena");
+    expect(quarantineBranch).toContain("return returnId");
+    expect(quarantineBranch).not.toContain('ctx.db.patch(stock._id');
+    expect(quarantineBranch).not.toContain('ctx.db.insert("stockByLocation"');
+    expect(quarantineBranch).not.toContain('ctx.db.insert("stockMovements"');
+    expect(quarantineBranch).not.toContain("quantityAvailable + allocation.quantity");
+  });
+
+  it("exige localização física para material recebido em quarentena", () => {
+    const quarantineStart = returnsMutationSource.indexOf("if (!returnConditionReturnsToAvailableStock(condition))");
+    const availableStockStart = returnsMutationSource.indexOf("// 2) Repor estoque físico global");
+    const quarantineBranch = returnsMutationSource.slice(quarantineStart, availableStockStart);
+    expect(returnsMutationSource).toContain("const destinationLocation: any = args.locationId ? await ctx.db.get(args.locationId) : null");
+    expect(returnsMutationSource).toContain("Informe um armário de destino existente e ativo");
+    expect(quarantineBranch).toContain("destinationLocationId: args.locationId");
+  });
+});
+
+
+describe("Inspeção de quarentena: liberação ou descarte auditados", () => {
+  it("só permite resolver devoluções explicitamente em quarentena", () => {
+    expect(returnsMutationSource).toContain('if (returned.stockDisposition !== "quarantine")');
+    expect(returnsMutationSource).toContain("Somente devoluções pendentes em quarentena podem ser inspecionadas.");
+  });
+
+  it("exige justificativa e armário ativo antes da decisão", () => {
+    expect(returnsMutationSource).toContain("A justificativa da inspeção é obrigatória.");
+    expect(returnsMutationSource).toContain("if (!location || !location.active)");
+  });
+
+  it("ao liberar, recompõe saldo global, armário e lote com rastreabilidade", () => {
+    const start = returnsMutationSource.indexOf("export const resolveQuarantine");
+    const mutation = returnsMutationSource.slice(start);
+    expect(mutation).toContain("requireSingleValidGlobalStock");
+    expect(mutation).toContain('ctx.db.patch(stock._id, { physicalQuantity: newPhysical })');
+    expect(mutation).toContain('ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable + allocation.quantity })');
+    expect(mutation).toContain('type: "return"');
+    expect(mutation).toContain('stockDisposition: args.disposition');
+    expect(mutation).toContain('inspectedByUserId: userId');
+    expect(mutation).toContain('ctx.db.insert("auditLogs"');
+  });
+
+  it("o descarte não entra no ramo de recomposição do estoque", () => {
+    const start = returnsMutationSource.indexOf("if (args.disposition === \"available\")");
+    const end = returnsMutationSource.indexOf("await ctx.db.patch(args.returnId", start);
+    const availableBranch = returnsMutationSource.slice(start, end);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(availableBranch).toContain('ctx.db.patch(stock._id, { physicalQuantity: newPhysical })');
+  });
+});
+
+
+describe("devolução mantém conciliação física", () => {
+  const source = readFileSync(resolve(__dirname, "../convex/returns.ts"), "utf8");
+  it("exige destino físico existente e ativo em toda devolução", () => {
+    expect(source).toContain("const destinationLocation: any = args.locationId ? await ctx.db.get(args.locationId) : null");
+    expect(source).toContain("destinationLocation.active === false");
+  });
+  it("bloqueia reposição quando global, armários e lotes já divergem", () => {
+    expect(source).toContain("Math.abs(localTotal - stock.physicalQuantity) > 1e-9");
+    expect(source).toContain("Math.abs(lotTotal - stock.physicalQuantity) > 1e-9");
+    expect(source).toContain("Math.abs(lotLocationTotal - lotTotal) > 1e-9");
+    expect(source).toContain("A devolução foi bloqueada: a soma dos lotes diverge do saldo do armário.");
+  });
+});
+
+describe("liberação de quarentena exige conciliação prévia", () => {
+  const source = readFileSync(resolve(__dirname, "../convex/returns.ts"), "utf8");
+  const start = source.indexOf("export const resolveQuarantine");
+  const quarantine = source.slice(start);
+  it("não reincorpora material quando global, armários e lotes já divergem", () => {
+    expect(quarantine).toContain("Math.abs(localTotal - stock.physicalQuantity) > 1e-9");
+    expect(quarantine).toContain("Math.abs(lotTotal - stock.physicalQuantity) > 1e-9");
+    expect(quarantine).toContain("Math.abs(lotLocationTotal - lotTotal) > 1e-9");
+    expect(quarantine).toContain("A inspeção foi bloqueada: a soma dos lotes diverge do saldo do armário.");
+  });
+});
+
+describe("interface de devolução exige armário para todo retorno", () => {
+  it("não permite enviar devolução sem localização física mesmo para material sem lote", () => {
+    const ui = readFileSync(resolve(__dirname, "../pages/Returns.tsx"), "utf8");
+    expect(ui).toContain("if (!locationId)");
+    expect(ui).toContain("<Label>Armário de destino *</Label>");
+    expect(ui).not.toContain("Sem alteração de local");
+  });
+});
+
+describe("histórico de devoluções sem truncamento silencioso", () => {
+  it("consulta o histórico completo e todas as saídas elegíveis para devolução", () => {
+    const source = readFileSync(resolve(__dirname, "../convex/returns.ts"), "utf8");
+    const listStart = source.indexOf("export const list = query");
+    const returnableStart = source.indexOf("export const returnable = query");
+    const createStart = source.indexOf("export const create = mutation");
+    const listBlock = source.slice(listStart, returnableStart);
+    const returnableBlock = source.slice(returnableStart, createStart);
+    expect(listBlock).toContain('.order("desc").collect()');
+    expect(listBlock).not.toContain(".take(200)");
+    expect(returnableBlock).toContain(".collect()");
+    expect(returnableBlock).not.toContain(".take(300)");
   });
 });

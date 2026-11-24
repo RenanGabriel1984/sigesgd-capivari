@@ -20,6 +20,7 @@
  *  - FUNÇÃO INTERNA: sem rota pública, não substitui a UI de importação.
  */
 import { internalMutation } from "./_generated/server";
+import { assertProductLedgerConsistent, assertProductReservationConsistent } from "./lotLocationLedger";
 import { v } from "convex/values";
 import {
   applyImplementationStockStamp,
@@ -174,6 +175,20 @@ export const registerGomaqNfe372043 = internalMutation({
       .find((c: any) => c.name === CATEGORY_SUPRIMENTOS);
     if (!category) throw new Error("Categoria \"Suprimentos de Impressão\" não encontrada");
 
+    const candidateAreas = await ctx.db.query("stockAreas").collect();
+    const printAreas = candidateAreas.filter((area: any) =>
+      area.active !== false &&
+      ["impressoras", "impressoras/gomaq"].includes(String(area.name ?? "").trim().toLocaleLowerCase("pt-BR")),
+    );
+    if (printAreas.length !== 1) {
+      throw new Error("A importação Gomaq exige exatamente uma área ativa Impressoras/Impressoras-Gomaq. Nenhum estoque foi alterado.");
+    }
+    const printAreaId = printAreas[0]._id;
+    const destination = await ctx.db.get(LOCATION_ARMARIO_TI_02);
+    if (!destination || destination.active === false) {
+      throw new Error("O Armário TI 02 não existe ou está inativo. Nenhum estoque foi alterado.");
+    }
+
     const products = await ctx.db.query("products").collect();
     const allLots = await ctx.db.query("lots").collect();
     const lotSeqBase = allLots.reduce((m: number, l: any) => {
@@ -233,6 +248,7 @@ export const registerGomaqNfe372043 = internalMutation({
       contractNumber: "00826309",
       responsibleUserId: admin._id,
       observation: "Importação NF-e 372043 — Gomaq. Natureza: VENDA. Pedido/contrato: 00826309. Destinatário: Prefeitura Municipal de Capivari (44.723.674/0001-90). Total R$ 20.822,22.",
+      areaId: printAreaId,
       accessKey: GOMAQ_ACCESS_KEY,
       series: "1",
       totalValue: 20822.22,
@@ -254,14 +270,18 @@ export const registerGomaqNfe372043 = internalMutation({
     for (const r of resolved) {
       lotSeq += 1;
       const lotNumber = "LOT-" + year + "-" + String(lotSeq).padStart(6, "0");
-      const prevStock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", r.productId)).first();
+      const productBefore = await ctx.db.get(r.productId);
+      if (!productBefore) throw new Error("Produto da NF-e Gomaq não encontrado.");
+      const prevStock = await assertProductLedgerConsistent(ctx, r.productId, productBefore.name);
+      await assertProductReservationConsistent(ctx, r.productId, productBefore.name, prevStock);
       const prevPhysical = prevStock?.physicalQuantity ?? 0;
       const prevReserved = prevStock?.reservedQuantity ?? 0;
 
-      await ctx.db.insert("lots", {
+      const lotId = await ctx.db.insert("lots", {
         lotNumber,
         productId: r.productId,
         entryId,
+        areaId: printAreaId,
         brand: r.brand,
         model: r.model,
         specification: "Código Gomaq " + r.code,
@@ -273,11 +293,20 @@ export const registerGomaqNfe372043 = internalMutation({
         active: true,
       });
 
+      await ctx.db.insert("lotLocationBalances", {
+        lotId,
+        productId: r.productId,
+        locationId: LOCATION_ARMARIO_TI_02,
+        quantityAvailable: r.qty,
+        updatedAt: now,
+      });
+
       await ctx.db.insert("entryItems", {
         entryId,
         productId: r.productId,
         quantity: r.qty,
         unitOfMeasure: r.unit,
+        lotId,
         locationId: LOCATION_ARMARIO_TI_02,
         supplierCode: r.code,
         observation: "NF-e 372043 — quantidade conforme NF (sem conversão de embalagem)",
@@ -310,6 +339,7 @@ export const registerGomaqNfe372043 = internalMutation({
         userId: admin._id,
         entryId,
         lotId: lotNumber,
+        locationId: LOCATION_ARMARIO_TI_02,
         documentNumber: "372043",
         observation: "Entrada " + entryNumber + " — Lote " + lotNumber,
         timestamp: now,

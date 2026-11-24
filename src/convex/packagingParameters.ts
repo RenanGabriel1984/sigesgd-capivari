@@ -20,6 +20,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { getOptionalSingleValidGlobalStock } from "../lib/stock-read-integrity";
 import {
   buildPackagingRow,
   computePackagingCounters,
@@ -55,10 +56,14 @@ export const list = query({
 
     const categoryNameById = new Map(categories.map((c) => [c._id, c.name]));
     const stockByProduct = new Map(
-      stockRows.map((s) => [
-        s.productId,
-        { physicalQuantity: s.physicalQuantity, reservedQuantity: s.reservedQuantity },
-      ])
+      products.map((product) => {
+        const rows = stockRows.filter((row) => row.productId === product._id);
+        const stock = getOptionalSingleValidGlobalStock(rows, product.name);
+        return [product._id, stock ? {
+          physicalQuantity: stock.physicalQuantity,
+          reservedQuantity: stock.reservedQuantity,
+        } : null] as const;
+      }),
     );
 
     const rows = products.map((p) =>

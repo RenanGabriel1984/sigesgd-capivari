@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { tonerKitObservation } from "./stockHelpers";
 import { requirePermission } from "./rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import { getOptionalSingleValidGlobalStock } from "../lib/stock-read-integrity";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -41,7 +42,8 @@ export const list = query({
     const compatProductIds = new Set(allCompat.map((c: any) => c.productId));
     return Promise.all(products.map(async (p: any) => {
       const category = await ctx.db.get(p.categoryId);
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
       return { ...p, category, stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 }, hasCompat: compatProductIds.has(p._id) };
     }));
   },
@@ -57,7 +59,8 @@ export const listActive = query({
     const compatProductIds = new Set(allCompat.map((c: any) => c.productId));
     return Promise.all(products.map(async (p: any) => {
       const category = await ctx.db.get(p.categoryId);
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", p._id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
       return { ...p, category, stock: stock ?? { physicalQuantity: 0, reservedQuantity: 0 }, hasCompat: compatProductIds.has(p._id) };
     }));
   },
@@ -70,7 +73,8 @@ export const getById = query({
     const product = await ctx.db.get(args.id);
     if (!product) return null;
     const category = await ctx.db.get(product.categoryId);
-    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.id)).first();
+    const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.id)).collect();
+    const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
     const movements = await ctx.db.query("stockMovements").withIndex("by_product", (q) => q.eq("productId", args.id)).order("desc").take(10);
     const movementsWithUser = await Promise.all(movements.map(async (m: any) => {
       const user = await ctx.db.get(m.userId);
@@ -104,7 +108,8 @@ export const getStock = query({
   args: { productId: v.id("products") },
   handler: async (ctx, args) => {
     await requireUser(ctx);
-    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
+    const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).collect();
+    const stock = getOptionalSingleValidGlobalStock(stockRows, String(args.productId));
     return stock ?? { physicalQuantity: 0, reservedQuantity: 0 };
   },
 });
@@ -116,11 +121,13 @@ export const belowMinimum = query({
     const products = await ctx.db.query("products").withIndex("by_active", (q) => q.eq("active", true)).collect();
     const result = [];
     for (const p of products) {
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", p._id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", p._id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
       const qty = stock?.physicalQuantity ?? 0;
-      if (qty < (p.minimumStock ?? 0)) {
+      const available = qty - (stock?.reservedQuantity ?? 0);
+      if (available < (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
-        result.push({ ...p, category, currentStock: qty });
+        result.push({ ...p, category, currentStock: qty, availableStock: available, reservedStock: stock?.reservedQuantity ?? 0 });
       }
     }
     return result;
@@ -148,10 +155,11 @@ export const create = mutation({
     // Estoque atual informado no cadastro (carga inicial com rastreabilidade por lote)
     initialStock: v.optional(v.number()),
     locationId: v.optional(v.id("storageLocations")),
+    areaId: v.optional(v.id("stockAreas")),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    const { initialStock, locationId, ...productArgs } = args;
+    const { initialStock, locationId, areaId, ...productArgs } = args;
     if (!args.name.trim()) throw new Error("Nome do item é obrigatório");
     if (args.ean && !/^\d{8,14}$/.test(args.ean.replace(/\D/g, ""))) {
       throw new Error("EAN/GTIN inválido: use de 8 a 14 dígitos");
@@ -198,6 +206,9 @@ export const create = mutation({
       const location = await ctx.db.get(locationId);
       if (!location) throw new Error("Local de armazenamento não encontrado");
       if (!location.active) throw new Error("O local de armazenamento selecionado está inativo");
+      if (!areaId) throw new Error("Informe a área/subestoque para classificar o estoque inicial");
+      const area = await ctx.db.get(areaId);
+      if (!area || !area.active) throw new Error("A área/subestoque selecionada não existe ou está inativa");
     }
 
     // Toners de kit original de 4 cores (VersaLink, AltaLink, Lexmark CX735,
@@ -235,6 +246,7 @@ export const create = mutation({
         originType: "initial_inventory",
         responsibleUserId: userId,
         observation: `Estoque inicial cadastrado junto com o item "${args.name}"`,
+        areaId,
         status: "confirmed",
         createdAt: now,
         updatedAt: now,
@@ -248,6 +260,7 @@ export const create = mutation({
         quantityReceived: initialStock,
         quantityAvailable: initialStock,
         receivedAt: now,
+        areaId,
         active: true,
         observation: `Carga inicial cadastrada junto com o item — ${initialStock} unidades`,
       });
@@ -259,6 +272,14 @@ export const create = mutation({
         unitOfMeasure: args.unitOfMeasure,
         lotId: lotId as string,
         locationId,
+      });
+
+      await ctx.db.insert("lotLocationBalances", {
+        lotId,
+        productId: id,
+        locationId,
+        quantityAvailable: initialStock,
+        updatedAt: now,
       });
 
       await ctx.db.insert("stockByLocation", {
@@ -280,6 +301,7 @@ export const create = mutation({
         userId,
         entryId,
         lotId: lotId as string,
+        locationId,
         observation: `Estoque inicial — lote ${lotNumber} — ${initialStock} unidades (cadastro do item)`,
         timestamp: now,
       });
@@ -323,7 +345,8 @@ export const update = mutation({
 
     // Prevent deactivation if product has active reservations
     if (updates.active === false) {
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
       if (stock && stock.reservedQuantity > 0) {
         throw new Error("Não é possível desativar: existem unidades reservadas em solicitações pendentes");
       }

@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { getOptionalSingleValidGlobalStock } from "../lib/stock-read-integrity";
 
 async function requireUser(ctx: any) {
   // RBAC central: dashboard exige permissão de visualização.
@@ -35,11 +36,12 @@ export const stats = query({
     // Critical stock count
     let criticalStock = 0;
     for (const p of products) {
-      const stock = await ctx.db
+      const stockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
-      const qty = stock?.physicalQuantity ?? 0;
+        .collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
+      const qty = (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
       // `?? 0` preserva exatamente o comportamento anterior (o campo passou a
       // ser anulável; produto sem mínimo configurado continua com mínimo 0).
       if (qty <= (p.minimumStock ?? 0)) criticalStock++;
@@ -99,11 +101,12 @@ export const stats = query({
     // Urgent alerts (items at or below minimum)
     const urgentAlerts = [];
     for (const p of products) {
-      const stock = await ctx.db
+      const stockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
-      const qty = stock?.physicalQuantity ?? 0;
+        .collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
+      const qty = (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
       if (qty <= (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
         urgentAlerts.push({
@@ -186,23 +189,28 @@ export const stockPosition = query({
     return Promise.all(
       products.map(async (p) => {
         const category = await ctx.db.get(p.categoryId);
-        const stock = await ctx.db
+        const stockRows = await ctx.db
           .query("stock")
           .withIndex("by_product", (q) => q.eq("productId", p._id))
-          .first();
-        const qty = stock?.physicalQuantity ?? 0;
+          .collect();
+        const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
+        const physicalQuantity = stock?.physicalQuantity ?? 0;
+        const reservedQuantity = stock?.reservedQuantity ?? 0;
+        const availableQuantity = physicalQuantity - reservedQuantity;
         let status: string = "Normal";
-        if (qty === 0) status = "Zerado";
-        else if (qty <= (p.minimumStock ?? 0)) status = "Crítico";
-        else if (qty <= (p.idealStock ?? 0)) status = "Baixo";
+        if (availableQuantity === 0) status = "Zerado";
+        else if (availableQuantity <= (p.minimumStock ?? 0)) status = "Crítico";
+        else if (availableQuantity <= (p.idealStock ?? 0)) status = "Baixo";
         return {
           _id: p._id,
           name: p.name,
           internalCode: p.internalCode ?? "",
           categoryName: category?.name ?? "",
           unitOfMeasure: p.unitOfMeasure,
-          currentStock: qty,
-          reservedQuantity: stock?.reservedQuantity ?? 0,
+          currentStock: physicalQuantity,
+          physicalQuantity,
+          reservedQuantity,
+          availableQuantity,
           minimumStock: p.minimumStock ?? 0,
           idealStock: p.idealStock ?? 0,
           maximumStock: p.maximumStock,
@@ -232,7 +240,7 @@ export const movementReport = query({
         idx.gte("timestamp", args.startDate!)
       ).order("desc");
     }
-    const movements = await q.take(500);
+    const movements = await q.collect();
     let filtered = movements;
     if (args.endDate) {
       filtered = movements.filter((m) => m.timestamp <= args.endDate!);
