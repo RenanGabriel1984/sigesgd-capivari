@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { assertProductReservationConsistent } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -379,6 +380,7 @@ export const close = mutation({
         ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
       ]);
       const stock = getOptionalSingleValidGlobalStock(stockRows, productName);
+      await assertProductReservationConsistent(ctx, productId, productName, stock);
       validateUniqueScopedStockRows(sbls, productName);
       const currentPhysical = stock?.physicalQuantity ?? 0;
       const reserved = stock?.reservedQuantity ?? 0;
