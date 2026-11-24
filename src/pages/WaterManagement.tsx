@@ -16,6 +16,10 @@ const money = (value: number) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value ?? 0);
 
 const dateInputToTimestamp = (value: string) => new Date(`${value}T12:00:00`).getTime();
+const localToday = () => {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+};
 
 type MovementType = "opening_balance" | "supplier_delivery" | "consumption" | "supplier_exchange" | "adjustment";
 
@@ -45,7 +49,7 @@ export default function WaterManagement() {
   const [paymentPeriodId, setPaymentPeriodId] = useState("");
   const [paymentParticipantId, setPaymentParticipantId] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [paymentDate, setPaymentDate] = useState(localToday());
   const [paymentMethod, setPaymentMethod] = useState("");
   const [paymentObservation, setPaymentObservation] = useState("");
   const [busy, setBusy] = useState(false);
@@ -214,7 +218,7 @@ export default function WaterManagement() {
               <Button disabled={busy} onClick={() => void submitParticipant()} variant="outline" className="w-full"><Plus className="mr-2 h-4 w-4" />Cadastrar participante</Button>
               <div className="max-h-72 space-y-2 overflow-y-auto">
                 {data.participants.map((participant: any) => <div key={participant._id} className="flex items-center justify-between gap-3 rounded-md border p-3">
-                  <div className="min-w-0"><p className="truncate text-sm font-medium">{participant.name}</p><p className="text-xs text-muted-foreground">{participant.department || "Sem setor"} · Em aberto: {money(participant.outstanding)}</p></div>
+                  <div className="min-w-0"><p className="truncate text-sm font-medium">{participant.name}</p><p className="text-xs text-muted-foreground">{participant.department || "Sem setor"}</p><p className="text-xs text-muted-foreground">Rateado: {money(participant.totalDue)} · Pago: {money(participant.totalPaid)} · Em aberto: {money(participant.outstanding)}</p></div>
                   <div className="flex items-center gap-2"><Badge variant={participant.active ? "default" : "secondary"}>{participant.active ? "Ativo" : "Inativo"}</Badge><Button size="sm" variant="ghost" onClick={() => void setParticipantActive({ participantId: participant._id, active: !participant.active }).catch((error) => toast.error(error instanceof Error ? error.message : "Falha ao alterar participante"))}>{participant.active ? "Inativar" : "Ativar"}</Button></div>
                 </div>)}
                 {data.participants.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">Nenhum participante cadastrado.</p>}
