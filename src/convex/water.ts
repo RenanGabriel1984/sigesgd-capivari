@@ -39,12 +39,13 @@ export const dashboard = query({
   args: {},
   handler: async (ctx) => {
     await requireWaterRead(ctx);
-    const [participants, movements, periods, charges, payments] = await Promise.all([
+    const [participants, movements, periods, charges, payments, users] = await Promise.all([
       ctx.db.query("waterParticipants").collect(),
       ctx.db.query("waterMovements").collect(),
       ctx.db.query("waterPeriods").collect(),
       ctx.db.query("waterPeriodCharges").collect(),
       ctx.db.query("waterPayments").collect(),
+      ctx.db.query("users").collect(),
     ]);
 
     const balances = calculateWaterBalances(movements);
@@ -54,6 +55,12 @@ export const dashboard = query({
       paymentsByCharge.set(key, (paymentsByCharge.get(key) ?? 0) + payment.amount);
     }
     const participantById = new Map(participants.map((row: any) => [String(row._id), row]));
+    const periodById = new Map(periods.map((row: any) => [String(row._id), row]));
+    const userById = new Map(users.map((row: any) => [String(row._id), row]));
+    const chargeByKey = new Map(charges.map((row: any) => [
+      `${String(row.periodId)}|${String(row.participantId)}`,
+      row,
+    ]));
     const chargesByPeriod = new Map<string, any[]>();
     for (const charge of charges) {
       const key = String(charge.periodId);
@@ -109,6 +116,29 @@ export const dashboard = query({
     const purchasedCost = movements.reduce((sum: number, row: any) => sum + (row.costAmount ?? 0), 0);
     const allocatedCost = periods.reduce((sum: number, row: any) => sum + row.totalCost, 0);
     const paidCost = payments.reduce((sum: number, row: any) => sum + row.amount, 0);
+    const movementRows = movements
+      .slice()
+      .sort((a: any, b: any) => b.createdAt - a.createdAt)
+      .slice(0, 200)
+      .map((row: any) => ({
+        ...row,
+        operatorName: userById.get(String(row.userId))?.name ?? userById.get(String(row.userId))?.email ?? "Usuário",
+      }));
+    const paymentRows = payments
+      .slice()
+      .sort((a: any, b: any) => b.paidAt - a.paidAt)
+      .slice(0, 200)
+      .map((row: any) => {
+        const charge = chargeByKey.get(`${String(row.periodId)}|${String(row.participantId)}`);
+        const period = periodById.get(String(row.periodId));
+        const user = userById.get(String(row.receivedByUserId));
+        return {
+          ...row,
+          periodLabel: period?.label ?? "Competência",
+          participantName: charge?.participantNameSnapshot ?? "Participante",
+          receivedByName: user?.name ?? user?.email ?? "Usuário",
+        };
+      });
 
     return {
       generatedAt: Date.now(),
@@ -123,7 +153,8 @@ export const dashboard = query({
       },
       participants: participantRows,
       periods: periodRows,
-      movements: movements.slice().sort((a: any, b: any) => b.createdAt - a.createdAt).slice(0, 200),
+      movements: movementRows,
+      payments: paymentRows,
     };
   },
 });
