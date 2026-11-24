@@ -36,6 +36,7 @@ import {
   Network,
   Phone,
   SlidersHorizontal,
+  Droplets,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -96,6 +97,7 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Dar saída", href: "/exit", icon: PackageMinus, permission: "canCreateEntries" },
     { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests", permission2: "canApproveRequests" },
     { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
+    { label: "Água mineral", href: "/water", icon: Droplets, permission: "canManageStock" },
   ]},
   { title: "Patrimônio", items: [
     { label: "Solicitações de baixa", href: "/patrimony", icon: ClipboardCheck, permission: "canManageAssets" },
