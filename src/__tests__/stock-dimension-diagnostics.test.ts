@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 const backend = readFileSync(resolve(__dirname, "../convex/stockSetup.ts"), "utf8");
 const reportsPage = readFileSync(resolve(__dirname, "../pages/Reports.tsx"), "utf8");
+const stockPage = readFileSync(resolve(__dirname, "../pages/Stock.tsx"), "utf8");
 
 describe("diagnóstico dimensional do estoque", () => {
   const start = backend.indexOf("export const stockDimensionDiagnostics = query({");
@@ -70,6 +71,10 @@ describe("visão dimensional consolidada do estoque", () => {
   it("mantém saldos legados sem lote visíveis por armário sem inventar área", () => {
     expect(block).toContain("untrackedLocations");
     expect(reportsPage).toContain('"Sem classificação por lote"');
+    expect(stockPage).toContain("dimension?.untrackedLocations?.length");
+    expect(stockPage).toContain("Saldo legado sem lote classificado");
+    expect(stockPage).toContain("location.locationName");
+    expect(stockPage).toContain("location.quantityAvailable");
   });
 
   it("relatório filtra e exporta área, armário e lote em consulta somente leitura", () => {
