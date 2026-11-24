@@ -193,7 +193,7 @@ export default function Reports() {
   // ─── Requests Report ───
   const [reqStartDate, setReqStartDate] = useState("");
   const [reqEndDate, setReqEndDate] = useState("");
-  const allRequests = useQuery(api.requests.list, {});
+  const allRequests = useQuery(api.requests.listForReport, {});
 
   // ─── Assets Report ───
   const allAssets = useQuery(api.assets.list, {});
