@@ -28,18 +28,13 @@ import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import {
   decideAreaRepair,
-  decideLotAvailabilityRepair,
   decideEntryAreaRepair,
   decideEntryItemLotLink,
   decideMovementLotLink,
   buildAreaRepairAuditDetail,
-  buildLotAvailabilityAuditDetail,
   buildEntryAreaTraceAuditDetail,
   buildEntryItemLotsTraceAuditDetail,
   buildMovementTraceAuditDetail,
-  isCoolerLotStateUnchanged,
-  COOLER_LOT_EXPECTED_AVAILABLE,
-  COOLER_LOT_INCONSISTENT_AVAILABLE,
   NF372043_EXPECTED_LOTS,
 } from "../lib/data-repairs";
 
