@@ -119,8 +119,22 @@ export const create = mutation({
     let products = await ctx.db.query("products").withIndex("by_active", (q) => q.eq("active", true)).collect();
     if (args.categoryId) products = products.filter((p) => p.categoryId === args.categoryId);
     if (args.productIds && args.productIds.length > 0) {
-      const selected = new Set(args.productIds);
-      products = products.filter((p) => selected.has(p._id));
+      const selectedIds = args.productIds.map(String);
+      const selected = new Set(selectedIds);
+      if (selected.size !== selectedIds.length) {
+        throw new Error("A seleção do inventário contém produtos duplicados.");
+      }
+      const selectedProducts = await Promise.all(args.productIds.map((productId) => ctx.db.get(productId)));
+      if (selectedProducts.some((product) => !product || !product.active)) {
+        throw new Error("Um ou mais produtos selecionados não existem ou estão inativos. Atualize a seleção antes de abrir o inventário.");
+      }
+      if (args.categoryId && selectedProducts.some((product) => product?.categoryId !== args.categoryId)) {
+        throw new Error("A seleção contém produto fora da categoria informada.");
+      }
+      products = selectedProducts.filter((product): product is NonNullable<typeof product> => Boolean(product));
+    }
+    if (products.length === 0) {
+      throw new Error("Nenhum produto ativo corresponde ao escopo do inventário. Revise os filtros antes de abrir.");
     }
 
     const scopeLabel = [
