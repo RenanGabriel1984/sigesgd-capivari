@@ -88,7 +88,12 @@ const productsReport = products.map((product) => {
   if (global && productLots.length > 0 && Math.abs(globalPhysical - lotPhysical) > EPSILON) {
     flags.push("global_diverge_dos_lotes");
   }
-  if (Math.abs(actualReserved - expectedReserved) > EPSILON) flags.push("reserva_diverge_das_solicitacoes_aprovadas");
+  if (globalReserved !== null && Math.abs(actualReserved - expectedReserved) > EPSILON) {
+    flags.push("reserva_diverge_das_solicitacoes_aprovadas");
+  }
+  if (globalRows.length === 0 && expectedReserved > EPSILON) {
+    flags.push("solicitacao_aprovada_sem_registro_global_de_estoque");
+  }
   if (approvedItems.some((item) => !Number.isFinite(item.quantityApproved) || Number(item.quantityApproved) < 0)) {
     flags.push("quantidade_aprovada_invalida");
   }
@@ -180,8 +185,11 @@ const productsReport = products.map((product) => {
     flags: [...new Set(flags)],
   };
 }).filter((row) =>
-  row.globalPhysical !== 0 || row.localPhysical !== 0 || row.globalReserved !== 0 ||
-  row.lotPhysical !== 0 || row.flags.length > 0,
+  (row.globalPhysical !== null && row.globalPhysical !== 0) ||
+  row.localPhysical !== 0 ||
+  (row.globalReserved !== null && row.globalReserved !== 0) ||
+  row.lotPhysical !== 0 ||
+  row.flags.length > 0,
 ).sort((a, b) => String(a.product).localeCompare(String(b.product), "pt-BR"));
 
 const movementTypeCounts = {};
