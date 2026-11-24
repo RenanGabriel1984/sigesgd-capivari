@@ -599,7 +599,7 @@ export const resolveQuarantine = mutation({
 
       if (allocations.length > 0) {
         const allocatedTotal = allocations.reduce((sum: number, row: any) => sum + row.quantity, 0);
-        if (allocatedTotal !== returned.quantity) {
+        if (Math.abs(allocatedTotal - returned.quantity) > 1e-8) {
           throw new Error("As alocações de quarentena não correspondem à quantidade devolvida. Regularize antes de liberar.");
         }
         for (const allocation of allocations) {
