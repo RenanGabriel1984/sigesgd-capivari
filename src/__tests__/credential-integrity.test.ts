@@ -168,7 +168,7 @@ describe("admin password reset UI after atomic account creation", () => {
     const { resolve } = await import("node:path");
     const source = readFileSync(resolve(__dirname, "../convex/passwords.ts"), "utf8");
     const start = source.indexOf("export const adminResetPassword = mutation({");
-    const end = source.indexOf("\\nexport const ", start + 1);
+    const end = source.indexOf("\nexport const ", start + 1);
     const block = source.slice(start, end === -1 ? source.length : end);
     expect(block).toContain('passwordResolution.status === "ambiguous"');
     expect(block).toContain('passwordResolution.status === "unique"');
