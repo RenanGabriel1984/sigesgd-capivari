@@ -61,6 +61,23 @@ export const list = query({
   },
 });
 
+/**
+ * Relatório operacional sem o limite de paginação da lista de trabalho.
+ * Mantém o escopo por perfil: gestores autorizados veem todas as solicitações;
+ * os demais usuários veem somente as próprias.
+ */
+export const listForReport = query({
+  args: {},
+  handler: async (ctx) => {
+    const { user } = await requireUser(ctx);
+    const role = (user.role ?? "technician") as UserRole;
+    const requests = hasFullVisibility(role)
+      ? await ctx.db.query("requests").withIndex("by_created").order("desc").collect()
+      : await ctx.db.query("requests").withIndex("by_requester", (q) => q.eq("requesterId", user._id)).order("desc").collect();
+    return Promise.all(requests.map(async (request) => enrichRequest(ctx, request)));
+  },
+});
+
 export const listByUser = query({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
