@@ -18,7 +18,7 @@ import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
-import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
+import { assertProductReservationConsistent, consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 import {
   buildSupplyRow,
   computeCardTotals,
@@ -412,6 +412,7 @@ export const withdraw = mutation({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
     const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
+    await assertProductReservationConsistent(ctx, args.productId, product.name, stock);
     const available = (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
     if (args.quantity > available) {
       throw new Error(`Estoque insuficiente. Disponível: ${available} ${product.unitOfMeasure}`);
@@ -703,6 +704,8 @@ export const withdrawFamily = mutation({
     const closedRes = closedStock?.reservedQuantity ?? 0;
     const loosePhys = looseStock?.physicalQuantity ?? 0;
     const looseRes = looseStock?.reservedQuantity ?? 0;
+    await assertProductReservationConsistent(ctx, closedMember._id, closedMember.name, closedStock);
+    await assertProductReservationConsistent(ctx, looseMember._id, looseMember.name, looseStock);
     const closedAvailable = closedPhys - closedRes;
     const looseAvailable = loosePhys - looseRes;
 
