@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { calculateWaterBalances, remainingWaterShare, splitWaterCost } from "../lib/water-management";
 
 const movementType = v.union(
   v.literal("opening_balance"),
@@ -16,19 +17,9 @@ function validDate(value: string): boolean {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
-function moneyCents(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100);
-}
-
 async function currentBalances(ctx: any) {
   const movements = await ctx.db.query("waterMovements").collect();
-  return movements.reduce(
-    (balance: { full: number; empty: number }, row: any) => ({
-      full: balance.full + row.fullDelta,
-      empty: balance.empty + row.emptyDelta,
-    }),
-    { full: 0, empty: 0 },
-  );
+  return calculateWaterBalances(movements);
 }
 
 async function requireWaterRead(ctx: any) {
@@ -56,13 +47,7 @@ export const dashboard = query({
       ctx.db.query("waterPayments").collect(),
     ]);
 
-    const balances = movements.reduce(
-      (total: { full: number; empty: number }, row: any) => ({
-        full: total.full + row.fullDelta,
-        empty: total.empty + row.emptyDelta,
-      }),
-      { full: 0, empty: 0 },
-    );
+    const balances = calculateWaterBalances(movements);
     const paymentsByCharge = new Map<string, number>();
     for (const payment of payments) {
       const key = `${String(payment.periodId)}|${String(payment.participantId)}`;
@@ -301,18 +286,14 @@ export const createPeriod = mutation({
       createdByUserId: userId,
       createdAt: now,
     });
-    const totalCents = moneyCents(args.totalCost);
-    const baseCents = Math.floor(totalCents / selected.length);
-    let remainingCents = totalCents;
-    for (let index = 0; index < selected.length; index += 1) {
-      const participant = selected[index]!;
-      const shareCents = index === selected.length - 1 ? remainingCents : baseCents;
-      remainingCents -= shareCents;
+    const shares = splitWaterCost(args.totalCost, selected.map((participant: any) => String(participant._id)));
+    for (const share of shares) {
+      const participant: any = selected.find((row: any) => String(row._id) === share.participantId);
       await ctx.db.insert("waterPeriodCharges", {
         periodId,
         participantId: participant._id,
         participantNameSnapshot: participant.name,
-        shareAmount: shareCents / 100,
+        shareAmount: share.shareAmount,
         createdAt: now,
       });
     }
@@ -346,10 +327,10 @@ export const recordPayment = mutation({
     if (!period) throw new Error("Competência não encontrada.");
     const charge = charges.find((row: any) => row.participantId === args.participantId);
     if (!charge) throw new Error("Este participante não faz parte do rateio selecionado.");
-    const paidSoFar = payments
+    const participantPayments = payments
       .filter((row: any) => row.participantId === args.participantId)
-      .reduce((sum: number, row: any) => sum + row.amount, 0);
-    const remaining = Math.round((charge.shareAmount - paidSoFar) * 100) / 100;
+      .map((row: any) => row.amount);
+    const remaining = remainingWaterShare(charge.shareAmount, participantPayments);
     if (args.amount > remaining + 0.000001) {
       throw new Error(`Pagamento excede o saldo em aberto de R$ ${remaining.toFixed(2)}.`);
     }
