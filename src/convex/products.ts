@@ -344,7 +344,8 @@ export const update = mutation({
 
     // Prevent deactivation if product has active reservations
     if (updates.active === false) {
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", id)).first();
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", id)).collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
       if (stock && stock.reservedQuantity > 0) {
         throw new Error("Não é possível desativar: existem unidades reservadas em solicitações pendentes");
       }
