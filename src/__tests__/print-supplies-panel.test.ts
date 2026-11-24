@@ -201,8 +201,8 @@ describe("PRINT-19 — nenhuma duplicação de estoque é criada", () => {
     // apenas quando o produto avulso ainda não possui registro. Não há nova
     // tabela/cache de família nem linha duplicada para o mesmo produto.
     expect(backend).toContain("getOptionalSingleValidGlobalStock");
-    expect(backend).toContain("if (looseStock) {");
-    expect(backend).toContain("else if (newLoosePhys > 0)");
+    expect(backend).toContain("if (looseStockId) {");
+    expect(backend).toContain('looseStockId = await ctx.db.insert("stock"');
     expect(backend).not.toMatch(/insert\("(printSuppliesStock|supplyStock|familyStock)"/);
     expect(backend).not.toMatch(/insert\("(families|supplyFamilies)"/);
   });
