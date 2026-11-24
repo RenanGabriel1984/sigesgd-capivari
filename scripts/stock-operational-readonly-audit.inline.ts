@@ -224,26 +224,73 @@ const productsById = new Map(products.map((product) => [String(product._id), pro
 const locationsById = new Map(locations.map((location) => [String(location._id), location]));
 const entriesWithoutAreaDetails = entries
   .filter((entry) => !entry.areaId)
-  .map((entry) => ({
-    entryNumber: entry.entryNumber,
-    status: entry.status,
-    originType: entry.originType,
-    materialType: entry.materialType ?? null,
-    invoiceNumber: entry.invoiceNumber ?? null,
-    receivedAt: entry.receivedAt,
-    itemCount: entryItems.filter((item) => String(item.entryId) === String(entry._id)).length,
-  }));
-const returnsDetails = returns.map((returned) => ({
-  productName: productsById.get(String(returned.productId))?.name ?? "Produto inexistente",
-  quantity: returned.quantity,
-  condition: returned.condition ?? "legada_sem_condicao",
-  stockDisposition: returned.stockDisposition ?? "legado_sem_destinacao_registrada",
-  locationName: returned.locationId ? locationsById.get(String(returned.locationId))?.name ?? "Local inexistente" : null,
-  exitMovementLinked: Boolean(returned.exitMovementId),
-  lotAllocationCount: returnLotAllocations.filter((allocation) => String(allocation.returnId) === String(returned._id)).length,
-  createdAt: returned.createdAt,
-  inspectedAt: returned.inspectedAt ?? null,
-}));
+  .map((entry) => {
+    const items = entryItems.filter((item) => String(item.entryId) === String(entry._id));
+    const areaDistribution = new Map();
+    const locationDistribution = new Map();
+    const itemDetails = items.map((item) => {
+      const lotRef = item.lotId ? String(item.lotId) : null;
+      const lot = lotRef ? lotById.get(lotRef) ?? lotByNumber.get(lotRef) : null;
+      const areaName = lot?.areaId ? areaById.get(String(lot.areaId))?.name ?? "Área inexistente" : "Sem área no lote";
+      const locationName = item.locationId
+        ? locationsById.get(String(item.locationId))?.name ?? "Armário inexistente"
+        : "Sem armário no item";
+      const areaStat = areaDistribution.get(areaName) ?? { itemCount: 0, quantity: 0 };
+      areaStat.itemCount++;
+      areaStat.quantity += Number(item.quantity ?? 0);
+      areaDistribution.set(areaName, areaStat);
+      const locationStat = locationDistribution.get(locationName) ?? { itemCount: 0, quantity: 0 };
+      locationStat.itemCount++;
+      locationStat.quantity += Number(item.quantity ?? 0);
+      locationDistribution.set(locationName, locationStat);
+      return {
+        productName: productsById.get(String(item.productId))?.name ?? "Produto inexistente",
+        lotNumber: lot?.lotNumber ?? "Lote não resolvido",
+        areaName,
+        locationName,
+        quantity: item.quantity,
+      };
+    });
+    return {
+      entryNumber: entry.entryNumber,
+      status: entry.status,
+      originType: entry.originType,
+      materialType: entry.materialType ?? null,
+      invoiceNumber: entry.invoiceNumber ?? null,
+      receivedAt: entry.receivedAt,
+      itemCount: items.length,
+      totalQuantity: items.reduce((total, item) => total + Number(item.quantity ?? 0), 0),
+      areaDistribution: Array.from(areaDistribution.entries()).map(([name, value]) => ({ name, ...value })),
+      locationDistribution: Array.from(locationDistribution.entries()).map(([name, value]) => ({ name, ...value })),
+      itemsWithoutResolvedLot: itemDetails.filter((item) => item.lotNumber === "Lote não resolvido").length,
+      itemsWithoutLotArea: itemDetails.filter((item) => item.areaName === "Sem área no lote" || item.areaName === "Área inexistente").length,
+      itemDetails,
+    };
+  });
+const movementById = new Map(movements.map((movement) => [String(movement._id), movement]));
+const returnsDetails = returns.map((returned) => {
+  const linkedExit = returned.exitMovementId ? movementById.get(String(returned.exitMovementId)) : null;
+  const lotRef = returned.lotId ? String(returned.lotId) : null;
+  const lot = lotRef ? lotById.get(lotRef) ?? lotByNumber.get(lotRef) : null;
+  return {
+    productName: productsById.get(String(returned.productId))?.name ?? "Produto inexistente",
+    quantity: returned.quantity,
+    condition: returned.condition ?? "legada_sem_condicao",
+    stockDisposition: returned.stockDisposition ?? "legado_sem_destinacao_registrada",
+    locationName: returned.locationId ? locationsById.get(String(returned.locationId))?.name ?? "Local inexistente" : null,
+    lotNumber: lot?.lotNumber ?? "Lote não resolvido",
+    exitMovement: linkedExit ? {
+      type: linkedExit.type,
+      quantity: linkedExit.quantity,
+      lotReference: linkedExit.lotId ?? null,
+      locationName: linkedExit.locationId ? locationsById.get(String(linkedExit.locationId))?.name ?? "Local inexistente" : null,
+      timestamp: linkedExit.timestamp,
+    } : null,
+    lotAllocationCount: returnLotAllocations.filter((allocation) => String(allocation.returnId) === String(returned._id)).length,
+    createdAt: returned.createdAt,
+    inspectedAt: returned.inspectedAt ?? null,
+  };
+});
 const lotReferenceCounts = { byId: 0, byNumber: 0, unresolved: 0, empty: 0 };
 for (const movement of movements) {
   if (!movement.lotId) lotReferenceCounts.empty++;
@@ -299,7 +346,13 @@ return {
     movementsWithStructuredLotAllocations: allocationCountByMovementId.size,
     movementsWithoutStructuredLotAllocations: movements.length - allocationCountByMovementId.size,
     returnLotAllocations: returnLotAllocations.length,
+    movementsMissingLotAllocation: movements.filter((movement) =>
+      ["exit", "return"].includes(String(movement.type)) &&
+      (allocationCountByMovementId.get(String(movement._id)) ?? 0) === 0,
+    ).length,
     entriesWithoutArea: entriesWithoutAreaDetails.length,
+    earliestMovementAt: movements.length > 0 ? Math.min(...movements.map((movement) => movement.timestamp)) : null,
+    latestMovementAt: movements.length > 0 ? Math.max(...movements.map((movement) => movement.timestamp)) : null,
   },
   movementAllocationCoverageByType,
   entriesWithoutAreaDetails,
