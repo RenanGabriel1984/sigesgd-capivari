@@ -160,11 +160,18 @@ export const create = mutation({
         quantity: args.quantity,
       });
     } else {
-      const activeLots = await ctx.db.query("lots")
-        .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
-        .collect();
-      if (activeLots.some((lot: any) => lot.quantityAvailable > 0)) {
-        throw new Error("Selecione o lote para transferir: o produto possui saldo rastreado por lote.");
+      const [productLots, existingLotBalances] = await Promise.all([
+        ctx.db.query("lots")
+          .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
+          .collect(),
+        ctx.db.query("lotLocationBalances")
+          .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
+          .collect(),
+      ]);
+      if (productLots.length > 0 || existingLotBalances.length > 0) {
+        throw new Error(
+          "Este produto possui histórico de lotes. Selecione o lote da transferência; se o saldo estiver sem classificação, regularize o inventário antes de transferir.",
+        );
       }
       const [globalRows, locationRows] = await Promise.all([
         ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
