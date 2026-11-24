@@ -73,7 +73,7 @@ jobs:
           {
             echo "### Metadados das funções atualmente implantadas"
             echo ""
-            echo "- Deployment selecionado pela própria deploy key: `dev:${TARGET_DEPLOYMENT}`"
+            echo "- Deployment selecionado pela própria deploy key: dev:${TARGET_DEPLOYMENT}"
             echo "- Consulta de metadados; sem deploy e sem gravação de dados."
             echo ""
             echo '~~~text'
