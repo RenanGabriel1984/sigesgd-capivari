@@ -37,6 +37,9 @@ export function planTransfer(input: {
   if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
     throw new Error("Quantidade da transferência deve ser maior que zero");
   }
+  if (!Number.isFinite(input.fromQuantity) || !Number.isFinite(input.toQuantity) || input.fromQuantity < 0 || input.toQuantity < 0) {
+    throw new Error("Os saldos de origem e destino devem ser finitos e não negativos.");
+  }
   if (input.quantity > input.fromQuantity) {
     throw new Error(
       `Estoque insuficiente na origem (${input.fromLocationName}). ` +
@@ -47,11 +50,16 @@ export function planTransfer(input: {
     throw new Error("Origem e destino não podem ser o mesmo local");
   }
 
+  const fromQuantityAfter = input.fromQuantity - input.quantity;
+  const toQuantityAfter = input.toQuantity + input.quantity;
+  if (!Number.isFinite(fromQuantityAfter) || !Number.isFinite(toQuantityAfter)) {
+    throw new Error("O resultado da transferência excede os limites numéricos válidos.");
+  }
   const lotSuffix = input.lotNumber ? ` | lote: ${input.lotNumber}` : "";
   const reason = input.reason?.trim() || "reorganização de estoque";
   return {
-    fromQuantityAfter: input.fromQuantity - input.quantity,
-    toQuantityAfter: input.toQuantity + input.quantity,
+    fromQuantityAfter,
+    toQuantityAfter,
     keepsLot: true,
     lotId: input.lotId ?? null,
     movementType: "transfer",
