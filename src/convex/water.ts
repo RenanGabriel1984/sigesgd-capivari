@@ -23,7 +23,7 @@ async function currentBalances(ctx: any) {
 }
 
 async function requireWaterRead(ctx: any) {
-  return requirePermission(ctx, "stock.view", { entity: "waterManagement" });
+  return requirePermission(ctx, "stock.mutate", { entity: "waterManagement" });
 }
 
 async function requireWaterManage(ctx: any) {
