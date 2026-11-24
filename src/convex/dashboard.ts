@@ -36,11 +36,12 @@ export const stats = query({
     // Critical stock count
     let criticalStock = 0;
     for (const p of products) {
-      const stock = await ctx.db
+      const stockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
-      const qty = stock?.physicalQuantity ?? 0;
+        .collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
+      const qty = (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
       // `?? 0` preserva exatamente o comportamento anterior (o campo passou a
       // ser anulável; produto sem mínimo configurado continua com mínimo 0).
       if (qty <= (p.minimumStock ?? 0)) criticalStock++;
@@ -100,11 +101,12 @@ export const stats = query({
     // Urgent alerts (items at or below minimum)
     const urgentAlerts = [];
     for (const p of products) {
-      const stock = await ctx.db
+      const stockRows = await ctx.db
         .query("stock")
         .withIndex("by_product", (q) => q.eq("productId", p._id))
-        .first();
-      const qty = stock?.physicalQuantity ?? 0;
+        .collect();
+      const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
+      const qty = (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
       if (qty <= (p.minimumStock ?? 0)) {
         const category = await ctx.db.get(p.categoryId);
         urgentAlerts.push({
@@ -238,7 +240,7 @@ export const movementReport = query({
         idx.gte("timestamp", args.startDate!)
       ).order("desc");
     }
-    const movements = await q.take(500);
+    const movements = await q.collect();
     let filtered = movements;
     if (args.endDate) {
       filtered = movements.filter((m) => m.timestamp <= args.endDate!);
