@@ -71,3 +71,21 @@ Links das evidências:
 O saldo quantitativo está conciliado no snapshot consultado. Permanecem ausentes os dois registros de alocação estruturada do teste: a alocação withdrawal da saída e a linha correspondente em returnLotAllocations. A prévia read-only identificou os dois vínculos de forma única, mas não os gravou. Qualquer backfill deve inserir somente esses metadados, sem alterar saldos, quantidades dos lotes ou movimentos originais.
 
 A confirmação de produção continua separada: o deployment de produção savory-sockeye-292 ainda precisa da consulta read-only com credencial restrita a esse deployment.
+
+
+## Mapeamento de ambientes e proteção de conexão — 24/11/2026
+
+O roteamento do aplicativo deve respeitar o seguinte mapa operacional confirmado:
+
+- **Produção:** `savory-sockeye-292` — backend oficial dos dados da Secretaria.
+- **Desenvolvimento cloud:** `first-herring-264` — ambiente de desenvolvimento; não é produção.
+- **Preview isolado:** deployments próprios da branch/ambiente; nunca assumir que um preview é o banco oficial.
+
+A resolução do backend no frontend foi alinhada a esse mapa em `src/lib/convex-url.ts`:
+
+- Build de produção usa fixamente `savory-sockeye-292`, ignorando `VITE_CONVEX_URL` injetada externamente.
+- Execução local de desenvolvimento usa `first-herring-264` por padrão; uma URL alternativa de desenvolvimento só é aceita quando explicitamente identificada como desenvolvimento e desde que não seja produção.
+- Homologação exige `VITE_APP_ENV=homologacao` e URL explícita, rejeitando tanto o backend de produção quanto o de desenvolvimento.
+- O script `scripts/build-homolog.mjs` bloqueia os dois hosts conhecidos antes de compilar.
+
+Esta alteração é apenas código, testes e documentação. Não conectou, consultou, migrou ou modificou nenhum deployment Convex; a auditoria read-only de produção continua sendo uma etapa separada.
