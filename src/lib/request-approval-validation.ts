@@ -42,3 +42,20 @@ export function assertCompleteDeliveryItemIds(
     throw new Error("A entrega deve informar todas as linhas aprovadas da solicitação. Atualize a tela e tente novamente.");
   }
 }
+
+
+export function assertCompleteApprovalItemIds(
+  requestItems: readonly { itemId: string }[],
+  approvalItems: readonly { itemId: string }[],
+): void {
+  const requestIds = new Set(requestItems.map((item) => item.itemId));
+  const approvalIds = new Set(approvalItems.map((item) => item.itemId));
+  if (approvalIds.size !== approvalItems.length) {
+    throw new Error("A mesma linha da solicitação foi enviada mais de uma vez para aprovação.");
+  }
+  const missing = [...requestIds].filter((id) => !approvalIds.has(id));
+  const unexpected = [...approvalIds].filter((id) => !requestIds.has(id));
+  if (missing.length || unexpected.length) {
+    throw new Error("A aprovação deve informar todas as linhas da solicitação. Atualize a tela e tente novamente.");
+  }
+}
