@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assertCompleteApprovalItemIds,
   assertCompleteDeliveryItemIds,
   assertUniqueApprovalItemIds,
   getDeliveryStockAdjustment,
@@ -91,5 +92,40 @@ describe("integração da aprovação sem reserva duplicada", () => {
     );
     expect(guard).toBeGreaterThan(-1);
     expect(firstWrite).toBeGreaterThan(guard);
+  });
+});
+
+
+describe("integridade da aprovação de solicitações", () => {
+  it("exige todas as linhas da solicitação e rejeita linhas inesperadas ou repetidas", () => {
+    expect(() => assertCompleteApprovalItemIds(
+      [{ itemId: "a" }, { itemId: "b" }],
+      [{ itemId: "a" }, { itemId: "b" }],
+    )).not.toThrow();
+    expect(() => assertCompleteApprovalItemIds(
+      [{ itemId: "a" }, { itemId: "b" }],
+      [{ itemId: "a" }],
+    )).toThrow(/todas as linhas da solicitação/i);
+    expect(() => assertCompleteApprovalItemIds(
+      [{ itemId: "a" }],
+      [{ itemId: "x" }],
+    )).toThrow(/todas as linhas da solicitação/i);
+    expect(() => assertCompleteApprovalItemIds(
+      [{ itemId: "a" }],
+      [{ itemId: "a" }, { itemId: "a" }],
+    )).toThrow(/mais de uma vez/i);
+  });
+
+  it("consulta e valida o registro global único antes de reservar estoque", () => {
+    const source = readFileSync(resolve(__dirname, "../convex/requests.ts"), "utf8");
+    const start = source.indexOf("export const approve = mutation({");
+    const end = source.indexOf("export const reject = mutation({", start);
+    const block = source.slice(start, end);
+    expect(block).toContain("assertCompleteApprovalItemIds(");
+    expect(block).toContain('.withIndex("by_product"');
+    expect(block).toContain(".collect()");
+    expect(block).toContain("requireSingleValidGlobalStock(stockRows, productId)");
+    expect(block).toContain("requireSingleValidGlobalStock(freshStockRows, String(requestItem.productId))");
+    expect(block).not.toContain(".first();");
   });
 });
