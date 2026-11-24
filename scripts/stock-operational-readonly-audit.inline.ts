@@ -270,8 +270,11 @@ const entriesWithoutAreaDetails = entries
 const movementById = new Map(movements.map((movement) => [String(movement._id), movement]));
 const returnsDetails = returns.map((returned) => {
   const linkedExit = returned.exitMovementId ? movementById.get(String(returned.exitMovementId)) : null;
-  const lotRef = returned.lotId ? String(returned.lotId) : null;
-  const lot = lotRef ? lotById.get(lotRef) ?? lotByNumber.get(lotRef) : null;
+  const returnedLotRef = returned.lotId ? String(returned.lotId) : null;
+  const returnedLot = returnedLotRef ? lotById.get(returnedLotRef) ?? lotByNumber.get(returnedLotRef) : null;
+  const linkedExitLotRef = linkedExit?.lotId ? String(linkedExit.lotId) : null;
+  const linkedExitLot = linkedExitLotRef ? lotById.get(linkedExitLotRef) ?? lotByNumber.get(linkedExitLotRef) : null;
+  const lot = returnedLot ?? linkedExitLot;
   return {
     productName: productsById.get(String(returned.productId))?.name ?? "Produto inexistente",
     quantity: returned.quantity,
@@ -279,6 +282,9 @@ const returnsDetails = returns.map((returned) => {
     stockDisposition: returned.stockDisposition ?? "legado_sem_destinacao_registrada",
     locationName: returned.locationId ? locationsById.get(String(returned.locationId))?.name ?? "Local inexistente" : null,
     lotNumber: lot?.lotNumber ?? "Lote não resolvido",
+    lotReferenceSource: returnedLot ? "registro_devolucao" : linkedExitLot ? "saida_original_vinculada" : "nao_resolvido",
+    returnLotReference: returnedLotRef,
+    linkedExitLotReference: linkedExitLotRef,
     exitMovement: linkedExit ? {
       type: linkedExit.type,
       quantity: linkedExit.quantity,
