@@ -135,6 +135,13 @@ describe("reconciliação administrativa respeita livros-razão e reservas", () 
     expect(core).toContain("reason: structuralError");
   });
 
+  it("transferências conciliam reservas antes de alterar armários", () => {
+    const transfers = readFileSync(resolve(__dirname, "../convex/stockTransfers.ts"), "utf8");
+    expect(transfers).toContain("assertProductReservationConsistent(ctx, args.productId, product.name, reservationStock)");
+    expect(transfers).toContain("validateUniqueScopedStockRows");
+    expect(transfers).toContain("planLotLocationTransfer");
+  });
+
   it("GomaQ valida reserva e baixa lote/armário pelo ledger", () => {
     const gomaq = readFileSync(resolve(__dirname, "../convex/gomaQ.ts"), "utf8");
     const start = gomaq.indexOf("export const createExchange = mutation({");
