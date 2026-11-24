@@ -32,7 +32,7 @@ export type HistoricalAreaClassificationPlan = {
 const normalize = (value: string | null | undefined) =>
   (value ?? "").normalize("NFKC").trim().toLocaleLowerCase("pt-BR");
 
-const digits = (value: string | null | undefined) => (value ?? "").replace(/\\D/g, "");
+const digits = (value: string | null | undefined) => (value ?? "").replace(/\D/g, "");
 
 /**
  * Classifica somente lotes cuja origem documental coincide integralmente com
@@ -86,7 +86,9 @@ export function buildHistoricalAreaClassificationPlan(
     } else if (
       source.entryNumber === GOMAQ_ENTRY_NUMBER &&
       digits(source.invoiceNumber) === GOMAQ_INVOICE_NUMBER &&
-      item.quantity > 0 &&
+      normalize(item.productName) === normalize("Kit teclado e mouse") &&
+      item.quantity === 25 &&
+      normalize(item.unitOfMeasure) === "kit" &&
       !!item.locationId
     ) {
       areaName = "Impressoras";
