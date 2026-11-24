@@ -315,17 +315,22 @@ export const approve = mutation({
       await ctx.db.patch(item.itemId, { quantityApproved: item.quantityApproved });
 
       // Reserve stock (re-read for safety)
-      const freshStock = await assertProductLedgerConsistent(
+      const freshStock = await ctx.db
+        .query("stock")
+        .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
+        .first();
+      if (!freshStock) throw new Error("Registro global de estoque não encontrado para reservar.");
+      const validatedStock = await assertProductLedgerConsistent(
         ctx,
         requestItem.productId,
         String(requestItem.productId),
       );
-      if (!freshStock) throw new Error("Registro global de estoque não encontrado para reservar.");
-
-      if (freshStock) {
-        const newReserved = freshStock.reservedQuantity + item.quantityApproved;
-        await ctx.db.patch(freshStock._id, { reservedQuantity: newReserved });
+      if (!validatedStock || validatedStock._id !== freshStock._id) {
+        throw new Error("O registro global de estoque mudou durante a aprovação.");
       }
+
+      const newReserved = freshStock.reservedQuantity + item.quantityApproved;
+      await ctx.db.patch(freshStock._id, { reservedQuantity: newReserved });
     }
 
     // Update request status
@@ -503,14 +508,17 @@ export const deliver = mutation({
         quantity: input.quantityDelivered,
       });
       const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
-      const newPhysical = freshStock.physicalQuantity - adjustment.physicalToRemove;
-      const newReserved = freshStock.reservedQuantity - adjustment.reservedToRelease;
-      await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical, reservedQuantity: newReserved });
+      const newPhysical = freshStock.physicalQuantity - input.quantityDelivered;
+      // Retain the legacy arithmetic invariant (subtract the delivered amount),
+      // then release the unused portion too because the request is now complete.
+      const newReserved = freshStock.reservedQuantity - input.quantityDelivered;
+      const finalReserved = newReserved - adjustment.unusedReservation;
+      await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical, reservedQuantity: finalReserved });
       const exitNumber = await generateExitNumber(ctx);
       const movementId = await ctx.db.insert("stockMovements", {
         productId: requestItem.productId, type: "exit", quantity: input.quantityDelivered,
         previousPhysical: freshStock.physicalQuantity, newPhysical,
-        previousReserved: freshStock.reservedQuantity, newReserved,
+        previousReserved: freshStock.reservedQuantity, newReserved: finalReserved,
         userId, requestId: args.requestId, exitNumber,
         lotId: lotConsumption.allocations[0]?.lotId as any,
         locationId: sourceLocationId,
