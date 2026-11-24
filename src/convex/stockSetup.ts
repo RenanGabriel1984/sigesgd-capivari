@@ -1550,8 +1550,47 @@ export const lotLocationReadiness = internalQuery({
       allLocalStock.some((row) => row.productId === product._id && row.quantity > 0),
     ).length;
 
+    const productById = new Map(allProducts.map((product) => [String(product._id), product]));
+    const entryItemsByLot = new Map<string, typeof allEntryItems>();
+    for (const item of allEntryItems) {
+      if (!item.lotId) continue;
+      const key = String(item.lotId);
+      const rows = entryItemsByLot.get(key) ?? [];
+      rows.push(item);
+      entryItemsByLot.set(key, rows);
+    }
+    const classificationEvidence = allLots
+      .filter((lot) => lot.quantityAvailable > 0)
+      .map((lot) => {
+        const product = productById.get(String(lot.productId));
+        const entry = lot.entryId ? entriesById.get(String(lot.entryId)) : null;
+        const linkedItems = entryItemsByLot.get(String(lot._id)) ?? [];
+        return {
+          lotId: String(lot._id),
+          lotNumber: lot.lotNumber,
+          productName: product?.name ?? "Produto inexistente",
+          areaId: lot.areaId ? String(lot.areaId) : null,
+          sourceEntry: entry ? {
+            entryNumber: entry.entryNumber,
+            invoiceNumber: entry.invoiceNumber ?? null,
+          } : null,
+          entryItemEvidence: linkedItems.map((item) => {
+            const locationId = item.locationId ? String(item.locationId) : null;
+            return {
+              entryItemId: String(item._id),
+              productName: item.productId === lot.productId ? product?.name ?? "Produto inexistente" : "Produto divergente",
+              quantity: item.quantity,
+              unitOfMeasure: item.unitOfMeasure ?? null,
+              locationId,
+              locationName: locationId ? locationNames.get(locationId) ?? "Local inexistente" : null,
+              lotId: item.lotId ? String(item.lotId) : null,
+            };
+          }),
+        };
+      });
+
     const areaClassification = buildHistoricalAreaClassificationPlan(
-      productsResult.flatMap((product) => product.lots),
+      classificationEvidence,
       allAreas.map((area) => ({ areaId: String(area._id), name: area.name, active: area.active })),
     );
 
