@@ -491,3 +491,18 @@ describe("interface de devolução exige armário para todo retorno", () => {
     expect(ui).not.toContain("Sem alteração de local");
   });
 });
+
+describe("histórico de devoluções sem truncamento silencioso", () => {
+  it("consulta o histórico completo e todas as saídas elegíveis para devolução", () => {
+    const source = readFileSync(resolve(__dirname, "../convex/returns.ts"), "utf8");
+    const listStart = source.indexOf("export const list = query");
+    const returnableStart = source.indexOf("export const returnable = query");
+    const createStart = source.indexOf("export const create = mutation");
+    const listBlock = source.slice(listStart, returnableStart);
+    const returnableBlock = source.slice(returnableStart, createStart);
+    expect(listBlock).toContain('.order("desc").collect()');
+    expect(listBlock).not.toContain(".take(200)");
+    expect(returnableBlock).toContain(".collect()");
+    expect(returnableBlock).not.toContain(".take(300)");
+  });
+});
