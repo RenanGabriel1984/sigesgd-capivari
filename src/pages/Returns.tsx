@@ -71,6 +71,7 @@ export default function ReturnsPage() {
   const returns = useQuery(api.returns.list);
   const locations = useQuery(api.storageLocations.listActive);
   const createReturn = useMutation(api.returns.create);
+  const resolveQuarantine = useMutation(api.returns.resolveQuarantine);
 
   const [selectedExitId, setSelectedExitId] = useState<string>("");
   const [quantity, setQuantity] = useState(1);
@@ -80,6 +81,10 @@ export default function ReturnsPage() {
   const [lotReturnQuantities, setLotReturnQuantities] = useState<Record<string, string>>({});
   const [observation, setObservation] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [inspectionReturn, setInspectionReturn] = useState<any>(null);
+  const [inspectionDisposition, setInspectionDisposition] = useState<"available" | "disposed">("available");
+  const [inspectionReason, setInspectionReason] = useState("");
+  const [inspectionSubmitting, setInspectionSubmitting] = useState(false);
 
   // Ação "Devolver" vinda da tela de Histórico/Relatório de saídas
   const exitParam = searchParams.get("exit") ?? "";
@@ -152,6 +157,32 @@ export default function ReturnsPage() {
       toast.error(e.message ?? "Erro ao registrar devolução");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleResolveQuarantine = async () => {
+    if (!inspectionReturn) return;
+    if (!inspectionReason.trim()) {
+      toast.error("Informe a justificativa da inspeção");
+      return;
+    }
+    setInspectionSubmitting(true);
+    try {
+      await resolveQuarantine({
+        returnId: inspectionReturn._id as any,
+        disposition: inspectionDisposition,
+        reason: inspectionReason.trim(),
+      });
+      toast.success(inspectionDisposition === "available"
+        ? "Material aprovado e reincorporado ao estoque"
+        : "Material descartado e mantido fora do estoque disponível");
+      setInspectionReturn(null);
+      setInspectionReason("");
+      setInspectionDisposition("available");
+    } catch (e: any) {
+      toast.error(e.message ?? "Não foi possível concluir a inspeção");
+    } finally {
+      setInspectionSubmitting(false);
     }
   };
 
@@ -290,6 +321,7 @@ export default function ReturnsPage() {
                       <TableHead>Motivo</TableHead>
                       <TableHead>Devolvido por</TableHead>
                       <TableHead>Recebido por</TableHead>
+                      <TableHead>Inspeção</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -332,6 +364,21 @@ export default function ReturnsPage() {
                         </TableCell>
                         <TableCell className="text-sm">
                           {r.receivedBy?.name ?? r.returnedBy?.name ?? "—"}
+                        </TableCell>
+                        <TableCell>
+                          {r.stockDisposition === "quarantine" && canProcess ? (
+                            <Button size="sm" variant="outline" onClick={() => {
+                              setInspectionReturn(r);
+                              setInspectionDisposition("available");
+                              setInspectionReason("");
+                            }}>Inspecionar</Button>
+                          ) : r.stockDisposition === "disposed" ? (
+                            <Badge variant="destructive">Descartado</Badge>
+                          ) : r.stockDisposition === "available" ? (
+                            <Badge variant="secondary">Liberado</Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Legado</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -445,13 +492,13 @@ export default function ReturnsPage() {
                 </div>
 
                 <div>
-                  <Label>Armário de destino {hasTrackedLots ? "*" : "(opcional)"}</Label>
+                  <Label>Armário de destino {(hasTrackedLots || condition !== "unused") ? "*" : "(opcional)"}</Label>
                   <select
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={locationId}
                     onChange={(e) => setLocationId(e.target.value)}
                   >
-                    <option value="">{hasTrackedLots ? "Selecione o armário de destino..." : "Sem alteração de local"}</option>
+                    <option value="">{(hasTrackedLots || condition !== "unused") ? "Selecione o armário de destino..." : "Sem alteração de local"}</option>
                     {(locations ?? []).map((l: any) => (
                       <option key={l._id} value={l._id}>
                         {l.name}
@@ -502,6 +549,52 @@ export default function ReturnsPage() {
                     Confirmar Devolução <ArrowRight className="h-4 w-4" />
                   </>
                 )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!inspectionReturn} onOpenChange={(open) => {
+          if (!open && !inspectionSubmitting) {
+            setInspectionReturn(null);
+            setInspectionReason("");
+          }
+        }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Inspecionar material em quarentena</DialogTitle>
+            </DialogHeader>
+            {inspectionReturn && (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {inspectionReturn.product?.name ?? "Produto"} · {inspectionReturn.quantity} unidade(s)
+                </p>
+                <div>
+                  <Label>Resultado da inspeção</Label>
+                  <select
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={inspectionDisposition}
+                    onChange={(e) => setInspectionDisposition(e.target.value as "available" | "disposed")}
+                  >
+                    <option value="available">Aprovado — liberar para o estoque</option>
+                    <option value="disposed">Reprovado — descartar</option>
+                  </select>
+                </div>
+                <div>
+                  <Label>Justificativa obrigatória</Label>
+                  <Textarea
+                    value={inspectionReason}
+                    onChange={(e) => setInspectionReason(e.target.value)}
+                    placeholder="Descreva a inspeção e o motivo da decisão..."
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" disabled={inspectionSubmitting} onClick={() => setInspectionReturn(null)}>Cancelar</Button>
+              <Button onClick={handleResolveQuarantine} disabled={inspectionSubmitting}>
+                {inspectionSubmitting ? "Registrando..." : "Confirmar inspeção"}
               </Button>
             </DialogFooter>
           </DialogContent>
