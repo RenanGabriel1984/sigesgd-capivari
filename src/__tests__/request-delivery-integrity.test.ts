@@ -116,16 +116,15 @@ describe("integridade da aprovação de solicitações", () => {
     )).toThrow(/mais de uma vez/i);
   });
 
-  it("consulta e valida o registro global único antes de reservar estoque", () => {
+  it("confere o livro-razão global × armários × lotes antes da reserva e releitura", () => {
     const source = readFileSync(resolve(__dirname, "../convex/requests.ts"), "utf8");
     const start = source.indexOf("export const approve = mutation({");
     const end = source.indexOf("export const reject = mutation({", start);
     const block = source.slice(start, end);
     expect(block).toContain("assertCompleteApprovalItemIds(");
-    expect(block).toContain('.withIndex("by_product"');
-    expect(block).toContain(".collect()");
-    expect(block).toContain("requireSingleValidGlobalStock(stockRows, productId)");
-    expect(block).toContain("requireSingleValidGlobalStock(freshStockRows, String(requestItem.productId))");
+    expect(block).toContain("assertProductLedgerConsistent(ctx, productId, needed.productName)");
+    expect(block).toContain("const freshStock = await assertProductLedgerConsistent(");
+    expect(block).toContain("Registro global de estoque não encontrado para reservar");
     expect(block).not.toContain(".first();");
   });
 });
