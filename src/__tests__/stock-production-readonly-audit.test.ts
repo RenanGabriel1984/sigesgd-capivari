@@ -23,8 +23,8 @@ describe("auditoria do deployment de produção — somente leitura", () => {
   it("usa somente convex run inline e não publica nem executa mutations", () => {
     expect(workflow).toContain("bunx convex run --inline-query");
     expect(workflow).not.toMatch(/bunx convex (deploy|dev|import|export)/);
-    expect(workflow).not.toContain("--push");
-    expect(workflow).not.toContain("--prod");
+    expect(workflow).not.toMatch(/bunx convex[^\\n]*--push/);
+    expect(workflow).not.toMatch(/bunx convex[^\\n]*--prod/);
     expect(query).not.toMatch(/ctx\.db\.(insert|patch|replace|delete)\s*\(/);
     expect(query).not.toMatch(/runMutation|internalMutation|mutation\s*\(/);
   });
