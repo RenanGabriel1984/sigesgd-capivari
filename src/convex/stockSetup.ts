@@ -9,7 +9,7 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { buildLotLocationMigrationPlan } from "../lib/lot-location-migration";
 import { buildHistoricalAreaClassificationPlan } from "../lib/stock-area-classification";
-import { resolveWithdrawalLocation, consumeLotLocationStock, recordLotMovementAllocations } from "./lotLocationLedger";
+import { assertProductLedgerConsistent, resolveWithdrawalLocation, consumeLotLocationStock, recordLotMovementAllocations } from "./lotLocationLedger";
 import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 import { v } from "convex/values";
 import {
@@ -77,6 +77,11 @@ async function performInitialLoad(
   // é chamada via CLI com literais JSON inteiros. Normaliza explicitamente
   // para number JS para que nenhuma aritmética misture bigint com number.
   items = items.map((i) => ({ ...i, quantity: Number(i.quantity) }));
+  for (const item of items) {
+    if (!Number.isFinite(item.quantity) || item.quantity < 0) {
+      throw new Error(`Quantidade inválida para o produto ${item.productId}.`);
+    }
+  }
 
   const now = Date.now();
   const year = new Date().getFullYear();
@@ -84,7 +89,10 @@ async function performInitialLoad(
   // Área é uma classificação explícita por item/lote; nunca inferir pelo produto,
   // categoria ou armário. Validar antes de criar qualquer registro da carga.
   for (const item of items) {
-    if (!item.areaId || item.quantity <= 0) continue;
+    if (item.quantity <= 0) continue;
+    if (!item.areaId) {
+      throw new Error(`Selecione uma área/subestoque para o produto ${item.productId} antes da carga inicial.`);
+    }
     const area = await ctx.db.get(item.areaId);
     if (!area || area.active === false) {
       throw new Error(`A área informada para o produto ${item.productId} não existe ou está inativa.`);
@@ -149,6 +157,17 @@ async function performInitialLoad(
     }
     if (item.quantity === 0) continue;
 
+      const productBefore = await ctx.db.get(item.productId);
+      if (!productBefore || productBefore.active === false) {
+        throw new Error(`Produto ${item.productId} inexistente ou inativo na carga inicial.`);
+      }
+      const stockBefore = await assertProductLedgerConsistent(
+        ctx,
+        item.productId,
+        productBefore.name ?? String(item.productId),
+      );
+      if (!item.areaId) throw new Error(`Selecione a área do produto "${productBefore.name}" antes da carga inicial.`);
+
       // ── 1. Create lot for traceability ──
       const lotNumber = await generateLotNumber(ctx, item.productId);
       const lotId = await ctx.db.insert("lots", {
@@ -190,6 +209,7 @@ async function performInitialLoad(
         .query("stockByLocation")
         .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
         .collect();
+      validateUniqueScopedStockRows(existingSbl, productBefore.name);
       const sblForLocation = existingSbl.find(
         (s: any) => s.locationId === item.locationId
       );
@@ -207,10 +227,7 @@ async function performInitialLoad(
       }
 
       // ── 4. stock (global) ──
-      const existingStock = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
-        .first();
+      const existingStock = stockBefore;
 
       const previousGlobal = existingStock?.physicalQuantity ?? 0;
       const totalForProduct = await ctx.db
@@ -288,7 +305,7 @@ export const initialStockLoad = mutation({
       v.object({
         productId: v.id("products"),
         locationId: v.id("storageLocations"),
-        areaId: v.optional(v.id("stockAreas")),
+        areaId: v.id("stockAreas"),
         quantity: v.number(),
         unitOfMeasure: v.optional(v.string()),
       })
@@ -319,7 +336,7 @@ export const importInitialSheet = mutation({
     rows: v.array(
       v.object({
         locationId: v.id("storageLocations"),
-        areaId: v.optional(v.id("stockAreas")),
+        areaId: v.id("stockAreas"),
         productName: v.string(),
         brand: v.optional(v.string()),
         quantity: v.number(),
