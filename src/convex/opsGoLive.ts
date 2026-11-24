@@ -339,6 +339,7 @@ export const registerGomaqNfe372043 = internalMutation({
         userId: admin._id,
         entryId,
         lotId: lotNumber,
+        locationId: LOCATION_ARMARIO_TI_02,
         documentNumber: "372043",
         observation: "Entrada " + entryNumber + " — Lote " + lotNumber,
         timestamp: now,
