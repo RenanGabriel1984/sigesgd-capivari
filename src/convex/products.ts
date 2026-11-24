@@ -301,6 +301,7 @@ export const create = mutation({
         userId,
         entryId,
         lotId: lotId as string,
+        locationId,
         observation: `Estoque inicial — lote ${lotNumber} — ${initialStock} unidades (cadastro do item)`,
         timestamp: now,
       });
