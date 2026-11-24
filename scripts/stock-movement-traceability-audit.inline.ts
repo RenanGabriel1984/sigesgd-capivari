@@ -2,7 +2,7 @@
 // A consulta inline do Convex é isolada em modo somente leitura.
 // Não importar mutations nem chamar APIs externas.
 
-const [movements, products, users, entries, entryItems, lots, locations, lotLocationBalances] =
+const [movements, products, users, entries, entryItems, lots, locations, lotLocationBalances, returns] =
   await Promise.all([
     ctx.db.query("stockMovements").collect(),
     ctx.db.query("products").collect(),
@@ -12,6 +12,7 @@ const [movements, products, users, entries, entryItems, lots, locations, lotLoca
     ctx.db.query("lots").collect(),
     ctx.db.query("storageLocations").collect(),
     ctx.db.query("lotLocationBalances").collect(),
+    ctx.db.query("returns").collect(),
   ]);
 
 let allocations = [];
@@ -20,6 +21,14 @@ try {
   allocations = await ctx.db.query("stockMovementLotAllocations").collect();
 } catch (_error) {
   allocationsAvailable = false;
+}
+
+let returnLotAllocations = [];
+let returnLotAllocationsAvailable = true;
+try {
+  returnLotAllocations = await ctx.db.query("returnLotAllocations").collect();
+} catch (_error) {
+  returnLotAllocationsAvailable = false;
 }
 
 const historicalBackfillAuditLogs = await ctx.db
@@ -103,6 +112,20 @@ for (const allocation of allocations) {
   allocationsByMovement.set(key, list);
 }
 const movementById = new Map(movements.map((row) => [String(row._id), row]));
+const returnLotAllocationsByReturn = new Map();
+for (const allocation of returnLotAllocations) {
+  const key = String(allocation.returnId);
+  const list = returnLotAllocationsByReturn.get(key) ?? [];
+  list.push(allocation);
+  returnLotAllocationsByReturn.set(key, list);
+}
+const returnMovementsByExit = new Map();
+for (const movement of movements.filter((row) => row.type === "return" && row.exitMovementId)) {
+  const key = String(movement.exitMovementId);
+  const list = returnMovementsByExit.get(key) ?? [];
+  list.push(movement);
+  returnMovementsByExit.set(key, list);
+}
 
 const resolveLot = (reference) => {
   if (!reference) return { lot: undefined, ambiguous: false };
@@ -217,6 +240,160 @@ const summarizeMovement = (movement) => {
   };
 };
 
+// Reconciliação documental específica de saídas e devoluções legadas.
+// Esta seção produz candidatos de vínculo, nunca grava nem altera saldos.
+const historicalExitReturnTraceability = returns
+  .filter((returned) => Boolean(returned.exitMovementId))
+  .map((returned) => {
+    const exitId = String(returned.exitMovementId);
+    const exit = movementById.get(exitId);
+    const exitLotResolution = exit ? resolveLot(exit.lotId) : { lot: undefined, ambiguous: false };
+    const lot = exitLotResolution.lot;
+    const sourceLocation = exit?.locationId
+      ? locationById.get(String(exit.locationId))
+      : undefined;
+    const destinationLocation = returned.locationId
+      ? locationById.get(String(returned.locationId))
+      : undefined;
+    const exitRows = allocationsByMovement.get(exitId) ?? [];
+    const withdrawalRows = exitRows.filter((row) => row.allocationType === "withdrawal");
+    const returnRows = returnLotAllocationsByReturn.get(String(returned._id)) ?? [];
+    const linkedReturnMovements = returnMovementsByExit.get(exitId) ?? [];
+    const sameReturnCandidates = linkedReturnMovements.filter((movement) =>
+      String(movement.productId) === String(returned.productId) &&
+      Number(movement.quantity) === Number(returned.quantity) &&
+      String(movement.locationId ?? "") === String(returned.locationId ?? ""),
+    );
+    const exactTimestampCandidates = sameReturnCandidates.filter((movement) =>
+      Number(movement.timestamp) === Number(returned.createdAt),
+    );
+    const selectedReturnMovement = exactTimestampCandidates.length === 1
+      ? exactTimestampCandidates[0]
+      : exactTimestampCandidates.length === 0 && sameReturnCandidates.length === 1
+        ? sameReturnCandidates[0]
+        : undefined;
+    const allReturnsForExit = returns.filter((row) => String(row.exitMovementId) === exitId);
+    const totalReturnedForExit = allReturnsForExit.reduce(
+      (total, row) => total + Number(row.quantity ?? 0), 0,
+    );
+    const returnedLotResolution = returned.lotId
+      ? resolveLot(returned.lotId)
+      : { lot: undefined, ambiguous: false };
+    const reasons = [];
+
+    if (!exit) reasons.push("saída original não encontrada");
+    else {
+      if (exit.type !== "exit") reasons.push("registro vinculado não é uma saída");
+      if (exit.canceled) reasons.push("saída original cancelada");
+      if (String(exit.productId) !== String(returned.productId)) reasons.push("produto da devolução diverge da saída");
+      if (!Number.isFinite(exit.quantity) || Number(exit.quantity) <= 0) reasons.push("quantidade da saída inválida");
+    }
+    if (exitLotResolution.ambiguous) reasons.push("referência de lote da saída ambígua");
+    if (!lot) reasons.push("lote da saída não resolvido");
+    if (lot && String(lot.productId) !== String(returned.productId)) reasons.push("lote não pertence ao produto da devolução");
+    if (returned.lotId && (returnedLotResolution.ambiguous || !returnedLotResolution.lot)) {
+      reasons.push("lote próprio da devolução não resolvido");
+    }
+    if (returnedLotResolution.lot && lot && String(returnedLotResolution.lot._id) !== String(lot._id)) {
+      reasons.push("lote próprio da devolução diverge do lote da saída");
+    }
+    if (!sourceLocation) reasons.push("armário de origem da saída ausente ou inválido");
+    if (!destinationLocation) reasons.push("armário de destino da devolução ausente ou inválido");
+    if (!Number.isFinite(returned.quantity) || Number(returned.quantity) <= 0) {
+      reasons.push("quantidade da devolução inválida");
+    }
+    if (exit && Number(returned.quantity) > Number(exit.quantity)) {
+      reasons.push("devolução isolada excede a quantidade da saída");
+    }
+    if (exit && totalReturnedForExit > Number(exit.quantity) + 1e-9) {
+      reasons.push("soma das devoluções excede a saída original");
+    }
+    if (sameReturnCandidates.length !== 1) {
+      reasons.push("movimentação type return não possui correspondência única por saída/produto/quantidade/destino");
+    } else if (!selectedReturnMovement) {
+      reasons.push("vínculo temporal entre registro de devolução e movimento não é único");
+    }
+    if (selectedReturnMovement && selectedReturnMovement.exitMovementId &&
+        String(selectedReturnMovement.exitMovementId) !== exitId) {
+      reasons.push("movimento de devolução aponta para outra saída");
+    }
+    if (exitRows.length > 0) {
+      const exactWithdrawal = withdrawalRows.length === 1 &&
+        String(withdrawalRows[0].productId) === String(returned.productId) &&
+        lot && String(withdrawalRows[0].lotId) === String(lot._id) &&
+        String(withdrawalRows[0].locationId) === String(exit?.locationId ?? "") &&
+        Math.abs(Number(withdrawalRows[0].quantity) - Number(exit?.quantity ?? 0)) < 1e-9;
+      if (!exactWithdrawal) reasons.push("saída já possui alocações estruturadas que exigem conciliação manual");
+    }
+    if (returnRows.length > 0) {
+      const exactReturnAllocation = returnRows.length === 1 &&
+        lot && String(returnRows[0].lotId) === String(lot._id) &&
+        String(returnRows[0].exitMovementId) === exitId &&
+        String(returnRows[0].productId) === String(returned.productId) &&
+        String(returnRows[0].sourceLocationId ?? "") === String(exit?.locationId ?? "") &&
+        String(returnRows[0].destinationLocationId) === String(returned.locationId ?? "") &&
+        Math.abs(Number(returnRows[0].quantity) - Number(returned.quantity)) < 1e-9;
+      if (!exactReturnAllocation) reasons.push("devolução já possui alocações estruturadas que exigem conciliação manual");
+    }
+    if (!allocationsAvailable) reasons.push("tabela de alocações de movimentação indisponível");
+    if (!returnLotAllocationsAvailable) reasons.push("tabela de alocações de devolução indisponível");
+
+    const needsExitAllocation = exitRows.length === 0;
+    const needsReturnAllocation = returnRows.length === 0;
+    const readyForMetadataBackfill = reasons.length === 0 &&
+      needsExitAllocation && needsReturnAllocation && Boolean(exit && lot && sourceLocation && destinationLocation);
+
+    return {
+      returnId: String(returned._id),
+      exitMovementId: exitId,
+      returnMovementId: selectedReturnMovement ? String(selectedReturnMovement._id) : null,
+      productName: productById.get(String(returned.productId))?.name ?? null,
+      quantity: returned.quantity,
+      condition: returned.condition ?? null,
+      stockDispositionRecorded: returned.stockDisposition ?? null,
+      expectedDispositionFromRecordedCondition: returned.condition === "unused"
+        ? "available"
+        : returned.condition
+          ? "quarantine"
+          : null,
+      returnCreatedAt: returned.createdAt,
+      exitTimestamp: exit?.timestamp ?? null,
+      returnMovementTimestamp: selectedReturnMovement?.timestamp ?? null,
+      sourceLotNumber: lot?.lotNumber ?? null,
+      sourceLotId: lot ? String(lot._id) : null,
+      returnRecordLotId: returned.lotId ? String(returned.lotId) : null,
+      sourceLocation: sourceLocation?.name ?? null,
+      destinationLocation: destinationLocation?.name ?? null,
+      exitAllocationRows: exitRows.length,
+      withdrawalAllocationRows: withdrawalRows.length,
+      returnAllocationRows: returnRows.length,
+      linkedReturnMovementCandidates: sameReturnCandidates.length,
+      totalReturnedForExit,
+      originalExitQuantity: exit?.quantity ?? null,
+      proposedMetadataOnlyBackfill: readyForMetadataBackfill ? {
+        exitAllocation: {
+          movementId: exitId,
+          productId: String(returned.productId),
+          lotId: String(lot._id),
+          locationId: String(exit.locationId),
+          quantity: Number(exit.quantity),
+          allocationType: "withdrawal",
+        },
+        returnAllocation: {
+          returnId: String(returned._id),
+          exitMovementId: exitId,
+          productId: String(returned.productId),
+          lotId: String(lot._id),
+          sourceLocationId: String(exit.locationId),
+          destinationLocationId: String(returned.locationId),
+          quantity: Number(returned.quantity),
+        },
+      } : null,
+      readyForMetadataBackfill,
+      reasons,
+    };
+  });
+
 const missingLocation = movements.filter((row) => !row.locationId);
 const invalidLocation = movements.filter((row) =>
   row.locationId && !locationById.has(String(row.locationId))
@@ -296,6 +473,11 @@ return {
     invalidEntryReference: invalidEntry.length,
     allocationTableAvailable: allocationsAvailable,
     allocationRows: allocations.length,
+    returnRecords: returns.length,
+    returnLotAllocationsAvailable,
+    returnLotAllocationRows: returnLotAllocations.length,
+    historicalExitReturnCases: historicalExitReturnTraceability.length,
+    historicalExitReturnCasesReadyForMetadataBackfill: historicalExitReturnTraceability.filter((row) => row.readyForMetadataBackfill).length,
     invalidAllocationReferences: invalidAllocationReferences.length,
     allocationQuantityMismatch: allocationQuantityMismatch.length,
   },
@@ -316,7 +498,15 @@ return {
   invalidEntryMovements: invalidEntry.map(summarizeMovement),
   invalidAllocationReferences,
   allocationQuantityMismatchMovements: allocationQuantityMismatch.map(summarizeMovement),
+  historicalExitReturnTraceability: {
+    count: historicalExitReturnTraceability.length,
+    readyForMetadataBackfill: historicalExitReturnTraceability.filter((row) => row.readyForMetadataBackfill).length,
+    rows: historicalExitReturnTraceability,
+  },
+  writesPerformed: 0,
+  mutationsImported: false,
   interpretation: {
+    historicalExitReturnTraceability: "Candidatos de vínculo por saída, devolução, produto, lote, quantidade e armários; nenhuma gravação é executada.",
     entryItemLocationEvidence: "Local no item de entrada: evidência documental, não correção automática.",
     allocationLocationEvidence: "Local registrado nas alocações históricas do movimento.",
     currentLotLocationSnapshot: "Posição atual do lote; não representa necessariamente o local histórico do movimento.",
