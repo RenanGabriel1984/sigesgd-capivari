@@ -1668,15 +1668,15 @@ export const applyLotLocationBalancesMigration = internalMutation({
         `Classificação histórica abortada: ${areaPlan.blockers.length} lote(s) sem evidência inequívoca. Primeiro bloqueio: ${areaPlan.blockers[0].lotNumber} — ${areaPlan.blockers[0].reason}`,
       );
     }
-    for (const row of areaPlan.patches) {
+    for (const row of areaPlan.patches as any[]) {
       await ctx.db.patch(row.lotId as Id<"lots">, { areaId: row.areaId as Id<"stockAreas"> });
     }
-    const classifiedIds = new Map(areaPlan.patches.map((row) => [row.lotId, row.areaId]));
+    const classifiedIds = new Map((areaPlan.patches as any[]).map((row: any) => [row.lotId, row.areaId]));
     const reportWithClassifiedAreas = {
       ...report,
-      products: report.products.map((product) => ({
+      products: report.products.map((product: any) => ({
         ...product,
-        lots: product.lots.map((lot) => ({ ...lot, areaId: classifiedIds.get(lot.lotId) ?? lot.areaId })),
+        lots: product.lots.map((lot: any) => ({ ...lot, areaId: classifiedIds.get(lot.lotId) ?? lot.areaId })),
       })),
     };
     const plan = buildLotLocationMigrationPlan(
