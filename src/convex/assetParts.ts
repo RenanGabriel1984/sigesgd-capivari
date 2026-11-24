@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { assertProductLedgerConsistent, assertProductReservationConsistent, consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -44,11 +45,13 @@ export const installPart = mutation({
     assetId: v.id("assets"),
     productId: v.id("products"),
     quantity: v.number(),
+    locationId: v.optional(v.id("storageLocations")),
+    areaId: v.optional(v.id("stockAreas")),
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
-    if (args.quantity <= 0) throw new Error("Quantidade deve ser maior que zero");
+    if (!Number.isFinite(args.quantity) || args.quantity <= 0) throw new Error("Quantidade deve ser um número finito maior que zero");
 
     const asset = await ctx.db.get(args.assetId);
     if (!asset) throw new Error("Equipamento não encontrado");
@@ -56,75 +59,61 @@ export const installPart = mutation({
     const product = await ctx.db.get(args.productId);
     if (!product) throw new Error("Produto não encontrado");
 
-    // Validate stock (check available = physical - reserved)
-    const stock = await ctx.db
-      .query("stock")
-      .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
+    // Confere o livro-razão antes de consumir: saldo global, armários e lotes.
+    const stock = await assertProductLedgerConsistent(ctx, args.productId, product.name);
     if (!stock) throw new Error("Registro de estoque não encontrado");
-    if (stock.physicalQuantity - stock.reservedQuantity < args.quantity) {
-      throw new Error(`Estoque insuficiente. Disponível: ${stock.physicalQuantity - stock.reservedQuantity}. Necessário: ${args.quantity}`);
+    await assertProductReservationConsistent(ctx, args.productId, product.name, stock);
+    const available = stock.physicalQuantity - stock.reservedQuantity;
+    if (available < args.quantity) {
+      throw new Error(`Estoque insuficiente. Disponível: ${available}. Necessário: ${args.quantity}`);
     }
+
+    const sourceLocationId = await resolveWithdrawalLocation(ctx, args.productId, args.locationId);
+    const lotConsumption = await consumeLotLocationStock(ctx, {
+      productId: args.productId,
+      locationId: sourceLocationId,
+      areaId: args.areaId,
+      quantity: args.quantity,
+    });
+    const newPhysical = stock.physicalQuantity - args.quantity;
+    await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
 
     const now = Date.now();
-
-    // FIFO Lot Consumption (before stock reduction)
-    let remainingToConsume = args.quantity;
-    let consumedLotId: string | undefined;
-    const lots = await ctx.db
-      .query("lots")
-      .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
-      .collect();
-    const sortedLots = lots
-      .filter((l: any) => l.quantityAvailable > 0)
-      .sort((a: any, b: any) => a.receivedAt - b.receivedAt || a.lotNumber.localeCompare(b.lotNumber));
-
-    for (const lot of sortedLots) {
-      if (remainingToConsume <= 0) break;
-      const consumeFromLot = Math.min(lot.quantityAvailable, remainingToConsume);
-      if (consumeFromLot <= 0) continue;
-      await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consumeFromLot });
-      if (!consumedLotId) consumedLotId = lot._id;
-      remainingToConsume -= consumeFromLot;
-    }
-
-    if (remainingToConsume > 0) {
-      throw new Error(`Lotes insuficientes. Faltam ${remainingToConsume} unidades sem lote disponível.`);
-    }
-
-    // Re-read stock for concurrency safety (double-check pattern)
-    const freshStock = await ctx.db
-      .query("stock")
-      .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
-    if (!freshStock) throw new Error("Registro de estoque desapareceu durante a instalação");
-    if (freshStock.physicalQuantity - freshStock.reservedQuantity < args.quantity) {
-      throw new Error(`Estoque insuficiente (concorrência). Disponível: ${freshStock.physicalQuantity - freshStock.reservedQuantity}. Necessário: ${args.quantity}.`);
-    }
-
-    // Reduce global stock
-    const newPhysical = freshStock.physicalQuantity - args.quantity;
-    await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical });
-
-    // Create stock movement
-    await ctx.db.insert("stockMovements", {
+    const sourceLocation: any = await ctx.db.get(sourceLocationId);
+    const lotsSummary = lotConsumption.allocations.map((allocation) =>
+      `${allocation.lotNumber}(${allocation.quantity})`,
+    ).join(", ");
+    const movementId = await ctx.db.insert("stockMovements", {
       productId: args.productId,
       type: "exit",
       quantity: args.quantity,
-      previousPhysical: freshStock.physicalQuantity,
+      previousPhysical: stock.physicalQuantity,
       newPhysical,
-      previousReserved: freshStock.reservedQuantity,
-      newReserved: freshStock.reservedQuantity,
+      previousReserved: stock.reservedQuantity,
+      newReserved: stock.reservedQuantity,
       userId,
-      observation: `Instalação em equipamento: ${asset.patrimonyNumber ?? asset.serialNumber ?? args.assetId}`,
+      lotId: lotConsumption.allocations[0]?.lotId as any,
+      locationId: sourceLocationId,
+      observation:
+        `Instalação em equipamento: ${asset.patrimonyNumber ?? asset.serialNumber ?? args.assetId} ` +
+        `| Armário: ${sourceLocation?.name ?? sourceLocationId} | Lotes: ${lotsSummary || "sem lote legado"}` +
+        (args.observation ? ` | ${args.observation}` : ""),
       timestamp: now,
+    });
+    await recordLotMovementAllocations(ctx, {
+      movementId,
+      productId: args.productId,
+      locationId: sourceLocationId,
+      allocations: lotConsumption.allocations,
     });
 
     // Record part installation
     const partId = await ctx.db.insert("assetParts", {
       assetId: args.assetId,
       productId: args.productId,
-      lotId: consumedLotId,
+      lotId: lotConsumption.allocations[0]?.lotId as any,
+      movementId,
+      locationId: sourceLocationId,
       quantity: args.quantity,
       installedAt: now,
       installedByUserId: userId,
@@ -146,7 +135,7 @@ export const installPart = mutation({
       action: "asset_part_install",
       entity: "assetParts",
       entityId: partId,
-      details: `Peça ${product.name} instalada em ${asset.patrimonyNumber ?? "equipamento"} — ${args.quantity} un`,
+      details: `Peça ${product.name} instalada em ${asset.patrimonyNumber ?? "equipamento"} — ${args.quantity} un. Armário: ${sourceLocation?.name ?? sourceLocationId}. Lotes: ${lotsSummary || "sem lote legado"}`,
       timestamp: now,
     });
 
