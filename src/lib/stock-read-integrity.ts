@@ -221,3 +221,119 @@ export function inspectProductStockIntegrity(
     consistent: issues.length === 0,
   };
 }
+
+
+export interface ProductLedgerLot {
+  lotId: string;
+  productId?: string;
+  lotNumber?: string;
+  quantityAvailable: number;
+  active?: boolean;
+}
+
+export interface ProductLedgerLotLocationBalance {
+  lotId: string;
+  productId?: string;
+  locationId?: string;
+  quantityAvailable: number;
+}
+
+/**
+ * Valida o retrato completo do livro-razão antes de uma operação que cria
+ * reserva, acrescenta ou retira material. Produtos genuinamente legados, sem
+ * qualquer histórico de lotes, continuam operáveis quando global e armários
+ * coincidem; quando há histórico de lotes, os três níveis precisam fechar.
+ */
+export function assertProductLedgerSnapshot(
+  input: {
+    globalRows: readonly GlobalStockBalance[];
+    locationRows: readonly ScopedStockBalance[];
+    lots: readonly ProductLedgerLot[];
+    lotLocationBalances: readonly ProductLedgerLotLocationBalance[];
+  },
+  productLabel: string,
+): GlobalStockBalance | null {
+  const stock = getOptionalSingleValidGlobalStock(input.globalRows, productLabel);
+  validateUniqueScopedStockRows(input.locationRows, productLabel);
+
+  const locationTotals = new Map<string, number>();
+  let physicalByLocation = 0;
+  for (const row of input.locationRows) {
+    locationTotals.set(String(row.locationId), (locationTotals.get(String(row.locationId)) ?? 0) + row.quantity);
+    physicalByLocation += row.quantity;
+  }
+  const globalPhysical = stock?.physicalQuantity ?? 0;
+  if (Math.abs(globalPhysical - physicalByLocation) > TOLERANCE) {
+    throw new Error(`O saldo global de "${productLabel}" diverge da soma dos armários. Operação bloqueada.`);
+  }
+
+  // Compatibilidade estrita com produtos legados sem qualquer lote: o saldo
+  // continua rastreado por armário, sem inventar lotes retroativamente.
+  if (input.lots.length === 0 && input.lotLocationBalances.length === 0) {
+    return stock;
+  }
+  if (input.lots.length === 0 || input.lotLocationBalances.length === 0) {
+    throw new Error(`O produto "${productLabel}" tem rastreabilidade de lote incompleta. Regularize antes de movimentar.`);
+  }
+
+  const lotsById = new Map<string, ProductLedgerLot>();
+  const lotTotalsByLocation = new Map<string, number>();
+  const lotTotalsById = new Map<string, number>();
+  let lotTotal = 0;
+  for (const lot of input.lots) {
+    if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0) {
+      throw new Error(`O lote ${lot.lotNumber ?? lot.lotId} de "${productLabel}" possui saldo inválido.`);
+    }
+    if (lot.active === false && lot.quantityAvailable > TOLERANCE) {
+      throw new Error(`O lote inativo ${lot.lotNumber ?? lot.lotId} de "${productLabel}" possui saldo positivo.`);
+    }
+    lotsById.set(String(lot.lotId), lot);
+    lotTotal += lot.quantityAvailable;
+  }
+
+  const seenLotLocations = new Set<string>();
+  let balanceTotal = 0;
+  for (const balance of input.lotLocationBalances) {
+    if (!balance.locationId || !balance.lotId) {
+      throw new Error(`Há saldo lote/armário sem identificação para "${productLabel}".`);
+    }
+    if (!Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0) {
+      throw new Error(`Há saldo lote/armário inválido para "${productLabel}".`);
+    }
+    const lot = lotsById.get(String(balance.lotId));
+    if (!lot || (lot.productId && balance.productId && lot.productId !== balance.productId)) {
+      throw new Error(`Há saldo de lote órfão ou incompatível para "${productLabel}".`);
+    }
+    const key = `${String(balance.lotId)}::${String(balance.locationId)}`;
+    if (seenLotLocations.has(key)) {
+      throw new Error(`Há saldo duplicado do mesmo lote no armário para "${productLabel}".`);
+    }
+    seenLotLocations.add(key);
+    balanceTotal += balance.quantityAvailable;
+    lotTotalsById.set(String(balance.lotId), (lotTotalsById.get(String(balance.lotId)) ?? 0) + balance.quantityAvailable);
+    lotTotalsByLocation.set(String(balance.locationId), (lotTotalsByLocation.get(String(balance.locationId)) ?? 0) + balance.quantityAvailable);
+  }
+
+  for (const lot of input.lots) {
+    const allocated = lotTotalsById.get(String(lot.lotId)) ?? 0;
+    if (Math.abs(allocated - lot.quantityAvailable) > TOLERANCE) {
+      throw new Error(`O lote ${lot.lotNumber ?? lot.lotId} de "${productLabel}" diverge dos seus armários.`);
+    }
+  }
+  if (
+    Math.abs(globalPhysical - lotTotal) > TOLERANCE ||
+    Math.abs(lotTotal - balanceTotal) > TOLERANCE
+  ) {
+    throw new Error(`Os saldos global, dos lotes e dos armários de "${productLabel}" não estão conciliados.`);
+  }
+
+  const allLocationIds = new Set([...locationTotals.keys(), ...lotTotalsByLocation.keys()]);
+  for (const locationId of allLocationIds) {
+    const local = locationTotals.get(locationId) ?? 0;
+    const lotsAtLocation = lotTotalsByLocation.get(locationId) ?? 0;
+    if (Math.abs(local - lotsAtLocation) > TOLERANCE) {
+      throw new Error(`O saldo por lote diverge do saldo físico no armário ${locationId} de "${productLabel}".`);
+    }
+  }
+  return stock;
+}
