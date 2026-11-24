@@ -487,6 +487,24 @@ export const close = mutation({
           }
         }
 
+        // Não fechar com saldos novos que surgiram depois da abertura e não
+        // foram contados. Isso evita que recebimentos/movimentações concorrentes
+        // entrem silenciosamente no inventário sem conferência física.
+        const currentPositiveLotBalances = await ctx.db.query("lotLocationBalances")
+          .withIndex("by_product", (q: any) => q.eq("productId", productId))
+          .collect();
+        for (const balance of currentPositiveLotBalances) {
+          if (balance.quantityAvailable <= EPSILON) continue;
+          if (inv.locationId && String(balance.locationId) !== String(inv.locationId)) continue;
+          const key = `${String(balance.lotId)}::${String(balance.locationId)}`;
+          if (!seen.has(key)) {
+            const lot: any = await ctx.db.get(balance.lotId);
+            throw new Error(
+              `O lote ${lot?.lotNumber ?? String(balance.lotId)} recebeu saldo no armário após a abertura do inventário e não foi contado. Atualize/recrie o inventário antes de fechar.`,
+            );
+          }
+        }
+
         // Recalcula os totais dos lotes a partir das localizações e reconcilia
         // os buckets do produto. Armários fora do escopo devem permanecer
         // conciliados; não se sobrescreve saldo que não foi contado.
