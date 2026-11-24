@@ -150,3 +150,29 @@ describe("legacy account email normalization", () => {
     expect(usersSource.match(/findUsersByNormalizedEmail\(/g)?.length).toBe(2);
   });
 });
+
+
+describe("admin password reset UI after atomic account creation", () => {
+  it("uses the same safe reset mutation for every account row", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(resolve(__dirname, "../pages/Users.tsx"), "utf8");
+    expect(source).toContain("await adminResetPassword({ userId: passwordDialog.userId as Id<\"users\">, newPassword: password })");
+    expect(source).not.toContain("useMutation(api.passwords.createPassword)");
+    expect(source).not.toContain("isNew");
+    expect(source).toContain('title="Redefinir senha"');
+  });
+
+  it("backend creates a missing credential or updates the unique one, while rejecting duplicates", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const source = readFileSync(resolve(__dirname, "../convex/passwords.ts"), "utf8");
+    const start = source.indexOf("export const adminResetPassword = mutation({");
+    const end = source.indexOf("\\nexport const ", start + 1);
+    const block = source.slice(start, end === -1 ? source.length : end);
+    expect(block).toContain('passwordResolution.status === "ambiguous"');
+    expect(block).toContain('passwordResolution.status === "unique"');
+    expect(block).toContain('ctx.db.insert("passwords"');
+    expect(block).toContain("requiresReset: true");
+  });
+});
