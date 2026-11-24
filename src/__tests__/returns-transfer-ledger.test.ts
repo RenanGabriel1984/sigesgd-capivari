@@ -81,7 +81,7 @@ describe("transferência: movimenta armários sem consumir o lote", () => {
     expect(() => planTransfer({ ...common, fromQuantity: 1, toQuantity: 4 })).toThrow(/insuficiente/i);
     expect(() => planTransfer({ ...common, fromQuantity: Number.NaN, toQuantity: 4 })).toThrow(/finitos/i);
     expect(() => planTransfer({ ...common, fromQuantity: 5, toQuantity: -1 })).toThrow(/não negativos/i);
-    expect(() => planTransfer({ ...common, fromQuantity: 5, toQuantity: Number.MAX_VALUE, quantity: Number.MAX_VALUE })).toThrow(/limites numéricos/i);
+    expect(() => planTransfer({ ...common, fromQuantity: Number.MAX_VALUE, toQuantity: Number.MAX_VALUE, quantity: Number.MAX_VALUE })).toThrow(/limites numéricos/i);
   });
   it("bloqueia origem e destino idênticos", () => {
     expect(() => planTransfer({ ...common, fromQuantity: 5, toQuantity: 4, toLocationName: "Armário TI 01" })).toThrow(/mesmo local/i);
