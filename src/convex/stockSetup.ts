@@ -166,6 +166,12 @@ async function performInitialLoad(
         item.productId,
         productBefore.name ?? String(item.productId),
       );
+      await assertProductReservationConsistent(
+        ctx,
+        item.productId,
+        productBefore.name ?? String(item.productId),
+        stockBefore,
+      );
       if (!item.areaId) throw new Error(`Selecione a área do produto "${productBefore.name}" antes da carga inicial.`);
 
       // ── 1. Create lot for traceability ──
