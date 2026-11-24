@@ -181,13 +181,14 @@ export const recordMovement = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireWaterManage(ctx);
-    if (!Number.isFinite(args.fullDelta) || !Number.isFinite(args.emptyDelta)) {
-      throw new Error("As quantidades de garrafões devem ser números finitos.");
+    if (!Number.isInteger(args.fullDelta) || !Number.isInteger(args.emptyDelta)) {
+      throw new Error("As quantidades de garrafões devem ser números inteiros.");
     }
-    if (args.costAmount !== undefined && (!Number.isFinite(args.costAmount) || args.costAmount < 0)) {
+    const normalizedCost = args.costAmount === undefined ? undefined : Math.round((args.costAmount + Number.EPSILON) * 100) / 100;
+    if (normalizedCost !== undefined && (!Number.isFinite(normalizedCost) || normalizedCost < 0)) {
       throw new Error("O custo informado é inválido.");
     }
-    if (!["supplier_delivery", "supplier_exchange"].includes(args.movementType) && args.costAmount !== undefined) {
+    if (!["supplier_delivery", "supplier_exchange"].includes(args.movementType) && normalizedCost !== undefined) {
       throw new Error("O custo de aquisição só pode ser informado em recebimentos ou trocas com fornecedor.");
     }
     if (!args.observation.trim()) throw new Error("Informe a observação da movimentação.");
@@ -199,7 +200,7 @@ export const recordMovement = mutation({
       }
     } else if (args.movementType === "supplier_delivery") {
       if (args.fullDelta <= 0 || args.emptyDelta !== 0) throw new Error("Recebimento do fornecedor deve aumentar apenas os garrafões cheios.");
-      if (!args.supplierName?.trim() || args.costAmount === undefined) throw new Error("Informe fornecedor e custo manual do recebimento.");
+      if (!args.supplierName?.trim() || normalizedCost === undefined) throw new Error("Informe fornecedor e custo manual do recebimento.");
     } else if (args.movementType === "consumption") {
       if (args.fullDelta >= 0 || args.emptyDelta < 0) throw new Error("Consumo deve retirar garrafões cheios e pode registrar os vazios recebidos.");
       if (args.costAmount !== undefined && args.costAmount !== 0) throw new Error("O custo do consumo é controlado pelo rateio da competência.");
@@ -222,7 +223,7 @@ export const recordMovement = mutation({
       fullDelta: args.fullDelta,
       emptyDelta: args.emptyDelta,
       supplierName: args.supplierName?.trim() || undefined,
-      costAmount: args.costAmount,
+      costAmount: normalizedCost,
       observation: args.observation.trim(),
       userId,
       createdAt: now,
@@ -253,10 +254,11 @@ export const createPeriod = mutation({
     if (!validDate(args.startDate) || !validDate(args.endDate) || args.endDate < args.startDate) {
       throw new Error("Informe datas válidas para o período (AAAA-MM-DD).");
     }
-    if (!Number.isFinite(args.gallonsConsumed) || args.gallonsConsumed <= 0) {
-      throw new Error("Informe a quantidade de garrafões consumidos no período.");
+    if (!Number.isInteger(args.gallonsConsumed) || args.gallonsConsumed <= 0) {
+      throw new Error("Informe a quantidade inteira de garrafões consumidos no período.");
     }
-    if (!Number.isFinite(args.totalCost) || args.totalCost <= 0) {
+    const normalizedTotalCost = Math.round((args.totalCost + Number.EPSILON) * 100) / 100;
+    if (!Number.isFinite(normalizedTotalCost) || normalizedTotalCost <= 0) {
       throw new Error("Informe o custo total manual do período.");
     }
     const participantIds = [...new Set(args.participantIds.map(String))];
@@ -284,12 +286,12 @@ export const createPeriod = mutation({
       startDate: args.startDate,
       endDate: args.endDate,
       gallonsConsumed: args.gallonsConsumed,
-      totalCost: args.totalCost,
+      totalCost: normalizedTotalCost,
       observation: args.observation?.trim() || undefined,
       createdByUserId: userId,
       createdAt: now,
     });
-    const shares = splitWaterCost(args.totalCost, selected.map((participant: any) => String(participant._id)));
+    const shares = splitWaterCost(normalizedTotalCost, selected.map((participant: any) => String(participant._id)));
     for (const share of shares) {
       const participant: any = selected.find((row: any) => String(row._id) === share.participantId);
       await ctx.db.insert("waterPeriodCharges", {
@@ -302,7 +304,7 @@ export const createPeriod = mutation({
     }
     await ctx.db.insert("auditLogs", {
       userId, action: "create", entity: "waterPeriods", entityId: periodId,
-      details: `Rateio ${label}: ${args.gallonsConsumed} garrafões, R$ ${args.totalCost.toFixed(2)}, ${selected.length} participante(s). Competência imutável.`,
+      details: `Rateio ${label}: ${args.gallonsConsumed} garrafões, R$ ${normalizedTotalCost.toFixed(2)}, ${selected.length} participante(s). Competência imutável.`,
       timestamp: now,
     });
     return periodId;
@@ -320,7 +322,8 @@ export const recordPayment = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireWaterManage(ctx);
-    if (!Number.isFinite(args.amount) || args.amount <= 0) throw new Error("O pagamento deve ser maior que zero.");
+    const normalizedAmount = Math.round((args.amount + Number.EPSILON) * 100) / 100;
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) throw new Error("O pagamento deve ser de pelo menos R$ 0,01.");
     if (!Number.isFinite(args.paidAt) || args.paidAt <= 0) throw new Error("Informe uma data de pagamento válida.");
     const [period, charges, payments] = await Promise.all([
       ctx.db.get(args.periodId),
@@ -334,14 +337,14 @@ export const recordPayment = mutation({
       .filter((row: any) => row.participantId === args.participantId)
       .map((row: any) => row.amount);
     const remaining = remainingWaterShare(charge.shareAmount, participantPayments);
-    if (args.amount > remaining + 0.000001) {
+    if (normalizedAmount > remaining + 0.000001) {
       throw new Error(`Pagamento excede o saldo em aberto de R$ ${remaining.toFixed(2)}.`);
     }
     const now = Date.now();
     const paymentId = await ctx.db.insert("waterPayments", {
       periodId: args.periodId,
       participantId: args.participantId,
-      amount: Math.round(args.amount * 100) / 100,
+      amount: normalizedAmount,
       paidAt: args.paidAt,
       method: args.method?.trim() || undefined,
       observation: args.observation?.trim() || undefined,
@@ -350,7 +353,7 @@ export const recordPayment = mutation({
     });
     await ctx.db.insert("auditLogs", {
       userId, action: "deliver", entity: "waterPayments", entityId: paymentId,
-      details: `Pagamento de água recebido: ${charge.participantNameSnapshot}, competência ${period.label}, R$ ${args.amount.toFixed(2)}.`,
+      details: `Pagamento de água recebido: ${charge.participantNameSnapshot}, competência ${period.label}, R$ ${normalizedAmount.toFixed(2)}.`,
       timestamp: now,
     });
     return paymentId;
