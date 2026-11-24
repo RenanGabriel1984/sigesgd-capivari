@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { recordLotMovementAllocations } from "@/convex/lotLocationLedger";
+import { assertProductLedgerSnapshot } from "@/lib/stock-read-integrity";
 
 describe("recordLotMovementAllocations", () => {
   it("persists each consumed lot, cabinet and quantity as a structured row", async () => {
@@ -71,5 +72,89 @@ describe("recordLotMovementAllocations", () => {
       },
     )).rejects.toThrow(/alocação de lote inválida/i);
     expect(insert).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("assertProductLedgerSnapshot", () => {
+  const balanced = {
+    globalRows: [{ physicalQuantity: 12, reservedQuantity: 3 }],
+    locationRows: [
+      { productId: "p1", locationId: "cabinet-1", quantity: 7 },
+      { productId: "p1", locationId: "cabinet-2", quantity: 5 },
+    ],
+    lots: [
+      { lotId: "lot-1", productId: "p1", lotNumber: "LOT-1", quantityAvailable: 8, active: true },
+      { lotId: "lot-2", productId: "p1", lotNumber: "LOT-2", quantityAvailable: 4, active: true },
+    ],
+    lotLocationBalances: [
+      { lotId: "lot-1", productId: "p1", locationId: "cabinet-1", quantityAvailable: 7 },
+      { lotId: "lot-1", productId: "p1", locationId: "cabinet-2", quantityAvailable: 1 },
+      { lotId: "lot-2", productId: "p1", locationId: "cabinet-2", quantityAvailable: 4 },
+    ],
+  };
+
+  it("accepts a consistent global × cabinet × lot snapshot", () => {
+    expect(assertProductLedgerSnapshot(balanced, "Produto teste")).toEqual({
+      physicalQuantity: 12,
+      reservedQuantity: 3,
+    });
+  });
+
+  it("blocks global versus cabinet divergence", () => {
+    expect(() => assertProductLedgerSnapshot({
+      ...balanced,
+      locationRows: [{ productId: "p1", locationId: "cabinet-1", quantity: 11 }],
+    }, "Produto teste")).toThrow(/global.*armários/i);
+  });
+
+  it("blocks lot total versus lot-location allocation divergence", () => {
+    expect(() => assertProductLedgerSnapshot({
+      ...balanced,
+      lotLocationBalances: balanced.lotLocationBalances.slice(1),
+    }, "Produto teste")).toThrow(/lote.*armários/i);
+  });
+
+  it("blocks cabinet versus lot allocations divergence", () => {
+    expect(() => assertProductLedgerSnapshot({
+      ...balanced,
+      lotLocationBalances: [
+        ...balanced.lotLocationBalances,
+        { lotId: "lot-2", productId: "p1", locationId: "cabinet-1", quantityAvailable: 1 },
+      ],
+      lots: [
+        ...balanced.lots,
+        { lotId: "lot-3", productId: "p1", lotNumber: "LOT-3", quantityAvailable: 0, active: true },
+      ],
+      locationRows: [
+        { productId: "p1", locationId: "cabinet-1", quantity: 7 },
+        { productId: "p1", locationId: "cabinet-2", quantity: 5 },
+      ],
+    }, "Produto teste")).toThrow(/lote.*armário/i);
+  });
+
+  it("blocks duplicate lot-location rows", () => {
+    expect(() => assertProductLedgerSnapshot({
+      ...balanced,
+      lotLocationBalances: [...balanced.lotLocationBalances, balanced.lotLocationBalances[0]],
+    }, "Produto teste")).toThrow(/saldo duplicado/i);
+  });
+
+  it("allows truly legacy untracked products only when global equals cabinets", () => {
+    expect(assertProductLedgerSnapshot({
+      globalRows: [{ physicalQuantity: 4, reservedQuantity: 1 }],
+      locationRows: [{ productId: "legacy", locationId: "cabinet-1", quantity: 4 }],
+      lots: [],
+      lotLocationBalances: [],
+    }, "Produto legado")).toEqual({ physicalQuantity: 4, reservedQuantity: 1 });
+  });
+
+  it("rejects partial lot traceability instead of treating it as legacy", () => {
+    expect(() => assertProductLedgerSnapshot({
+      globalRows: [{ physicalQuantity: 4, reservedQuantity: 0 }],
+      locationRows: [{ productId: "p1", locationId: "cabinet-1", quantity: 4 }],
+      lots: [{ lotId: "lot-1", productId: "p1", quantityAvailable: 4 }],
+      lotLocationBalances: [],
+    }, "Produto teste")).toThrow(/rastreabilidade de lote incompleta/i);
   });
 });
