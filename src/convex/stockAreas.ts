@@ -192,11 +192,11 @@ export const create = mutation({
     const name = args.name.trim();
     if (!name) throw new Error("Nome da área é obrigatório");
 
-    const existing = await ctx.db
-      .query("stockAreas")
-      .withIndex("by_name", (q: any) => q.eq("name", name))
-      .first();
-    if (existing) throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
+    const existing = await ctx.db.query("stockAreas").collect();
+    const normalizedName = name.toLocaleLowerCase("pt-BR");
+    if (existing.some((area: any) => area.name.trim().toLocaleLowerCase("pt-BR") === normalizedName)) {
+      throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
+    }
 
     const id = await ctx.db.insert("stockAreas", {
       name,
@@ -232,11 +232,14 @@ export const update = mutation({
       const name = args.name.trim();
       if (!name) throw new Error("Nome da área é obrigatório");
       if (name !== area.name) {
-        const dup = await ctx.db
-          .query("stockAreas")
-          .withIndex("by_name", (q: any) => q.eq("name", name))
-          .first();
-        if (dup) throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
+        const allAreas = await ctx.db.query("stockAreas").collect();
+        const normalizedName = name.toLocaleLowerCase("pt-BR");
+        if (allAreas.some((candidate: any) =>
+          candidate._id !== args.id &&
+          candidate.name.trim().toLocaleLowerCase("pt-BR") === normalizedName
+        )) {
+          throw new Error(`Já existe uma área/subestoque chamado "${name}"`);
+        }
       }
       updates.name = name;
     }
