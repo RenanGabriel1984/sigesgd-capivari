@@ -66,6 +66,8 @@ describe("visão dimensional consolidada do estoque", () => {
     expect(block).toContain("locationName");
     expect(block).toContain("unmappedLotQuantity");
     expect(block).toContain("globalVsLocationDifference");
+    expect(block).toContain("if (areaId && (!area || area.active === false)) invalidBalanceCount++");
+    expect(block).toContain("if (!location || location.active === false) invalidBalanceCount++");
   });
 
   it("mantém saldos legados sem lote visíveis por armário sem inventar área", () => {
