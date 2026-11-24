@@ -153,7 +153,7 @@ describe("PRINT-08 — retirada rápida reduz estoque corretamente", () => {
 
 describe("PRINT-09 — retirada registra alocação estruturada de todos os lotes", () => {
   it("movement mantém o lote principal legado e a tabela registra todos", () => {
-    expect(backend).toContain("lotId: consumedLots[0].lotId");
+    expect(backend).toContain("lotId: consumedLots[0]?.lotId");
     expect(backend).toContain("recordLotMovementAllocations");
     expect(schema).toContain("stockMovementLotAllocations: defineTable");
     expect(ledger).toContain('ctx.db.insert("stockMovementLotAllocations"');
