@@ -297,7 +297,7 @@ export const create = mutation({
     // Área/Subestoque precisa existir (cadastro independente)
     if (args.areaId) {
       const area = await ctx.db.get(args.areaId);
-      if (!area) throw new Error("Área/Subestoque não encontrada");
+      if (!area || area.active === false) throw new Error("Área/Subestoque não encontrada ou inativa");
     }
 
     const entryId = await ctx.db.insert("entries", {
@@ -380,6 +380,13 @@ export const confirm = mutation({
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ser confirmadas");
+    if (!entry.areaId) {
+      throw new Error("Selecione a área/subestoque da entrada antes de confirmar. Nenhum saldo pode ser criado sem classificação.");
+    }
+    const destinationArea = await ctx.db.get(entry.areaId);
+    if (!destinationArea || destinationArea.active === false) {
+      throw new Error("A área/subestoque selecionada não existe ou está inativa. Escolha uma área ativa antes de confirmar.");
+    }
 
     const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
     if (items.length === 0) throw new Error("Entrada não possui itens");
