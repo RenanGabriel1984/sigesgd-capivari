@@ -124,7 +124,7 @@ describe("integração da conciliação de reservas nos fluxos operacionais", ()
 
 describe("reconciliação administrativa respeita livros-razão e reservas", () => {
   it("não escolhe arbitrariamente um registro global e valida reservas/lotes antes de corrigir físico", () => {
-    const diagnostics = source("convex/diagnostics.ts");
+    const diagnostics = readFileSync(resolve(__dirname, "../convex/diagnostics.ts"), "utf8");
     const start = diagnostics.indexOf("async function reconcileCore");
     const end = diagnostics.indexOf("export const environmentCheckInternal", start);
     const core = diagnostics.slice(start, end);
@@ -134,4 +134,29 @@ describe("reconciliação administrativa respeita livros-razão e reservas", () 
     expect(core).not.toContain("stocks.find((s: any) => s.productId === product._id)");
     expect(core).toContain("reason: structuralError");
   });
+
+  it("GomaQ valida reserva e baixa lote/armário pelo ledger", () => {
+    const gomaq = readFileSync(resolve(__dirname, "../convex/gomaQ.ts"), "utf8");
+    const start = gomaq.indexOf("export const createExchange = mutation({");
+    const end = gomaq.indexOf("export const createCollection = mutation({", start);
+    const block = gomaq.slice(start, end);
+    expect(block).toContain("assertProductReservationConsistent");
+    expect(block).toContain("consumeLotLocationStock");
+    expect(block).toContain("recordLotMovementAllocations");
+    expect(block).toContain("Trocas GomaQ vinculadas a requisições devem ser registradas");
+  });
+
+  it("instalação de peças patrimoniais baixa físico, armário e lotes na mesma operação", () => {
+    const assetParts = readFileSync(resolve(__dirname, "../convex/assetParts.ts"), "utf8");
+    const start = assetParts.indexOf("export const installPart = mutation({");
+    const end = assetParts.indexOf("export const removePart = mutation({", start);
+    const block = assetParts.slice(start, end);
+    expect(block).toContain("assertProductLedgerConsistent");
+    expect(block).toContain("assertProductReservationConsistent");
+    expect(block).toContain("consumeLotLocationStock");
+    expect(block).toContain("recordLotMovementAllocations");
+    expect(block).toContain("movementId");
+    expect(block).toContain("locationId: sourceLocationId");
+  });
+
 });
