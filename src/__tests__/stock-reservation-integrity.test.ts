@@ -186,3 +186,16 @@ describe("rastreabilidade de estornos e entradas especiais", () => {
     expect(opsGoLive).toContain("locationId: LOCATION_ARMARIO_TI_02");
   });
 });
+
+
+describe("reparos históricos não podem alterar apenas o saldo de lote", () => {
+  it("mantém a correção isolada do lote do cooler desativada", () => {
+    const source = readFileSync(resolve(__dirname, "../convex/dataRepairs.ts"), "utf8");
+    const start = source.indexOf("export const repairCoolerLotAvailability = internalMutation({");
+    const end = source.indexOf("/* ─── A) areaId", start);
+    const repair = source.slice(start, end);
+    expect(start).toBeGreaterThan(-1);
+    expect(repair).toContain("Correção isolada desativada");
+    expect(repair).not.toContain('ctx.db.patch(lot._id, { quantityAvailable:');
+  });
+});
