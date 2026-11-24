@@ -28,18 +28,13 @@ import { internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import {
   decideAreaRepair,
-  decideLotAvailabilityRepair,
   decideEntryAreaRepair,
   decideEntryItemLotLink,
   decideMovementLotLink,
   buildAreaRepairAuditDetail,
-  buildLotAvailabilityAuditDetail,
   buildEntryAreaTraceAuditDetail,
   buildEntryItemLotsTraceAuditDetail,
   buildMovementTraceAuditDetail,
-  isCoolerLotStateUnchanged,
-  COOLER_LOT_EXPECTED_AVAILABLE,
-  COOLER_LOT_INCONSISTENT_AVAILABLE,
   NF372043_EXPECTED_LOTS,
 } from "../lib/data-repairs";
 
@@ -158,76 +153,20 @@ export const repairNf372043Area = internalMutation({
  * correção é interrompida e o motivo é reportado — o banco mudou desde o
  * diagnóstico e não deve ser sobrescrito.
  */
+/**
+ * A correção histórica isolada de quantityAvailable foi desativada após a
+ * introdução do livro-razão lote × armário. Alterar somente o lote deixaria
+ * stockByLocation e stock.physicalQuantity divergentes. Ajustes de quantidade
+ * devem ser feitos por inventário com conferência física e auditoria.
+ */
 export const repairCoolerLotAvailability = internalMutation({
   args: {},
-  handler: async (ctx) => {
-    const lot: any = await ctx.db.get(COOLER_LOT_ID as any);
-    if (!lot) {
-      return { applied: false, reason: `Lote ${COOLER_LOT_ID} não encontrado.`, previous: null, current: null };
-    }
-
-    const product: any = await ctx.db.get(lot.productId);
-    const productName: string = product?.name ?? "item";
-
-    if (!isCoolerLotStateUnchanged(lot.quantityAvailable)) {
-      return {
-        applied: false,
-        reason:
-          `Estado mudou inesperadamente: quantityAvailable está ${lot.quantityAvailable}, ` +
-          `e a correção histórica só vale para ${COOLER_LOT_INCONSISTENT_AVAILABLE}. ` +
-          `Correção interrompida; nenhuma alteração realizada.`,
-        previous: lot.quantityAvailable,
-        current: lot.quantityAvailable,
-      };
-    }
-
-    const decision = decideLotAvailabilityRepair({
-      currentAvailable: lot.quantityAvailable,
-      received: lot.quantityReceived,
-      expectedAvailable: COOLER_LOT_EXPECTED_AVAILABLE,
-    });
-
-    if (!decision.shouldApply) {
-      return { applied: false, reason: decision.reason, previous: lot.quantityAvailable, current: lot.quantityAvailable };
-    }
-
-    await ctx.db.patch(lot._id, { quantityAvailable: COOLER_LOT_EXPECTED_AVAILABLE });
-
-    // Auditoria uma única vez (idempotente no histórico também).
-    const alreadyLogged = await hasAuditMarker(
-      ctx,
-      COOLER_LOT_ID,
-      "Correção histórica de consistência de lote",
-    );
-    if (!alreadyLogged) {
-      const userId = await getAuthUserId(ctx).catch(() => null);
-      await ctx.db.insert("auditLogs", {
-        userId: userId ?? undefined,
-        action: "update",
-        entity: "lots",
-        entityId: COOLER_LOT_ID,
-        details: buildLotAvailabilityAuditDetail({
-          lotNumber: lot.lotNumber,
-          productName,
-          previousAvailable: COOLER_LOT_INCONSISTENT_AVAILABLE,
-          newAvailable: COOLER_LOT_EXPECTED_AVAILABLE,
-          received: lot.quantityReceived,
-          exitMovementRef: COOLER_EXIT_MOVEMENT_ID,
-          returnMovementRef: COOLER_RETURN_MOVEMENT_ID,
-        }),
-        timestamp: Date.now(),
-      });
-    }
-
-    return {
-      applied: true,
-      reason: decision.reason,
-      previous: COOLER_LOT_INCONSISTENT_AVAILABLE,
-      current: COOLER_LOT_EXPECTED_AVAILABLE,
-      lotNumber: lot.lotNumber,
-      productName,
-    };
-  },
+  handler: async () => ({
+    applied: false,
+    reason: "Correção isolada desativada: utilize inventário por lote e armário para qualquer ajuste físico.",
+    previous: null,
+    current: null,
+  }),
 });
 
 /* ─── A) areaId da ENTRADA ENT-2026-000002 ──────────────────────────────────── */
