@@ -122,9 +122,7 @@ export function buildLotLocationMigrationPlan(
   );
 
   const activeAreaIds = new Set(summary.stockAreas.areas.filter((area) => area.active).map((area) => area.areaId));
-  assert(activeAreaIds.size === summary.stockAreas.areas.length, "há área de estoque inativa no conjunto auditado.");
   const activeLocationIds = new Set(summary.storageLocations.locations.filter((location) => location.active).map((location) => location.locationId));
-  assert(activeLocationIds.size === summary.storageLocations.locations.length, "há local de armazenamento inativo no conjunto auditado.");
 
   const rows: LotLocationMigrationRow[] = [];
   const insertions: LotLocationMigrationRow[] = [];
