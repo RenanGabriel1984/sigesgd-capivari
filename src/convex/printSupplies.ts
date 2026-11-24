@@ -754,6 +754,7 @@ export const withdrawFamily = mutation({
     let looseExitUnits = 0; // quantidade de unidades-base efetivamente retirada
     let newClosedPhys = closedPhys;
     let newLoosePhys = loosePhys;
+    let looseStockId: Id<"stock"> | null = looseStock?._id ?? null;
 
     if (plan.operation === "take_pack") {
       // Primeiro consome avulsas; o restante só pode sair como embalagens inteiras.
@@ -830,6 +831,20 @@ export const withdrawFamily = mutation({
       }
       newLoosePhys = loosePhys + openedUnits;
 
+      // Atualiza primeiro o saldo global do produto avulso para que a próxima
+      // validação do ledger veja o mesmo total em stock, stockByLocation e lotes.
+      // Convex mantém toda a mutation atômica: qualquer falha posterior desfaz
+      // também esta reclassificação e o lote-filho recém-criado.
+      if (looseStockId) {
+        await ctx.db.patch(looseStockId, { physicalQuantity: newLoosePhys });
+      } else {
+        looseStockId = await ctx.db.insert("stock", {
+          productId: looseMember._id as Id<"products">,
+          physicalQuantity: newLoosePhys,
+          reservedQuantity: 0,
+        });
+      }
+
       // Agora a saída real consome as unidades avulsas (antigas primeiro,
       // e só depois os lotes recém-abertos, conforme FIFO por data).
       looseExitUnits = args.quantity;
@@ -845,10 +860,10 @@ export const withdrawFamily = mutation({
       await ctx.db.patch(closedStock._id as Id<"stock">, { physicalQuantity: newClosedPhys });
     }
     if (looseExitUnits > 0 || plan.operation === "open_pack") {
-      if (looseStock) {
-        await ctx.db.patch(looseStock._id as Id<"stock">, { physicalQuantity: newLoosePhys });
+      if (looseStockId) {
+        await ctx.db.patch(looseStockId, { physicalQuantity: newLoosePhys });
       } else if (newLoosePhys > 0) {
-        await ctx.db.insert("stock", {
+        looseStockId = await ctx.db.insert("stock", {
           productId: looseMember._id as Id<"products">,
           physicalQuantity: newLoosePhys,
           reservedQuantity: 0,
