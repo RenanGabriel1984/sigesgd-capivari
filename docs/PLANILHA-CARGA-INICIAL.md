@@ -28,6 +28,15 @@ A confirmação gera, por item: entrada `initial_inventory`, lote rastreável, `
 - A carga foi **efetivada** (entrada `initial_inventory` com 53 lotes rastreáveis, saldos por local e globais conferidos, movimentações e auditoria). A proteção contra duplicação impede nova carga inicial para os mesmos produtos.
 - Observações com `;` interno (ex.: `Parte do kit original e 4 cores; CX735`, `Cat5E; 5 caixas com 100`) são preservadas integralmente pelo parser — a observação é sempre a última coluna da linha.
 - **Pré-requisito já atendido**: os locais `Armário TI 01` e `Armário TI 02` estão cadastrados.
+
+## Mapeamento de ambientes Convex — 24/11/2026
+
+- **Produção:** `savory-sockeye-292` — backend oficial dos dados da Secretaria.
+- **Desenvolvimento cloud:** `first-herring-264` — não é produção.
+- **Homologação/preview:** usar deployment isolado; nunca reutilizar produção ou desenvolvimento.
+
+O frontend fixa o backend de produção, seleciona desenvolvimento local pelo modo do Vite e exige URL explícita para homologação. O script de homologação bloqueia os hosts de produção e desenvolvimento. Esta alteração contém apenas código/testes/documentação; não conecta, consulta ou altera qualquer deployment.
+
 ## Conciliação documental e operacional — referência de 24/11/2026
 
 A versão de referência é este CSV do repositório (docs/planilha-carga-inicial.csv), validado automaticamente por src/__tests__/initial-stock-documentation.test.ts.
@@ -71,21 +80,3 @@ Links das evidências:
 O saldo quantitativo está conciliado no snapshot consultado. Permanecem ausentes os dois registros de alocação estruturada do teste: a alocação withdrawal da saída e a linha correspondente em returnLotAllocations. A prévia read-only identificou os dois vínculos de forma única, mas não os gravou. Qualquer backfill deve inserir somente esses metadados, sem alterar saldos, quantidades dos lotes ou movimentos originais.
 
 A confirmação de produção continua separada: o deployment de produção savory-sockeye-292 ainda precisa da consulta read-only com credencial restrita a esse deployment.
-
-
-## Mapeamento de ambientes e proteção de conexão — 24/11/2026
-
-O roteamento do aplicativo deve respeitar o seguinte mapa operacional confirmado:
-
-- **Produção:** `savory-sockeye-292` — backend oficial dos dados da Secretaria.
-- **Desenvolvimento cloud:** `first-herring-264` — ambiente de desenvolvimento; não é produção.
-- **Preview isolado:** deployments próprios da branch/ambiente; nunca assumir que um preview é o banco oficial.
-
-A resolução do backend no frontend foi alinhada a esse mapa em `src/lib/convex-url.ts`:
-
-- Build de produção usa fixamente `savory-sockeye-292`, ignorando `VITE_CONVEX_URL` injetada externamente.
-- Execução local de desenvolvimento usa `first-herring-264` por padrão; uma URL alternativa de desenvolvimento só é aceita quando explicitamente identificada como desenvolvimento e desde que não seja produção.
-- Homologação exige `VITE_APP_ENV=homologacao` e URL explícita, rejeitando tanto o backend de produção quanto o de desenvolvimento.
-- O script `scripts/build-homolog.mjs` bloqueia os dois hosts conhecidos antes de compilar.
-
-Esta alteração é apenas código, testes e documentação. Não conectou, consultou, migrou ou modificou nenhum deployment Convex; a auditoria read-only de produção continua sendo uma etapa separada.
