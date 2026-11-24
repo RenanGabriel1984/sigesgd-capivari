@@ -30,6 +30,7 @@ export default function WaterManagement() {
   const recordMovement = useMutation(api.water.recordMovement);
   const createPeriod = useMutation(api.water.createPeriod);
   const recordPayment = useMutation(api.water.recordPayment);
+  const reversePayment = useMutation(api.water.reversePayment);
 
   const [participantName, setParticipantName] = useState("");
   const [participantDepartment, setParticipantDepartment] = useState("");
@@ -271,7 +272,7 @@ export default function WaterManagement() {
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ArrowDownToLine className="h-4 w-4" />Histórico de pagamentos recebidos</CardTitle></CardHeader>
           <CardContent className="space-y-2">
-            {data.payments.map((payment: any) => <div key={payment._id} className="flex flex-col gap-1 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium">{payment.participantName} · {payment.periodLabel}</p><p className="text-xs text-muted-foreground">{new Date(payment.paidAt).toLocaleDateString("pt-BR")} · {payment.method || "Forma não informada"} · Recebido por: {payment.receivedByName}</p><p className="text-xs text-muted-foreground">{payment.observation || "Sem observação"}</p></div><p className="text-sm font-semibold tabular-nums">{money(payment.amount)}</p></div>)}
+            {data.payments.map((payment: any) => <div key={payment._id} className="flex flex-col gap-1 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium">{payment.participantName} · {payment.periodLabel}</p><p className="text-xs text-muted-foreground">{new Date(payment.paidAt).toLocaleDateString("pt-BR")} · {payment.method || "Forma não informada"} · Recebido por: {payment.receivedByName}</p>{payment.reversedAt && <p className="text-xs text-destructive">Estornado em {new Date(payment.reversedAt).toLocaleString("pt-BR")}: {payment.reversalReason}</p>}<p className="text-xs text-muted-foreground">{payment.observation || "Sem observação"}</p></div><div className="flex items-center gap-2"><p className="text-sm font-semibold tabular-nums">{money(payment.amount)}</p>{!payment.reversedAt && <Button size="sm" variant="ghost" onClick={() => { const reason = window.prompt("Motivo do estorno do pagamento:"); if (reason?.trim()) void reversePayment({ paymentId: payment._id, reason }).then(() => toast.success("Pagamento estornado; saldo em aberto recalculado.")).catch((error) => toast.error(error instanceof Error ? error.message : "Não foi possível estornar o pagamento.")); }}>Estornar</Button>}</div></div>)}
             {data.payments.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Nenhum pagamento registrado.</p>}
           </CardContent>
         </Card>
