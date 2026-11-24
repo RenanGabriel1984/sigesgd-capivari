@@ -7,7 +7,7 @@ import { requirePermission, requireRequestAction } from "./rbac";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
 import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
-import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
+import { assertProductLedgerConsistent, consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 import { assertUniqueApprovalItemIds, assertCompleteApprovalItemIds, assertCompleteDeliveryItemIds, getDeliveryStockAdjustment } from "../lib/request-approval-validation";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
@@ -289,11 +289,10 @@ export const approve = mutation({
 
     // Validate stock for each product (fresh read)
     for (const [productId, needed] of Object.entries(stockNeeded)) {
-      const stockRows = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", productId as any))
-        .collect();
-      const stock = requireSingleValidGlobalStock(stockRows, productId);
+      const stock = await assertProductLedgerConsistent(ctx, productId, needed.productName);
+      if (!stock) {
+        throw new Error(`Registro global de estoque não encontrado para "${needed.productName}".`);
+      }
 
       const available = stock.physicalQuantity - stock.reservedQuantity;
       if (available < needed.quantity) {
@@ -321,11 +320,12 @@ export const approve = mutation({
       await ctx.db.patch(item.itemId, { quantityApproved: item.quantityApproved });
 
       // Reserve stock (re-read for safety)
-      const freshStockRows = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
-        .collect();
-      const freshStock = requireSingleValidGlobalStock(freshStockRows, String(requestItem.productId));
+      const freshStock = await assertProductLedgerConsistent(
+        ctx,
+        requestItem.productId,
+        String(requestItem.productId),
+      );
+      if (!freshStock) throw new Error("Registro global de estoque não encontrado para reservar.");
 
       if (freshStock) {
         const newReserved = freshStock.reservedQuantity + item.quantityApproved;
