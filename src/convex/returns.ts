@@ -634,6 +634,39 @@ export const resolveQuarantine = mutation({
         .withIndex("by_return", (q: any) => q.eq("returnId", args.returnId)).collect();
       const activeLots = await ctx.db.query("lots")
         .withIndex("by_product", (q: any) => q.eq("productId", returned.productId)).collect();
+      const allLotBalances = await ctx.db.query("lotLocationBalances")
+        .withIndex("by_product", (q: any) => q.eq("productId", returned.productId)).collect();
+      const localTotal = locationRows.reduce((sum: number, row: any) => sum + row.quantity, 0);
+      if (Math.abs(localTotal - stock.physicalQuantity) > 1e-9) {
+        throw new Error("A inspeção foi bloqueada: o saldo global diverge da soma dos armários.");
+      }
+      if (activeLots.length > 0) {
+        const lotTotal = activeLots.reduce((sum: number, lot: any) => {
+          if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0 || (lot.active === false && lot.quantityAvailable > 1e-9)) {
+            throw new Error("A inspeção foi bloqueada: existe lote com saldo inválido ou inativo positivo.");
+          }
+          return sum + lot.quantityAvailable;
+        }, 0);
+        const lotLocationTotal = allLotBalances.reduce((sum: number, balance: any) => {
+          if (!Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0) {
+            throw new Error("A inspeção foi bloqueada: existe saldo inválido por lote e armário.");
+          }
+          return sum + balance.quantityAvailable;
+        }, 0);
+        if (Math.abs(lotTotal - stock.physicalQuantity) > 1e-9 || Math.abs(lotLocationTotal - lotTotal) > 1e-9) {
+          throw new Error("A inspeção foi bloqueada: os saldos global, dos lotes e dos armários não estão conciliados.");
+        }
+        const lotByLocation = new Map<string, number>();
+        for (const balance of allLotBalances) {
+          const key = String(balance.locationId);
+          lotByLocation.set(key, (lotByLocation.get(key) ?? 0) + balance.quantityAvailable);
+        }
+        for (const row of locationRows) {
+          if (Math.abs((lotByLocation.get(String(row.locationId)) ?? 0) - row.quantity) > 1e-9) {
+            throw new Error("A inspeção foi bloqueada: a soma dos lotes diverge do saldo do armário.");
+          }
+        }
+      }
 
       if (allocations.length > 0) {
         const allocatedTotal = allocations.reduce((sum: number, row: any) => sum + row.quantity, 0);
@@ -665,7 +698,7 @@ export const resolveQuarantine = mutation({
             });
           }
         }
-      } else if (activeLots.some((lot: any) => lot.active)) {
+      } else if (activeLots.length > 0) {
         throw new Error("O produto possui rastreio por lote, mas a devolução em quarentena não tem alocação. Regularize antes de liberar.");
       }
 
