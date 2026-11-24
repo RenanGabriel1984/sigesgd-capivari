@@ -47,7 +47,7 @@ const shellSource = readFileSync(resolve(__dirname, "../components/AppShell.tsx"
 function exportedBlock(source: string, exportName: string): string {
   const start = source.indexOf(`export const ${exportName} =`);
   if (start < 0) throw new Error(`Export ${exportName} não encontrado`);
-  const next = source.indexOf("\\nexport const ", start + 1);
+  const next = source.indexOf("\nexport const ", start + 1);
   return source.slice(start, next < 0 ? source.length : next);
 }
 
