@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /**
- * R32.0 — Build do frontend de HOMOLOGAÇÃO do SIGESGD.
+ * R33.0 — Build do frontend de HOMOLOGAÇÃO do SIGESGD.
  *
  * Gera um artefato estático que fale com um deployment Convex ISOLADO e
  * comprova, com a mesma função que o app usa em runtime, que a build resolve
- * para esse backend — nunca para o deployment oficial.
+ * para esse backend — nunca para produção ou desenvolvimento.
  *
  * Uso:
  *   VITE_CONVEX_URL=https://<staging>.convex.cloud \
@@ -12,9 +12,11 @@
  *   bun scripts/build-homolog.mjs [--dry-run]
  *
  * Variáveis opcionais:
- *   HOMOLOG_OUT_DIR          pasta de saída (padrão: dist-homolog)
- *   PRODUCTION_CONVEX_HOSTS  hosts proibidos, separados por espaço
- *                            (padrão: first-herring-264.convex.cloud)
+ *   HOMOLOG_OUT_DIR             pasta de saída (padrão: dist-homolog)
+ *   PRODUCTION_CONVEX_HOSTS     hosts oficiais proibidos, separados por espaço
+ *                               (padrão: savory-sockeye-292.convex.cloud)
+ *   DEVELOPMENT_CONVEX_HOSTS    hosts de desenvolvimento proibidos, separados
+ *                               por espaço (padrão: first-herring-264.convex.cloud)
  *
  * O script NÃO publica, NÃO faz deploy de funções e NÃO executa mutações no
  * banco: apenas valida a configuração e compila o frontend.
@@ -28,11 +30,18 @@ const dryRun = args.includes("--dry-run");
 const ROOT = resolve(import.meta.dir, "..");
 
 const PRODUCTION_HOSTS = (
-  process.env.PRODUCTION_CONVEX_HOSTS ?? "first-herring-264.convex.cloud"
+  process.env.PRODUCTION_CONVEX_HOSTS ?? "savory-sockeye-292.convex.cloud"
 )
   .split(/\s+/)
   .filter(Boolean);
 
+const DEVELOPMENT_HOSTS = (
+  process.env.DEVELOPMENT_CONVEX_HOSTS ?? "first-herring-264.convex.cloud"
+)
+  .split(/\s+/)
+  .filter(Boolean);
+
+const FORBIDDEN_HOSTS = [...PRODUCTION_HOSTS, ...DEVELOPMENT_HOSTS];
 const OUT_DIR = process.env.HOMOLOG_OUT_DIR ?? "dist-homolog";
 const rawUrl = (process.env.VITE_CONVEX_URL ?? "").trim();
 const appEnv = (process.env.VITE_APP_ENV ?? "").trim().toLowerCase();
@@ -69,10 +78,14 @@ try {
 
 const host = url.host;
 
-if (PRODUCTION_HOSTS.some((prod) => host === prod || host.endsWith(`.${prod}`))) {
+if (url.protocol !== "https:" || !host.endsWith(".convex.cloud")) {
+  fail("VITE_CONVEX_URL deve ser HTTPS e apontar para um deployment Convex válido.");
+}
+
+if (FORBIDDEN_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`))) {
   fail(
-    `backend ${host} está na lista de hosts PROIBIDOS (${PRODUCTION_HOSTS.join(", ")}) — ` +
-      "homologação não pode reutilizar o backend em uso.",
+    `backend ${host} está na lista de hosts não homologáveis (${FORBIDDEN_HOSTS.join(", ")}) — ` +
+      "homologação não pode reutilizar produção ou desenvolvimento.",
   );
 }
 
@@ -96,12 +109,12 @@ if (convexHost(resolved) !== host) {
   );
 }
 
-console.log("── Build de homologação (R32.0) ──");
+console.log("── Build de homologação (R33.0) ──");
 console.log(`backend   : ${host}`);
-console.log(`ambiente  : homologacao`);
+console.log("ambiente  : homologacao");
 console.log(`versão app: ${APP_VERSION}`);
 console.log(`saída     : ${OUT_DIR}`);
-console.log(`proibidos : ${PRODUCTION_HOSTS.join(", ")}`);
+console.log(`proibidos : ${FORBIDDEN_HOSTS.join(", ")}`);
 
 if (dryRun) {
   console.log("\nDRY RUN — configuração válida; nada compilado, nada publicado.");
@@ -142,7 +155,7 @@ if (!entrySource.includes("homologacao")) {
 console.log("\n── Artefato de homologação pronto ──");
 console.log(`build    : ${buildId}`);
 console.log(`backend  : ${host}`);
-console.log(`ambiente : homologacao`);
+console.log("ambiente : homologacao");
 console.log(`versão   : ${APP_VERSION}`);
 console.log(`pasta    : ${OUT_DIR}`);
 console.log(
