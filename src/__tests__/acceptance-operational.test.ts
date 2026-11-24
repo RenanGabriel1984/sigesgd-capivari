@@ -133,7 +133,7 @@ describe("A–T: saída e solicitação (itens I–R)", () => {
     // Aprovação reserva (reservedQuantity sobe)
     expect(REQUESTS).toMatch(/reservedQuantity:\s*newReserved/);
     // Entrega baixa físico e reservado na mesma operação
-    expect(REQUESTS).toMatch(/physicalQuantity:\\s*newPhysical,\\s*reservedQuantity:\\s*finalReserved/);
+    expect(REQUESTS).toMatch(/physicalQuantity:\s*newPhysical,\s*reservedQuantity:\s*finalReserved/);
     expect(REQUESTS).toContain("const finalReserved = newReserved - unusedReservation;");
     // Rejeição existe
     expect(REQUESTS).toMatch(/status:\s*"rejected"/);
