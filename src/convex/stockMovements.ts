@@ -56,34 +56,23 @@ export const byProduct = query({
   },
 });
 
+/**
+ * Endpoint legado mantido apenas para compatibilidade de nome.
+ * Entradas operacionais devem passar por entries.create/confirm, que registram
+ * área, local físico, lote, item documental e saldo global atomicamente.
+ * Este endpoint não recebe essas dimensões e, portanto, não pode gravar estoque.
+ */
 export const createEntry = mutation({
   args: {
     productId: v.id("products"), quantity: v.number(),
     supplierId: v.optional(v.id("suppliers")),
     documentNumber: v.optional(v.string()), observation: v.optional(v.string()),
   },
-  handler: async (ctx, args) => {
-    const { userId } = await requireStockManagerOrAdmin(ctx);
-    if (args.quantity <= 0) throw new Error("A quantidade deve ser positiva");
-    if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
-    const product = await ctx.db.get(args.productId);
-    if (!product) throw new Error("Produto não encontrado");
-    const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
-    const prevPhysical = stock?.physicalQuantity ?? 0;
-    const prevReserved = stock?.reservedQuantity ?? 0;
-    const newPhysical = prevPhysical + args.quantity;
-    if (stock) { await ctx.db.patch(stock._id, { physicalQuantity: newPhysical }); }
-    else { await ctx.db.insert("stock", { productId: args.productId, physicalQuantity: args.quantity, reservedQuantity: 0 }); }
-    const movementId = await ctx.db.insert("stockMovements", {
-      productId: args.productId, type: "entry", quantity: args.quantity,
-      previousPhysical: prevPhysical, newPhysical, previousReserved: prevReserved, newReserved: prevReserved,
-      userId, supplierId: args.supplierId, documentNumber: args.documentNumber, observation: args.observation, timestamp: Date.now(),
-    });
-    await ctx.db.insert("auditLogs", {
-      userId, action: "move_stock", entity: "stockMovements", entityId: movementId,
-      details: `Entrada de ${args.quantity} unidade(s)`, timestamp: Date.now(),
-    });
-    return movementId;
+  handler: async (ctx) => {
+    await requireStockManagerOrAdmin(ctx);
+    throw new Error(
+      "Entrada direta legada desativada: utilize o fluxo de Entradas para registrar documento, área, armário e lote.",
+    );
   },
 });
 
