@@ -688,7 +688,7 @@ export const listDelivered = query({
       .query("requests")
       .withIndex("by_status", (q: any) => q.eq("status", "delivered"))
       .order("desc")
-      .take(500);
+      .collect();
 
     if (!fullVisibility) {
       requests = requests.filter((r) => r.requesterId === user._id);
@@ -739,7 +739,7 @@ export const listByOrganization = query({
       .query("requests")
       .withIndex("by_status", (q: any) => q.eq("status", "delivered"))
       .order("desc")
-      .take(500);
+      .collect();
 
     const filtered = allDelivered.filter(
       (r) => r.secretariaId === args.organizationId || r.departamentoId === args.organizationId || r.unidadeId === args.organizationId
