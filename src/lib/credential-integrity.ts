@@ -18,11 +18,13 @@ export function normalizeLoginEmail(email: string): string {
 
 
 /** Return every legacy/current user record whose email has the same canonical login key. */
-export function findUsersByNormalizedEmail<T extends { email: string }>(
+export function findUsersByNormalizedEmail<T extends { email?: string }>(
   users: readonly T[],
   email: string,
 ): T[] {
   const normalizedEmail = normalizeLoginEmail(email);
   if (!normalizedEmail) return [];
-  return users.filter((user) => normalizeLoginEmail(user.email) === normalizedEmail);
+  return users.filter(
+    (user) => typeof user.email === "string" && normalizeLoginEmail(user.email) === normalizedEmail,
+  );
 }
