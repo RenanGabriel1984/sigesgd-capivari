@@ -469,3 +469,15 @@ describe("devolução mantém conciliação física", () => {
     expect(source).toContain("A devolução foi bloqueada: a soma dos lotes diverge do saldo do armário.");
   });
 });
+
+describe("liberação de quarentena exige conciliação prévia", () => {
+  const source = readFileSync(resolve(__dirname, "../convex/returns.ts"), "utf8");
+  const start = source.indexOf("export const resolveQuarantine");
+  const quarantine = source.slice(start);
+  it("não reincorpora material quando global, armários e lotes já divergem", () => {
+    expect(quarantine).toContain("Math.abs(localTotal - stock.physicalQuantity) > 1e-9");
+    expect(quarantine).toContain("Math.abs(lotTotal - stock.physicalQuantity) > 1e-9");
+    expect(quarantine).toContain("Math.abs(lotLocationTotal - lotTotal) > 1e-9");
+    expect(quarantine).toContain("A inspeção foi bloqueada: a soma dos lotes diverge do saldo do armário.");
+  });
+});
