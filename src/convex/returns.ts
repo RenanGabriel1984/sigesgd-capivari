@@ -425,7 +425,7 @@ export const create = mutation({
           productId: exit.productId,
           lotId: allocation.lotId,
           sourceLocationId: allocation.sourceLocationId,
-          destinationLocationId: args.locationId,
+          destinationLocationId: args.locationId!,
           quantity: allocation.quantity,
           createdAt: now,
         });
