@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+      - codex/rbac-audit-hardening
 
 permissions:
   contents: read
