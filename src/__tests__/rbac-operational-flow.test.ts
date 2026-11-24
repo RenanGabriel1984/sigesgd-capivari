@@ -162,6 +162,10 @@ describe("invariantes globais de estoque preservadas no código", () => {
   });
 
   it("cancellation libera reserva com guarda de inconsistência explícita", () => {
+    const cancel = reqSrc.slice(reqSrc.indexOf("export const cancel"), reqSrc.indexOf("export const pendingCount"));
+    expect(cancel).toContain('.collect()');
+    expect(cancel).toContain("requireSingleValidGlobalStock(stockRows, String(item.productId))");
+    expect(cancel).not.toContain(".first();");
     expect(reqSrc).toContain("Inconsistência de estoque: reservado");
   });
 
