@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeLoginEmail, resolveUniqueRecord } from "../lib/credential-integrity";
+import { findUsersByNormalizedEmail, normalizeLoginEmail, resolveUniqueRecord } from "../lib/credential-integrity";
 
 describe("resolveUniqueRecord", () => {
   it("distinguishes missing, unique and duplicate records", () => {
@@ -59,7 +59,7 @@ describe("password management rejects ambiguous credentials", () => {
 
     const bootstrapStart = source.indexOf("export const bootstrapResetPassword = internalMutation({");
     expect(bootstrapStart).toBeGreaterThan(-1);
-    const bootstrapEnd = source.indexOf("\\nexport const ", bootstrapStart + 1);
+    const bootstrapEnd = source.indexOf("\nexport const ", bootstrapStart + 1);
     const bootstrapBlock = source.slice(bootstrapStart, bootstrapEnd === -1 ? source.length : bootstrapEnd);
     expect(bootstrapBlock).toContain(".collect()");
     expect(bootstrapBlock).toContain('passwordResolution.status === "ambiguous"');
@@ -98,7 +98,9 @@ describe("atomic user and temporary password creation", () => {
     const start = backend.indexOf("export const createUser = mutation({");
     const end = backend.indexOf("\nexport const updateUser", start);
     const block = backend.slice(start, end);
-    expect(block).toContain("temporaryPassword: v.optional(v.string())");
+    expect(block).toContain("temporaryPassword: v.string()");
+    expect(block).not.toContain("v.optional(v.string())");
+    expect(block).not.toContain("temporaryPassword !== undefined");
     expect(block).toContain('ctx.db.insert("passwords"');
     expect(block).toContain("requiresReset: true");
     expect(ui).toContain("temporaryPassword: tempPassword");
@@ -114,5 +116,37 @@ describe("cryptographic password salt generation", () => {
     const source = readFileSync(resolve(__dirname, "../convex/auth/passwords.ts"), "utf8");
     expect(source).toContain("crypto.getRandomValues(bytes)");
     expect(source).not.toContain("Math.random()");
+  });
+});
+
+
+describe("legacy account email normalization", () => {
+  it("matches existing addresses regardless of surrounding whitespace or letter case", () => {
+    const users = [
+      { id: "legacy-upper", email: "  RENAN@CAPIVARI.SP.GOV.BR " },
+      { id: "other", email: "outro@capivari.sp.gov.br" },
+    ];
+    expect(findUsersByNormalizedEmail(users, "renan@capivari.sp.gov.br")).toEqual([
+      users[0],
+    ]);
+  });
+
+  it("exposes case-variant legacy duplicates instead of choosing one account", () => {
+    const users = [
+      { id: "lower", email: "renan@capivari.sp.gov.br" },
+      { id: "upper", email: "RENAN@CAPIVARI.SP.GOV.BR" },
+    ];
+    expect(
+      resolveUniqueRecord(findUsersByNormalizedEmail(users, "Renan@Capivari.sp.gov.br")),
+    ).toEqual({ status: "ambiguous", count: 2 });
+  });
+
+  it("uses normalized matching in all credential identity lookups", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const passwords = readFileSync(resolve(__dirname, "../convex/passwords.ts"), "utf8");
+    const usersSource = readFileSync(resolve(__dirname, "../convex/users.ts"), "utf8");
+    expect(passwords.match(/findUsersByNormalizedEmail\\(/g)?.length).toBeGreaterThanOrEqual(6);
+    expect(usersSource.match(/findUsersByNormalizedEmail\\(/g)?.length).toBe(2);
   });
 });
