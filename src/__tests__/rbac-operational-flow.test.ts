@@ -156,6 +156,23 @@ describe("saída rápida e transferência rastreada por lote", () => {
   });
 });
 
+describe("relatórios operacionais refletem saldos conciliados", () => {
+  it("posição de estoque distingue físico, reservado e disponível e rejeita saldos globais duplicados", () => {
+    const dashboard = readFileSync(resolve(ROOT, "src/convex/dashboard.ts"), "utf-8");
+    const position = dashboard.slice(dashboard.indexOf("export const stockPosition"), dashboard.indexOf("export const movementReport"));
+    expect(position).toContain("getOptionalSingleValidGlobalStock(stockRows, p.name)");
+    expect(position).toContain("const availableQuantity = physicalQuantity - reservedQuantity");
+    expect(position).toContain("availableQuantity <= (p.minimumStock ?? 0)");
+  });
+
+  it("relatório de movimentações não trunca silenciosamente o histórico em 500 linhas", () => {
+    const dashboard = readFileSync(resolve(ROOT, "src/convex/dashboard.ts"), "utf-8");
+    const report = dashboard.slice(dashboard.indexOf("export const movementReport"));
+    expect(report).toContain("const movements = await q.collect()");
+    expect(report).not.toContain("q.take(500)");
+  });
+});
+
 describe("invariantes globais de estoque preservadas no código", () => {
   it("reserva usa revalidação fresh (evita condição de corrida)", () => {
     expect(reqSrc).toMatch(/freshStock\.reservedQuantity \+ item\.quantityApproved/);
