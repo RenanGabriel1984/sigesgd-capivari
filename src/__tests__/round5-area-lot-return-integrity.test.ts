@@ -31,6 +31,7 @@ import {
 import {
   resolveReturnLotGuard,
   buildUnresolvableLotMessage,
+  returnConditionReturnsToAvailableStock,
 } from "@/lib/returns-rules";
 
 import {
@@ -367,5 +368,24 @@ describe("Tela de Produtos: 'Reservado 0' é apresentado como '—'", () => {
     const s = stockSummary({ physicalQuantity: 0, reservedQuantity: 0 });
     expect(formatStockQuantity(s.physical)).toBe("0");
     expect(formatStockQuantity(s.reserved, { zeroAsEmpty: true })).toBe("—");
+  });
+});
+
+
+describe("Devoluções: condição do material e saldo disponível", () => {
+  it("reintegra automaticamente somente material não utilizado", () => {
+    expect(returnConditionReturnsToAvailableStock("unused")).toBe(true);
+  });
+
+  it("mantém material parcialmente utilizado em quarentena", () => {
+    expect(returnConditionReturnsToAvailableStock("partially_used")).toBe(false);
+  });
+
+  it("mantém material defeituoso em quarentena", () => {
+    expect(returnConditionReturnsToAvailableStock("defective")).toBe(false);
+  });
+
+  it("mantém condição não classificada em quarentena", () => {
+    expect(returnConditionReturnsToAvailableStock("other")).toBe(false);
   });
 });
