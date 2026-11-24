@@ -416,8 +416,9 @@ describe("Devolução: materiais não utilizáveis não entram no saldo disponí
     const quarantineStart = returnsMutationSource.indexOf("if (!returnConditionReturnsToAvailableStock(condition))");
     const availableStockStart = returnsMutationSource.indexOf("// 2) Repor estoque físico global");
     const quarantineBranch = returnsMutationSource.slice(quarantineStart, availableStockStart);
-    expect(quarantineBranch).toContain("if (!args.locationId)");
-    expect(quarantineBranch).toContain("armário de destino");
+    expect(returnsMutationSource).toContain("const destinationLocation: any = args.locationId ? await ctx.db.get(args.locationId) : null");
+    expect(returnsMutationSource).toContain("Informe um armário de destino existente e ativo");
+    expect(quarantineBranch).toContain("destinationLocationId: args.locationId");
   });
 });
 
