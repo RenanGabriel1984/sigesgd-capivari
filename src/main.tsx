@@ -12,11 +12,11 @@ import "./index.css";
 import { resolvedConvexUrl } from "@/lib/convex-url";
 
 // ── Backend Convex do Gestão de Estoque SGGD ─────────────────────────────────────────────
-// Produção usa o deployment oficial fixo (imune a VITE_CONVEX_URL desatualizado
-// injetado no build). Homologação só é aceita com VITE_APP_ENV=homologacao +
-// VITE_CONVEX_URL de um deployment isolado — regra em src/lib/convex-url.ts,
-// chamada por scripts/build-homolog.mjs. Sem essa exceção, qualquer build de
-// homologação continuaria falando com os dados oficiais.
+// Produção usa savory-sockeye-292; execução local usa first-herring-264.
+// VITE_CONVEX_URL não pode redirecionar builds de produção. Homologação exige
+// VITE_APP_ENV=homologacao + URL isolada, rejeitando produção e desenvolvimento.
+// A resolução compartilhada está em src/lib/convex-url.ts e é validada pelo
+// scripts/build-homolog.mjs antes de gerar o artefato de homologação.
 
 // Lazy load route components
 const Landing = lazy(() => import("./pages/Landing.tsx"));
