@@ -38,14 +38,13 @@ export default function UsersPage() {
   const updateUser = useMutation(api.users.updateUser);
   const activateUser = useMutation(api.users.activateUser);
   const deactivateUser = useMutation(api.users.deactivateUser);
-  const createPassword = useMutation(api.passwords.createPassword);
   const adminResetPassword = useMutation(api.passwords.adminResetPassword);
 
   // ─── Hooks: TODOS acima de qualquer return condicional (Rules of Hooks) ───
   const [search, setSearch] = useState("");
   const [editDialog, setEditDialog] = useState(false);
   const [createDialog, setCreateDialog] = useState(false);
-  const [passwordDialog, setPasswordDialog] = useState<{ userId: string; userName: string; isNew: boolean } | null>(null);
+  const [passwordDialog, setPasswordDialog] = useState<{ userId: string; userName: string } | null>(null);
   const [editUser, setEditUser] = useState<Doc<"users"> | null>(null);
 
   // Form states
@@ -78,9 +77,9 @@ export default function UsersPage() {
     setEditDialog(true);
   };
 
-  const openPassword = (userId: string, userName: string, isNew: boolean) => {
+  const openPassword = (userId: string, userName: string) => {
     setPassword("");
-    setPasswordDialog({ userId, userName, isNew });
+    setPasswordDialog({ userId, userName });
   };
 
   const handleCreate = async () => {
@@ -128,12 +127,10 @@ export default function UsersPage() {
     if (!passwordDialog) return;
     if (password.trim().length < 8) { toast.error("A senha deve ter pelo menos 8 caracteres"); return; }
     try {
-      if (passwordDialog.isNew) {
-        await createPassword({ userId: passwordDialog.userId as Id<"users">, password, requiresReset: true });
-      } else {
-        await adminResetPassword({ userId: passwordDialog.userId as Id<"users">, newPassword: password });
-      }
-      toast.success(passwordDialog.isNew ? "Senha definida com sucesso" : "Senha redefinida com sucesso");
+      // adminResetPassword atualiza uma credencial única ou cria a que estiver
+      // ausente; em ambos os casos exige troca pelo usuário no próximo acesso.
+      await adminResetPassword({ userId: passwordDialog.userId as Id<"users">, newPassword: password });
+      toast.success("Senha redefinida. O usuário deverá trocá-la no próximo acesso.");
       setPasswordDialog(null);
     } catch (e: any) { toast.error(e.message ?? "Erro ao definir senha"); }
   };
@@ -191,7 +188,7 @@ export default function UsersPage() {
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(u)} title="Editar">
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
-                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openPassword(u._id, u.name ?? u.email, true)} title="Definir senha">
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openPassword(u._id, u.name ?? u.email)} title="Redefinir senha">
                               <Key className="h-3.5 w-3.5" />
                             </Button>
                             <Button variant="ghost" size="icon" className="h-7 w-7"
@@ -249,7 +246,7 @@ export default function UsersPage() {
             <div><Label>Perfil</Label><Select value={role} onValueChange={(v) => setRole(v as UserRole)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(ROLE_LABELS).map(([k, v]) => (<SelectItem key={k} value={k}>{v}</SelectItem>))}</SelectContent></Select></div>
             <div><Label>Unidade Organizacional</Label><Select value={orgId} onValueChange={setOrgId}><SelectTrigger><SelectValue placeholder="Nenhuma" /></SelectTrigger><SelectContent>{orgs?.orgs.map((o: any) => (<SelectItem key={o._id} value={o._id}>{o.name}</SelectItem>))}</SelectContent></Select></div>
             <div><Label>Status</Label><Select value={active ? "active" : "inactive"} onValueChange={(v) => setActive(v === "active")} disabled={editUser?._id === users?.find((u: any) => u.role === "admin")?._id}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">Ativo</SelectItem><SelectItem value="inactive">Inativo</SelectItem></SelectContent></Select></div>
-            <div><Button variant="outline" size="sm" className="gap-2" onClick={() => { if (!editUser) return; setEditDialog(false); openPassword(editUser._id, editUser.name ?? editUser.email ?? "Usuário", false); }}><Key className="h-3.5 w-3.5" /> Redefinir Senha</Button></div>
+            <div><Button variant="outline" size="sm" className="gap-2" onClick={() => { if (!editUser) return; setEditDialog(false); openPassword(editUser._id, editUser.name ?? editUser.email ?? "Usuário"); }}><Key className="h-3.5 w-3.5" /> Redefinir Senha</Button></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setEditDialog(false)}>Cancelar</Button><Button onClick={handleEdit}>Salvar</Button></DialogFooter>
         </DialogContent>
@@ -259,16 +256,16 @@ export default function UsersPage() {
       <Dialog open={!!passwordDialog} onOpenChange={() => setPasswordDialog(null)}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>{passwordDialog?.isNew ? "Definir Senha" : "Redefinir Senha"}</DialogTitle>
+            <DialogTitle>Redefinir Senha</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <p className="text-sm text-muted-foreground">
-              {passwordDialog?.isNew ? `Definir senha para ${passwordDialog?.userName}` : `Redefinir senha de ${passwordDialog?.userName}`}
+              { `Redefinir senha de ${passwordDialog?.userName}` }
             </p>
             <div><Label>Nova Senha *</Label><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 8 caracteres" /></div>
-            {passwordDialog?.isNew && <p className="text-xs text-muted-foreground">O usuário será obrigado a alterar a senha no primeiro acesso.</p>}
+            <p className="text-xs text-muted-foreground">O usuário será obrigado a alterar a senha no próximo acesso.</p>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setPasswordDialog(null)}>Cancelar</Button><Button onClick={handleSetPassword} disabled={password.trim().length < 8}>{passwordDialog?.isNew ? "Definir" : "Redefinir"}</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setPasswordDialog(null)}>Cancelar</Button><Button onClick={handleSetPassword} disabled={password.trim().length < 8}>Redefinir</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </AppShell>
