@@ -70,6 +70,12 @@ export const create = mutation({
     if (!fromLocation) throw new Error("Local de origem não encontrado");
     const toLocation = await ctx.db.get(args.toLocationId);
     if (!toLocation) throw new Error("Local de destino não encontrado");
+    if (fromLocation.active === false) {
+      throw new Error("O armário de origem está inativo. Reative-o antes de transferir materiais.");
+    }
+    if (toLocation.active === false) {
+      throw new Error("O armário de destino está inativo. Selecione um armário ativo.");
+    }
 
     // Validate product
     const product = await ctx.db.get(args.productId);
