@@ -151,11 +151,17 @@ describe("PRINT-08 — retirada rápida reduz estoque corretamente", () => {
 
 describe("PRINT-09 — retirada registra lotId", () => {
   it("movement carrega lotId estruturado (1º lote consumido)", () => {
-    expect(backend).toContain("lotId: consumedLots[0].lotId");
+    // Produtos legados sem lotes seguem permitidos; quando há lote, o primeiro
+    // mantém o atalho legado enquanto a tabela estruturada guarda todos.
+    expect(backend).toContain("lotId: consumedLots[0]?.lotId");
   });
   it("consome lotes FIFO por recebimento e registra todos na observation", () => {
-    expect(backend).toMatch(/sort\(\(a, b\) => a\.receivedAt - b\.receivedAt\)/);
-    expect(backend).toContain("Lotes: ${consumedLots.map((c) => `${c.lotNumber}(${c.qty})`).join(\", \")}");
+    expect(backend).toContain("consumeLotLocationStock");
+    expect(backend).toContain("recordLotMovementAllocations");
+    const planner = read("src/lib/lot-location-rules.ts");
+    expect(planner).toContain("export function planFifoLotLocationConsumption");
+    expect(planner).toContain("a.lot.receivedAt - b.lot.receivedAt");
+    expect(backend).toContain("Lotes retirados:");
   });
 });
 
@@ -191,7 +197,14 @@ describe("PRINT-19 — nenhuma duplicação de estoque é criada", () => {
   it("o painel lê stock/lots existentes — sem nova tabela de estoque", () => {
     expect(backend).toContain('ctx.db.query("stock")');
     expect(backend).toContain('ctx.db.query("lots")');
-    expect(backend).not.toMatch(/insert\("(stock|printSuppliesStock|supplyStock)"/);
+    // stock é o livro-razão global canônico existente; uma linha é criada
+    // apenas quando o produto avulso ainda não possui registro. Não há nova
+    // tabela/cache de família nem linha duplicada para o mesmo produto.
+    expect(backend).toContain("getOptionalSingleValidGlobalStock");
+    expect(backend).toContain("if (looseStock) {");
+    expect(backend).toContain("else if (newLoosePhys > 0)");
+    expect(backend).not.toMatch(/insert\("(printSuppliesStock|supplyStock|familyStock)"/);
+    expect(backend).not.toMatch(/insert\("(families|supplyFamilies)"/);
   });
 });
 
