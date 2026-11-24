@@ -315,8 +315,7 @@ export const approve = mutation({
       await ctx.db.patch(item.itemId, { quantityApproved: item.quantityApproved });
 
       // Reserve stock (re-read for safety)
-      const freshStock = await ctx.db
-        .query("stock")
+      const freshStock = await ctx.db.query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
         .first();
       if (!freshStock) throw new Error("Registro global de estoque não encontrado para reservar.");
@@ -512,7 +511,8 @@ export const deliver = mutation({
       // Retain the legacy arithmetic invariant (subtract the delivered amount),
       // then release the unused portion too because the request is now complete.
       const newReserved = freshStock.reservedQuantity - input.quantityDelivered;
-      const finalReserved = newReserved - adjustment.unusedReservation;
+      const unusedReservation = adjustment.reservedToRelease - input.quantityDelivered;
+      const finalReserved = newReserved - unusedReservation;
       await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical, reservedQuantity: finalReserved });
       const exitNumber = await generateExitNumber(ctx);
       const movementId = await ctx.db.insert("stockMovements", {

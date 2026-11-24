@@ -50,6 +50,7 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain("recordLotMovementAllocations");
     expect(part).toContain("locationId: sourceLocationId");
     expect(part).toContain("reservedToRelease");
+    expect(part).toContain("const finalReserved = newReserved - unusedReservation;");
   });
   it("interfaces exigem área e armário antes da saída", () => {
     const exit = source("pages/Exit.tsx");
