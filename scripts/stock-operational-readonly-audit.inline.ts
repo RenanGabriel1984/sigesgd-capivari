@@ -169,6 +169,8 @@ const productsReport = products.map((product) => {
     globalRows: globalRows.length,
     globalPhysical,
     localPhysical,
+    globalVsLocationDifference: globalPhysical === null ? null : globalPhysical - localPhysical,
+    globalVsLotsDifference: globalPhysical === null || productLots.length === 0 ? null : globalPhysical - lotPhysical,
     globalReserved,
     expectedReservedFromApprovedRequests: expectedReserved,
     reservationDifference: globalReserved === null ? null : actualReserved - expectedReserved,
