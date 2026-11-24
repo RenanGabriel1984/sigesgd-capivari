@@ -4,6 +4,7 @@ import {
   requireSingleValidGlobalStock,
   validateUniqueScopedStockRows,
 } from "../lib/stock-read-integrity";
+import { assertReservedQuantityMatchesApprovedRequests } from "../lib/stock-reservation-integrity";
 
 const QUANTITY_EPSILON = 1e-9;
 
@@ -78,6 +79,50 @@ export async function assertProductLedgerConsistent(
       quantityAvailable: balance.quantityAvailable,
     })),
   }, productLabel);
+}
+
+/**
+ * Confere se a reserva global corresponde exatamente às linhas de requisições
+ * que ainda estão aprovadas. É somente leitura; não tenta reparar reservas
+ * órfãs ou ausentes.
+ */
+export async function assertProductReservationConsistent(
+  ctx: any,
+  productId: any,
+  productLabel: string,
+  stockOverride?: any,
+): Promise<number> {
+  const [stockRows, approvedRequests, productItems] = await Promise.all([
+    stockOverride === undefined
+      ? ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect()
+      : Promise.resolve(null),
+    ctx.db.query("requests")
+      .withIndex("by_status", (q: any) => q.eq("status", "approved"))
+      .collect(),
+    ctx.db.query("requestItems")
+      .withIndex("by_product", (q: any) => q.eq("productId", productId))
+      .collect(),
+  ]);
+  const stock = stockOverride === undefined
+    ? requireSingleValidGlobalStock(stockRows, productLabel)
+    : stockOverride;
+  return assertReservedQuantityMatchesApprovedRequests({
+    stock: stock ? {
+      physicalQuantity: stock.physicalQuantity,
+      reservedQuantity: stock.reservedQuantity,
+    } : null,
+    requests: approvedRequests.map((request: any) => ({
+      _id: String(request._id),
+      status: request.status,
+    })),
+    items: productItems.map((item: any) => ({
+      requestId: String(item.requestId),
+      productId: String(item.productId),
+      quantityApproved: item.quantityApproved,
+    })),
+    productId: String(productId),
+    productLabel,
+  });
 }
 
 /**
