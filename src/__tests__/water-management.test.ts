@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   calculateWaterBalances,
   remainingWaterShare,
@@ -36,9 +38,6 @@ describe("water mineral accounting", () => {
   });
 });
 
-
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 const waterBackend = readFileSync(resolve(__dirname, "../convex/water.ts"), "utf8");
 const appSource = readFileSync(resolve(__dirname, "../main.tsx"), "utf8");
