@@ -511,7 +511,7 @@ export const create = mutation({
     } else {
       await ctx.db.insert("stockByLocation", {
         productId: exit.productId,
-        locationId: args.locationId,
+        locationId: args.locationId!,
         quantity: args.quantity,
       });
     }
