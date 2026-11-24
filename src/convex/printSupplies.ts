@@ -898,11 +898,11 @@ export const withdrawFamily = mutation({
       exitNumber: `SAI-${new Date(now).getFullYear()}-SUP-${now}`,
       observation:
         `Retirada por família (${conv.baseUnit}) — ${args.reason ?? "Sem motivo"} ` +
-        `| Operação: ${plan.operation === "open_pack" ? `abertura integral de ${plan.packs} ${conv.packagingUnit}(s)` : `${plan.packs > 0 ? `${plan.packs} ${conv.packagingUnit}(s) fechada(s)` : ""}${plan.packs > 0 && looseExitUnits > 0 ? " + " : ""}${looseExitUnits} ${conv.baseUnit}. avulsa(s)`} ` +
+        `| Operação: ${plan.operation === "open_pack" ? `Abertura INTEGRAL de ${plan.packs} ${conv.packagingUnit}(s)` : `${plan.packs > 0 ? `${plan.packs} ${conv.packagingUnit}(s) fechada(s)` : ""}${plan.packs > 0 && looseExitUnits > 0 ? " + " : ""}${looseExitUnits} ${conv.baseUnit}. avulsa(s)`} ` +
         `| Composição antes: ${closedAvailable} ${conv.packagingUnit}(s) fechada(s) + ${looseAvailable} ${conv.baseUnit}. avulsa(s) ` +
         `| O.S.: ${args.osNumber ?? "—"} | Destino: ${args.secretariaId ?? "—"} ` +
         `| Lotes retirados: ${consumedLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}` +
-        (reclassifiedFromLots.length ? ` | Embalagens abertas: ${reclassifiedFromLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}` : "") +
+        (reclassifiedFromLots.length ? ` | Reclassificação: transferir as unidades das embalagens para ${looseMember.name}; lotes de origem: ${reclassifiedFromLots.map((item) => `${item.lotNumber}(${item.qty})`).join(", ")}` : "") +
         (args.observation ? ` | Obs: ${args.observation}` : ""),
       timestamp: now,
     } as never);
