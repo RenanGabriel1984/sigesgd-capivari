@@ -10,7 +10,7 @@ import {
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
-import { assertProductLedgerConsistent, assertProductReservationConsistent } from "./lotLocationLedger";
+import { assertProductLedgerConsistent, assertProductReservationConsistent, recordLotMovementAllocations } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -910,7 +910,7 @@ export const reverse = mutation({
         const location: any = await ctx.db.get(decrement.locationId);
         return `${location?.name ?? decrement.locationId}: ${decrement.quantity}`;
       }));
-      await ctx.db.insert("stockMovements", {
+      const movementId = await ctx.db.insert("stockMovements", {
         productId: item.productId,
         type: "adjustment",
         quantity: item.quantity,
@@ -925,6 +925,18 @@ export const reverse = mutation({
         observation: `Estorno da entrada ${entry.entryNumber}. ${lot ? `Lote ${lot.lotNumber}. ` : ""}Locais: ${locationNames.join("; ") || "não identificados"}. Motivo: ${reason}`,
         timestamp: now,
       });
+      if (lot) {
+        await recordLotMovementAllocations(ctx, {
+          movementId,
+          productId: item.productId,
+          allocations: decrements.map((decrement: any) => ({
+            lotId: lot._id,
+            locationId: decrement.locationId,
+            quantity: decrement.quantity,
+          })),
+          allocationType: "reversal",
+        });
+      }
       reversalDetails.push(`${productName}: -${item.quantity}${lot ? ` (${lot.lotNumber})` : ""}`);
     }
 
