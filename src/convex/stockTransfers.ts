@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { planTransfer } from "../lib/transfer-rules";
 import { planLotLocationTransfer } from "../lib/lot-location-rules";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { assertProductReservationConsistent } from "./lotLocationLedger";
 import { requirePermission } from "./rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
