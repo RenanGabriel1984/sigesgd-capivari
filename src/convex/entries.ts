@@ -9,7 +9,8 @@ import {
   normalizeInvoiceNumber,
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
-import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { assertProductLedgerConsistent } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -451,6 +452,10 @@ export const confirm = mutation({
       const entryLocation = await ctx.db.get(item.locationId);
       if (!entryLocation || entryLocation.active === false) throw new Error(`O armário selecionado para "${product.name}" não existe ou está inativo.`);
 
+      // A entrada só pode aumentar um livro-razão que já esteja conciliado.
+      // Isso impede que uma diferença antiga seja perpetuada por novas compras.
+      const stockBefore = await assertProductLedgerConsistent(ctx, item.productId, product.name);
+
       // Generate lot
       const lotNumber = await generateLotNumber(ctx);
       const lotId = await ctx.db.insert("lots", {
@@ -510,8 +515,7 @@ export const confirm = mutation({
       }
 
       // Update stock (increase physicalQuantity)
-      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-      const stock = getOptionalSingleValidGlobalStock(stockRows, product.name);
+      const stock = stockBefore;
       const prevPhysical = stock?.physicalQuantity ?? 0;
       const prevReserved = stock?.reservedQuantity ?? 0;
       const newPhysical = prevPhysical + item.quantity;
@@ -826,10 +830,8 @@ export const reverse = mutation({
     for (const item of items as any[]) {
       const product: any = await ctx.db.get(item.productId);
       const productName = product?.name ?? String(item.productId);
-      const stockRows = await ctx.db.query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
-        .collect();
-      const stock = requireSingleValidGlobalStock(stockRows, productName);
+      const stock = await assertProductLedgerConsistent(ctx, item.productId, productName);
+      if (!stock) throw new Error(`Registro global de estoque não encontrado para "${productName}".`);
       if (stock.physicalQuantity + 1e-9 < item.quantity) {
         throw new Error(`Não é possível estornar "${productName}": parte do material já foi consumida.`);
       }
