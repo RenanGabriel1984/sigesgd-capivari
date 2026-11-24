@@ -141,7 +141,9 @@ export default function ReturnsPage() {
         observation: observation || undefined,
       });
       toast.success(
-        `Devolução de ${returnQuantity} unidade(s) registrada — estoque recomposto`
+        condition === "unused"
+          ? `Devolução de ${returnQuantity} unidade(s) registrada — estoque recomposto`
+          : `Devolução registrada em quarentena — não adicionada ao saldo disponível`
       );
       setSelectedExitId("");
       setSearchParams({}, { replace: true });
