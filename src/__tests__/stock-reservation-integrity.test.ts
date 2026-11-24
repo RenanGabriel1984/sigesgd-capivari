@@ -167,3 +167,22 @@ describe("reconciliação administrativa respeita livros-razão e reservas", () 
   });
 
 });
+
+describe("rastreabilidade de estornos e entradas especiais", () => {
+  it("estorno de entrada em vários armários registra alocações estruturadas por local", () => {
+    const entries = readFileSync(resolve(__dirname, "../convex/entries.ts"), "utf8");
+    const start = entries.indexOf("export const reverse = mutation({");
+    const end = entries.indexOf("export const setUnits = mutation({", start);
+    const block = entries.slice(start, end);
+    expect(block).toContain("recordLotMovementAllocations(ctx");
+    expect(block).toContain("locationId: decrement.locationId");
+    expect(block).toContain('allocationType: "reversal"');
+  });
+
+  it("estoque inicial de produto e importação GomaQ registram armário no movimento", () => {
+    const products = readFileSync(resolve(__dirname, "../convex/products.ts"), "utf8");
+    const opsGoLive = readFileSync(resolve(__dirname, "../convex/opsGoLive.ts"), "utf8");
+    expect(products).toContain("locationId,\n        observation: `Estoque inicial");
+    expect(opsGoLive).toContain("locationId: LOCATION_ARMARIO_TI_02");
+  });
+});
