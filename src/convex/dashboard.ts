@@ -1,6 +1,7 @@
 import { requirePermission } from "./rbac";
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import { getOptionalSingleValidGlobalStock } from "../lib/stock-read-integrity";
 
 async function requireUser(ctx: any) {
   // RBAC central: dashboard exige permissão de visualização.
@@ -186,23 +187,28 @@ export const stockPosition = query({
     return Promise.all(
       products.map(async (p) => {
         const category = await ctx.db.get(p.categoryId);
-        const stock = await ctx.db
+        const stockRows = await ctx.db
           .query("stock")
           .withIndex("by_product", (q) => q.eq("productId", p._id))
-          .first();
-        const qty = stock?.physicalQuantity ?? 0;
+          .collect();
+        const stock = getOptionalSingleValidGlobalStock(stockRows, p.name);
+        const physicalQuantity = stock?.physicalQuantity ?? 0;
+        const reservedQuantity = stock?.reservedQuantity ?? 0;
+        const availableQuantity = physicalQuantity - reservedQuantity;
         let status: string = "Normal";
-        if (qty === 0) status = "Zerado";
-        else if (qty <= (p.minimumStock ?? 0)) status = "Crítico";
-        else if (qty <= (p.idealStock ?? 0)) status = "Baixo";
+        if (availableQuantity === 0) status = "Zerado";
+        else if (availableQuantity <= (p.minimumStock ?? 0)) status = "Crítico";
+        else if (availableQuantity <= (p.idealStock ?? 0)) status = "Baixo";
         return {
           _id: p._id,
           name: p.name,
           internalCode: p.internalCode ?? "",
           categoryName: category?.name ?? "",
           unitOfMeasure: p.unitOfMeasure,
-          currentStock: qty,
-          reservedQuantity: stock?.reservedQuantity ?? 0,
+          currentStock: physicalQuantity,
+          physicalQuantity,
+          reservedQuantity,
+          availableQuantity,
           minimumStock: p.minimumStock ?? 0,
           idealStock: p.idealStock ?? 0,
           maximumStock: p.maximumStock,
