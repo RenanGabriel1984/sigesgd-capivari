@@ -81,6 +81,14 @@ export const create = mutation({
     const product = await ctx.db.get(args.productId);
     if (!product) throw new Error("Produto não encontrado");
 
+    // Transferir altera a distribuição física, não a reserva. A reserva precisa
+    // continuar conciliada com as solicitações aprovadas antes de mover saldo.
+    const reservationStockRows = await ctx.db.query("stock")
+      .withIndex("by_product", (q: any) => q.eq("productId", args.productId))
+      .collect();
+    const reservationStock = requireSingleValidGlobalStock(reservationStockRows, product.name);
+    await assertProductReservationConsistent(ctx, args.productId, product.name, reservationStock);
+
     // A transferência rastreada exige lote e saldo atual no armário de origem.
     // Nunca reduzir quantityAvailable do lote: transferir muda a localização,
     // não consome material.
