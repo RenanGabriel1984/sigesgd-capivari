@@ -1550,8 +1550,7 @@ export const lotLocationReadiness = internalQuery({
       allLocalStock.some((row) => row.productId === product._id && row.quantity > 0),
     ).length;
 
-    const productById = new Map(allProducts.map((product) => [String(product._id), product]));
-    const entryItemsByLot = new Map<string, typeof allEntryItems>();
+        const entryItemsByLot = new Map<string, typeof allEntryItems>();
     for (const item of allEntryItems) {
       if (!item.lotId) continue;
       const key = String(item.lotId);
