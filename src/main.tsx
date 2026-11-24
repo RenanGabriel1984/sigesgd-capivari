@@ -35,6 +35,7 @@ const StockParametersPage = lazy(() => import("./pages/StockParameters.tsx"));
 const PackagingParametersPage = lazy(() => import("./pages/PackagingParameters.tsx"));
 const InventoryPage = lazy(() => import("./pages/Inventory.tsx"));
 const Requests = lazy(() => import("./pages/Requests.tsx"));
+const WaterManagementPage = lazy(() => import("./pages/WaterManagement.tsx"));
 const ReturnsPage = lazy(() => import("./pages/Returns.tsx"));
 const StockTransfersPage = lazy(() => import("./pages/StockTransfers.tsx"));
 const GomaQPage = lazy(() => import("./pages/GomaQ.tsx"));
@@ -143,6 +144,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/packaging-parameters" element={<RequireAuth><RequirePermission><PackagingParametersPage /></RequirePermission></RequireAuth>} />
               <Route path="/inventory" element={<RequireAuth><RequirePermission><InventoryPage /></RequirePermission></RequireAuth>} />
               <Route path="/requests" element={<RequireAuth><RequirePermission><Requests /></RequirePermission></RequireAuth>} />
+              <Route path="/water" element={<RequireAuth><RequirePermission><WaterManagementPage /></RequirePermission></RequireAuth>} />
               <Route path="/returns" element={<RequireAuth><RequirePermission><ReturnsPage /></RequirePermission></RequireAuth>} />
               <Route path="/transfers" element={<RequireAuth><RequirePermission><StockTransfersPage /></RequirePermission></RequireAuth>} />
               <Route path="/gomaq" element={<RequireAuth><RequirePermission><GomaQPage /></RequirePermission></RequireAuth>} />
