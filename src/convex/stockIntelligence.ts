@@ -50,6 +50,7 @@ import {
   type ConsumptionAggregate,
   type OrganizationalMovement,
 } from "../lib/consumption-organization";
+import { getOptionalSingleValidGlobalStock } from "../lib/stock-read-integrity";
 
 const periodArg = v.union(
   v.literal("30d"),
@@ -72,9 +73,13 @@ async function loadStockParameterRows(ctx: QueryCtx): Promise<StockParameterRow[
 
   const categoryNameById = new Map(categories.map((c) => [c._id, c.name]));
   const areaNameById = new Map(areas.map((a) => [a._id, a.name]));
-  const stockByProduct = new Map(
-    stockRows.map((s) => [s.productId, { physicalQuantity: s.physicalQuantity, reservedQuantity: s.reservedQuantity }])
-  );
+  const stockRowsByProduct = new Map<string, typeof stockRows>();
+  for (const row of stockRows) {
+    const key = String(row.productId);
+    const rows = stockRowsByProduct.get(key) ?? [];
+    rows.push(row);
+    stockRowsByProduct.set(key, rows);
+  }
 
   const areaByProduct = new Map<string, Set<string>>();
   for (const lot of lots) {
@@ -86,24 +91,25 @@ async function loadStockParameterRows(ctx: QueryCtx): Promise<StockParameterRow[
     areaByProduct.set(lot.productId, set);
   }
 
-  const rows = products.map((p) =>
-    buildStockParameterRow({
+  const rows = products.map((p) => {
+    const stock = getOptionalSingleValidGlobalStock(stockRowsByProduct.get(String(p._id)) ?? [], p.name);
+    return buildStockParameterRow({
       productId: p._id,
       productName: p.name,
       categoryName: categoryNameById.get(p.categoryId) ?? null,
       areaName: [...(areaByProduct.get(p._id) ?? [])].sort().join(", ") || null,
       unitOfMeasure: p.unitOfMeasure,
-      // Saldo REAL lido — nenhuma soma é convertida ou ajustada aqui.
-      physicalStock: stockByProduct.get(p._id)?.physicalQuantity ?? 0,
-      reservedStock: stockByProduct.get(p._id)?.reservedQuantity ?? 0,
+      // Saldo global único validado; duplicidades nunca são reduzidas a um Map.
+      physicalStock: stock?.physicalQuantity ?? 0,
+      reservedStock: stock?.reservedQuantity ?? 0,
       parameters: readReplenishmentParameters(p),
       packaging: {
         baseUnit: p.baseUnit ?? null,
         packagingUnit: p.packagingUnit ?? null,
         conversionFactor: p.conversionFactor ?? null,
       },
-    })
-  );
+    });
+  });
 
   rows.sort((a, b) => a.productName.localeCompare(b.productName, "pt-BR"));
   return rows;
