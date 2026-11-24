@@ -446,7 +446,7 @@ export const withdraw = mutation({
       newPhysical,
       previousReserved: stock!.reservedQuantity,
       newReserved: stock!.reservedQuantity,
-      lotId: consumedLots[0].lotId as never,
+      lotId: consumedLots[0]?.lotId as never,
       locationId: sourceLocationId,
       userId,
       exitNumber: `SAI-${new Date(now).getFullYear()}-SUP-${now}`,
