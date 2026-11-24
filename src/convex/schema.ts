@@ -1041,6 +1041,9 @@ const schema = defineSchema(
       method: v.optional(v.string()),
       observation: v.optional(v.string()),
       receivedByUserId: v.id("users"),
+      reversedAt: v.optional(v.number()),
+      reversedByUserId: v.optional(v.id("users")),
+      reversalReason: v.optional(v.string()),
       createdAt: v.number(),
     }).index("by_period", ["periodId"])
       .index("by_participant", ["participantId"])
