@@ -18,7 +18,7 @@ if [ ! -f "${QUERY_FILE}" ]; then
 fi
 
 echo "Executando consulta estritamente somente leitura em first-herring-264..."
-echo "Nenhum --push, --prod, deploy, mutation ou migration será usado."
+echo "Nenhuma publicação, migration ou alteração de dados será executada."
 
 npx convex run \
   --deployment first-herring-264 \
