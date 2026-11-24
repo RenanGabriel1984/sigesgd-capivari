@@ -116,7 +116,7 @@ export default function ReturnsPage() {
       quantity: Number(lotReturnQuantities[`${allocation.lotId}::${allocation.sourceLocationId ?? ""}`] ?? 0),
     })).filter((allocation) => allocation.quantity > 0);
     const returnQuantity = hasTrackedLots ? selectedLotAllocations.reduce((sum, allocation) => sum + allocation.quantity, 0) : quantity;
-    if ((hasTrackedLots || condition !== "unused") && !locationId) {
+    if (!locationId) {
       toast.error("Selecione o armário onde o material está sendo recebido ou ficará em quarentena");
       return;
     }
@@ -492,13 +492,13 @@ export default function ReturnsPage() {
                 </div>
 
                 <div>
-                  <Label>Armário de destino {(hasTrackedLots || condition !== "unused") ? "*" : "(opcional)"}</Label>
+                  <Label>Armário de destino *</Label>
                   <select
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={locationId}
                     onChange={(e) => setLocationId(e.target.value)}
                   >
-                    <option value="">{(hasTrackedLots || condition !== "unused") ? "Selecione o armário de destino..." : "Sem alteração de local"}</option>
+                    <option value="">Selecione o armário de destino...</option>
                     {(locations ?? []).map((l: any) => (
                       <option key={l._id} value={l._id}>
                         {l.name}
