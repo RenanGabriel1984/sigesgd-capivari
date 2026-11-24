@@ -111,8 +111,8 @@ export default function ReturnsPage() {
       quantity: Number(lotReturnQuantities[`${allocation.lotId}::${allocation.sourceLocationId ?? ""}`] ?? 0),
     })).filter((allocation) => allocation.quantity > 0);
     const returnQuantity = hasTrackedLots ? selectedLotAllocations.reduce((sum, allocation) => sum + allocation.quantity, 0) : quantity;
-    if (hasTrackedLots && !locationId) {
-      toast.error("Selecione o armário onde o material está sendo recebido");
+    if ((hasTrackedLots || condition !== "unused") && !locationId) {
+      toast.error("Selecione o armário onde o material está sendo recebido ou ficará em quarentena");
       return;
     }
     const validationError = validateReturnQuantity({
@@ -286,6 +286,7 @@ export default function ReturnsPage() {
                       <TableHead className="text-center">Qtd</TableHead>
                       <TableHead>Lotes × armários</TableHead>
                       <TableHead>Condição</TableHead>
+                      <TableHead>Situação do estoque</TableHead>
                       <TableHead>Motivo</TableHead>
                       <TableHead>Devolvido por</TableHead>
                       <TableHead>Recebido por</TableHead>
@@ -317,6 +318,11 @@ export default function ReturnsPage() {
                           {r.condition
                             ? RETURN_CONDITION_LABELS[r.condition as ReturnCondition]
                             : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={r.condition === "unused" ? "secondary" : "destructive"}>
+                            {r.condition === "unused" ? "Disponível" : "Quarentena"}
+                          </Badge>
                         </TableCell>
                         <TableCell className="text-sm max-w-[200px] truncate">
                           {r.reason}
@@ -414,6 +420,7 @@ export default function ReturnsPage() {
 
                 <div>
                   <Label>Condição do material</Label>
+                  <p className="text-xs text-muted-foreground">Somente material não utilizado retorna ao saldo disponível. Material parcialmente utilizado, defeituoso ou não classificado fica em quarentena até inspeção.</p>
                   <select
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={condition}
