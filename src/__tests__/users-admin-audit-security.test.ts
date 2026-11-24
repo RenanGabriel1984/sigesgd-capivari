@@ -121,6 +121,7 @@ describe("gestão de usuários — autorização e último administrador ativo",
       email: "tecnico@example.test",
       role: "technician",
       organizationId: undefined,
+      temporaryPassword: "SenhaTemporaria123",
     });
 
     expect(userId).toBe("users_2");
@@ -130,6 +131,12 @@ describe("gestão de usuários — autorização e último administrador ativo",
       email: "tecnico@example.test",
       role: "technician",
       active: true,
+      requiresPasswordReset: true,
+    });
+    expect(ctx.db._tables.passwords).toHaveLength(1);
+    expect(ctx.db._tables.passwords[0]).toMatchObject({
+      userId,
+      requiresReset: true,
     });
   });
 
