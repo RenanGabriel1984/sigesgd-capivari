@@ -172,7 +172,13 @@ describe("PRINT-EXIT-03 — retirada respeita o backend (autoridade final)", () 
     expect(planner).toContain("a.lot.receivedAt - b.lot.receivedAt");
     expect(planner).toContain("Lotes insuficientes no armário selecionado");
     const family = backend.slice(backend.indexOf("export const withdrawFamily = mutation({"), backend.indexOf("export const previewFamilyWithdrawal = query({"));
-    expect(family.indexOf("physicalQuantity: newLoosePhys")).toBeLessThan(family.indexOf("consumeAtLocation(looseMember._id, looseExitUnits"));
+    const openPackStart = family.indexOf("const openPacks = plan.packs");
+    const globalPatch = family.indexOf("await ctx.db.patch(looseStockId, { physicalQuantity: newLoosePhys })", openPackStart);
+    const globalInsert = family.indexOf('looseStockId = await ctx.db.insert("stock"', openPackStart);
+    const fifoConsume = family.indexOf("consumeAtLocation(looseMember._id, looseExitUnits", openPackStart);
+    expect(openPackStart).toBeGreaterThan(-1);
+    expect(globalPatch > openPackStart || globalInsert > openPackStart).toBe(true);
+    expect(Math.min(globalPatch < 0 ? Number.MAX_SAFE_INTEGER : globalPatch, globalInsert < 0 ? Number.MAX_SAFE_INTEGER : globalInsert)).toBeLessThan(fifoConsume);
   });
 
   it("a retirada registra destino, secretaria, departamento, unidade, O.S. e motivo", () => {
