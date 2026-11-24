@@ -160,7 +160,7 @@ export const create = mutation({
       }
 
       for (const locationId of targetLocationIds) {
-        const location = await ctx.db.get(locationId as any);
+        const location: any = await ctx.db.get(locationId as any);
         if (!location || location.active === false) {
           throw new Error("Um dos armários do inventário não existe ou está inativo. Reabra o inventário usando apenas locais ativos.");
         }
