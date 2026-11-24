@@ -75,10 +75,11 @@ export const update = mutation({
     const location = await ctx.db.get(id);
     if (!location) throw new Error("Local não encontrado");
 
-    if (updates.name) {
+    if (updates.name !== undefined) {
       updates.name = updates.name.trim();
+      if (!updates.name) throw new Error("Nome do local é obrigatório");
       const all = await ctx.db.query("storageLocations").collect();
-      if (all.some((l: any) => l._id !== id && l.name.toLowerCase() === updates.name!.toLowerCase())) {
+      if (all.some((l: any) => l._id !== id && l.name.trim().toLocaleLowerCase("pt-BR") === updates.name!.toLocaleLowerCase("pt-BR"))) {
         throw new Error("Já existe outro local com este nome");
       }
     }
