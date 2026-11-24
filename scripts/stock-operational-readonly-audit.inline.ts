@@ -45,6 +45,13 @@ try {
 } catch {
   movementLotAllocationsAvailable = false;
 }
+let returnLotAllocations = [];
+let returnLotAllocationsAvailable = true;
+try {
+  returnLotAllocations = await ctx.db.query("returnLotAllocations").collect();
+} catch {
+  returnLotAllocationsAvailable = false;
+}
 
 const EPSILON = 1e-9;
 const sum = (rows, field) => rows.reduce((total, row) => total + Number(row[field] ?? 0), 0);
@@ -199,6 +206,44 @@ for (const movement of movements) {
   const key = String(movement.type ?? "sem_tipo");
   movementTypeCounts[key] = (movementTypeCounts[key] ?? 0) + 1;
 }
+const allocationCountByMovementId = new Map();
+for (const allocation of movementLotAllocations) {
+  const key = String(allocation.movementId);
+  allocationCountByMovementId.set(key, (allocationCountByMovementId.get(key) ?? 0) + 1);
+}
+const movementAllocationCoverageByType = {};
+for (const movement of movements) {
+  const type = String(movement.type ?? "sem_tipo");
+  const stat = movementAllocationCoverageByType[type] ?? { total: 0, withStructuredLots: 0, withoutStructuredLots: 0 };
+  stat.total++;
+  if ((allocationCountByMovementId.get(String(movement._id)) ?? 0) > 0) stat.withStructuredLots++;
+  else stat.withoutStructuredLots++;
+  movementAllocationCoverageByType[type] = stat;
+}
+const productsById = new Map(products.map((product) => [String(product._id), product]));
+const locationsById = new Map(locations.map((location) => [String(location._id), location]));
+const entriesWithoutAreaDetails = entries
+  .filter((entry) => !entry.areaId)
+  .map((entry) => ({
+    entryNumber: entry.entryNumber,
+    status: entry.status,
+    originType: entry.originType,
+    materialType: entry.materialType ?? null,
+    invoiceNumber: entry.invoiceNumber ?? null,
+    receivedAt: entry.receivedAt,
+    itemCount: entryItems.filter((item) => String(item.entryId) === String(entry._id)).length,
+  }));
+const returnsDetails = returns.map((returned) => ({
+  productName: productsById.get(String(returned.productId))?.name ?? "Produto inexistente",
+  quantity: returned.quantity,
+  condition: returned.condition ?? "legada_sem_condicao",
+  stockDisposition: returned.stockDisposition ?? "legado_sem_destinacao_registrada",
+  locationName: returned.locationId ? locationsById.get(String(returned.locationId))?.name ?? "Local inexistente" : null,
+  exitMovementLinked: Boolean(returned.exitMovementId),
+  lotAllocationCount: returnLotAllocations.filter((allocation) => String(allocation.returnId) === String(returned._id)).length,
+  createdAt: returned.createdAt,
+  inspectedAt: returned.inspectedAt ?? null,
+}));
 const lotReferenceCounts = { byId: 0, byNumber: 0, unresolved: 0, empty: 0 };
 for (const movement of movements) {
   if (!movement.lotId) lotReferenceCounts.empty++;
@@ -251,6 +296,18 @@ return {
     entryItems: entryItems.length,
     entryItemsWithoutLot: entryItems.filter((row) => !row.lotId).length,
     movementLotAllocations: movementLotAllocations.length,
+    movementsWithStructuredLotAllocations: allocationCountByMovementId.size,
+    movementsWithoutStructuredLotAllocations: movements.length - allocationCountByMovementId.size,
+    returnLotAllocations: returnLotAllocations.length,
+    entriesWithoutArea: entriesWithoutAreaDetails.length,
+  },
+  movementAllocationCoverageByType,
+  entriesWithoutAreaDetails,
+  returnsDetails,
+  schemaAvailability: {
+    lotLocationBalances: lotLocationBalancesAvailable,
+    stockMovementLotAllocations: movementLotAllocationsAvailable,
+    returnLotAllocations: returnLotAllocationsAvailable,
   },
   areas: areaRows,
   locations: locationRows,
@@ -266,6 +323,11 @@ return {
     movementLotAllocationsAvailable
       ? "Alocações estruturadas de lotes por movimentação estão disponíveis."
       : "A tabela stockMovementLotAllocations não existe ou não está disponível neste deployment.",
+    returnLotAllocationsAvailable
+      ? "Alocações de lotes por devolução estão disponíveis."
+      : "A tabela returnLotAllocations não existe ou não está disponível neste deployment.",
+    "A ausência de área em entrada precisa ser interpretada junto ao status e aos itens: rascunhos não equivalem a entrada confirmada sem classificação.",
+    "A ausência de alocações estruturadas em movimentos históricos não prova divergência de saldo; requer avaliação de cobertura conforme tipo e data do movimento.",
     "Produtos sem lote podem ser legados válidos; suas quantidades continuam sendo conciliadas por armário.",
   ],
 };
