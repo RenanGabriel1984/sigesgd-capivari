@@ -107,7 +107,11 @@ export const createExit = mutation({
 export const reserveStock = mutation({
   args: { productId: v.id("products"), quantity: v.number(), requestId: v.id("requests") },
   handler: async (ctx, args) => {
-    const { userId } = await requireUser(ctx);
+    // Reserva altera saldo reservado; exige permissão operacional de estoque.
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    if (!Number.isFinite(args.quantity) || args.quantity <= 0) {
+      throw new Error("A quantidade da reserva deve ser um número finito maior que zero");
+    }
     const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).first();
     if (!stock) throw new Error("Registro de estoque não encontrado");
     const available = stock.physicalQuantity - stock.reservedQuantity;

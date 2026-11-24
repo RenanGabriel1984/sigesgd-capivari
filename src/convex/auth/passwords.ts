@@ -22,9 +22,7 @@ function fromHex(hex: string): Uint8Array {
 
 function generateSalt(): string {
   const bytes = new Uint8Array(16);
-  for (let i = 0; i < 16; i++) {
-    bytes[i] = Math.floor(Math.random() * 256);
-  }
+  crypto.getRandomValues(bytes);
   return toHex(bytes.buffer);
 }
 

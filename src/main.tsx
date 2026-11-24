@@ -12,11 +12,11 @@ import "./index.css";
 import { resolvedConvexUrl } from "@/lib/convex-url";
 
 // ── Backend Convex do Gestão de Estoque SGGD ─────────────────────────────────────────────
-// Produção usa o deployment oficial fixo (imune a VITE_CONVEX_URL desatualizado
-// injetado no build). Homologação só é aceita com VITE_APP_ENV=homologacao +
-// VITE_CONVEX_URL de um deployment isolado — regra em src/lib/convex-url.ts,
-// chamada por scripts/build-homolog.mjs. Sem essa exceção, qualquer build de
-// homologação continuaria falando com os dados oficiais.
+// Produção usa savory-sockeye-292; execução local usa first-herring-264.
+// VITE_CONVEX_URL não pode redirecionar builds de produção. Homologação exige
+// VITE_APP_ENV=homologacao + URL isolada, rejeitando produção e desenvolvimento.
+// A resolução compartilhada está em src/lib/convex-url.ts e é validada pelo
+// scripts/build-homolog.mjs antes de gerar o artefato de homologação.
 
 // Lazy load route components
 const Landing = lazy(() => import("./pages/Landing.tsx"));
@@ -39,6 +39,7 @@ const ReturnsPage = lazy(() => import("./pages/Returns.tsx"));
 const StockTransfersPage = lazy(() => import("./pages/StockTransfers.tsx"));
 const GomaQPage = lazy(() => import("./pages/GomaQ.tsx"));
 const AssetsPage = lazy(() => import("./pages/Assets.tsx"));
+const PatrimonyPage = lazy(() => import("./pages/Patrimony.tsx"));
 const AssetDetailPage = lazy(() => import("./pages/AssetDetail.tsx"));
 const LicensesPage = lazy(() => import("./pages/Licenses.tsx"));
 const Movements = lazy(() => import("./pages/Movements.tsx"));
@@ -146,6 +147,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/transfers" element={<RequireAuth><RequirePermission><StockTransfersPage /></RequirePermission></RequireAuth>} />
               <Route path="/gomaq" element={<RequireAuth><RequirePermission><GomaQPage /></RequirePermission></RequireAuth>} />
               <Route path="/assets" element={<RequireAuth><RequirePermission><AssetsPage /></RequirePermission></RequireAuth>} />
+              <Route path="/patrimony" element={<RequireAuth><RequirePermission><PatrimonyPage /></RequirePermission></RequireAuth>} />
               <Route path="/assets/:id" element={<RequireAuth><RequirePermission><AssetDetailPage /></RequirePermission></RequireAuth>} />
               <Route path="/licenses" element={<RequireAuth><RequirePermission><LicensesPage /></RequirePermission></RequireAuth>} />
               <Route path="/movements" element={<RequireAuth><RequirePermission><Movements /></RequirePermission></RequireAuth>} />

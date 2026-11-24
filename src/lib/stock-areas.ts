@@ -67,6 +67,15 @@ export const AREA_TI_GERAL = "TI Geral";
 /** Área/subestoque de referência: suprimentos e materiais de impressão. */
 export const AREA_IMPRESSORAS = "Impressoras";
 
+/** Área/subestoque de referência: materiais e produtos de limpeza. */
+export const AREA_LIMPEZA = "Limpeza";
+
+/** Área/subestoque de referência: copa e cozinha. */
+export const AREA_COPA_COZINHA = "Copa e Cozinha";
+
+/** Área/subestoque de referência: água mineral e garrafões. */
+export const AREA_AGUA_MINERAL = "Água mineral";
+
 /**
  * Áreas de referência da estrutura oficial.
  *
@@ -82,5 +91,17 @@ export const BASELINE_STOCK_AREAS: Array<{ name: string; description: string }> 
     name: AREA_IMPRESSORAS,
     description:
       "Suprimentos e materiais de impressão. A área não pertence a nenhum fornecedor: o fornecedor de cada entrada permanece no histórico.",
+  },
+  {
+    name: AREA_LIMPEZA,
+    description: "Produtos e materiais de limpeza, com controle de entradas, saídas, lotes, locais e inventário.",
+  },
+  {
+    name: AREA_COPA_COZINHA,
+    description: "Alimentos, descartáveis e materiais de copa e cozinha, com controle pelo estoque comum.",
+  },
+  {
+    name: AREA_AGUA_MINERAL,
+    description: "Área de referência dos garrafões e materiais de água mineral; custos, trocas e rateios são controlados no módulo específico.",
   },
 ];

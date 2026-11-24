@@ -3,8 +3,9 @@ import { query, mutation, internalMutation, QueryCtx } from "./_generated/server
 import { v } from "convex/values";
 import { hashPassword } from "./auth/passwords";
 import { requirePermission } from "./rbac";
+import { findUsersByNormalizedEmail, normalizeLoginEmail } from "../lib/credential-integrity";
 
-type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
+type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 async function requireUser(ctx: any) {
   // Compatibilidade: wrapper fino sobre a camada central src/lib/rbac.ts
@@ -12,10 +13,30 @@ async function requireUser(ctx: any) {
   return auth;
 }
 
-async function requireAdmin(ctx: any) {
-  const { userId, user } = await requireUser(ctx);
-  if (user.role !== "admin") throw new Error("Apenas administradores podem executar esta operação");
-  return { userId, user };
+async function requireUserManager(ctx: any) {
+  // A matriz central concede users.manage a admin e secretary.
+  // Não duplicar a autorização por comparação direta de papel.
+  return requirePermission(ctx, "users.manage", { entity: "users" });
+}
+
+/**
+ * Impede que uma alteração deixe o sistema sem administrador ATIVO.
+ * Administradores inativos não contam como alternativa operacional.
+ */
+async function ensureAnotherActiveAdmin(ctx: any, targetUser: any): Promise<void> {
+  if (targetUser?.role !== "admin" || targetUser.active === false) return;
+
+  const admins = await ctx.db
+    .query("users")
+    .withIndex("by_role", (q: any) => q.eq("role", "admin"))
+    .collect();
+  const hasAnotherActiveAdmin = admins.some(
+    (admin: any) => admin._id !== targetUser._id && admin.active !== false,
+  );
+
+  if (!hasAnotherActiveAdmin) {
+    throw new Error("Não é possível remover, rebaixar ou desativar o último administrador ativo.");
+  }
 }
 
 // ─── Bootstrap ───────────────────────────────────────────────────────────────
@@ -116,19 +137,35 @@ export const listUserOptions = query({
 export const createUser = mutation({
   args: {
     name: v.string(), email: v.string(),
-    role: v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician")),
+    role: v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician"), v.literal("patrimony_manager")),
     organizationId: v.optional(v.id("organizations")),
+    temporaryPassword: v.string(),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireAdmin(ctx);
-    const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", args.email.toLowerCase())).first();
-    if (existing) throw new Error("Já existe um usuário com este e-mail");
+    const { userId } = await requireUserManager(ctx);
+    const email = normalizeLoginEmail(args.email);
+    if (!email) throw new Error("E-mail é obrigatório");
+    const allUsers = await ctx.db.query("users").collect();
+    const existing = findUsersByNormalizedEmail(allUsers, email);
+    if (existing.length > 0) throw new Error("Já existe um usuário com este e-mail");
+
+    if (args.temporaryPassword.trim().length < 8 || args.temporaryPassword.length > 200) {
+      throw new Error("A senha temporária deve ter entre 8 e 200 caracteres.");
+    }
 
     const now = Date.now();
     const newUserId = await ctx.db.insert("users", {
-      name: args.name, email: args.email.toLowerCase(), role: args.role,
+      name: args.name.trim(), email, role: args.role,
       organizationId: args.organizationId, active: true,
+      requiresPasswordReset: true,
       createdAt: now, updatedAt: now,
+    });
+    const { hash, salt } = await hashPassword(args.temporaryPassword);
+    await ctx.db.insert("passwords", {
+      userId: newUserId,
+      passwordHash: hash,
+      salt,
+      requiresReset: true,
     });
     await ctx.db.insert("auditLogs", {
       userId, action: "create", entity: "users", entityId: newUserId,
@@ -141,27 +178,33 @@ export const createUser = mutation({
 export const updateUser = mutation({
   args: {
     userId: v.id("users"), name: v.optional(v.string()), email: v.optional(v.string()),
-    role: v.optional(v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician"))),
+    role: v.optional(v.union(v.literal("admin"), v.literal("stock_manager"), v.literal("director"), v.literal("secretary"), v.literal("technician"), v.literal("patrimony_manager"))),
     organizationId: v.optional(v.id("organizations")), active: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { userId: adminId } = await requireAdmin(ctx);
+    const { userId: adminId } = await requireUserManager(ctx);
     const { userId, ...updates } = args;
 
     if (userId === adminId && updates.active === false) {
       throw new Error("Você não pode desativar sua própria conta");
     }
-    if (updates.role && updates.role !== "admin") {
-      const user = await ctx.db.get(userId);
-      if (user?.role === "admin") {
-        const admins = await ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect();
-        if (admins.length <= 1) throw new Error("Não é possível alterar o perfil do único administrador");
+
+    const targetUser = await ctx.db.get(userId);
+    if (!targetUser) throw new Error("Usuário não encontrado");
+
+    const removesActiveAdmin = targetUser.role === "admin" &&
+      targetUser.active !== false &&
+      (updates.active === false || (updates.role !== undefined && updates.role !== "admin"));
+    if (removesActiveAdmin) await ensureAnotherActiveAdmin(ctx, targetUser);
+    if (updates.email !== undefined) {
+      const email = normalizeLoginEmail(updates.email);
+      if (!email) throw new Error("E-mail é obrigatório");
+      const allUsers = await ctx.db.query("users").collect();
+      const existing = findUsersByNormalizedEmail(allUsers, email);
+      if (existing.some((record: any) => record._id !== userId)) {
+        throw new Error("Já existe outro usuário com este e-mail");
       }
-    }
-    if (updates.email) {
-      const existing = await ctx.db.query("users").withIndex("email", (q: any) => q.eq("email", updates.email!.toLowerCase())).first();
-      if (existing && existing._id !== userId) throw new Error("Já existe outro usuário com este e-mail");
-      updates.email = updates.email.toLowerCase();
+      updates.email = email;
     }
 
     await ctx.db.patch(userId, { ...updates, updatedAt: Date.now() });
@@ -178,7 +221,7 @@ export const updateUser = mutation({
 export const activateUser = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
-    const { userId: adminId } = await requireAdmin(ctx);
+    const { userId: adminId } = await requireUserManager(ctx);
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
     await ctx.db.patch(args.userId, { active: true, updatedAt: Date.now() });
@@ -193,14 +236,11 @@ export const activateUser = mutation({
 export const deactivateUser = mutation({
   args: { userId: v.id("users") },
   handler: async (ctx, args) => {
-    const { userId: adminId } = await requireAdmin(ctx);
+    const { userId: adminId } = await requireUserManager(ctx);
     if (args.userId === adminId) throw new Error("Você não pode desativar sua própria conta");
     const user = await ctx.db.get(args.userId);
     if (!user) throw new Error("Usuário não encontrado");
-    if (user.role === "admin") {
-      const admins = await ctx.db.query("users").withIndex("by_role", (q: any) => q.eq("role", "admin")).collect();
-      if (admins.length <= 1) throw new Error("Não é possível desativar o único administrador");
-    }
+    await ensureAnotherActiveAdmin(ctx, user);
     await ctx.db.patch(args.userId, { active: false, updatedAt: Date.now() });
     await ctx.db.insert("auditLogs", {
       userId: adminId, action: "deactivate", entity: "users", entityId: args.userId,

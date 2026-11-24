@@ -143,6 +143,45 @@ export const ensureBaselineAreas = internalMutation({
   },
 });
 
+/**
+ * Cria somente as áreas oficiais que ainda não existem.
+ * A execução é explícita pelo gestor na tela; nunca altera lotes ou saldos.
+ */
+export const createMissingBaselineAreas = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const { userId } = await requireStockManagerOrAdmin(ctx);
+    const created: string[] = [];
+    const skipped: string[] = [];
+    const existingAreas = await ctx.db.query("stockAreas").collect();
+    const normalizedName = (value: string) => value.trim().toLocaleLowerCase("pt-BR");
+
+    for (const area of BASELINE_STOCK_AREAS) {
+      const existing = existingAreas.find((candidate) => normalizedName(candidate.name) === normalizedName(area.name));
+      if (existing) {
+        skipped.push(area.name);
+        continue;
+      }
+      const id = await ctx.db.insert("stockAreas", {
+        name: area.name,
+        description: area.description,
+        active: true,
+      });
+      await ctx.db.insert("auditLogs", {
+        userId,
+        action: "create",
+        entity: "stockAreas",
+        entityId: id,
+        details: `Área/Subestoque oficial "${area.name}" criada por ação explícita do gestor`,
+        timestamp: Date.now(),
+      });
+      created.push(area.name);
+    }
+
+    return { created, skipped };
+  },
+});
+
 export const create = mutation({
   args: {
     name: v.string(),

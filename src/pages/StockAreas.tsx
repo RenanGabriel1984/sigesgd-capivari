@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Layers, Edit2, ToggleLeft, ToggleRight, ArrowRightLeft, Info } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router";
-import { NO_AREA_LABEL } from "@/lib/stock-areas";
+import { BASELINE_STOCK_AREAS, NO_AREA_LABEL } from "@/lib/stock-areas";
 
 /**
  * ÁREAS / SUBESTOQUES — conceito INDEPENDENTE.
@@ -47,6 +47,7 @@ export default function StockAreas() {
   const summary = useQuery(api.stockAreas.summary);
   const createArea = useMutation(api.stockAreas.create);
   const updateArea = useMutation(api.stockAreas.update);
+  const createMissingBaselineAreas = useMutation(api.stockAreas.createMissingBaselineAreas);
   const navigate = useNavigate();
 
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -54,6 +55,7 @@ export default function StockAreas() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
+  const [creatingBaseline, setCreatingBaseline] = useState(false);
 
   if (areas === undefined) return <StockAreasSkeleton />;
 
@@ -111,6 +113,8 @@ export default function StockAreas() {
     }
   };
 
+  const existingNames = new Set(areas.map((area) => area.name.trim().toLocaleLowerCase("pt-BR")));
+  const missingBaseline = BASELINE_STOCK_AREAS.filter((area) => !existingNames.has(area.name.toLocaleLowerCase("pt-BR")));
   const activeCount = areas.filter((a) => a.active).length;
   const inactiveCount = areas.length - activeCount;
 
@@ -127,6 +131,27 @@ export default function StockAreas() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            {missingBaseline.length > 0 && (
+              <Button
+                variant="outline"
+                className="gap-2"
+                disabled={creatingBaseline}
+                onClick={async () => {
+                  setCreatingBaseline(true);
+                  try {
+                    const result = await createMissingBaselineAreas({});
+                    toast.success(`${result.created.length} área(s) oficial(is) criada(s); ${result.skipped.length} já existia(m).`);
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Não foi possível criar as áreas oficiais.");
+                  } finally {
+                    setCreatingBaseline(false);
+                  }
+                }}
+              >
+                <Layers className="h-4 w-4" />
+                {creatingBaseline ? "Criando..." : `Adicionar ${missingBaseline.length} área(s) oficial(is)`}
+              </Button>
+            )}
             <Button variant="outline" className="gap-2" onClick={() => navigate("/transfers")}>
               <ArrowRightLeft className="h-4 w-4" /> Transferir estoque
             </Button>

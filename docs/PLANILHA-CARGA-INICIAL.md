@@ -28,3 +28,11 @@ A confirmação gera, por item: entrada `initial_inventory`, lote rastreável, `
 - A carga foi **efetivada** (entrada `initial_inventory` com 53 lotes rastreáveis, saldos por local e globais conferidos, movimentações e auditoria). A proteção contra duplicação impede nova carga inicial para os mesmos produtos.
 - Observações com `;` interno (ex.: `Parte do kit original e 4 cores; CX735`, `Cat5E; 5 caixas com 100`) são preservadas integralmente pelo parser — a observação é sempre a última coluna da linha.
 - **Pré-requisito já atendido**: os locais `Armário TI 01` e `Armário TI 02` estão cadastrados.
+
+## Mapeamento de ambientes Convex — 24/11/2026
+
+- **Produção:** `savory-sockeye-292` — backend oficial dos dados da Secretaria.
+- **Desenvolvimento cloud:** `first-herring-264` — não é produção.
+- **Homologação/preview:** usar deployment isolado; nunca reutilizar produção ou desenvolvimento.
+
+O frontend fixa o backend de produção, seleciona desenvolvimento local pelo modo do Vite e exige URL explícita para homologação. O script de homologação bloqueia os hosts de produção e desenvolvimento. Esta alteração contém apenas código/testes/documentação; não conecta, consulta ou altera qualquer deployment.
