@@ -320,8 +320,8 @@ export default function ReturnsPage() {
                             : "—"}
                         </TableCell>
                         <TableCell>
-                          <Badge variant={r.condition === "unused" ? "secondary" : "destructive"}>
-                            {r.condition === "unused" ? "Disponível" : "Quarentena"}
+                          <Badge variant={r.stockDisposition === "quarantine" ? "destructive" : "secondary"}>
+                            {r.stockDisposition === "quarantine" ? "Quarentena" : r.stockDisposition === "available" ? "Disponível" : "Disponível (legado)"}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm max-w-[200px] truncate">
