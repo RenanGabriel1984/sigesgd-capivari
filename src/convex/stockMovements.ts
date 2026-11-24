@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import type { Id } from "./_generated/dataModel";
 import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
-import { consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
+import { assertProductReservationConsistent, consumeLotLocationStock, recordLotMovementAllocations, resolveWithdrawalLocation } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -92,6 +92,7 @@ export const createExit = mutation({
     if (!isFinite(args.quantity)) throw new Error("Quantidade inválida");
     const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", args.productId)).collect();
     const stock = requireSingleValidGlobalStock(stockRows, String(args.productId));
+    await assertProductReservationConsistent(ctx, args.productId, String(args.productId), stock);
     const available = stock.physicalQuantity - stock.reservedQuantity;
     if (available < args.quantity) {
       throw new Error(`Estoque insuficiente. Disponível: ${available}. Solicitado: ${args.quantity}.`);
