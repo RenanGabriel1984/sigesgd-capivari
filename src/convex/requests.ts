@@ -565,14 +565,11 @@ export const cancel = mutation({
         if (item.quantityApproved <= 0) continue;
 
         // Re-read stock for consistency
-        const stock = await ctx.db
+        const stockRows = await ctx.db
           .query("stock")
           .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
-          .first();
-
-        if (!stock) {
-          throw new Error(`Registro de estoque não encontrado para o produto. Não é possível liberar reserva.`);
-        }
+          .collect();
+        const stock = requireSingleValidGlobalStock(stockRows, String(item.productId));
 
         // Safety: never allow reservedQuantity to go below 0
         if (stock.reservedQuantity < item.quantityApproved) {
