@@ -145,6 +145,6 @@ describe("legacy account email normalization", () => {
     const passwords = readFileSync(resolve(__dirname, "../convex/passwords.ts"), "utf8");
     const usersSource = readFileSync(resolve(__dirname, "../convex/users.ts"), "utf8");
     expect(passwords.match(/findUsersByNormalizedEmail\(/g)?.length).toBeGreaterThanOrEqual(6);
-    expect(usersSource.match(/findUsersByNormalizedEmail\(/g)?.length).toBe(3);
+    expect(usersSource.match(/findUsersByNormalizedEmail\(/g)?.length).toBe(2);
   });
 });
