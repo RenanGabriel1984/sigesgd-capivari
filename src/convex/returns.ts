@@ -13,6 +13,7 @@ import {
   resolveReturnLotGuard,
   buildUnresolvableLotMessage,
   type ReturnCondition,
+  returnConditionReturnsToAvailableStock,
 } from "../lib/returns-rules";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
@@ -407,6 +408,43 @@ export const create = mutation({
       observation: args.observation,
       createdAt: now,
     });
+
+    // Material usado parcialmente, defeituoso ou com condição não confirmada
+    // fica registrado em quarentena: não pode aumentar o saldo disponível.
+    // As alocações preservam o lote/local de origem para futura inspeção.
+    if (!returnConditionReturnsToAvailableStock(condition)) {
+      if (!args.locationId) {
+        throw new Error("Informe o armário de destino para manter o material em quarentena.");
+      }
+      for (const allocation of plannedLotAllocations) {
+        await ctx.db.insert("returnLotAllocations", {
+          returnId,
+          exitMovementId: exit._id,
+          productId: exit.productId,
+          lotId: allocation.lotId,
+          sourceLocationId: allocation.sourceLocationId,
+          destinationLocationId: args.locationId,
+          quantity: allocation.quantity,
+          createdAt: now,
+        });
+      }
+      const exitLabel = exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
+      await ctx.db.insert("auditLogs", {
+        userId,
+        action: "return_stock",
+        entity: "returns",
+        entityId: returnId,
+        details: buildReturnAuditDetail({
+          quantity: args.quantity,
+          productName: product.name,
+          exitLabel,
+          condition,
+          reason,
+        }) + " | destino: quarentena; não incorporado ao saldo disponível",
+        timestamp: now,
+      });
+      return returnId;
+    }
 
     // 2) Repor estoque físico global
     const stockRows = await ctx.db
