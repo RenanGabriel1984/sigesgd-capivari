@@ -82,6 +82,21 @@ export const update = mutation({
         throw new Error("Já existe outro local com este nome");
       }
     }
+    if (updates.active === false && location.active !== false) {
+      const [physicalRows, lotLocationRows] = await Promise.all([
+        ctx.db.query("stockByLocation").collect(),
+        ctx.db.query("lotLocationBalances").collect(),
+      ]);
+      const hasPhysicalBalance = physicalRows.some((row: any) =>
+        row.locationId === id && row.quantity > 0,
+      );
+      const hasTrackedBalance = lotLocationRows.some((row: any) =>
+        row.locationId === id && row.quantityAvailable > 0,
+      );
+      if (hasPhysicalBalance || hasTrackedBalance) {
+        throw new Error("Não é possível desativar um local que ainda possui saldo físico ou lotes armazenados.");
+      }
+    }
 
     await ctx.db.patch(id, updates);
     const action = updates.active === false ? "deactivate" : updates.active === true ? "activate" : "update";
