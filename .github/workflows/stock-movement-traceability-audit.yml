@@ -98,7 +98,7 @@ jobs:
           {
             echo "### Simulação de recuperação concluída — DRY-RUN"
             echo ""
-            echo "- Deployment: `dev:${TARGET_DEPLOYMENT}`"
+            echo "- Deployment: dev:${TARGET_DEPLOYMENT}"
             echo "- Escritas realizadas: **0**"
             echo "- Saídas e devoluções: excluídas para revisão manual"
             echo "- Nenhuma correção foi aplicada."
