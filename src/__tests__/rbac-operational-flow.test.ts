@@ -135,9 +135,12 @@ describe("saída rápida e transferência rastreada por lote", () => {
     expect(transferUiSrc).toContain("lotId: lotId ? (lotId as any) : undefined");
   });
 
-  it("backend bloqueia transferência sem lote quando há lotes ativos com saldo", () => {
+  it("backend bloqueia transferência sem lote para produtos rastreados e armários inativos", () => {
     const transferSrc = readFileSync(resolve(ROOT, "src/convex/stockTransfers.ts"), "utf-8");
-    expect(transferSrc).toContain("Selecione o lote para transferir: o produto possui saldo rastreado por lote.");
+    expect(transferSrc).toContain("productLots.length > 0 || existingLotBalances.length > 0");
+    expect(transferSrc).toContain("histórico de lotes. Selecione o lote da transferência");
+    expect(transferSrc).toContain("fromLocation.active === false");
+    expect(transferSrc).toContain("toLocation.active === false");
     expect(transferSrc).toContain("planLotLocationTransfer");
   });
 
