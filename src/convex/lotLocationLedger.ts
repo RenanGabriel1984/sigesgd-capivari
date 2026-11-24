@@ -1,5 +1,9 @@
 import { planFifoLotLocationConsumption } from "../lib/lot-location-rules";
-import { requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import {
+  assertProductLedgerSnapshot,
+  requireSingleValidGlobalStock,
+  validateUniqueScopedStockRows,
+} from "../lib/stock-read-integrity";
 
 const QUANTITY_EPSILON = 1e-9;
 
@@ -39,6 +43,41 @@ export async function resolveWithdrawalLocation(
     );
   }
   return positive[0].locationId;
+}
+
+
+/**
+ * Lê e valida global × armários × lotes sem escrever no banco.
+ * Use antes de reservar, receber ou reverter uma entrada.
+ */
+export async function assertProductLedgerConsistent(
+  ctx: any,
+  productId: any,
+  productLabel: string,
+): Promise<any | null> {
+  const [globalRows, locationRows, lots, lotLocationBalances] = await Promise.all([
+    ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
+    ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
+    ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
+    ctx.db.query("lotLocationBalances").withIndex("by_product", (q: any) => q.eq("productId", productId)).collect(),
+  ]);
+  return assertProductLedgerSnapshot({
+    globalRows,
+    locationRows,
+    lots: lots.map((lot: any) => ({
+      lotId: String(lot._id),
+      productId: String(lot.productId),
+      lotNumber: lot.lotNumber,
+      quantityAvailable: lot.quantityAvailable,
+      active: lot.active,
+    })),
+    lotLocationBalances: lotLocationBalances.map((balance: any) => ({
+      lotId: String(balance.lotId),
+      productId: String(balance.productId),
+      locationId: String(balance.locationId),
+      quantityAvailable: balance.quantityAvailable,
+    })),
+  }, productLabel);
 }
 
 /**
