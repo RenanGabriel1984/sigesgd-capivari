@@ -129,3 +129,16 @@ describe("integridade da aprovação de solicitações", () => {
     expect(block).not.toContain(".first();");
   });
 });
+
+describe("completude do relatório de solicitações", () => {
+  it("usa consulta de relatório sem limite fixo de 200 registros e respeita escopo de perfil", () => {
+    const source = readFileSync(resolve(__dirname, "../convex/requests.ts"), "utf8");
+    const start = source.indexOf("export const listForReport");
+    const end = source.indexOf("export const listByUser", start);
+    const report = source.slice(start, end);
+    expect(start).toBeGreaterThan(-1);
+    expect(report).toContain(".collect()");
+    expect(report).toContain("hasFullVisibility(role)");
+    expect(report).not.toContain(".take(200)");
+  });
+});
