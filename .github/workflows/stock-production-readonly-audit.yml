@@ -50,9 +50,9 @@ jobs:
             {
               echo "### Auditoria de produção — não executada"
               echo ""
-              echo "O secret `CONVEX_MAINTENANCE_KEY_SAVORY_SOCKEYE` não está configurado no repositório."
+              echo "O secret CONVEX_MAINTENANCE_KEY_SAVORY_SOCKEYE não está configurado no repositório."
               echo "Nenhuma conexão/consulta foi tentada e nenhum dado foi alterado."
-              echo "Configure uma deploy key restrita a `prod:savory-sockeye-292` para habilitar a leitura."
+              echo "Configure uma deploy key restrita a prod:savory-sockeye-292 para habilitar a leitura."
             } >> "${GITHUB_STEP_SUMMARY}"
             echo "::notice::Secret de produção ausente; leitura não executada."
             exit 0
