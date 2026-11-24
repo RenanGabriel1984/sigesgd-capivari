@@ -454,3 +454,18 @@ describe("Inspeção de quarentena: liberação ou descarte auditados", () => {
     expect(availableBranch).toContain('ctx.db.patch(stock._id, { physicalQuantity: newPhysical })');
   });
 });
+
+
+describe("devolução mantém conciliação física", () => {
+  const source = readFileSync(resolve(__dirname, "../convex/returns.ts"), "utf8");
+  it("exige destino físico existente e ativo em toda devolução", () => {
+    expect(source).toContain("const destinationLocation: any = args.locationId ? await ctx.db.get(args.locationId) : null");
+    expect(source).toContain("destinationLocation.active === false");
+  });
+  it("bloqueia reposição quando global, armários e lotes já divergem", () => {
+    expect(source).toContain("Math.abs(localTotal - stock.physicalQuantity) > 1e-9");
+    expect(source).toContain("Math.abs(lotTotal - stock.physicalQuantity) > 1e-9");
+    expect(source).toContain("Math.abs(lotLocationTotal - lotTotal) > 1e-9");
+    expect(source).toContain("A devolução foi bloqueada: a soma dos lotes diverge do saldo do armário.");
+  });
+});
