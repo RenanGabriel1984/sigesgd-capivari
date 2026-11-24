@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/rbac-audit-hardening
+      - codex/water-mineral-management
   pull_request:
     branches:
       - main

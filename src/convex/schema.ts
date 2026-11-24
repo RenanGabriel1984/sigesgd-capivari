@@ -984,6 +984,71 @@ const schema = defineSchema(
       lockedUntil: v.optional(v.number()),
     }).index("by_email", ["email"]),
 
+    // ── Water Mineral Management (garrafões, rateio e pagamentos) ──
+    waterParticipants: defineTable({
+      name: v.string(),
+      department: v.optional(v.string()),
+      active: v.boolean(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_active", ["active"])
+      .index("by_name", ["name"]),
+
+    waterMovements: defineTable({
+      movementType: v.union(
+        v.literal("opening_balance"),
+        v.literal("supplier_delivery"),
+        v.literal("consumption"),
+        v.literal("supplier_exchange"),
+        v.literal("adjustment")
+      ),
+      fullDelta: v.number(),
+      emptyDelta: v.number(),
+      supplierName: v.optional(v.string()),
+      costAmount: v.optional(v.number()),
+      observation: v.optional(v.string()),
+      userId: v.id("users"),
+      createdAt: v.number(),
+    }).index("by_created", ["createdAt"])
+      .index("by_type", ["movementType"]),
+
+    waterPeriods: defineTable({
+      label: v.string(),
+      startDate: v.string(),
+      endDate: v.string(),
+      gallonsConsumed: v.number(),
+      totalCost: v.number(),
+      observation: v.optional(v.string()),
+      createdByUserId: v.id("users"),
+      createdAt: v.number(),
+    }).index("by_start", ["startDate"])
+      .index("by_label", ["label"]),
+
+    waterPeriodCharges: defineTable({
+      periodId: v.id("waterPeriods"),
+      participantId: v.id("waterParticipants"),
+      participantNameSnapshot: v.string(),
+      shareAmount: v.number(),
+      createdAt: v.number(),
+    }).index("by_period", ["periodId"])
+      .index("by_participant", ["participantId"]),
+
+    waterPayments: defineTable({
+      periodId: v.id("waterPeriods"),
+      participantId: v.id("waterParticipants"),
+      amount: v.number(),
+      paidAt: v.number(),
+      method: v.optional(v.string()),
+      observation: v.optional(v.string()),
+      receivedByUserId: v.id("users"),
+      reversedAt: v.optional(v.number()),
+      reversedByUserId: v.optional(v.id("users")),
+      reversalReason: v.optional(v.string()),
+      createdAt: v.number(),
+    }).index("by_period", ["periodId"])
+      .index("by_participant", ["participantId"])
+      .index("by_paid_at", ["paidAt"]),
+
     // ── Audit Log ──
     auditLogs: defineTable({
       userId: v.optional(v.id("users")),
