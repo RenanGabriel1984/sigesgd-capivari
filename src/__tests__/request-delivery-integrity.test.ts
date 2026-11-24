@@ -141,3 +141,17 @@ describe("completude do relatório de solicitações", () => {
     expect(report).not.toContain(".take(200)");
   });
 });
+
+describe("históricos operacionais completos", () => {
+  it("consultas de solicitações entregues e por organização não truncam em 500 registros", () => {
+    const source = readFileSync(resolve(__dirname, "../convex/requests.ts"), "utf8");
+    const deliveredStart = source.indexOf("export const listDelivered");
+    const organizationStart = source.indexOf("export const listByOrganization");
+    const delivered = source.slice(deliveredStart, organizationStart);
+    const organization = source.slice(organizationStart);
+    expect(delivered).toContain('.order("desc")\n      .collect()');
+    expect(organization).toContain('.order("desc")\n      .collect()');
+    expect(delivered).not.toContain(".take(500)");
+    expect(organization).not.toContain(".take(500)");
+  });
+});
