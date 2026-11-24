@@ -129,10 +129,12 @@ describe("saída rápida e transferência rastreada por lote", () => {
     expect(roleHasPermission("technician", "exits.create")).toBe(false);
   });
 
-  it("transferência apresenta lotes ativos e envia lotId quando há rastreabilidade", () => {
+  it("transferência apresenta lotes ativos, envia lotId e mostra o lote no histórico", () => {
     expect(transferUiSrc).toContain("api.lots.listActiveByProduct");
     expect(transferUiSrc).toContain('Selecione o lote que será transferido.');
     expect(transferUiSrc).toContain("lotId: lotId ? (lotId as any) : undefined");
+    expect(transferUiSrc).toContain("<TableHead>Lote</TableHead>");
+    expect(transferUiSrc).toContain("t.lot?.lotNumber");
   });
 
   it("backend bloqueia transferência sem lote para produtos rastreados e armários inativos", () => {
