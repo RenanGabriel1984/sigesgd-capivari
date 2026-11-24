@@ -10,7 +10,7 @@ import {
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
-import { assertProductLedgerConsistent } from "./lotLocationLedger";
+import { assertProductLedgerConsistent, assertProductReservationConsistent } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -455,6 +455,7 @@ export const confirm = mutation({
       // A entrada só pode aumentar um livro-razão que já esteja conciliado.
       // Isso impede que uma diferença antiga seja perpetuada por novas compras.
       const stockBefore = await assertProductLedgerConsistent(ctx, item.productId, product.name);
+      await assertProductReservationConsistent(ctx, item.productId, product.name, stockBefore);
 
       // Generate lot
       const lotNumber = await generateLotNumber(ctx);
@@ -832,6 +833,7 @@ export const reverse = mutation({
       const productName = product?.name ?? String(item.productId);
       const stock = await assertProductLedgerConsistent(ctx, item.productId, productName);
       if (!stock) throw new Error(`Registro global de estoque não encontrado para "${productName}".`);
+      await assertProductReservationConsistent(ctx, item.productId, productName, stock);
       if (stock.physicalQuantity + 1e-9 < item.quantity) {
         throw new Error(`Não é possível estornar "${productName}": parte do material já foi consumida.`);
       }
