@@ -264,6 +264,10 @@ export const create = mutation({
 
     const product: any = await ctx.db.get(exit.productId);
     if (!product) throw new Error("Produto da saída não encontrado");
+    const destinationLocation: any = args.locationId ? await ctx.db.get(args.locationId) : null;
+    if (!destinationLocation || destinationLocation.active === false) {
+      throw new Error("Informe um armário de destino existente e ativo para registrar a devolução.");
+    }
 
     // Saldo disponível para devolver NESTA saída
     const allReturns = await loadReturns(ctx);
@@ -308,7 +312,7 @@ export const create = mutation({
       }
     }
 
-    const requiresLot = sourceAllocations.length > 0 || productLots.some((lot: any) => lot.active);
+    const requiresLot = sourceAllocations.length > 0 || productLots.length > 0;
     let plannedLotAllocations: Array<{ lotId: any; sourceLocationId?: any; quantity: number }> = [];
     const destinationBalances = new Map<string, any>();
 
@@ -414,9 +418,6 @@ export const create = mutation({
     // fica registrado em quarentena: não pode aumentar o saldo disponível.
     // As alocações preservam o lote/local de origem para futura inspeção.
     if (!returnConditionReturnsToAvailableStock(condition)) {
-      if (!args.locationId) {
-        throw new Error("Informe o armário de destino para manter o material em quarentena.");
-      }
       for (const allocation of plannedLotAllocations) {
         await ctx.db.insert("returnLotAllocations", {
           returnId,
@@ -453,29 +454,66 @@ export const create = mutation({
       .withIndex("by_product", (q) => q.eq("productId", exit.productId))
       .collect();
     const stock = requireSingleValidGlobalStock(stockRows, String(exit.productId));
+    const sblList = await ctx.db.query("stockByLocation")
+      .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+      .collect();
+    validateUniqueScopedStockRows(sblList, String(exit.productId));
+    const localTotal = sblList.reduce((sum: number, row: any) => sum + row.quantity, 0);
+    if (Math.abs(localTotal - stock.physicalQuantity) > 1e-9) {
+      throw new Error("A devolução foi bloqueada: o saldo global diverge da soma dos armários. Regularize o estoque antes de devolver.");
+    }
+
+    if (requiresLot) {
+      const [lotBalances, allProductLots] = await Promise.all([
+        ctx.db.query("lotLocationBalances")
+          .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+          .collect(),
+        ctx.db.query("lots")
+          .withIndex("by_product", (q: any) => q.eq("productId", exit.productId))
+          .collect(),
+      ]);
+      const lotTotal = allProductLots.reduce((sum: number, lot: any) => {
+        if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0 || (lot.active === false && lot.quantityAvailable > 1e-9)) {
+          throw new Error("A devolução foi bloqueada: existe lote com saldo inválido ou lote inativo positivo.");
+        }
+        return sum + lot.quantityAvailable;
+      }, 0);
+      const lotLocationTotal = lotBalances.reduce((sum: number, balance: any) => {
+        if (!Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0) {
+          throw new Error("A devolução foi bloqueada: existe saldo inválido por lote e armário.");
+        }
+        return sum + balance.quantityAvailable;
+      }, 0);
+      if (Math.abs(lotTotal - stock.physicalQuantity) > 1e-9 || Math.abs(lotLocationTotal - lotTotal) > 1e-9) {
+        throw new Error("A devolução foi bloqueada: os saldos global, dos lotes e dos armários não estão conciliados.");
+      }
+      const lotByLocation = new Map<string, number>();
+      for (const balance of lotBalances) {
+        const key = String(balance.locationId);
+        lotByLocation.set(key, (lotByLocation.get(key) ?? 0) + balance.quantityAvailable);
+      }
+      for (const row of sblList) {
+        if (Math.abs((lotByLocation.get(String(row.locationId)) ?? 0) - row.quantity) > 1e-9) {
+          throw new Error("A devolução foi bloqueada: a soma dos lotes diverge do saldo do armário.");
+        }
+      }
+    }
 
     const newPhysical = applyReturnToStock(stock.physicalQuantity, args.quantity);
     await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
 
-    // 3) Repor saldo no local físico (quando a devolução informa o destino)
-    if (args.locationId) {
-      const sblList = await ctx.db
-        .query("stockByLocation")
-        .withIndex("by_product", (q) => q.eq("productId", exit.productId))
-        .collect();
-      validateUniqueScopedStockRows(sblList, String(exit.productId));
-      const sbl = sblList.find((s: any) => s.locationId === args.locationId);
-      if (sbl) {
-        await ctx.db.patch(sbl._id, {
-          quantity: applyReturnToLocation(sbl.quantity, args.quantity),
-        });
-      } else {
-        await ctx.db.insert("stockByLocation", {
-          productId: exit.productId,
-          locationId: args.locationId,
-          quantity: args.quantity,
-        });
-      }
+    // 3) Repor saldo no armário de destino validado acima.
+    const sbl = sblList.find((row: any) => row.locationId === args.locationId);
+    if (sbl) {
+      await ctx.db.patch(sbl._id, {
+        quantity: applyReturnToLocation(sbl.quantity, args.quantity),
+      });
+    } else {
+      await ctx.db.insert("stockByLocation", {
+        productId: exit.productId,
+        locationId: args.locationId,
+        quantity: args.quantity,
+      });
     }
 
     // 4) Repor exatamente os lotes da saída original no armário de destino.
