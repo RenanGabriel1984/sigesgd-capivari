@@ -1,0 +1,109 @@
+name: Convex — publicar funções em PRODUÇÃO (savory-sockeye-292)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmar:
+        description: 'Digite publicar-producao para publicar funções no backend oficial'
+        required: true
+        default: nao
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: convex-production-savory-sockeye
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    name: Publicar funções no Convex oficial
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.confirmar == 'publicar-producao'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TARGET_DEPLOYMENT: savory-sockeye-292
+      TARGET_HOST: savory-sockeye-292.convex.cloud
+      FORBIDDEN_HOST: first-herring-264.convex.cloud
+    steps:
+      - name: Exigir execução a partir da main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Este workflow só pode ser executado a partir da main."
+          exit 1
+
+      - name: Checkout da versão aprovada
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Bun 1.3.14
+        uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: '1.3.14'
+
+      - name: Validar deploy key e destino (sem revelar segredo)
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_SAVORY_SOCKEYE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CONVEX_DEPLOY_KEY:-}" ]; then
+            echo "::error::Secret CONVEX_DEPLOY_KEY_SAVORY_SOCKEYE ausente. Nada foi publicado."
+            exit 1
+          fi
+          if [ -n "${CONVEX_DEPLOYMENT:-}" ]; then
+            echo "::error::CONVEX_DEPLOYMENT está definida e poderia sobrepor o destino. Nada foi publicado."
+            exit 1
+          fi
+          case "${CONVEX_DEPLOY_KEY}" in
+            *"|"*) ;;
+            *) echo "::error::Formato de deploy key inesperado. Nada foi publicado."; exit 1 ;;
+          esac
+          prefix="${CONVEX_DEPLOY_KEY%%|*}"
+          if [ "${prefix}" != "prod:${TARGET_DEPLOYMENT}" ]; then
+            echo "::error::A deploy key não pertence a prod:${TARGET_DEPLOYMENT}. Nada foi publicado."
+            exit 1
+          fi
+          test -d src/convex
+          echo "Destino confirmado: prod:${TARGET_DEPLOYMENT}."
+
+      - name: Instalar dependências
+        run: bun install --frozen-lockfile
+
+      - name: Validar TypeScript e build de produção
+        run: bun run build
+
+      - name: Publicar funções Convex no backend oficial
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_SAVORY_SOCKEYE }}
+        run: |
+          set -euo pipefail
+          log="${RUNNER_TEMP}/convex-production-deploy.log"
+          bunx convex --version | tee "${log}"
+          bunx convex deploy 2>&1 | tee -a "${log}"
+
+      - name: Confirmar destino publicado
+        run: |
+          set -euo pipefail
+          log="${RUNNER_TEMP}/convex-production-deploy.log"
+          if grep -qF "${FORBIDDEN_HOST}" "${log}"; then
+            echo "::error::O log mencionou o backend de desenvolvimento. Publicação não confirmada."
+            exit 1
+          fi
+          if ! grep -qF "Deploying code to deployment:" "${log}"; then
+            echo "::error::O CLI não confirmou o destino anunciado. Publicação não confirmada."
+            exit 1
+          fi
+          if ! grep -qF "Deployed Convex functions to https://${TARGET_HOST}" "${log}"; then
+            echo "::error::O CLI não confirmou o backend oficial esperado. Publicação não confirmada."
+            exit 1
+          fi
+          {
+            echo "### Publicação Convex em produção confirmada"
+            echo "- Destino: `prod:${TARGET_DEPLOYMENT}`"
+            echo "- O log confirmou o host oficial."
+            echo "- Nenhuma mutation de negócio foi executada por este workflow."
+            echo "- Nenhum dado de estoque foi alterado."
+          } >> "${GITHUB_STEP_SUMMARY}"
