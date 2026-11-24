@@ -15,3 +15,14 @@ export function resolveUniqueRecord<T>(records: readonly T[]): UniqueRecordResol
 export function normalizeLoginEmail(email: string): string {
   return email.trim().toLowerCase();
 }
+
+
+/** Return every legacy/current user record whose email has the same canonical login key. */
+export function findUsersByNormalizedEmail<T extends { email: string }>(
+  users: readonly T[],
+  email: string,
+): T[] {
+  const normalizedEmail = normalizeLoginEmail(email);
+  if (!normalizedEmail) return [];
+  return users.filter((user) => normalizeLoginEmail(user.email) === normalizedEmail);
+}
