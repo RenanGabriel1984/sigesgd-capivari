@@ -1,6 +1,7 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
+import { getOptionalSingleValidGlobalStock } from "../lib/stock-read-integrity";
 import { findEquipmentCategory, buildRelatedStockProducts } from "../lib/equipment-categories";
 import type { RelatedStockProduct } from "../lib/equipment-categories";
 
@@ -76,13 +77,16 @@ export const relatedStockByCategory = query({
 
     const products = await ctx.db.query("products").collect();
     const stockRows = await ctx.db.query("stock").collect();
-    const stockByProduct = new Map<string, { physicalQuantity: number; reservedQuantity: number }>();
-    for (const s of stockRows) {
-      stockByProduct.set(s.productId, {
-        physicalQuantity: s.physicalQuantity ?? 0,
-        reservedQuantity: s.reservedQuantity ?? 0,
-      });
-    }
+    const stockByProduct = new Map(
+      products.map((product) => {
+        const rows = stockRows.filter((row) => row.productId === product._id);
+        const stock = getOptionalSingleValidGlobalStock(rows, product.name);
+        return [product._id, stock ? {
+          physicalQuantity: stock.physicalQuantity,
+          reservedQuantity: stock.reservedQuantity,
+        } : null] as const;
+      }),
+    );
 
     // Categorias do catálogo resolvidas uma única vez (evita N+1 por produto).
     const categoryNameById = new Map<string, string>();
