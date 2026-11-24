@@ -98,9 +98,11 @@ describe("atomic user and temporary password creation", () => {
     const start = backend.indexOf("export const createUser = mutation({");
     const end = backend.indexOf("\nexport const updateUser", start);
     const block = backend.slice(start, end);
-    expect(block).toContain("temporaryPassword: v.optional(v.string())");
+    expect(block).toContain("temporaryPassword: v.string()");
     expect(block).toContain('ctx.db.insert("passwords"');
     expect(block).toContain("requiresReset: true");
+    expect(block).not.toContain("v.optional(v.string())");
+    expect(block).not.toContain("temporaryPassword !== undefined");
     expect(ui).toContain("temporaryPassword: tempPassword");
     expect(ui).not.toContain("await createPassword({ userId: newUserId");
   });
