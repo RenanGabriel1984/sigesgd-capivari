@@ -164,9 +164,15 @@ describe("PRINT-EXIT-03 — retirada respeita o backend (autoridade final)", () 
   });
 
   it("FIFO de lotes e lotId estruturado preservados na retirada por família", () => {
-    expect(backend).toContain("sort((a, b) => a.receivedAt - b.receivedAt)");
-    expect(backend).toContain("lotId: consumedLots[0]?.lotId as never");
-    expect(backend).toContain("Falha de consistência: lotes insuficientes");
+    expect(backend).toContain("consumeLotLocationStock");
+    expect(backend).toContain("recordLotMovementAllocations");
+    expect(backend).toContain("lotId: consumedLots.find((allocation) => allocation.productId === args.productId)?.lotId");
+    const planner = read("src/lib/lot-location-rules.ts");
+    expect(planner).toContain("export function planFifoLotLocationConsumption");
+    expect(planner).toContain("a.lot.receivedAt - b.lot.receivedAt");
+    expect(planner).toContain("Lotes insuficientes no armário selecionado");
+    const family = backend.slice(backend.indexOf("export const withdrawFamily = mutation({"), backend.indexOf("export const previewFamilyWithdrawal = query({"));
+    expect(family.indexOf("physicalQuantity: newLoosePhys")).toBeLessThan(family.indexOf("consumeAtLocation(looseMember._id, looseExitUnits"));
   });
 
   it("a retirada registra destino, secretaria, departamento, unidade, O.S. e motivo", () => {
