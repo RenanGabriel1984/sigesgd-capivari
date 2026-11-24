@@ -402,6 +402,7 @@ export const create = mutation({
       quantity: args.quantity,
       reason,
       condition,
+      stockDisposition: returnConditionReturnsToAvailableStock(condition) ? "available" : "quarantine",
       locationId: args.locationId,
       returnedByUserId: userId,
       receivedByUserId: args.receivedByUserId,
