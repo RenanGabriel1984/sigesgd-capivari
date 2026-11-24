@@ -3,6 +3,8 @@ import {
   assertReservedQuantityMatchesApprovedRequests,
   expectedReservedQuantityForProduct,
 } from "../lib/stock-reservation-integrity";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const requests = [
   { _id: "approved-1", status: "approved" },
@@ -71,5 +73,50 @@ describe("integridade entre reservas e solicitações aprovadas", () => {
       productId: "p1",
       productLabel: "Produto 1",
     })).toThrow(/reserva divergente/i);
+  });
+});
+
+
+describe("integração da conciliação de reservas nos fluxos operacionais", () => {
+  const root = resolve(__dirname, "..");
+  const source = (path: string) => readFileSync(resolve(root, path), "utf8");
+
+  it("aprovação valida reserva anterior antes da primeira gravação", () => {
+    const requests = source("convex/requests.ts");
+    const start = requests.indexOf("export const approve = mutation({");
+    const end = requests.indexOf("export const reject = mutation({", start);
+    const block = requests.slice(start, end);
+    const guard = block.indexOf("assertProductReservationConsistent(ctx, productId, needed.productName, stock)");
+    const firstWrite = Math.min(...["ctx.db.patch(", "ctx.db.insert("].map((term) => {
+      const index = block.indexOf(term);
+      return index < 0 ? Number.POSITIVE_INFINITY : index;
+    }));
+    expect(guard).toBeGreaterThan(-1);
+    expect(firstWrite).toBeGreaterThan(guard);
+  });
+
+  it("entrega e cancelamento reconciliam as reservas antes de liberar unidades", () => {
+    const requests = source("convex/requests.ts");
+    const deliverStart = requests.indexOf("export const deliver = mutation({");
+    const cancelStart = requests.indexOf("export const cancel = mutation({");
+    const pendingStart = requests.indexOf("export const pendingCount = query({");
+    const delivery = requests.slice(deliverStart, cancelStart);
+    const cancellation = requests.slice(cancelStart, pendingStart);
+    expect(delivery).toContain("assertProductReservationConsistent(ctx, productId, label, stock)");
+    expect(cancellation).toContain("assertProductReservationConsistent(ctx, productId, label, stock)");
+  });
+
+  it("saídas diretas, suprimentos e inventário verificam reserva contra requisições aprovadas", () => {
+    expect(source("convex/stockMovements.ts")).toContain("assertProductReservationConsistent(ctx, args.productId, String(args.productId), stock)");
+    expect(source("convex/stockSetup.ts")).toContain("await assertProductReservationConsistent(ctx, args.productId, product.name, stock)");
+    expect(source("convex/printSupplies.ts")).toContain("await assertProductReservationConsistent(ctx, args.productId, product.name, stock)");
+    expect(source("convex/inventory.ts")).toContain("await assertProductReservationConsistent(ctx, productId, productName, stock)");
+  });
+
+  it("entradas e devoluções também preservam a integridade das reservas ativas", () => {
+    expect(source("convex/entries.ts")).toContain("assertProductReservationConsistent(ctx, item.productId, product.name, stockBefore)");
+    expect(source("convex/entries.ts")).toContain("assertProductReservationConsistent(ctx, item.productId, productName, stock)");
+    expect(source("convex/returns.ts")).toContain("assertProductReservationConsistent(ctx, exit.productId, product.name, stock)");
+    expect(source("convex/returns.ts")).toContain("assertProductReservationConsistent(ctx, returned.productId, product.name, stock)");
   });
 });
