@@ -45,7 +45,7 @@ describe("classificação histórica de áreas por evidência documental", () =>
       entryItemEvidence: [{
         entryItemId: "entry-item-gomaq",
         productName: "Kit teclado e mouse",
-        quantity: 8,
+        quantity: 25,
         unitOfMeasure: "kit",
         locationId: "location-2",
         locationName: "Armário TI 02",
@@ -55,6 +55,33 @@ describe("classificação histórica de áreas por evidência documental", () =>
     const plan = buildHistoricalAreaClassificationPlan([lot], areas);
     expect(plan.patches[0]?.areaName).toBe("Impressoras");
     expect(plan.blockers).toHaveLength(0);
+  });
+
+  it("bloqueia NF Gomaq quando produto, quantidade ou unidade não coincidem com a evidência", () => {
+    const base = initialLot({
+      productName: "Kit teclado e mouse",
+      sourceEntry: { entryNumber: "ENT-2026-000002", invoiceNumber: "372043" },
+      entryItemEvidence: [{
+        entryItemId: "entry-item-gomaq",
+        productName: "Kit teclado e mouse",
+        quantity: 25,
+        unitOfMeasure: "kit",
+        locationId: "location-2",
+        locationName: "Armário TI 02",
+        lotId: "lot-1",
+      }],
+    });
+    const wrongQuantity = initialLot({
+      ...base,
+      entryItemEvidence: [{ ...base.entryItemEvidence[0], quantity: 24 }],
+    });
+    const wrongProduct = initialLot({
+      ...base,
+      entryItemEvidence: [{ ...base.entryItemEvidence[0], productName: "Mouse" }],
+    });
+    const plan = buildHistoricalAreaClassificationPlan([wrongQuantity, wrongProduct], areas);
+    expect(plan.patches).toHaveLength(0);
+    expect(plan.blockers).toHaveLength(2);
   });
 
   it("não classifica produto desconhecido nem item com quantidade divergente", () => {
