@@ -123,8 +123,15 @@ export const createExit = mutation({
 
 export const reserveStock = mutation({
   args: { productId: v.id("products"), quantity: v.number(), requestId: v.id("requests") },
-  handler: async (ctx) => {
+  handler: async (ctx, args) => {
     await requireStockManagerOrAdmin(ctx);
+    if (!Number.isFinite(args.quantity) || args.quantity <= 0) {
+      throw new Error("A quantidade da reserva deve ser positiva e finita.");
+    }
+    const request = await ctx.db.get(args.requestId);
+    if (!request || request.status !== "pending") {
+      throw new Error("A solicitação não existe ou não está pendente.");
+    }
     throw new Error("Reserva direta legada desativada. As reservas são criadas exclusivamente pela aprovação em requests.approve.");
   },
 });

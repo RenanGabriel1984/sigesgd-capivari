@@ -297,7 +297,7 @@ export function assertProductLedgerSnapshot(
     return stock;
   }
   if (input.lotLocationBalances.length === 0) {
-    throw new Error("O produto \"" + productLabel + "\" possui lotes com saldo, mas sem vínculos por armário.");
+    throw new Error("Rastreabilidade de lote incompleta para o produto \"" + productLabel + "\": há lotes com saldo, mas sem vínculos por armário.");
   }
 
   const lotTotalsById = new Map<string, number>();
