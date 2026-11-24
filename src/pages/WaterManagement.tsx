@@ -265,9 +265,17 @@ export default function WaterManagement() {
         </Card>
 
         <Card>
+          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ArrowDownToLine className="h-4 w-4" />Histórico de pagamentos recebidos</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {data.payments.map((payment: any) => <div key={payment._id} className="flex flex-col gap-1 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium">{payment.participantName} · {payment.periodLabel}</p><p className="text-xs text-muted-foreground">{new Date(payment.paidAt).toLocaleDateString("pt-BR")} · {payment.method || "Forma não informada"} · Recebido por: {payment.receivedByName}</p><p className="text-xs text-muted-foreground">{payment.observation || "Sem observação"}</p></div><p className="text-sm font-semibold tabular-nums">{money(payment.amount)}</p></div>)}
+            {data.payments.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Nenhum pagamento registrado.</p>}
+          </CardContent>
+        </Card>
+
+        <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ArrowUpFromLine className="h-4 w-4" />Movimentações recentes de garrafões</CardTitle></CardHeader>
           <CardContent className="space-y-2">
-            {data.movements.map((movement: any) => <div key={movement._id} className="flex flex-col gap-1 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium">{movement.movementType.replaceAll("_", " ")}</p><p className="text-xs text-muted-foreground">{new Date(movement.createdAt).toLocaleString("pt-BR")} · {movement.supplierName || "Movimentação interna"}</p><p className="text-xs text-muted-foreground">{movement.observation}</p></div><div className="text-sm tabular-nums sm:text-right"><p>Cheios: {movement.fullDelta > 0 ? "+" : ""}{movement.fullDelta}</p><p>Vazios: {movement.emptyDelta > 0 ? "+" : ""}{movement.emptyDelta}</p>{movement.costAmount !== undefined && <p>{money(movement.costAmount)}</p>}</div></div>)}
+            {data.movements.map((movement: any) => <div key={movement._id} className="flex flex-col gap-1 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-medium">{movement.movementType.replaceAll("_", " ")}</p><p className="text-xs text-muted-foreground">{new Date(movement.createdAt).toLocaleString("pt-BR")} · {movement.supplierName || "Movimentação interna"} · Operador: {movement.operatorName}</p><p className="text-xs text-muted-foreground">{movement.observation}</p></div><div className="text-sm tabular-nums sm:text-right"><p>Cheios: {movement.fullDelta > 0 ? "+" : ""}{movement.fullDelta}</p><p>Vazios: {movement.emptyDelta > 0 ? "+" : ""}{movement.emptyDelta}</p>{movement.costAmount !== undefined && <p>{money(movement.costAmount)}</p>}</div></div>)}
             {data.movements.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">Nenhuma movimentação registrada.</p>}
           </CardContent>
         </Card>
