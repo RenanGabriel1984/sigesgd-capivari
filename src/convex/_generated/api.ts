@@ -51,6 +51,7 @@ import type * as stockMovements from "../stockMovements.js";
 import type * as stockParameters from "../stockParameters.js";
 import type * as stockSetup from "../stockSetup.js";
 import type * as stockTransfers from "../stockTransfers.js";
+import type * as stockDevTransactionTests from "../stockDevTransactionTests.js";
 import type * as storage from "../storage.js";
 import type * as storageLocations from "../storageLocations.js";
 import type * as suppliers from "../suppliers.js";
@@ -111,6 +112,7 @@ const fullApi: ApiFromModules<{
   stockParameters: typeof stockParameters;
   stockSetup: typeof stockSetup;
   stockTransfers: typeof stockTransfers;
+  stockDevTransactionTests: typeof stockDevTransactionTests;
   storage: typeof storage;
   storageLocations: typeof storageLocations;
   suppliers: typeof suppliers;
