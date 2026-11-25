@@ -59,6 +59,8 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  for(const row of stocks)await ctx.db.delete(row._id);
  await ctx.db.delete(product._id);
  if(entry)await ctx.db.delete(entry._id);
+ if(requester)await ctx.db.delete(requester._id);
+ if(approver)await ctx.db.delete(approver._id);
  if(org)await ctx.db.delete(org._id);
  if(area)await ctx.db.delete(area._id);
  if(location)await ctx.db.delete(location._id);
