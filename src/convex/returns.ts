@@ -51,7 +51,7 @@ export const list = query({
       const returnedBy = await ctx.db.get(r.returnedByUserId);
       const receivedBy = r.receivedByUserId ? await ctx.db.get(r.receivedByUserId) : null;
       const request = r.requestId ? await ctx.db.get(r.requestId) : null;
-      const exit = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
+      const exit: any = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
       const location = r.locationId ? await ctx.db.get(r.locationId) : null;
       const area = r.areaId
         ? await ctx.db.get(r.areaId)
