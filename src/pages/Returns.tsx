@@ -56,6 +56,7 @@ type ExitRow = {
   timestamp: number;
   exitNumber?: string | null;
   product?: { name?: string } | null;
+  area?: { name?: string } | null;
   requesterName?: string | null;
   osNumber?: string | null;
   requestReason?: string | null;
@@ -237,6 +238,7 @@ export default function ReturnsPage() {
                     <TableRow>
                       <TableHead>Saída</TableHead>
                       <TableHead>Produto</TableHead>
+                      <TableHead>Área</TableHead>
                       <TableHead className="text-center">Retirado</TableHead>
                       <TableHead className="text-center">Devolvido</TableHead>
                       <TableHead className="text-center">Disponível</TableHead>
@@ -258,6 +260,9 @@ export default function ReturnsPage() {
                         </TableCell>
                         <TableCell className="text-sm font-medium">
                           {row.product?.name ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {row.area?.name ?? "Sem área classificada"}
                         </TableCell>
                         <TableCell className="text-center font-mono">
                           {row.quantity}
