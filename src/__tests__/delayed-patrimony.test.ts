@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateEntryUnits } from "@/lib/material-types";
+import { roleHasPermission } from "@/lib/rbac";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -98,6 +99,15 @@ describe("identificação de equipamentos e solicitação de baixa patrimonial",
     expect(assets).toContain('status: "sent_to_patrimony"');
     expect(assets).toContain('eventType: "disposal_requested"');
     expect(assets).toContain("Solicitação encaminhada ao Departamento de Patrimônio");
+  });
+
+  it("impede a TI de atribuir número patrimonial pela criação/edição genérica", () => {
+    const create = assets.slice(assets.indexOf("export const create = mutation"), assets.indexOf("export const update = mutation"));
+    const update = assets.slice(assets.indexOf("export const update = mutation"), assets.indexOf("export const assign = mutation"));
+    expect(create).toContain("requirePatrimonyManager(ctx)");
+    expect(update).toContain("requirePatrimonyManager(ctx)");
+    expect(roleHasPermission("stock_manager", "patrimony.assign")).toBe(false);
+    expect(roleHasPermission("patrimony_manager", "patrimony.assign")).toBe(true);
   });
 
   it("só registra baixa oficial quando há documento/protocolo e data recebidos do Patrimônio", () => {

@@ -640,6 +640,7 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireManagerOrAdmin(ctx);
+    if (args.patrimonyNumber?.trim()) await requirePatrimonyManager(ctx);
     const now = Date.now();
 
     const assetId = await ctx.db.insert("assets", {
