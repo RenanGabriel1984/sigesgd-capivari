@@ -65,7 +65,7 @@ function downloadCSV(filename: string, csvContent: string) {
 }
 
 function exportStockPositionCSV(data: any[]) {
-  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Atual;Mínimo;Ideal;Máximo;Status;Unidade";
+  const header = "Código;Nome;Categoria;Marca;Modelo;Saldo Físico;Reservado;Disponível;Mínimo;Ideal;Máximo;Status;Unidade";
   const rows = data.map((r) =>
     [
       r.internalCode,
@@ -74,6 +74,8 @@ function exportStockPositionCSV(data: any[]) {
       r.brand ?? "",
       r.model ?? "",
       r.currentStock,
+      r.reservedQuantity,
+      r.currentStock - r.reservedQuantity,
       r.minimumStock,
       r.idealStock,
       r.maximumStock,
@@ -82,6 +84,20 @@ function exportStockPositionCSV(data: any[]) {
     ].join(";")
   );
   downloadCSV("posicao_estoque.csv", [header, ...rows].join("\n"));
+}
+
+function exportLotLocationCSV(data: any[]) {
+  const header = "Produto;Lote;Área;Armário;Saldo no armário;Saldo total do lote;Diferença lote/armário";
+  const rows = data.map((r) => [
+    r.productName,
+    r.lotNumber,
+    r.areaName,
+    r.locationName,
+    r.quantityAvailable,
+    r.lotTotal,
+    r.unmappedQuantity,
+  ].map((value) => String(value ?? "").replace(/[;\r\n]/g, " ")).join(";"));
+  downloadCSV("rastreabilidade_area_armario_lote.csv", [header, ...rows].join("\n"));
 }
 
 function exportMovementCSV(data: any[]) {
@@ -167,12 +183,17 @@ function exportGomaqCSV(exchanges: any[]) {
 export default function Reports() {
   // ─── Stock Position ───
   const stockPosition = useQuery(api.dashboard.stockPosition);
+  const stockDimensions = useQuery(api.stockSetup.stockDimensionOverview);
   const tonerMetrics = useQuery(api.printers.tonerMetrics);
+
+  const [dimensionAreaFilter, setDimensionAreaFilter] = useState("all");
+  const [dimensionLocationFilter, setDimensionLocationFilter] = useState("all");
+  const [dimensionSearch, setDimensionSearch] = useState("");
 
   // ─── Requests Report ───
   const [reqStartDate, setReqStartDate] = useState("");
   const [reqEndDate, setReqEndDate] = useState("");
-  const allRequests = useQuery(api.requests.list, {});
+  const allRequests = useQuery(api.requests.listForReport, {});
 
   // ─── Assets Report ───
   const allAssets = useQuery(api.assets.list, {});
@@ -218,6 +239,62 @@ export default function Reports() {
       { normal: 0, baixo: 0, critico: 0, zerado: 0, total: 0 }
     );
   }, [stockPosition]);
+
+  const lotLocationRows = useMemo(() => {
+    const rows: any[] = [];
+    for (const product of stockDimensions?.products ?? []) {
+      for (const lot of product.lots ?? []) {
+        const locations = lot.locations?.length
+          ? lot.locations
+          : [{ locationId: "", locationName: "Sem alocação", quantityAvailable: 0 }];
+        const located = (lot.locations ?? []).reduce((sum: number, location: any) => sum + (location.quantityAvailable ?? 0), 0);
+        for (const location of locations) {
+          rows.push({
+            productName: product.productName,
+            lotId: lot.lotId,
+            lotNumber: lot.lotNumber,
+            areaName: lot.areaName,
+            locationId: location.locationId,
+            locationName: location.locationName,
+            quantityAvailable: location.quantityAvailable,
+            lotTotal: lot.quantityAvailable,
+            unmappedQuantity: lot.quantityAvailable - located,
+          });
+        }
+      }
+      for (const location of product.untrackedLocations ?? []) {
+        rows.push({
+          productName: product.productName,
+          lotId: "",
+          lotNumber: "Sem lote legado",
+          areaName: "Sem classificação por lote",
+          locationId: location.locationId,
+          locationName: location.locationName,
+          quantityAvailable: location.quantityAvailable,
+          lotTotal: location.quantityAvailable,
+          unmappedQuantity: 0,
+        });
+      }
+    }
+    return rows;
+  }, [stockDimensions]);
+
+  const dimensionAreaOptions = useMemo(
+    () => [...new Set(lotLocationRows.map((row) => row.areaName))].sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [lotLocationRows],
+  );
+  const dimensionLocationOptions = useMemo(
+    () => [...new Set(lotLocationRows.map((row) => row.locationName))].sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [lotLocationRows],
+  );
+  const filteredLotLocationRows = useMemo(() => {
+    const term = dimensionSearch.trim().toLocaleLowerCase("pt-BR");
+    return lotLocationRows.filter((row) =>
+      (dimensionAreaFilter === "all" || row.areaName === dimensionAreaFilter) &&
+      (dimensionLocationFilter === "all" || row.locationName === dimensionLocationFilter) &&
+      (!term || row.productName.toLocaleLowerCase("pt-BR").includes(term) || row.lotNumber.toLocaleLowerCase("pt-BR").includes(term))
+    );
+  }, [lotLocationRows, dimensionAreaFilter, dimensionLocationFilter, dimensionSearch]);
 
   return (
     <AppShell>
@@ -306,7 +383,9 @@ export default function Reports() {
                         <TableHead className="text-xs">Nome</TableHead>
                         <TableHead className="text-xs">Categoria</TableHead>
                         <TableHead className="text-xs">Marca/Modelo</TableHead>
-                        <TableHead className="text-xs text-right">Saldo</TableHead>
+                        <TableHead className="text-xs text-right">Físico</TableHead>
+                        <TableHead className="text-xs text-right">Reservado</TableHead>
+                        <TableHead className="text-xs text-right">Disponível</TableHead>
                         <TableHead className="text-xs text-right">Mínimo</TableHead>
                         <TableHead className="text-xs text-right">Ideal</TableHead>
                         <TableHead className="text-xs text-right">Máximo</TableHead>
@@ -321,6 +400,8 @@ export default function Reports() {
                           <TableCell className="text-xs">{item.categoryName}</TableCell>
                           <TableCell className="text-xs">{[item.brand, item.model].filter(Boolean).join(" — ") || "—"}</TableCell>
                           <TableCell className="text-sm text-right font-mono">{item.currentStock}</TableCell>
+                          <TableCell className="text-xs text-right font-mono">{item.reservedQuantity}</TableCell>
+                          <TableCell className="text-sm text-right font-mono">{item.currentStock - item.reservedQuantity}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.minimumStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.idealStock}</TableCell>
                           <TableCell className="text-xs text-right font-mono">{item.maximumStock}</TableCell>
@@ -342,10 +423,100 @@ export default function Reports() {
                       ))}
                       {!stockPosition && (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
+                          <TableCell colSpan={11} className="text-center py-8 text-muted-foreground text-sm">
                             Carregando…
                           </TableCell>
                         </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50">
+              <CardContent className="space-y-4 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="font-semibold">Rastreabilidade por área, armário e lote</h3>
+                    <p className="text-xs text-muted-foreground">
+                      Saldo físico detalhado por lote e localização. Registros legados sem lote aparecem identificados, sem atribuição artificial de área.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!filteredLotLocationRows.length}
+                    onClick={() => exportLotLocationCSV(filteredLotLocationRows)}
+                  >
+                    <Download className="mr-1.5 h-3.5 w-3.5" /> Exportar rastreabilidade CSV
+                  </Button>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <Label className="text-xs">Área</Label>
+                    <Select value={dimensionAreaFilter} onValueChange={setDimensionAreaFilter}>
+                      <SelectTrigger><SelectValue placeholder="Todas as áreas" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todas as áreas</SelectItem>
+                        {dimensionAreaOptions.map((area) => <SelectItem key={area} value={area}>{area}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Armário</Label>
+                    <Select value={dimensionLocationFilter} onValueChange={setDimensionLocationFilter}>
+                      <SelectTrigger><SelectValue placeholder="Todos os armários" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos os armários</SelectItem>
+                        {dimensionLocationOptions.map((location) => <SelectItem key={location} value={location}>{location}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Produto ou lote</Label>
+                    <Input value={dimensionSearch} onChange={(e) => setDimensionSearch(e.target.value)} placeholder="Buscar produto ou número do lote..." />
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <Badge variant="outline">{filteredLotLocationRows.length} linha(s)</Badge>
+                  <Badge variant="outline">
+                    Quantidade nos armários: {filteredLotLocationRows.reduce((sum, row) => sum + row.quantityAvailable, 0)}
+                  </Badge>
+                  {stockDimensions?.readOnly && <Badge variant="secondary">Consulta somente leitura</Badge>}
+                </div>
+                <div className="overflow-x-auto rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Produto</TableHead>
+                        <TableHead>Lote</TableHead>
+                        <TableHead>Área</TableHead>
+                        <TableHead>Armário</TableHead>
+                        <TableHead className="text-right">No armário</TableHead>
+                        <TableHead className="text-right">Total do lote</TableHead>
+                        <TableHead className="text-right">Diferença lote/armário</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredLotLocationRows.map((row, index) => (
+                        <TableRow key={row.lotId ? row.lotId + ":" + row.locationId : row.productName + ":" + row.locationId + ":" + index}>
+                          <TableCell className="min-w-48 text-sm font-medium">{row.productName}</TableCell>
+                          <TableCell className="text-xs font-mono">{row.lotNumber}</TableCell>
+                          <TableCell className="text-xs">{row.areaName}</TableCell>
+                          <TableCell className="text-xs">{row.locationName}</TableCell>
+                          <TableCell className="text-right font-mono">{row.quantityAvailable}</TableCell>
+                          <TableCell className="text-right font-mono">{row.lotTotal}</TableCell>
+                          <TableCell className={Math.abs(row.unmappedQuantity) > 1e-9 ? "text-right font-mono text-amber-600" : "text-right font-mono"}>
+                            {row.unmappedQuantity}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      {!stockDimensions && (
+                        <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">Carregando rastreabilidade…</TableCell></TableRow>
+                      )}
+                      {stockDimensions && filteredLotLocationRows.length === 0 && (
+                        <TableRow><TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">Nenhum lote ou saldo encontrado para os filtros selecionados.</TableCell></TableRow>
                       )}
                     </TableBody>
                   </Table>

@@ -5,6 +5,21 @@ import { generateExitNumber } from "./stockHelpers";
 import { requirePermission, requireRequestAction } from "./rbac";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import type { Id } from "./_generated/dataModel";
+import { requireSingleValidGlobalStock } from "../lib/stock-read-integrity";
+import {
+  assertProductLedgerConsistent,
+  assertProductReservationConsistent,
+  consumeLotLocationStock,
+  recordLotMovementAllocations,
+  resolveWithdrawalLocation,
+} from "./lotLocationLedger";
+import {
+  assertUniqueApprovalItemIds,
+  assertCompleteApprovalItemIds,
+  assertCompleteDeliveryItemIds,
+  getDeliveryStockAdjustment,
+} from "../lib/request-approval-validation";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -56,6 +71,19 @@ export const list = query({
     return Promise.all(requests.map(async (r) => enrichRequest(ctx, r)));
   },
 });
+
+export const listForReport = query({
+  args: {},
+  handler: async (ctx) => {
+    const { user } = await requireUser(ctx);
+    const role = (user.role ?? "technician") as UserRole;
+    const requests = hasFullVisibility(role)
+      ? await ctx.db.query("requests").withIndex("by_created").order("desc").collect()
+      : await ctx.db.query("requests").withIndex("by_requester", (q) => q.eq("requesterId", user._id)).order("desc").collect();
+    return Promise.all(requests.map(async (request) => enrichRequest(ctx, request)));
+  },
+});
+
 
 export const listByUser = query({
   args: { userId: v.id("users") },
@@ -229,6 +257,14 @@ export const approve = mutation({
       entity: "requests", entityId: args.requestId,
     });
     if (request.status !== "pending") throw new Error("Solicitação não está pendente. Verifique se já foi aprovada, rejeitada ou cancelada.");
+    assertUniqueApprovalItemIds(args.items);
+    const allRequestItemsForApproval = await ctx.db.query("requestItems")
+      .withIndex("by_request", (q: any) => q.eq("requestId", args.requestId))
+      .collect();
+    assertCompleteApprovalItemIds(
+      allRequestItemsForApproval.map((item: any) => ({ itemId: item._id as string })),
+      args.items.map((item) => ({ itemId: item.itemId as string })),
+    );
 
     // ─── PHASE 1: Validate ALL items and calculate total reservation per product ───
     // Group by productId to handle multiple request items for the same product
@@ -259,15 +295,13 @@ export const approve = mutation({
     if (totalItemsToApprove === 0) throw new Error("Nenhum item com quantidade aprovada maior que zero.");
 
     // Validate stock for each product (fresh read)
-    const stockMap: Record<string, any> = {};
     for (const [productId, needed] of Object.entries(stockNeeded)) {
-      const stock = await ctx.db
-        .query("stock")
-        .withIndex("by_product", (q: any) => q.eq("productId", productId as any))
-        .first();
+      const stock = await assertProductLedgerConsistent(ctx, productId, needed.productName);
+      if (!stock) {
+        throw new Error(`Registro global de estoque não encontrado para "${needed.productName}".`);
+      }
 
-      if (!stock) throw new Error(`Registro de estoque não encontrado para "${needed.productName}"`);
-
+      await assertProductReservationConsistent(ctx, productId, needed.productName, stock);
       const available = stock.physicalQuantity - stock.reservedQuantity;
       if (available < needed.quantity) {
         throw new Error(
@@ -276,7 +310,6 @@ export const approve = mutation({
           `Nenhum item foi reservado — operação abortada.`
         );
       }
-      stockMap[productId] = stock;
     }
 
     // ─── PHASE 2: Apply ALL reservations atomically (no partial approval) ───
@@ -295,15 +328,21 @@ export const approve = mutation({
       await ctx.db.patch(item.itemId, { quantityApproved: item.quantityApproved });
 
       // Reserve stock (re-read for safety)
-      const freshStock = await ctx.db
-        .query("stock")
+      const freshStock = await ctx.db.query("stock")
         .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
         .first();
-
-      if (freshStock) {
-        const newReserved = freshStock.reservedQuantity + item.quantityApproved;
-        await ctx.db.patch(freshStock._id, { reservedQuantity: newReserved });
+      if (!freshStock) throw new Error("Registro global de estoque não encontrado para reservar.");
+      const validatedStock = await assertProductLedgerConsistent(
+        ctx,
+        requestItem.productId,
+        String(requestItem.productId),
+      );
+      if (!validatedStock || validatedStock._id !== freshStock._id) {
+        throw new Error("O registro global de estoque mudou durante a aprovação.");
       }
+
+      const newReserved = freshStock.reservedQuantity + item.quantityApproved;
+      await ctx.db.patch(freshStock._id, { reservedQuantity: newReserved });
     }
 
     // Update request status
@@ -358,6 +397,8 @@ export const deliver = mutation({
       itemId: v.id("requestItems"),
       quantityDelivered: v.number(),
       serialNumbers: v.optional(v.array(v.string())),
+      locationId: v.optional(v.id("storageLocations")),
+      areaId: v.optional(v.id("stockAreas")),
     }))),
     receivedByUserId: v.optional(v.id("users")),
     confirmationPassword: v.string(),
@@ -370,11 +411,18 @@ export const deliver = mutation({
     await requirePermission(ctx, "requests.deliver", { entity: "requests", entityId: args.requestId });
 
     // Verify password for electronic signature
-    const passwordRecord = await ctx.db
+    const passwordRecords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q: any) => q.eq("userId", userId))
-      .first();
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+      .collect();
+    if (passwordRecords.length !== 1) {
+      throw new Error(
+        passwordRecords.length === 0
+          ? "Senha não configurada. Contate o administrador."
+          : "Credenciais duplicadas. Contate o administrador para regularizar o acesso.",
+      );
+    }
+    const passwordRecord = passwordRecords[0];
     const passwordValid = await verifyPassword(args.confirmationPassword, passwordRecord.passwordHash, passwordRecord.salt);
     if (!passwordValid) throw new Error("Senha de confirmação incorreta");
 
@@ -383,6 +431,26 @@ export const deliver = mutation({
     if (request.status !== "approved") throw new Error("Solicitação deve estar aprovada");
     const inputItems = args.items ?? [];
     if (inputItems.length === 0) throw new Error("Informe ao menos um item para entrega");
+    assertUniqueApprovalItemIds(inputItems);
+    const allRequestItems = await ctx.db
+      .query("requestItems")
+      .withIndex("by_request", (q: any) => q.eq("requestId", args.requestId))
+      .collect();
+    const approvedRequestItems = allRequestItems.filter((item: any) => item.quantityApproved > 0);
+    assertCompleteDeliveryItemIds(
+      approvedRequestItems.map((item: any) => ({ itemId: item._id as string })),
+      inputItems.map((item) => ({ itemId: item.itemId as string })),
+    );
+
+    // Pré-valida TODO o escopo antes da primeira escrita: o saldo reservado
+    // deve coincidir com todas as linhas de solicitações ainda aprovadas.
+    const deliveryProductIds = [...new Set(approvedRequestItems.map((item: any) => String(item.productId)))];
+    for (const productId of deliveryProductIds) {
+      const product = await ctx.db.get(productId as Id<"products">);
+      const label = product?.name ?? productId;
+      const stock = await assertProductLedgerConsistent(ctx, productId, label);
+      await assertProductReservationConsistent(ctx, productId, label, stock);
+    }
 
     // Validate receiver
     if (args.receivedByUserId) {
@@ -420,13 +488,13 @@ export const deliver = mutation({
       if (input.quantityDelivered <= 0) continue;
       const requestItem = await ctx.db.get(input.itemId);
       if (!requestItem) continue;
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", requestItem.productId)).first();
-      if (!stock) throw new Error(`Registro de estoque não encontrado para o produto`);
+      const stockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", requestItem.productId)).collect();
+      const stock = requireSingleValidGlobalStock(stockRows, String(requestItem.productId));
       if (stock.physicalQuantity < input.quantityDelivered) {
         throw new Error(`Estoque insuficiente. Disponível: ${stock.physicalQuantity}. Entrega: ${input.quantityDelivered}.`);
       }
-      if (stock.reservedQuantity < input.quantityDelivered) {
-        throw new Error(`Estoque reservado insuficiente. Reservado: ${stock.reservedQuantity}. Entrega: ${input.quantityDelivered}.`);
+      if (stock.reservedQuantity < requestItem.quantityApproved) {
+        throw new Error(`Estoque reservado insuficiente. Reservado: ${stock.reservedQuantity}. Reserva aprovada a liberar: ${requestItem.quantityApproved}.`);
       }
     }
 
@@ -436,60 +504,57 @@ export const deliver = mutation({
       if (input.quantityDelivered <= 0) continue;
       const requestItem = await ctx.db.get(input.itemId);
       if (!requestItem) continue;
-      const freshStock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", requestItem.productId)).first();
-      if (!freshStock) throw new Error("Registro de estoque desapareceu durante a entrega");
+      const freshStockRows = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", requestItem.productId)).collect();
+      const freshStock = requireSingleValidGlobalStock(freshStockRows, String(requestItem.productId));
       if (freshStock.physicalQuantity < input.quantityDelivered) throw new Error(`Estoque insuficiente (concorrência). Disponível: ${freshStock.physicalQuantity}.`);
-      if (freshStock.reservedQuantity < input.quantityDelivered) throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}.`);
+      if (freshStock.reservedQuantity < requestItem.quantityApproved) throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}; necessário liberar: ${requestItem.quantityApproved}.`);
+      const adjustment = getDeliveryStockAdjustment(requestItem.quantityApproved, input.quantityDelivered);
+      // Resolve the source cabinet without guessing and consume lot/location
+      // balances before changing the global balance. Convex rolls back the
+      // whole mutation if any validation fails.
+      const sourceLocationId = await resolveWithdrawalLocation(ctx, requestItem.productId, input.locationId);
+      const lotConsumption = await consumeLotLocationStock(ctx, {
+        productId: requestItem.productId,
+        locationId: sourceLocationId,
+        areaId: input.areaId,
+        quantity: input.quantityDelivered,
+      });
+      const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
       const newPhysical = freshStock.physicalQuantity - input.quantityDelivered;
+      // Retain the legacy arithmetic invariant (subtract the delivered amount),
+      // then release the unused portion too because the request is now complete.
       const newReserved = freshStock.reservedQuantity - input.quantityDelivered;
-      await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical, reservedQuantity: newReserved });
+      const unusedReservation = adjustment.reservedToRelease - input.quantityDelivered;
+      const finalReserved = newReserved - unusedReservation;
+      await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical, reservedQuantity: finalReserved });
       const exitNumber = await generateExitNumber(ctx);
-      await ctx.db.insert("stockMovements", {
+      const movementId = await ctx.db.insert("stockMovements", {
         productId: requestItem.productId, type: "exit", quantity: input.quantityDelivered,
         previousPhysical: freshStock.physicalQuantity, newPhysical,
-        previousReserved: freshStock.reservedQuantity, newReserved,
+        previousReserved: freshStock.reservedQuantity, newReserved: finalReserved,
         userId, requestId: args.requestId, exitNumber,
-        observation: "Entrega da solicitação", timestamp: now,
+        lotId: lotConsumption.allocations[0]?.lotId as any,
+        locationId: sourceLocationId,
+        observation: `Entrega da solicitação — armário ${sourceLocation?.name ?? sourceLocationId}. Lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
+        timestamp: now,
+      });
+      await recordLotMovementAllocations(ctx, {
+        movementId, productId: requestItem.productId, locationId: sourceLocationId,
+        allocations: lotConsumption.allocations,
       });
       await ctx.db.patch(input.itemId, {
         quantityDelivered: input.quantityDelivered,
         deliveredSerialNumbers: input.serialNumbers?.length ? input.serialNumbers : undefined,
       });
 
-      // FIFO Lot Consumption: find lots for this product, ordered by receivedAt ascending
-      let remainingToConsume = input.quantityDelivered;
-      const lots = await ctx.db
-        .query("lots")
-        .withIndex("by_product", (q: any) => q.eq("productId", requestItem.productId))
-        .collect();
-      // Sort by receivedAt ascending (FIFO), then by lotNumber
-      const sortedLots = lots
-        .filter((l) => l.quantityAvailable > 0)
-        .sort((a, b) => a.receivedAt - b.receivedAt || a.lotNumber.localeCompare(b.lotNumber));
-
-      for (const lot of sortedLots) {
-        if (remainingToConsume <= 0) break;
-        const consumeFromLot = Math.min(lot.quantityAvailable, remainingToConsume);
-        if (consumeFromLot <= 0) continue;
-
-        // Reduce lot available
-        await ctx.db.patch(lot._id, { quantityAvailable: lot.quantityAvailable - consumeFromLot });
-
-        // Record which lot was consumed
+      // Preserve full lot/location traceability for each allocation.
+      for (const allocation of lotConsumption.allocations) {
         await ctx.db.insert("requestItemLots", {
           requestItemId: input.itemId,
-          lotId: lot._id,
-          quantity: consumeFromLot,
+          lotId: allocation.lotId,
+          quantity: allocation.quantity,
+          locationId: sourceLocationId,
         });
-
-        remainingToConsume -= consumeFromLot;
-      }
-
-      if (remainingToConsume > 0) {
-        throw new Error(
-          `Lotes insuficientes para "${(await ctx.db.get(requestItem.productId))?.name ?? "item"}". ` +
-          `Faltam ${remainingToConsume} unidades sem lote disponível.`
-        );
       }
     }
 
@@ -504,7 +569,11 @@ export const deliver = mutation({
       receivedByUserId: args.receivedByUserId ?? request.requesterId,
       reverseLogisticsConfirmed: args.reverseLogisticsConfirmed ?? undefined,
     });
-    await ctx.db.insert("auditLogs", { userId, action: "deliver", entity: "requests", entityId: args.requestId, details: `Solicitação entregue (${inputItems.length} item(ns))`, timestamp: now });
+    const unusedReservation = inputItems.reduce((total, input) => {
+      const approved = approvedRequestItems.find((item: any) => item._id === input.itemId)?.quantityApproved ?? 0;
+      return total + approved - input.quantityDelivered;
+    }, 0);
+    await ctx.db.insert("auditLogs", { userId, action: "deliver", entity: "requests", entityId: args.requestId, details: `Solicitação entregue (${inputItems.length} item(ns)). Reserva não utilizada liberada: ${unusedReservation}.`, timestamp: now });
     return args.requestId;
   },
 });
@@ -534,19 +603,25 @@ export const cancel = mutation({
         .collect();
 
       const releaseDetails: string[] = [];
+      const cancellationProductIds = [...new Set(items
+        .filter((item: any) => item.quantityApproved > 0)
+        .map((item: any) => String(item.productId)))];
+      for (const productId of cancellationProductIds) {
+        const product = await ctx.db.get(productId as Id<"products">);
+        const label = product?.name ?? productId;
+        const stock = await assertProductLedgerConsistent(ctx, productId, label);
+        await assertProductReservationConsistent(ctx, productId, label, stock);
+      }
 
       for (const item of items) {
         if (item.quantityApproved <= 0) continue;
 
         // Re-read stock for consistency
-        const stock = await ctx.db
+        const stockRows = await ctx.db
           .query("stock")
           .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
-          .first();
-
-        if (!stock) {
-          throw new Error(`Registro de estoque não encontrado para o produto. Não é possível liberar reserva.`);
-        }
+          .collect();
+        const stock = requireSingleValidGlobalStock(stockRows, String(item.productId));
 
         // Safety: never allow reservedQuantity to go below 0
         if (stock.reservedQuantity < item.quantityApproved) {

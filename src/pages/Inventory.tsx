@@ -40,6 +40,8 @@ const STATUS_COLORS: Record<string, string> = {
 // Formato retornado por api.inventory.list (inventário + contagens + joins)
 type InventoryCountView = Doc<"inventoryCounts"> & {
   product: Doc<"products"> | null;
+  lot: Doc<"lots"> | null;
+  countLocation: Doc<"storageLocations"> | null;
 };
 
 type InventoryView = Doc<"inventories"> & {
@@ -57,6 +59,7 @@ export default function Inventory() {
 
   const inventories = useQuery(api.inventory.list) as InventoryView[] | undefined;
   const locations = useQuery(api.storageLocations.listActive);
+  const areas = useQuery(api.stockAreas.listActive);
   const products = useQuery(api.products.listActive);
   const categories = useQuery(api.categories.listActive);
   const initialStatus = useQuery(api.stockSetup.getInitialLoadStatus, canInitialLoad ? {} : "skip");
@@ -85,6 +88,7 @@ export default function Inventory() {
 
   // Implantação inicial
   const [initialLocationId, setInitialLocationId] = useState("");
+  const [initialAreaId, setInitialAreaId] = useState("");
   const [quantities, setQuantities] = useState<Record<string, string>>({});
 
   // Criação contextual de produto na implantação inicial
@@ -106,6 +110,7 @@ export default function Inventory() {
   // Importação da planilha de inventário físico
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetText, setSheetText] = useState("");
+  const [sheetAreaId, setSheetAreaId] = useState("");
   const [importing, setImporting] = useState(false);
 
   const [loadingInitial, setLoadingInitial] = useState(false);
@@ -302,6 +307,7 @@ export default function Inventory() {
   const sheetUnknownLocations = sheetRows.filter((r) => !r.locationId).length;
 
   const handleImportSheet = async () => {
+    if (!sheetAreaId) { toast.error("Selecione a área/subestoque da importação"); return; }
     if (sheetValidRows.length === 0) {
       toast.error("Nenhuma linha válida (verifique local e quantidade)");
       return;
@@ -311,6 +317,7 @@ export default function Inventory() {
       const res = await importInitialSheet({
         rows: sheetValidRows.map((r) => ({
           locationId: r.locationId as any,
+          areaId: sheetAreaId as any,
           productName: r.productName,
           brand: r.brand || undefined,
           quantity: r.quantity,
@@ -332,9 +339,10 @@ export default function Inventory() {
 
   const handleConfirmInitialLoad = async () => {
     if (!initialLocationId) { toast.error("Selecione o local de armazenamento"); return; }
+    if (!initialAreaId) { toast.error("Selecione a área/subestoque"); return; }
     const items = Object.entries(quantities)
       .filter(([, q]) => Number(q) > 0)
-      .map(([productId, q]) => ({ productId: productId as any, locationId: initialLocationId as any, quantity: Number(q) }));
+      .map(([productId, q]) => ({ productId: productId as any, locationId: initialLocationId as any, areaId: initialAreaId as any, quantity: Number(q) }));
     if (items.length === 0) { toast.error("Informe ao menos uma quantidade"); return; }
     setLoadingInitial(true);
     try {
@@ -475,7 +483,7 @@ export default function Inventory() {
                             <Table>
                               <TableHeader>
                                 <TableRow>
-                                  <TableHead className="text-xs">Produto</TableHead>
+                                  <TableHead className="text-xs">Produto / lote / armário</TableHead>
                                   <TableHead className="text-xs text-center">Est. Sistema</TableHead>
                                   <TableHead className="text-xs text-center">Contado</TableHead>
                                   <TableHead className="text-xs text-center">Diferença</TableHead>
@@ -493,7 +501,11 @@ export default function Inventory() {
                                     <TableRow key={c._id}>
                                       <TableCell>
                                         <p className="font-medium text-sm">{c.product?.name ?? "—"}</p>
-                                        <p className="text-[10px] text-muted-foreground">{c.product?.internalCode ?? ""}</p>
+                                        <p className="text-[10px] text-muted-foreground">
+                                          {c.lot?.lotNumber ? `Lote ${c.lot.lotNumber} · ` : ""}
+                                          {c.countLocation?.name ?? (c.locationId ? "Armário" : "Local não definido")}
+                                          {c.product?.internalCode ? ` · ${c.product.internalCode}` : ""}
+                                        </p>
                                       </TableCell>
                                       <TableCell className="text-center font-mono text-sm">{c.systemQuantity}</TableCell>
                                       <TableCell className="text-center">
@@ -572,6 +584,15 @@ export default function Inventory() {
               <Card className="border-border/50">
                 <CardContent className="py-4">
                   <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+                    <div className="w-full sm:max-w-xs">
+                      <Label className="text-xs">Área / Subestoque *</Label>
+                      <Select value={initialAreaId} onValueChange={setInitialAreaId}>
+                        <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione a área" /></SelectTrigger>
+                        <SelectContent>
+                          {areas?.map((area) => <SelectItem key={area._id} value={area._id}>{area.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <div className="w-full sm:max-w-xs">
                       <Label className="text-xs">Local de armazenamento *</Label>
                       <Select value={initialLocationId} onValueChange={setInitialLocationId}>
@@ -812,6 +833,16 @@ export default function Inventory() {
               <DialogTitle className="flex items-center gap-2"><Upload className="h-4 w-4" /> Importar planilha de inventário</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
+              <div>
+                <Label className="text-xs">Área / Subestoque da importação *</Label>
+                <Select value={sheetAreaId} onValueChange={setSheetAreaId}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Selecione a área" /></SelectTrigger>
+                  <SelectContent>
+                    {areas?.map((area) => <SelectItem key={area._id} value={area._id}>{area.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">Todas as linhas desta planilha serão classificadas nesta área. Para outra área, faça uma importação separada.</p>
+              </div>
               <p className="text-sm text-muted-foreground">
                 Cole as linhas da planilha (separadas por <code>;</code> ou <code>,</code>). Colunas:
                 <strong> Localização; Produto; Marca; Quantidade; Unidade; Observação</strong>.
@@ -870,7 +901,7 @@ export default function Inventory() {
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => { setSheetOpen(false); setSheetText(""); }}>Cancelar</Button>
-              <Button onClick={handleImportSheet} disabled={importing || sheetValidRows.length === 0}>
+              <Button onClick={handleImportSheet} disabled={importing || !sheetAreaId || sheetValidRows.length === 0}>
                 {importing ? "Importando..." : `Confirmar importação (${sheetValidRows.length} linha(s))`}
               </Button>
             </DialogFooter>

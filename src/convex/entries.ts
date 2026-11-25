@@ -9,6 +9,8 @@ import {
   normalizeInvoiceNumber,
 } from "../lib/entry-duplicates";
 import { requirePermission } from "./rbac";
+import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { assertProductLedgerConsistent, assertProductReservationConsistent, recordLotMovementAllocations } from "./lotLocationLedger";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -296,7 +298,7 @@ export const create = mutation({
     // Área/Subestoque precisa existir (cadastro independente)
     if (args.areaId) {
       const area = await ctx.db.get(args.areaId);
-      if (!area) throw new Error("Área/Subestoque não encontrada");
+      if (!area || area.active === false) throw new Error("Área/Subestoque não encontrada ou inativa");
     }
 
     const entryId = await ctx.db.insert("entries", {
@@ -379,6 +381,13 @@ export const confirm = mutation({
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ser confirmadas");
+    if (!entry.areaId) {
+      throw new Error("Selecione a área/subestoque da entrada antes de confirmar. Nenhum saldo pode ser criado sem classificação.");
+    }
+    const destinationArea = await ctx.db.get(entry.areaId);
+    if (!destinationArea || destinationArea.active === false) {
+      throw new Error("A área/subestoque selecionada não existe ou está inativa. Escolha uma área ativa antes de confirmar.");
+    }
 
     const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
     if (items.length === 0) throw new Error("Entrada não possui itens");
@@ -439,6 +448,14 @@ export const confirm = mutation({
       const product = await ctx.db.get(item.productId);
       if (!product) throw new Error(`Produto não encontrado para item da entrada`);
       if (!product.active) throw new Error(`O produto "${product.name}" está inativo — não é possível confirmar entrada`);
+      if (!item.locationId) throw new Error(`Selecione o armário de destino da entrada de "${product.name}" antes de confirmar.`);
+      const entryLocation = await ctx.db.get(item.locationId);
+      if (!entryLocation || entryLocation.active === false) throw new Error(`O armário selecionado para "${product.name}" não existe ou está inativo.`);
+
+      // A entrada só pode aumentar um livro-razão que já esteja conciliado.
+      // Isso impede que uma diferença antiga seja perpetuada por novas compras.
+      const stockBefore = await assertProductLedgerConsistent(ctx, item.productId, product.name);
+      await assertProductReservationConsistent(ctx, item.productId, product.name, stockBefore);
 
       // Generate lot
       const lotNumber = await generateLotNumber(ctx);
@@ -470,8 +487,36 @@ export const confirm = mutation({
       // o item ao lote que ele gerou.
       await ctx.db.patch(item._id, { lotId: lotId as string });
 
+      // Saldo rastreável do lote no armário informado no recebimento.
+      // Entradas legadas sem local continuam preservadas, mas não recebem
+      // localização presumida.
+      if (item.locationId) {
+        const existingLotLocation = await ctx.db
+          .query("lotLocationBalances")
+          .withIndex("by_lot", (q: any) => q.eq("lotId", lotId))
+          .collect();
+        const duplicate = existingLotLocation.filter((row: any) => row.locationId === item.locationId);
+        if (duplicate.length > 1) {
+          throw new Error(`Saldo duplicado do lote ${lotNumber} no local informado.`);
+        }
+        if (duplicate.length === 1) {
+          await ctx.db.patch(duplicate[0]._id, {
+            quantityAvailable: duplicate[0].quantityAvailable + item.quantity,
+            updatedAt: now,
+          });
+        } else {
+          await ctx.db.insert("lotLocationBalances", {
+            lotId,
+            productId: item.productId,
+            locationId: item.locationId,
+            quantityAvailable: item.quantity,
+            updatedAt: now,
+          });
+        }
+      }
+
       // Update stock (increase physicalQuantity)
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
+      const stock = stockBefore;
       const prevPhysical = stock?.physicalQuantity ?? 0;
       const prevReserved = stock?.reservedQuantity ?? 0;
       const newPhysical = prevPhysical + item.quantity;
@@ -485,6 +530,7 @@ export const confirm = mutation({
       // Update stock by location (saldo por localização) — keeps global × location consistent
       if (item.locationId) {
         const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
+        validateUniqueScopedStockRows(sblList, product.name);
         const sbl = sblList.find((s: any) => s.locationId === item.locationId);
         if (sbl) {
           await ctx.db.patch(sbl._id, { quantity: sbl.quantity + item.quantity });
@@ -505,6 +551,7 @@ export const confirm = mutation({
         userId,
         entryId: args.entryId,
         lotId: lotNumber,
+        locationId: item.locationId,
         documentNumber: entry.invoiceNumber,
         observation: `Entrada ${entry.entryNumber} — Lote ${lotNumber}`,
         timestamp: now,
@@ -766,101 +813,146 @@ export const reverse = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireStockManagerOrAdmin(ctx);
-    if (!args.reason.trim()) throw new Error("O motivo do estorno é obrigatório");
+    const reason = args.reason.trim();
+    if (!reason) throw new Error("O motivo do estorno é obrigatório");
 
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "confirmed") throw new Error("Apenas entradas confirmadas podem ser estornadas");
 
-    const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
+    const items = await ctx.db.query("entryItems")
+      .withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId))
+      .collect();
+    if (items.length === 0) throw new Error("A entrada não possui itens para estornar.");
+
     const now = Date.now();
     const reversalDetails: string[] = [];
 
-    for (const item of items) {
-      const product = await ctx.db.get(item.productId);
-
-      // Check stock — cannot reverse if consumed
-      const stock = await ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).first();
-      if (!stock) throw new Error(`Registro de estoque não encontrado para "${product?.name ?? "item"}"`);
-
-      if (stock.physicalQuantity < item.quantity) {
-        throw new Error(
-          `Não é possível estornar "${product?.name ?? "item"}": parte do material já foi consumida. ` +
-          `Saldo atual: ${stock.physicalQuantity}. Quantidade da entrada: ${item.quantity}. ` +
-          `Diferença consumida: ${item.quantity - stock.physicalQuantity}.`
-        );
+    for (const item of items as any[]) {
+      const product: any = await ctx.db.get(item.productId);
+      const productName = product?.name ?? String(item.productId);
+      const stock = await assertProductLedgerConsistent(ctx, item.productId, productName);
+      if (!stock) throw new Error(`Registro global de estoque não encontrado para "${productName}".`);
+      await assertProductReservationConsistent(ctx, item.productId, productName, stock);
+      if (stock.physicalQuantity + 1e-9 < item.quantity) {
+        throw new Error(`Não é possível estornar "${productName}": parte do material já foi consumida.`);
+      }
+      if (stock.physicalQuantity - item.quantity + 1e-9 < stock.reservedQuantity) {
+        throw new Error(`Não é possível estornar "${productName}": o saldo restante ficaria abaixo das reservas.`);
       }
 
-      // Check reservation integrity
-      if (stock.reservedQuantity > 0 && stock.physicalQuantity - item.quantity < stock.reservedQuantity) {
-        throw new Error(
-          `Não é possível estornar "${product?.name ?? "item"}": a reserva atual (${stock.reservedQuantity}) consumiria mais que o saldo restante.`
-        );
+      const productLots = await ctx.db.query("lots")
+        .withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId))
+        .collect();
+      const productEntryLots = productLots.filter((candidate: any) =>
+        String(candidate.productId) === String(item.productId),
+      );
+      const lotMatches = productEntryLots.filter((candidate: any) =>
+        item.lotId && (String(candidate._id) === String(item.lotId) || candidate.lotNumber === String(item.lotId)),
+      );
+      if (lotMatches.length > 1 || (!item.lotId && productEntryLots.length > 1)) {
+        throw new Error(`Não é seguro estornar "${productName}": há mais de um lote possível na entrada sem vínculo inequívoco.`);
+      }
+      const lot = lotMatches[0] ?? (!item.lotId && productEntryLots.length === 1 ? productEntryLots[0] : null);
+      if (item.lotId && !lot) {
+        throw new Error(`Não foi possível resolver o lote de origem de "${productName}" para estorno.`);
       }
 
-      const newPhysical = stock.physicalQuantity - item.quantity;
-      await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
+      const locationRows = await ctx.db.query("stockByLocation")
+        .withIndex("by_product", (q: any) => q.eq("productId", item.productId))
+        .collect();
+      validateUniqueScopedStockRows(locationRows, productName);
 
-      // Reverse stock by location (same location used at confirmation)
-      if (item.locationId) {
-        const sblList = await ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", item.productId)).collect();
-        const sbl = sblList.find((s: any) => s.locationId === item.locationId);
-        if (sbl && sbl.quantity < item.quantity) {
-          throw new Error(
-            `Não é possível estornar "${product?.name ?? "item"}" no local: saldo do local (${sbl.quantity}) é menor que a quantidade da entrada (${item.quantity}). ` +
-            `Faça um inventário/transferência para regularizar a localização antes de estornar.`
-          );
+      let lotBalances: any[] = [];
+      if (lot) {
+        lotBalances = await ctx.db.query("lotLocationBalances")
+          .withIndex("by_lot", (q: any) => q.eq("lotId", lot._id))
+          .collect();
+        const locatedQuantity = lotBalances.reduce((sum: number, row: any) => sum + row.quantityAvailable, 0);
+        if (lotBalances.length === 0 || Math.abs(locatedQuantity - lot.quantityAvailable) > 1e-9 ||
+            Math.abs(lot.quantityAvailable - item.quantity) > 1e-9) {
+          throw new Error(`Não é seguro estornar "${productName}": o lote ${lot.lotNumber} não está integralmente disponível e conciliado por armário.`);
         }
-        if (sbl) {
-          await ctx.db.patch(sbl._id, { quantity: sbl.quantity - item.quantity });
+      } else if (item.locationId) {
+        const local = locationRows.find((row: any) => String(row.locationId) === String(item.locationId));
+        if (!local || local.quantity + 1e-9 < item.quantity) {
+          throw new Error(`Não há saldo suficiente de "${productName}" no armário original para estornar a entrada.`);
+        }
+      } else if (locationRows.some((row: any) => row.quantity > 1e-9)) {
+        throw new Error(`Não é seguro estornar "${productName}" sem identificar o armário de origem.`);
+      }
+
+      const decrements = lot
+        ? lotBalances.map((row: any) => ({ locationId: row.locationId, quantity: row.quantityAvailable }))
+        : item.locationId ? [{ locationId: item.locationId, quantity: item.quantity }] : [];
+
+      for (const decrement of decrements) {
+        const local = locationRows.find((row: any) => String(row.locationId) === String(decrement.locationId));
+        if (!local || local.quantity + 1e-9 < decrement.quantity) {
+          throw new Error(`O armário não possui saldo suficiente de "${productName}" para estornar o lote.`);
         }
       }
 
-      // Mark related lots as inactive
-      const lots = await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
-      for (const lot of lots) {
-        if (lot.productId === item.productId) {
-          await ctx.db.patch(lot._id, { active: false, quantityAvailable: 0 });
+      await ctx.db.patch(stock._id, { physicalQuantity: stock.physicalQuantity - item.quantity });
+      for (const decrement of decrements) {
+        const local = locationRows.find((row: any) => String(row.locationId) === String(decrement.locationId));
+        if (!local) throw new Error("O saldo por armário desapareceu durante o estorno.");
+        await ctx.db.patch(local._id, { quantity: local.quantity - decrement.quantity });
+      }
+      if (lot) {
+        for (const balance of lotBalances) {
+          await ctx.db.patch(balance._id, { quantityAvailable: 0, updatedAt: now });
         }
+        await ctx.db.patch(lot._id, { active: false, quantityAvailable: 0 });
       }
 
-      // Create reversal movement
-      await ctx.db.insert("stockMovements", {
+      const locationNames = await Promise.all(decrements.map(async (decrement: any) => {
+        const location: any = await ctx.db.get(decrement.locationId);
+        return `${location?.name ?? decrement.locationId}: ${decrement.quantity}`;
+      }));
+      const movementId = await ctx.db.insert("stockMovements", {
         productId: item.productId,
         type: "adjustment",
         quantity: item.quantity,
         previousPhysical: stock.physicalQuantity,
-        newPhysical,
+        newPhysical: stock.physicalQuantity - item.quantity,
         previousReserved: stock.reservedQuantity,
         newReserved: stock.reservedQuantity,
         userId,
         entryId: args.entryId,
-        observation: `Estorno da entrada ${entry.entryNumber}. Motivo: ${args.reason.trim()}`,
+        lotId: lot ? String(lot._id) : undefined,
+        locationId: decrements.length === 1 ? decrements[0].locationId : undefined,
+        observation: `Estorno da entrada ${entry.entryNumber}. ${lot ? `Lote ${lot.lotNumber}. ` : ""}Locais: ${locationNames.join("; ") || "não identificados"}. Motivo: ${reason}`,
         timestamp: now,
       });
-
-      reversalDetails.push(`${product?.name ?? "item"}: -${item.quantity}`);
+      if (lot) {
+        await recordLotMovementAllocations(ctx, {
+          movementId,
+          productId: item.productId,
+          allocations: decrements.map((decrement: any) => ({
+            lotId: lot._id,
+            locationId: decrement.locationId,
+            quantity: decrement.quantity,
+          })),
+          allocationType: "reversal",
+        });
+      }
+      reversalDetails.push(`${productName}: -${item.quantity}${lot ? ` (${lot.lotNumber})` : ""}`);
     }
 
     await ctx.db.patch(args.entryId, { status: "reversed", updatedAt: now });
-
     await ctx.db.insert("auditLogs", {
-      userId,      action: "reverse_entry", entity: "entries", entityId: args.entryId,
-      details: `Entrada ${entry.entryNumber} estornada. Itens: ${reversalDetails.join("; ")}. Motivo: ${args.reason.trim()}`,
+      userId,
+      action: "reverse_entry",
+      entity: "entries",
+      entityId: args.entryId,
+      details: `Entrada ${entry.entryNumber} estornada. Itens: ${reversalDetails.join("; ")}. Motivo: ${reason}`,
       timestamp: now,
     });
-
     return args.entryId;
   },
 });
 
-/**
- * Registra/ substitui as UNIDADES PATRIMONIAIS de uma entrada em rascunho.
- *
- * Só faz sentido para entrada classificada como Material PERMANENTE —
- * material de consumo não exige patrimônio e não aceita unidades.
- * Não altera estoque: só cadastro de unidades (patrimônio / série).
- */
 export const setUnits = mutation({
   args: {
     entryId: v.id("entries"),

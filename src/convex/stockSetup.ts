@@ -5,6 +5,15 @@ import {
   type LotConsumption,
 } from "../lib/stock-consumption";
 import { internalMutation, mutation, query } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import {
+  assertProductLedgerConsistent,
+  assertProductReservationConsistent,
+  resolveWithdrawalLocation,
+  consumeLotLocationStock,
+  recordLotMovementAllocations,
+} from "./lotLocationLedger";
 import { v } from "convex/values";
 import {
   applyImplementationStockStamp,
@@ -456,6 +465,7 @@ export const quickExit = mutation({
     productId: v.id("products"),
     quantity: v.number(),
     locationId: v.optional(v.id("storageLocations")),
+    areaId: v.optional(v.id("stockAreas")),
     destination: v.string(),
     receiverName: v.string(),
     reason: v.optional(v.string()),
@@ -463,7 +473,7 @@ export const quickExit = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireAdmin(ctx);
+    const { userId } = await requirePermission(ctx, "exits.create", { entity: "stockMovements" });
 
     // Defesa numérica: normaliza Int64 → number (v.number() aceita Int64 via CLI)
     args = { ...args, quantity: Number(args.quantity) };
@@ -477,11 +487,13 @@ export const quickExit = mutation({
     if (!product) throw new Error("Produto não encontrado");
     if (!product.active) throw new Error("Produto está inativo");
 
-    // ── Check stock ──
-    const stock = await ctx.db
+    // ── Check stock: nunca selecionar arbitrariamente entre duplicidades ──
+    const stockRows = await ctx.db
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .first();
+      .collect();
+    const stock = await assertProductLedgerConsistent(ctx, args.productId, product.name);
+    await assertProductReservationConsistent(ctx, args.productId, product.name, stock);
 
     const available =
       (stock?.physicalQuantity ?? 0) - (stock?.reservedQuantity ?? 0);
@@ -492,82 +504,32 @@ export const quickExit = mutation({
       );
     }
 
+    const sourceLocationId = await resolveWithdrawalLocation(ctx, args.productId, args.locationId);
+    const lotConsumption = await consumeLotLocationStock(ctx, {
+      productId: args.productId,
+      locationId: sourceLocationId,
+      areaId: args.areaId,
+      quantity: args.quantity,
+    });
+    const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
+
     const now = Date.now();
     const previousPhysical = stock?.physicalQuantity ?? 0;
     const previousReserved = stock?.reservedQuantity ?? 0;
-
-    // ── 1. Consume lots (FIFO: oldest first, then by lotNumber) ──
-    const lots = await ctx.db
-      .query("lots")
-      .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .collect();
-
-    const activeLots = lots
-      .filter((l) => l.active && l.quantityAvailable > 0)
-      .sort(
-        (a, b) =>
-          a.receivedAt - b.receivedAt ||
-          a.lotNumber.localeCompare(b.lotNumber)
-      );
-
-    let remaining = args.quantity;
-    const consumedLots: Array<{ lotId: string; quantity: number }> = [];
-
-    for (const lot of activeLots) {
-      if (remaining <= 0) break;
-      const consume = Math.min(remaining, lot.quantityAvailable);
-      await ctx.db.patch(lot._id, {
-        quantityAvailable: lot.quantityAvailable - consume,
-      });
-      consumedLots.push({ lotId: lot._id, quantity: consume });
-      remaining -= consume;
-    }
-
-    if (remaining > 0) {
-      throw new Error(
-        `Lotes insuficientes. Faltam ${remaining} ${product.unitOfMeasure} para consumo`
-      );
-    }
-
-    // ── 2. Reduce global stock ──
     const newPhysical = previousPhysical - args.quantity;
-    await ctx.db.patch(stock!._id, { physicalQuantity: newPhysical });
+    if (!stock) throw new Error("Registro global de estoque não encontrado.");
 
-    // ── 3. Reduce location stock if specified ──
-    if (args.locationId) {
-      const sbl = await ctx.db
-        .query("stockByLocation")
-        .withIndex("by_product", (q) => q.eq("productId", args.productId))
-        .collect();
-      const sblForLocation = sbl.find(
-        (s) => s.locationId === args.locationId
-      );
+    await ctx.db.patch(stock._id, { physicalQuantity: newPhysical });
 
-      if (sblForLocation) {
-        const newLocQty = sblForLocation.quantity - args.quantity;
-        if (newLocQty < 0) {
-          throw new Error(
-            `Estoque insuficiente no local. Disponível: ${sblForLocation.quantity}`
-          );
-        }
-        await ctx.db.patch(sblForLocation._id, { quantity: newLocQty });
-      }
-    }
-
-    // ── 4. Create stock movement ──
-    // CORREÇÃO: o lote consumido passa a ser gravado no campo ESTRUTURADO
-    // `lotId`. Antes ele existia apenas dentro do texto da observation, o que
-    // impedia a devolução de restaurar o `quantityAvailable` do lote e gerava
-    // a divergência 3337 x 3338. A observation é mantida para compatibilidade.
-    const consumedLotId = resolveConsumedLotId(consumedLots as LotConsumption[]);
-    const lotInfo = formatConsumedLots(consumedLots, (id) =>
-      lots.find((l) => l._id === id)?.lotNumber,
-    );
+    const consumedLotId = lotConsumption.allocations[0]?.lotId;
+    const lotInfo = lotConsumption.allocations
+      .map((allocation) => `${allocation.lotNumber}(${allocation.quantity})`)
+      .join(", ");
 
     // Número sequencial da saída (SAI-ANO-SEQ) — usado no vínculo de devoluções
     const exitNumber = await generateExitNumber(ctx);
 
-    await ctx.db.insert("stockMovements", {
+    const movementId = await ctx.db.insert("stockMovements", {
       productId: args.productId,
       type: "exit",
       quantity: args.quantity,
@@ -578,17 +540,24 @@ export const quickExit = mutation({
       userId,
       exitNumber,
       lotId: consumedLotId ?? undefined,
+      locationId: sourceLocationId,
       observation: [
         `Saída rápida — ${args.receiverName}`,
         args.reason ? `Motivo: ${args.reason}` : "",
         args.osNumber ? `O.S.: ${args.osNumber}` : "",
         args.observation ?? "",
         `Destino: ${args.destination}`,
+        `Armário: ${sourceLocation?.name ?? sourceLocationId}`,
         `Lotes: ${lotInfo}`,
       ]
         .filter(Boolean)
         .join(" | "),
       timestamp: now,
+    });
+
+    await recordLotMovementAllocations(ctx, {
+      movementId, productId: args.productId, locationId: sourceLocationId,
+      allocations: lotConsumption.allocations,
     });
 
     // ── 5. Audit ──
@@ -606,14 +575,13 @@ export const quickExit = mutation({
       quantity: args.quantity,
       product: product.name,
       newAvailable: newPhysical - previousReserved,
-      lotsConsumed: consumedLots.length,
+      lotsConsumed: lotConsumption.allocations.length,
     };
   },
 });
 
 /**
- * Limpeza destrutiva de dados de teste, restrita à API interna.
- * Nunca pode ser chamada diretamente pelo cliente autenticado.
+ * Cleanup: remove test/homologation data.
  * Preserves users, passwords, auth, schema, audit logs.
  */
 export const cleanupTestData = internalMutation({
@@ -1116,5 +1084,213 @@ export const stockDimensionDiagnostics = query({
         "O histórico de movimentos não contém localização de origem/destino de forma estruturada em todas as operações.",
       ],
     };
+  },
+});
+
+
+// Resumo somente de leitura para selecionar área e armário na saída rápida.
+// A área é derivada de lots.areaId; o saldo físico continua em stockByLocation.
+export const productDimensionSummary = query({
+  args: { productId: v.id("products") },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    const [product, lots, balances, areas, locations, stockRows, locationRows] = await Promise.all([
+      ctx.db.get(args.productId),
+      ctx.db.query("lots").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
+      ctx.db.query("lotLocationBalances").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
+      ctx.db.query("stockAreas").collect(),
+      ctx.db.query("storageLocations").collect(),
+      ctx.db.query("stock").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
+      ctx.db.query("stockByLocation").withIndex("by_product", (q: any) => q.eq("productId", args.productId)).collect(),
+    ]);
+    if (!product) throw new Error("Produto não encontrado.");
+    const global = getOptionalSingleValidGlobalStock(stockRows, product.name);
+    validateUniqueScopedStockRows(locationRows, product.name);
+    const areaById = new Map(areas.map((area: any) => [String(area._id), area]));
+    const locationById = new Map(locations.map((location: any) => [String(location._id), location]));
+    const lotById = new Map(lots.map((lot: any) => [String(lot._id), lot]));
+    const grouped = new Map<string, { areaId: string | null; areaName: string; quantityAvailable: number; locations: Map<string, number> }>();
+    const seen = new Set<string>();
+    const lotLocated = new Map<string, number>();
+    const invalidBalances: string[] = [];
+
+    for (const balance of balances as any[]) {
+      const lot = lotById.get(String(balance.lotId));
+      const location = locationById.get(String(balance.locationId));
+      if (!lot) {
+        invalidBalances.push("Existe saldo lote/armário vinculado a lote inexistente.");
+        continue;
+      }
+      const key = String(balance.lotId) + "::" + String(balance.locationId);
+      if (seen.has(key)) {
+        invalidBalances.push("Existe saldo duplicado do mesmo lote no mesmo armário.");
+        continue;
+      }
+      seen.add(key);
+      if (!Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0) {
+        invalidBalances.push("Existe quantidade inválida em saldo lote/armário.");
+        continue;
+      }
+      if (!location || location.active === false) invalidBalances.push("Existe saldo vinculado a armário inexistente ou inativo.");
+      lotLocated.set(String(balance.lotId), (lotLocated.get(String(balance.lotId)) ?? 0) + balance.quantityAvailable);
+      const areaId = lot.areaId ? String(lot.areaId) : null;
+      const area = areaId ? areaById.get(areaId) as any : null;
+      if (areaId && (!area || area.active === false)) invalidBalances.push("Existe lote vinculado a área inexistente ou inativa.");
+      const areaKey = areaId ?? "unclassified";
+      const group = grouped.get(areaKey) ?? {
+        areaId,
+        areaName: areaId ? (area?.name ?? "Área não encontrada") : "Sem área",
+        quantityAvailable: 0,
+        locations: new Map<string, number>(),
+      };
+      group.quantityAvailable += balance.quantityAvailable;
+      group.locations.set(String(balance.locationId), (group.locations.get(String(balance.locationId)) ?? 0) + balance.quantityAvailable);
+      grouped.set(areaKey, group);
+    }
+
+    let unmappedLotQuantity = 0;
+    for (const lot of lots as any[]) {
+      const located = lotLocated.get(String(lot._id)) ?? 0;
+      if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0) {
+        invalidBalances.push("Existe lote com quantidade disponível inválida.");
+        continue;
+      }
+      if (Math.abs(lot.quantityAvailable - located) > 1e-9) unmappedLotQuantity += Math.abs(lot.quantityAvailable - located);
+      if (lot.active === false && lot.quantityAvailable > 1e-9) invalidBalances.push("Existe lote inativo com saldo positivo.");
+    }
+
+    const areaRows = Array.from(grouped.values()).map((group) => ({
+      areaId: group.areaId,
+      areaName: group.areaName,
+      quantityAvailable: group.quantityAvailable,
+      locations: Array.from(group.locations.entries()).map(([locationId, quantityAvailable]) => ({
+        locationId,
+        locationName: (locationById.get(locationId) as any)?.name ?? "Armário não encontrado",
+        quantityAvailable,
+      })).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR")),
+    })).sort((a, b) => a.areaName.localeCompare(b.areaName, "pt-BR"));
+
+    const totalByLocation = (locationRows as any[]).reduce((sum, row) => sum + row.quantity, 0);
+    const totalLots = (lots as any[]).reduce((sum, lot) => sum + (Number.isFinite(lot.quantityAvailable) ? lot.quantityAvailable : 0), 0);
+    return {
+      productId: args.productId,
+      productName: product.name,
+      globalPhysical: global?.physicalQuantity ?? 0,
+      globalReserved: global?.reservedQuantity ?? 0,
+      totalByLocation,
+      totalLotsAvailable: totalLots,
+      globalVsLocationDifference: (global?.physicalQuantity ?? 0) - totalByLocation,
+      globalVsLotsDifference: lots.length > 0 ? (global?.physicalQuantity ?? 0) - totalLots : 0,
+      unmappedLotQuantity,
+      invalidBalances,
+      areas: areaRows,
+      readOnly: true,
+    };
+  },
+});
+
+export const stockDimensionOverview = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const [products, lots, balances, areas, locations, stocks, locationRows] = await Promise.all([
+      ctx.db.query("products").collect(),
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("stockAreas").collect(),
+      ctx.db.query("storageLocations").collect(),
+      ctx.db.query("stock").collect(),
+      ctx.db.query("stockByLocation").collect(),
+    ]);
+    const areaById = new Map(areas.map((area: any) => [String(area._id), area]));
+    const locationById = new Map(locations.map((location: any) => [String(location._id), location]));
+    const result = products.map((product: any) => {
+      const productLots = (lots as any[]).filter((lot) => String(lot.productId) === String(product._id));
+      const productBalances = (balances as any[]).filter((balance) => String(balance.productId) === String(product._id));
+      const productLocations = (locationRows as any[]).filter((row) => String(row.productId) === String(product._id));
+      const global = (stocks as any[]).filter((row) => String(row.productId) === String(product._id));
+      const globalPhysical = global.length === 1 ? global[0].physicalQuantity : 0;
+      const areasMap = new Map<string, { areaId: string | null; areaName: string; quantityAvailable: number; locations: Map<string, number> }>();
+      const keys = new Set<string>();
+      let invalidBalanceCount = global.length !== 1 && (productLots.length > 0 || productLocations.length > 0) ? 1 : 0;
+      const locationKeys = new Set<string>();
+      for (const row of productLocations) {
+        const key = String(row.locationId);
+        if (locationKeys.has(key)) invalidBalanceCount++;
+        locationKeys.add(key);
+      }
+      for (const balance of productBalances) {
+        const lot = productLots.find((candidate) => String(candidate._id) === String(balance.lotId));
+        if (!lot || !Number.isFinite(balance.quantityAvailable) || balance.quantityAvailable < 0) {
+          invalidBalanceCount++;
+          continue;
+        }
+        const key = `${String(balance.lotId)}::${String(balance.locationId)}`;
+        if (keys.has(key)) {
+          invalidBalanceCount++;
+          continue;
+        }
+        keys.add(key);
+        const areaId = lot.areaId ? String(lot.areaId) : null;
+        const area = areaId ? areaById.get(areaId) as any : null;
+        if (areaId && (!area || area.active === false)) invalidBalanceCount++;
+        const areaName = areaId ? (area?.name ?? "Área não encontrada") : "Sem área";
+        const areaKey = areaId ?? "unclassified";
+        const locationId = String(balance.locationId);
+        const location = locationById.get(locationId) as any;
+        if (!location || location.active === false) invalidBalanceCount++;
+        const group = areasMap.get(areaKey) ?? { areaId, areaName, quantityAvailable: 0, locations: new Map<string, number>() };
+        group.quantityAvailable += balance.quantityAvailable;
+        group.locations.set(locationId, (group.locations.get(locationId) ?? 0) + balance.quantityAvailable);
+        areasMap.set(areaKey, group);
+      }
+      const areaRows = Array.from(areasMap.values()).map((group) => ({
+        areaId: group.areaId,
+        areaName: group.areaName,
+        quantityAvailable: group.quantityAvailable,
+        locations: Array.from(group.locations.entries()).map(([locationId, quantityAvailable]) => ({
+          locationId,
+          locationName: (locationById.get(locationId) as any)?.name ?? "Armário não encontrado",
+          quantityAvailable,
+        })).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR")),
+      })).sort((a, b) => a.areaName.localeCompare(b.areaName, "pt-BR"));
+      const lotTotal = productLots.reduce((sum, lot) => sum + (Number.isFinite(lot.quantityAvailable) ? lot.quantityAvailable : 0), 0);
+      const locatedLotTotal = productBalances.reduce((sum, balance) => sum + (Number.isFinite(balance.quantityAvailable) ? balance.quantityAvailable : 0), 0);
+      const lotRows = productLots.map((lot: any) => ({
+        lotId: String(lot._id),
+        lotNumber: lot.lotNumber,
+        areaName: lot.areaId ? ((areaById.get(String(lot.areaId)) as any)?.name ?? "Área não encontrada") : "Sem área",
+        quantityAvailable: lot.quantityAvailable,
+        locations: productBalances.filter((balance) => String(balance.lotId) === String(lot._id)).map((balance) => ({
+          locationId: String(balance.locationId),
+          locationName: (locationById.get(String(balance.locationId)) as any)?.name ?? "Armário não encontrado",
+          quantityAvailable: balance.quantityAvailable,
+        })),
+      })).filter((lot: any) => lot.quantityAvailable > 0 || lot.locations.length > 0);
+      const locationTotal = productLocations.reduce((sum, row) => sum + row.quantity, 0);
+      const physical = productLocations.reduce((sum, row) => sum + row.quantity, 0);
+      return {
+        productId: String(product._id),
+        productName: product.name,
+        globalPhysical,
+        globalStockRowCount: global.length,
+        globalVsLocationDifference: global.length === 1 ? globalPhysical - locationTotal : null,
+        globalVsLotsDifference: productLots.length > 0 ? globalPhysical - lotTotal : null,
+        unmappedLotQuantity: Math.abs(lotTotal - locatedLotTotal),
+        invalidBalanceCount,
+        areas: areaRows,
+        lots: lotRows,
+        // Produtos legados sem lotes continuam visíveis por armário, sem inventar área/lote.
+        untrackedLocations: productLots.length === 0 ? productLocations.map((row: any) => ({
+          locationId: String(row.locationId),
+          locationName: (locationById.get(String(row.locationId)) as any)?.name ?? "Armário não encontrado",
+          quantityAvailable: row.quantity,
+        })) : [],
+        locationPhysical: physical,
+      };
+    }).filter((row: any) =>
+      row.globalPhysical !== 0 || row.locationPhysical !== 0 || row.areas.length > 0 || row.unmappedLotQuantity > 0
+    ).sort((a: any, b: any) => a.productName.localeCompare(b.productName, "pt-BR"));
+    return { generatedAt: Date.now(), readOnly: true, products: result };
   },
 });

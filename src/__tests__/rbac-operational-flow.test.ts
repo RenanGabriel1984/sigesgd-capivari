@@ -55,7 +55,7 @@ describe("etapa 2 — diretor/gestor aprovado reserva estoque", () => {
 
   it("aprovação RESERVA (reservedQuantity += aprovado) com revalidação fresh", () => {
     expect(reqSrc).toContain("const newReserved = freshStock.reservedQuantity + item.quantityApproved;");
-    expect(reqSrc).toMatch(/const freshStock = await ctx\.db\./);
+    expect(reqSrc).toMatch(/const freshStock = await ctx\.db\.query\("stock"\)/);
   });
 
   it("auditoria 'approve' registrada com usuário e itens", () => {
@@ -73,6 +73,8 @@ describe("etapa 3 — entrega baixa físico e libera reserva", () => {
   it("baixa efetiva SOMENTE na entrega: físico e reservado descem JUNTOS", () => {
     expect(reqSrc).toContain("const newPhysical = freshStock.physicalQuantity - input.quantityDelivered;");
     expect(reqSrc).toContain("const newReserved = freshStock.reservedQuantity - input.quantityDelivered;");
+    expect(reqSrc).toContain("const unusedReservation = adjustment.reservedToRelease - input.quantityDelivered;");
+    expect(reqSrc).toContain("const finalReserved = newReserved - unusedReservation;");
   });
 
   it("valida reserva suficiente antes de baixar (nunca reservado < 0)", () => {

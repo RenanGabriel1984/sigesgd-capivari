@@ -61,6 +61,7 @@ type ExitRow = {
   requestReason?: string | null;
   returned: number;
   available: number;
+  lotAllocations?: Array<{ lotId: string; lotNumber: string; sourceLocationId?: string; sourceLocationName: string; allocatedQuantity: number; alreadyReturned: number; remaining: number }>;
 };
 
 export default function ReturnsPage() {
@@ -70,14 +71,20 @@ export default function ReturnsPage() {
   const returns = useQuery(api.returns.list);
   const locations = useQuery(api.storageLocations.listActive);
   const createReturn = useMutation(api.returns.create);
+  const resolveQuarantine = useMutation(api.returns.resolveQuarantine);
 
   const [selectedExitId, setSelectedExitId] = useState<string>("");
   const [quantity, setQuantity] = useState(1);
   const [reason, setReason] = useState("");
   const [condition, setCondition] = useState<ReturnCondition>("unused");
   const [locationId, setLocationId] = useState("");
+  const [lotReturnQuantities, setLotReturnQuantities] = useState<Record<string, string>>({});
   const [observation, setObservation] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [inspectionReturn, setInspectionReturn] = useState<any>(null);
+  const [inspectionDisposition, setInspectionDisposition] = useState<"available" | "disposed">("available");
+  const [inspectionReason, setInspectionReason] = useState("");
+  const [inspectionSubmitting, setInspectionSubmitting] = useState(false);
 
   // Ação "Devolver" vinda da tela de Histórico/Relatório de saídas
   const exitParam = searchParams.get("exit") ?? "";
@@ -95,16 +102,28 @@ export default function ReturnsPage() {
   const alreadyReturned = selectedExit?.returned ?? 0;
   const exitQty = selectedExit?.quantity ?? 0;
   const maxReturnable = returnableQuantity(exitQty, alreadyReturned);
+  const hasTrackedLots = (selectedExit?.lotAllocations?.length ?? 0) > 0;
+  const lotReturnTotal = Object.values(lotReturnQuantities).reduce((sum, value) => sum + (Number(value) || 0), 0);
 
   const handleSubmit = async () => {
     if (!selectedExit) {
       toast.error("Selecione a saída da qual o material será devolvido");
       return;
     }
+    const selectedLotAllocations = (selectedExit.lotAllocations ?? []).map((allocation) => ({
+      lotId: allocation.lotId,
+      sourceLocationId: allocation.sourceLocationId,
+      quantity: Number(lotReturnQuantities[`${allocation.lotId}::${allocation.sourceLocationId ?? ""}`] ?? 0),
+    })).filter((allocation) => allocation.quantity > 0);
+    const returnQuantity = hasTrackedLots ? selectedLotAllocations.reduce((sum, allocation) => sum + allocation.quantity, 0) : quantity;
+    if (!locationId) {
+      toast.error("Selecione o armário onde o material está sendo recebido ou ficará em quarentena");
+      return;
+    }
     const validationError = validateReturnQuantity({
       exitQuantity: exitQty,
       alreadyReturned,
-      requested: quantity,
+      requested: returnQuantity,
     });
     if (validationError) {
       toast.error(validationError);
@@ -119,14 +138,17 @@ export default function ReturnsPage() {
     try {
       await createReturn({
         exitMovementId: selectedExit._id as any,
-        quantity,
+        quantity: returnQuantity,
         reason: reason.trim(),
         condition: condition as any,
         locationId: locationId ? (locationId as any) : undefined,
+        lotAllocations: hasTrackedLots ? selectedLotAllocations as any : undefined,
         observation: observation || undefined,
       });
       toast.success(
-        `Devolução de ${quantity} unidade(s) registrada — estoque recomposto`
+        condition === "unused"
+          ? `Devolução de ${returnQuantity} unidade(s) registrada — estoque recomposto`
+          : `Devolução registrada em quarentena — não adicionada ao saldo disponível`
       );
       setSelectedExitId("");
       setSearchParams({}, { replace: true });
@@ -138,20 +160,48 @@ export default function ReturnsPage() {
     }
   };
 
+  const handleResolveQuarantine = async () => {
+    if (!inspectionReturn) return;
+    if (!inspectionReason.trim()) {
+      toast.error("Informe a justificativa da inspeção");
+      return;
+    }
+    setInspectionSubmitting(true);
+    try {
+      await resolveQuarantine({
+        returnId: inspectionReturn._id as any,
+        disposition: inspectionDisposition,
+        reason: inspectionReason.trim(),
+      });
+      toast.success(inspectionDisposition === "available"
+        ? "Material aprovado e reincorporado ao estoque"
+        : "Material descartado e mantido fora do estoque disponível");
+      setInspectionReturn(null);
+      setInspectionReason("");
+      setInspectionDisposition("available");
+    } catch (e: any) {
+      toast.error(e.message ?? "Não foi possível concluir a inspeção");
+    } finally {
+      setInspectionSubmitting(false);
+    }
+  };
+
   const resetForm = () => {
     setQuantity(1);
     setReason("");
     setCondition("unused");
     setLocationId("");
+    setLotReturnQuantities({});
     setObservation("");
   };
 
   const openReturn = (row: ExitRow) => {
     setSelectedExitId(row._id);
-    setQuantity(row.available >= 1 ? 1 : row.available);
+    setQuantity((row.lotAllocations?.length ?? 0) > 0 ? 0 : (row.available >= 1 ? 1 : row.available));
     setReason("");
     setCondition("unused");
     setLocationId("");
+    setLotReturnQuantities({});
     setObservation("");
   };
 
@@ -265,10 +315,13 @@ export default function ReturnsPage() {
                       <TableHead>Saída</TableHead>
                       <TableHead>Produto</TableHead>
                       <TableHead className="text-center">Qtd</TableHead>
+                      <TableHead>Lotes × armários</TableHead>
                       <TableHead>Condição</TableHead>
+                      <TableHead>Situação do estoque</TableHead>
                       <TableHead>Motivo</TableHead>
                       <TableHead>Devolvido por</TableHead>
                       <TableHead>Recebido por</TableHead>
+                      <TableHead>Inspeção</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -286,10 +339,22 @@ export default function ReturnsPage() {
                         <TableCell className="text-center">
                           <Badge variant="outline">{r.quantity}</Badge>
                         </TableCell>
+                        <TableCell className="text-xs min-w-52">
+                          {(r.lotAllocations ?? []).length > 0
+                            ? r.lotAllocations.map((allocation: any, index: number) => (
+                                <div key={index}>{allocation.lotNumber} · {allocation.sourceLocationName} → {allocation.destinationLocationName}: <span className="font-mono">{allocation.quantity}</span></div>
+                              ))
+                            : r.lot?.lotNumber ?? "—"}
+                        </TableCell>
                         <TableCell className="text-xs">
                           {r.condition
                             ? RETURN_CONDITION_LABELS[r.condition as ReturnCondition]
                             : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={r.stockDisposition === "quarantine" ? "destructive" : "secondary"}>
+                            {r.stockDisposition === "quarantine" ? "Quarentena" : r.stockDisposition === "available" ? "Disponível" : "Disponível (legado)"}
+                          </Badge>
                         </TableCell>
                         <TableCell className="text-sm max-w-[200px] truncate">
                           {r.reason}
@@ -299,6 +364,21 @@ export default function ReturnsPage() {
                         </TableCell>
                         <TableCell className="text-sm">
                           {r.receivedBy?.name ?? r.returnedBy?.name ?? "—"}
+                        </TableCell>
+                        <TableCell>
+                          {r.stockDisposition === "quarantine" && canProcess ? (
+                            <Button size="sm" variant="outline" onClick={() => {
+                              setInspectionReturn(r);
+                              setInspectionDisposition("available");
+                              setInspectionReason("");
+                            }}>Inspecionar</Button>
+                          ) : r.stockDisposition === "disposed" ? (
+                            <Badge variant="destructive">Descartado</Badge>
+                          ) : r.stockDisposition === "available" ? (
+                            <Badge variant="secondary">Liberado</Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Legado</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -358,7 +438,18 @@ export default function ReturnsPage() {
                   ))}
                 </div>
 
-                <div>
+                {hasTrackedLots ? (
+                  <div className="space-y-3 rounded-lg border p-3">
+                    <div><Label>Distribuição da devolução por lote</Label><p className="mt-1 text-xs text-muted-foreground">Informe quanto está retornando de cada lote retirado. O sistema não distribui a quantidade automaticamente.</p></div>
+                    {(selectedExit?.lotAllocations ?? []).map((allocation) => {
+                      const key = `${allocation.lotId}::${allocation.sourceLocationId ?? ""}`;
+                      return <div key={key} className="grid grid-cols-[1fr_96px] gap-3 items-center"><div className="min-w-0"><p className="text-sm font-medium">{allocation.lotNumber}</p><p className="text-xs text-muted-foreground">Origem: {allocation.sourceLocationName} · Restante: {allocation.remaining}</p></div><Input type="number" min={0} max={allocation.remaining} step="any" value={lotReturnQuantities[key] ?? ""} onChange={(e) => setLotReturnQuantities((current) => ({ ...current, [key]: e.target.value }))} placeholder="0" /></div>;
+                    })}
+                    <div className="flex justify-between border-t pt-2 text-sm"><span className="text-muted-foreground">Total a devolver</span><span className="font-semibold tabular-nums">{lotReturnTotal}</span></div>
+                    <p className="text-xs text-muted-foreground">Limite total da saída: {maxReturnable}</p>
+                  </div>
+                ) : (
+                  <div>
                   <Label>Quantidade a devolver (parcial permitida)</Label>
                   <Input
                     type="number"
@@ -371,10 +462,12 @@ export default function ReturnsPage() {
                   <p className="text-xs text-muted-foreground mt-1">
                     Disponível para devolver: {maxReturnable}
                   </p>
-                </div>
+                  </div>
+                )}
 
                 <div>
                   <Label>Condição do material</Label>
+                  <p className="text-xs text-muted-foreground">Somente material não utilizado retorna ao saldo disponível. Material parcialmente utilizado, defeituoso ou não classificado fica em quarentena até inspeção.</p>
                   <select
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={condition}
@@ -399,13 +492,13 @@ export default function ReturnsPage() {
                 </div>
 
                 <div>
-                  <Label>Local físico de destino (opcional)</Label>
+                  <Label>Armário de destino *</Label>
                   <select
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                     value={locationId}
                     onChange={(e) => setLocationId(e.target.value)}
                   >
-                    <option value="">Sem alteração de local</option>
+                    <option value="">Selecione o armário de destino...</option>
                     {(locations ?? []).map((l: any) => (
                       <option key={l._id} value={l._id}>
                         {l.name}
@@ -456,6 +549,52 @@ export default function ReturnsPage() {
                     Confirmar Devolução <ArrowRight className="h-4 w-4" />
                   </>
                 )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!inspectionReturn} onOpenChange={(open) => {
+          if (!open && !inspectionSubmitting) {
+            setInspectionReturn(null);
+            setInspectionReason("");
+          }
+        }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Inspecionar material em quarentena</DialogTitle>
+            </DialogHeader>
+            {inspectionReturn && (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
+                  {inspectionReturn.product?.name ?? "Produto"} · {inspectionReturn.quantity} unidade(s)
+                </p>
+                <div>
+                  <Label>Resultado da inspeção</Label>
+                  <select
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={inspectionDisposition}
+                    onChange={(e) => setInspectionDisposition(e.target.value as "available" | "disposed")}
+                  >
+                    <option value="available">Aprovado — liberar para o estoque</option>
+                    <option value="disposed">Reprovado — descartar</option>
+                  </select>
+                </div>
+                <div>
+                  <Label>Justificativa obrigatória</Label>
+                  <Textarea
+                    value={inspectionReason}
+                    onChange={(e) => setInspectionReason(e.target.value)}
+                    placeholder="Descreva a inspeção e o motivo da decisão..."
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" disabled={inspectionSubmitting} onClick={() => setInspectionReturn(null)}>Cancelar</Button>
+              <Button onClick={handleResolveQuarantine} disabled={inspectionSubmitting}>
+                {inspectionSubmitting ? "Registrando..." : "Confirmar inspeção"}
               </Button>
             </DialogFooter>
           </DialogContent>

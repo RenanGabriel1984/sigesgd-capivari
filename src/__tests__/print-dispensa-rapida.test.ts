@@ -254,14 +254,18 @@ describe("PRINT-DISP — A retirada é uma SAÍDA real, não transferência", ()
     expect(submitBody).not.toContain("delete");
     expect(submitBody).not.toContain("patch");
 
-    // O backend só DEBITO saldo: não apaga registro de estoque/local.
+    // A saída simples só consome no armário; abertura de embalagens também
+    // reclassifica unidades para o produto avulso no MESMO armário/área.
     expect(withdrawBlock).not.toContain("db.delete");
     expect(withdrawFamilyBlock).not.toContain("db.delete");
     expect(withdrawBlock).toContain("physicalQuantity: newPhysical");
-    // E nenhuma das duas mutations altera produtos/áreas/locais.
+    expect(withdrawFamilyBlock).toContain("stockByLocation");
+    expect(withdrawFamilyBlock).toContain("lotLocationBalances");
+    expect(withdrawFamilyBlock).toContain("locationId: args.locationId");
+    // Nenhuma mutation altera o cadastro do produto nem sua classificação de área.
     for (const block of [withdrawBlock, withdrawFamilyBlock]) {
       expect(block).not.toContain('db.patch(product');
-      expect(block).not.toContain("stockByLocation");
+      expect(block).not.toContain('db.patch(lot, { areaId');
     }
   });
 
@@ -289,16 +293,19 @@ describe("PRINT-DISP — A retirada é uma SAÍDA real, não transferência", ()
   });
 
   it("PRINT-DISP-04: FIFO e lotId preservados", () => {
-    // Lotes consumidos em ordem de recebimento (FIFO)…
-    expect(withdrawBlock).toContain("sort((a, b) => a.receivedAt - b.receivedAt)");
-    expect(withdrawBlock).toContain("quantityAvailable");
-    expect(withdrawBlock).toContain("lot.quantityAvailable - take");
-    // …e o lotId do 1º lote consumido vai para a movimentação.
-    expect(withdrawBlock).toContain("lotId: consumedLots[0].lotId");
+    // FIFO é centralizado no planejador puro e chamado pela mutation.
+    expect(withdrawBlock).toContain("consumeLotLocationStock");
+    expect(withdrawBlock).toContain("recordLotMovementAllocations");
+    expect(withdrawBlock).toContain("lotId: consumedLots[0]?.lotId");
+    expect(withdrawBlock).toContain("Lotes retirados:");
+    const planner = read("src/lib/lot-location-rules.ts");
+    expect(planner).toContain("export function planFifoLotLocationConsumption");
+    expect(planner).toContain("a.lot.receivedAt - b.lot.receivedAt");
+    expect(planner).toContain("lotQuantityAfter: Math.max(0, item.lot.quantityAvailable - take)");
 
-    // Falha de consistência ABORTA (nenhuma saída parcial registrada).
-    expect(withdrawBlock).toContain("Falha de consistência: lotes insuficientes");
-    expect(withdrawBlock).toContain("Nenhuma saída registrada");
+    // Falha de consistência bloqueia antes de gravar a movimentação.
+    expect(planner).toContain("Lotes insuficientes no armário selecionado");
+    expect(withdrawBlock.indexOf("consumeLotLocationStock")).toBeLessThan(withdrawBlock.indexOf('ctx.db.insert("stockMovements"'));
   });
 
   it("PRINT-DISP-04b: a abertura de embalagem é um evento explícito e rastreado", () => {

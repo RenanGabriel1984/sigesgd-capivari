@@ -20,6 +20,12 @@ export const RETURN_CONDITION_VALUES = [
 
 export type ReturnCondition = (typeof RETURN_CONDITION_VALUES)[number];
 
+/** Somente material não utilizado pode voltar automaticamente ao saldo disponível. */
+export function returnConditionReturnsToAvailableStock(condition: ReturnCondition): boolean {
+  return condition === "unused";
+}
+
+
 export const RETURN_CONDITION_LABELS: Record<ReturnCondition, string> = {
   unused: "Não utilizado",
   partially_used: "Utilizado parcialmente",

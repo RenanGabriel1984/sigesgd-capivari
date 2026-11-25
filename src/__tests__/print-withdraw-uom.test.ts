@@ -164,9 +164,21 @@ describe("PRINT-EXIT-03 — retirada respeita o backend (autoridade final)", () 
   });
 
   it("FIFO de lotes e lotId estruturado preservados na retirada por família", () => {
-    expect(backend).toContain("sort((a, b) => a.receivedAt - b.receivedAt)");
-    expect(backend).toContain("lotId: consumedLots[0]?.lotId as never");
-    expect(backend).toContain("Falha de consistência: lotes insuficientes");
+    expect(backend).toContain("consumeLotLocationStock");
+    expect(backend).toContain("recordLotMovementAllocations");
+    expect(backend).toContain("lotId: consumedLots.find((allocation) => allocation.productId === args.productId)?.lotId");
+    const planner = read("src/lib/lot-location-rules.ts");
+    expect(planner).toContain("export function planFifoLotLocationConsumption");
+    expect(planner).toContain("a.lot.receivedAt - b.lot.receivedAt");
+    expect(planner).toContain("Lotes insuficientes no armário selecionado");
+    const family = backend.slice(backend.indexOf("export const withdrawFamily = mutation({"), backend.indexOf("export const previewFamilyWithdrawal = query({"));
+    const openPackStart = family.indexOf("const openPacks = plan.packs");
+    const globalPatch = family.indexOf("await ctx.db.patch(looseStockId, { physicalQuantity: newLoosePhys })", openPackStart);
+    const globalInsert = family.indexOf('looseStockId = await ctx.db.insert("stock"', openPackStart);
+    const fifoConsume = family.indexOf("consumeAtLocation(looseMember._id, looseExitUnits", openPackStart);
+    expect(openPackStart).toBeGreaterThan(-1);
+    expect(globalPatch > openPackStart || globalInsert > openPackStart).toBe(true);
+    expect(Math.min(globalPatch < 0 ? Number.MAX_SAFE_INTEGER : globalPatch, globalInsert < 0 ? Number.MAX_SAFE_INTEGER : globalInsert)).toBeLessThan(fifoConsume);
   });
 
   it("a retirada registra destino, secretaria, departamento, unidade, O.S. e motivo", () => {
@@ -432,9 +444,12 @@ describe("PRINT-UOM-12 — estoque global continua 3338 com divergência 0", () 
   });
 
   it("qualquer mutation aborta em divergência inesperada", () => {
-    expect(backend).toContain("INTEGRIDADE: estoque global divergente antes da operação");
-    expect(backend).toContain("VIOLAÇÃO DE SALDO na retirada");
-    expect(backend).toContain("physicalDelta !== -args.quantity");
+    expect(backend).toContain("INTEGRIDADE: estoque da família divergente antes da operação");
+    expect(backend).toContain("VIOLAÇÃO DE SALDO na reclassificação/retirada");
+    // A retirada opera com produtos em unidades diferentes (caixa × unidade):
+    // a guarda correta verifica equivalência convertida em unidade-base.
+    expect(backend).toContain("Math.abs(baseUnitDelta + args.quantity) > STOCK_EPSILON");
+    expect(backend).toContain("Math.abs(physicalDelta - expectedRawDelta) > STOCK_EPSILON");
   });
 
   it("a conversa de estoque usa a MESMA unidade-base (4 livros-razão conferidos)", () => {
@@ -472,12 +487,15 @@ describe("PRINT-UOM-13 — nenhuma conversão automática indevida de papel tér
 
 describe("PRINT-UOM-14 — nenhuma duplicação de estoque é criada", () => {
   it("não existe nova tabela de estoque no painel de suprimentos", () => {
-    expect(backend).not.toMatch(/insert\("(stock|printSuppliesStock|supplyStock|familyStock)"/);
+    // O registro stock é a tabela canônica já existente, não uma tabela nova;
+    // não pode haver cache/tabela paralela de famílias.
+    expect(backend).toContain("getOptionalSingleValidGlobalStock");
+    expect(backend).not.toMatch(/insert\("(printSuppliesStock|supplyStock|familyStock|supplyFamilies|families)"/);
     expect(schema).not.toMatch(/defineTable\(\{[^}]*familyStock/);
   });
 
   it("a abertura de caixa é REPARTIÇÃO, não geração: transferência de unidades entre registros", () => {
-    expect(backend).toContain("transferir as unidades");
+    expect(backend).toContain("Reclassificação: transferir as unidades");
     // A abertura credita as unidades no produto avulso e consome as caixas.
     expect(backend).toContain("const openedUnits = openPacks * conv.factor");
     expect(backend).toContain("newLoosePhys = loosePhys + openedUnits");
