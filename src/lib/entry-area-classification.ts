@@ -3,9 +3,9 @@
  * Área do item tem precedência; item legado ou sem sobrescrita herda o cabeçalho.
  * A localização física permanece independente desta classificação.
  */
-export function resolveEntryItemAreaId(
-  itemAreaId: string | null | undefined,
-  defaultAreaId: string | null | undefined,
-): string | undefined {
+export function resolveEntryItemAreaId<T extends string>(
+  itemAreaId: T | null | undefined,
+  defaultAreaId: T | null | undefined,
+): T | undefined {
   return itemAreaId ?? defaultAreaId ?? undefined;
 }
