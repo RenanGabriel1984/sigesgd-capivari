@@ -36,6 +36,13 @@ describe("etapa 4 — Gomaq, suprimentos, inventário e relatórios", () => {
     expect(create).toContain("gomaQExchanges");
   });
 
+  it("coleta GomaQ rejeita IDs de carcaça duplicados antes de alterar registros", () => {
+    const collection = section(gomaQ, "export const createCollection = mutation({", "export const exportMonthlyOrder = mutation({");
+    expect(collection).toContain("new Set(args.cartridgeIds).size !== args.cartridgeIds.length");
+    expect(collection).toContain("A mesma carcaça não pode ser incluída mais de uma vez");
+    expect(collection.indexOf("new Set(args.cartridgeIds)")).toBeLessThan(collection.indexOf('ctx.db.patch(cartridgeId'));
+  });
+
   it("retirada simples e por família de suprimentos registram lotes e armários", () => {
     const simple = section(printSupplies, "export const withdraw = mutation({", "export const configurePackaging = mutation({");
     const family = section(printSupplies, "export const withdrawFamily = mutation({", "export const previewFamilyWithdrawal = query({");
