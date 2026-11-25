@@ -31,6 +31,7 @@ export interface NfeAdvanceRow {
   productId?: string;
   matchStatus: ProductMatchStatus;
   locationId?: string;
+  areaId?: string;
   supplierLot?: string;
 }
 
@@ -118,6 +119,7 @@ export interface NfeSummaryItem {
   unitValue?: number;
   totalValue?: number;
   locationName?: string;
+  areaName?: string;
   supplierLot?: string;
 }
 
@@ -154,12 +156,15 @@ export function buildNfeEntrySummary(input: {
   rows: ReadonlyArray<NfeAdvanceRow>;
   products: ReadonlyArray<{ _id: string; name: string }>;
   locations?: ReadonlyArray<{ _id: string; name: string }>;
+  areas?: ReadonlyArray<{ _id: string; name: string }>;
+  defaultAreaId?: string;
   supplier?: { legalName: string; cnpj?: string | null } | null;
   afNumber?: string;
   processNumber?: string;
   empenhoNumber?: string;
 }): NfeEntrySummaryData {
   const locations = input.locations ?? [];
+  const areas = input.areas ?? [];
   const items: NfeSummaryItem[] = input.rows.map((row) => {
     const product = input.products.find(
       (candidate) => candidate._id === row.productId,
@@ -167,6 +172,8 @@ export function buildNfeEntrySummary(input: {
     const location = locations.find(
       (candidate) => candidate._id === row.locationId,
     );
+    const effectiveAreaId = row.areaId || input.defaultAreaId;
+    const area = areas.find((candidate) => candidate._id === effectiveAreaId);
     return {
       lineNumber: row.item.lineNumber,
       productId: row.productId ?? "",
@@ -180,6 +187,9 @@ export function buildNfeEntrySummary(input: {
       unitValue: row.item.unitValue,
       totalValue: row.item.totalValue,
       locationName: location?.name,
+      areaName: area?.name ?? (row.areaId
+        ? "Área selecionada não encontrada"
+        : "Área padrão será definida na confirmação"),
       supplierLot: row.supplierLot || undefined,
     };
   });
