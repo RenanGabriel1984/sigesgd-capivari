@@ -1522,8 +1522,17 @@ export const stockDimensionOverview = query({
           quantityAvailable,
         })).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR")),
       })).sort((a, b) => a.areaName.localeCompare(b.areaName, "pt-BR"));
+      // Soma diferenças por lote; diferenças opostas entre lotes não podem se anular.
+      const unmappedLotQuantity = productLots.reduce((sum, lot) => {
+        const lotQuantity = Number.isFinite(lot.quantityAvailable) ? lot.quantityAvailable : 0;
+        const locatedQuantity = productBalances
+          .filter((balance) => String(balance.lotId) === String(lot._id))
+          .reduce((total, balance) => total + (Number.isFinite(balance.quantityAvailable) ? balance.quantityAvailable : 0), 0);
+        return sum + Math.abs(lotQuantity - locatedQuantity);
+      }, 0) + productBalances
+        .filter((balance) => !productLots.some((lot) => String(lot._id) === String(balance.lotId)))
+        .reduce((sum, balance) => sum + Math.abs(Number.isFinite(balance.quantityAvailable) ? balance.quantityAvailable : 0), 0);
       const lotTotal = productLots.reduce((sum, lot) => sum + (Number.isFinite(lot.quantityAvailable) ? lot.quantityAvailable : 0), 0);
-      const locatedLotTotal = productBalances.reduce((sum, balance) => sum + (Number.isFinite(balance.quantityAvailable) ? balance.quantityAvailable : 0), 0);
       const lotRows = productLots.map((lot: any) => ({
         lotId: String(lot._id),
         lotNumber: lot.lotNumber,
@@ -1544,7 +1553,7 @@ export const stockDimensionOverview = query({
         globalStockRowCount: global.length,
         globalVsLocationDifference: global.length === 1 ? globalPhysical - locationTotal : null,
         globalVsLotsDifference: productLots.length > 0 ? globalPhysical - lotTotal : null,
-        unmappedLotQuantity: Math.abs(lotTotal - locatedLotTotal),
+        unmappedLotQuantity,
         invalidBalanceCount,
         areas: areaRows,
         lots: lotRows,
