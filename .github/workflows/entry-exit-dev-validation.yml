@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: entry-exit-dev-first-herring
+  group: entry-exit-dev-first-herring-${{ github.event_name }}
   cancel-in-progress: false
 jobs:
   quality:
