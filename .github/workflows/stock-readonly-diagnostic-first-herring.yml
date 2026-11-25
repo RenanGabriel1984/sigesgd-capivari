@@ -13,7 +13,7 @@ permissions:
   statuses: write
 
 concurrency:
-  group: stock-readonly-diagnostic-first-herring
+  group: stock-readonly-diagnostic-${{ github.event_name }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -164,27 +164,6 @@ jobs:
           console.log(JSON.stringify(summary, null, 2));
           NODE
 
-      - name: Publicar status verificável do diagnóstico no commit
-        if: always()
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          if [ "${JOB_STATUS}" = "success" ]; then
-            state="success"
-            description="Diagnóstico read-only concluído em first-herring-264"
-          else
-            state="failure"
-            description="Diagnóstico read-only falhou; consulte a execução"
-          fi
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -f state="${state}" \
-            -f context="stock-readonly-diagnostic/first-herring-264" \
-            -f description="${description}" \
-            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-
       - name: Registrar resumo sem dados identificadores
         shell: bash
         run: |
@@ -220,3 +199,24 @@ jobs:
             appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n")
           );
           NODE
+
+      - name: Publicar status verificável do diagnóstico no commit
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [ "${JOB_STATUS}" = "success" ]; then
+            state="success"
+            description="Diagnóstico read-only concluído em first-herring-264"
+          else
+            state="failure"
+            description="Diagnóstico read-only falhou; consulte a execução"
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state="${state}" \
+            -f context="stock-readonly-diagnostic/first-herring-264" \
+            -f description="${description}" \
+            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
