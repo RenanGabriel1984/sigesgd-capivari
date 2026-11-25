@@ -1,4 +1,4 @@
-import {internalMutation} from "./_generated/server";
+import {internalMutation,internalQuery} from "./_generated/server";
 import {v} from "convex/values";
 import {hashPassword,verifyPassword} from "./auth/passwords";
 const HOST="first-herring-264.convex.cloud",PREFIX="__SIGESGD_AUTH_DEV__";
