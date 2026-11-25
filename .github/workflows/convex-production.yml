@@ -97,7 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           result="$(bunx convex run passwords:hasAdmin '{}')"
-          if ! printf '%s\\n' "$result" | grep -Fxq 'true'; then
+          if ! printf '%s\n' "$result" | grep -Fxq 'true'; then
             echo "::error::Backend publicado, mas não foi possível confirmar a existência de um administrador ativo. Nenhuma conta foi criada ou alterada."
             exit 1
           fi
