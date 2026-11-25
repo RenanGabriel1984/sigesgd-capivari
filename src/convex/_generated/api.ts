@@ -41,6 +41,7 @@ import type * as products from "../products.js";
 import type * as pwResetHelpers from "../pwResetHelpers.js";
 import type * as rbac from "../rbac.js";
 import type * as requests from "../requests.js";
+import type * as requestDevTests from "../requestDevTests.js";
 import type * as returns from "../returns.js";
 import type * as securityAudit from "../securityAudit.js";
 import type * as seed from "../seed.js";
@@ -104,6 +105,7 @@ const fullApi: ApiFromModules<{
   pwResetHelpers: typeof pwResetHelpers;
   rbac: typeof rbac;
   requests: typeof requests;
+  requestDevTests: typeof requestDevTests;
   returns: typeof returns;
   securityAudit: typeof securityAudit;
   seed: typeof seed;
