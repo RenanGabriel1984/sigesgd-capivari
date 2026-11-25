@@ -78,6 +78,30 @@ export function readReplenishmentParameters(raw: RawReplenishmentFields): Replen
 }
 
 /**
+ * Habilitação operacional segura da reposição.
+ *
+ * Um produto só pode entrar no planejamento quando mínimo e ideal são
+ * positivos e coerentes. Zero continua sendo um parâmetro válido para
+ * relatórios, mas não é um gatilho operacional de reposição.
+ */
+export function validateReplenishmentActivation(input: {
+  minimumStock: number | null;
+  idealStock: number | null;
+}): string | null {
+  const { minimumStock: minimum, idealStock: ideal } = input;
+  if (minimum === null || minimum <= 0) {
+    return "Defina um estoque mínimo maior que zero antes de habilitar a reposição.";
+  }
+  if (ideal === null || ideal <= 0) {
+    return "Defina um estoque ideal maior que zero antes de habilitar a reposição.";
+  }
+  if (ideal < minimum) {
+    return "O estoque ideal não pode ser menor que o estoque mínimo.";
+  }
+  return null;
+}
+
+/**
  * O produto foi parametrizado?
  *
  * TRUE quando ao menos um parâmetro de reposição tem VALOR — inclusive 0.
