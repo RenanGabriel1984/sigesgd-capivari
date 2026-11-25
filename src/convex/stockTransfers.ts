@@ -22,7 +22,7 @@ export const list = query({
     const transfers = await ctx.db.query("stockTransfers").order("desc").take(200);
     return Promise.all(transfers.map(async (t: any) => {
       const product = await ctx.db.get(t.productId);
-      const lot = t.lotId ? await ctx.db.get(t.lotId) : null;
+      const lot: any = t.lotId ? await ctx.db.get(t.lotId) : null;
       const fromLocation = await ctx.db.get(t.fromLocationId);
       const toLocation = await ctx.db.get(t.toLocationId);
       const responsible = await ctx.db.get(t.responsibleUserId);
@@ -45,7 +45,7 @@ export const listByProduct = query({
     return Promise.all(transfers.map(async (t: any) => {
       const fromLocation = await ctx.db.get(t.fromLocationId);
       const toLocation = await ctx.db.get(t.toLocationId);
-      const lot = t.lotId ? await ctx.db.get(t.lotId) : null;
+      const lot: any = t.lotId ? await ctx.db.get(t.lotId) : null;
       const area = lot?.areaId ? await ctx.db.get(lot.areaId) : null;
       const movement = t.movementId ? await ctx.db.get(t.movementId) : null;
       return { ...t, lot, area, movement, fromLocation, toLocation };
