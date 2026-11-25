@@ -26,3 +26,12 @@ O registro `stockTransfers` mantém produto/lote, origem, destino, quantidade, r
 - Nenhuma migração ou alteração de saldo é executada por estes artefatos.
 - Transferências sem lote continuam permitidas somente para produtos sem histórico de lotes/saldos lote-local.
 - Divergências, áreas incompatíveis, lotes inativos positivos, saldos duplicados ou saldos não rastreáveis bloqueiam a operação para regularização.
+
+
+## Validação transacional controlada no DEV
+
+O workflow `.github/workflows/stock-dev-transactional-validation.yml` publica este código exclusivamente em `dev:first-herring-264` e executa as mutations públicas reais com identidade de um operador DEV ativo autorizado. A fixture é criada em uma transação interna, com produto, lote, área, entrada e dois armários identificados pelo prefixo `__SIGESGD_DEV_TXN__` e pelo ID único da execução.
+
+O cenário cobre transferência entre armários, devolução parcial, bloqueio de devolução acima do saldo, entrada em quarentena, liberação após inspeção e descarte sem recomposição. Cada etapa compara estoque global, soma dos armários, saldo dos lotes e lote × armário. O runner sempre tenta a limpeza em `finally`; um segundo passo do workflow repete a limpeza de forma idempotente e confirma que o produto de fixture não existe mais.
+
+A fixture não reutiliza os produtos, lotes ou armários operacionais. As saídas de origem são movimentos sintéticos vinculados apenas ao produto descartável de teste, evitando consumir o sequencial real de saídas. O workflow recusa qualquer chave diferente do prefixo `dev:first-herring-264`; não contém caminho de execução em produção.
