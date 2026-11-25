@@ -1,0 +1,48 @@
+name: Stock returns and transfers runtime DEV validation
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: stock-ledger-runtime-first-herring-${{ github.event_name }}
+  cancel-in-progress: false
+jobs:
+  transactional-validation:
+    if: github.head_ref == 'codex/stock-transactions-runtime-on-current-chain'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76
+        with:
+          bun-version: "1.3.14"
+      - run: bun install --frozen-lockfile
+      - name: Tests, TypeScript and production build
+        run: bun run test && bun run build
+      - name: Guard exclusive DEV deployment
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
+        run: |
+          set -euo pipefail
+          test -n "${CONVEX_DEPLOY_KEY:-}"
+          test "${CONVEX_DEPLOY_KEY%%|*}" = "dev:first-herring-264"
+          test -z "${CONVEX_DEPLOYMENT:-}"
+      - name: Deploy DEV functions
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
+        run: bunx convex dev --once --tail-logs disable
+      - name: Exercise transfer and return mutations, then verify fixture cleanup
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
+        run: node scripts/convex-dev-stock-transactions.mjs
+      - name: Final idempotent cleanup
+        if: always()
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
+          RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          bunx convex run stockDevTransactionTests:cleanup "{\"runId\":\"$RUN_ID\"}"
