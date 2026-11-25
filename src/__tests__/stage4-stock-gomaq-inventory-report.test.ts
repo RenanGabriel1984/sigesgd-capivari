@@ -101,6 +101,9 @@ describe("etapa 4 — Gomaq, suprimentos, inventário e relatórios", () => {
     expect(reports).toContain("api.stockSetup.stockDimensionOverview");
     expect(reports).toContain("api.requests.listForReport");
     expect(reports).toContain("exportLotLocationCSV");
+    expect(reports).toContain('lotNumber: "Inconsistência de saldo"');
+    expect(reports).toContain("diagnosticCount: product.invalidBalanceCount");
+    expect(reports).toContain("Alertas de integridade");
     expect(reports).toContain("dimensionAreaFilter");
     expect(reports).toContain("dimensionLocationFilter");
     expect(stockPage).toContain("api.stockSetup.stockDimensionOverview");
