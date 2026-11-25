@@ -58,6 +58,7 @@ import type * as supplyRequests from "../supplyRequests.js";
 import type * as users from "../users.js";
 import type * as water from "../water.js";
 import type * as waterDevTransactionTests from "../waterDevTransactionTests.js";
+import type * as entryExitDevTests from "../entryExitDevTests.js";
 
 import type {
   ApiFromModules,
@@ -117,6 +118,7 @@ const fullApi: ApiFromModules<{
   users: typeof users;
   water: typeof water;
   waterDevTransactionTests: typeof waterDevTransactionTests;
+  entryExitDevTests: typeof entryExitDevTests;
 }> = anyApi as any;
 
 /**
