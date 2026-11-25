@@ -66,5 +66,5 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  if(location)await ctx.db.delete(location._id);
  const remaining=await ctx.db.query("products").withIndex("by_name",q=>q.eq("name",name(runId,"PRODUCT"))).first();
  if(remaining)throw new Error("Fixture request ainda existe.");
- return {fixtureRemaining:false,deleted:{audit:audit.length,requests:requests.length,items:items.length,users:2}};
+ return {fixtureRemaining:false,deleted:{audit:audit.length,requests:requests.length,items:items.length,movements:movements.length,allocations:allocations.length,requestItemLots:requestItemLots.length,passwords:credentials.length,users:2}};
 }});
