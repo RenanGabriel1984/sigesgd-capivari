@@ -4,7 +4,7 @@ Este workflow publica funções e schema apenas no deployment `dev:first-herring
 e executa `stockSetup:lotLocationMigrationReadinessInternal`, uma consulta interna
 sem operações de escrita.
 
-A execução é acionada por push na branch `codex/stock-readonly-diagnostic-first-herring`.
+A execução é acionada por push na branch `codex/stock-readonly-diagnostic-pr39-dev-run`.
 Antes da publicação, o workflow executa a suíte completa e a compilação de produção.
 A chave é validada pelo prefixo exato `dev:first-herring-264`; os deployments oficiais
 e de homologação são explicitamente rejeitados.
