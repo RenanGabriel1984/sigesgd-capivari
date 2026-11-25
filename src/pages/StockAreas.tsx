@@ -225,7 +225,7 @@ export default function StockAreas() {
                     {lotLocationReadiness.plan.insertions.length === 0 ? (
                       <p className="text-xs text-muted-foreground">Nenhuma associação candidata liberada.</p>
                     ) : lotLocationReadiness.plan.insertions.map((row) => {
-                      const product = lotLocationReadiness.report.products.find((item) => item.productId === row.productId);
+                      const product = lotLocationReadiness.report.products.find((item: { productId: string; productName: string }) => item.productId === row.productId);
                       const location = lotLocationReadiness.report.locations.find((item) => item.locationId === row.locationId);
                       return (
                         <div key={row.lotId} className="text-xs border-b last:border-0 pb-2">
