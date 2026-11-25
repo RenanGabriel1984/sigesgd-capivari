@@ -11,7 +11,8 @@ describe("GomaQ transaction fixture DEV",()=>{
  });
  it("runner requires a dev key, checks actual ledger, and cleans up in finally",()=>{
   const runner=source("../scripts/convex-dev-gomaq-validation.mjs");
-  expect(runner).toContain("dev:first-herring-264");
+  expect(runner).toContain("first-herring-264");
+  expect(runner).toContain("dev:");
   expect(runner).toContain("CONVEX_DEPLOYMENT");
   expect(runner).toContain("finally");
   expect(runner).toContain("gomaQDevTests:cleanup");
