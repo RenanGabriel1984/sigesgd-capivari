@@ -1,6 +1,9 @@
 name: Validação transacional controlada — Convex DEV
 
 on:
+  push:
+    branches:
+      - codex/dev-transactional-validation
   pull_request:
     branches:
       - codex/returns-transfers-ledger-integration
