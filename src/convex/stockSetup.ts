@@ -1,5 +1,5 @@
 import { requirePermission } from "./rbac";
-import { buildReadonlyLotLocationPlan, isClosedUnusedReturnAtSource } from "../lib/lot-location-readonly-plan";
+import { buildReadonlyLotLocationPlan, isClosedUnusedReturnAtSource, type LotLocationReadinessReport } from "../lib/lot-location-readonly-plan";
 import {
   resolveConsumedLotId,
   formatConsumedLots,
@@ -1220,7 +1220,7 @@ async function readLotLocationMigrationReadiness(ctx: any) {
       entryItemsByLot.set(key, [...(entryItemsByLot.get(key) ?? []), item]);
     }
     const entryById = new Map(entries.map((entry: any) => [String(entry._id), entry]));
-    const readinessProducts: any[] = [];
+    const readinessProducts: LotLocationReadinessReport["products"] = [];
     for (const product of products as any[]) {
       const productLots = (lots as any[]).filter((lot) => String(lot.productId) === String(product._id));
       // Produtos sem lote histórico também entram no relatório: saldo positivo sem lote deve ser bloqueado.
