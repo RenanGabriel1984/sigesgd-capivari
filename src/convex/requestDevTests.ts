@@ -48,9 +48,15 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  ctx.db.query("stockByLocation").withIndex("by_product",q=>q.eq("productId",product._id)).collect(),
  ctx.db.query("lots").withIndex("by_product",q=>q.eq("productId",product._id)).collect()]);
  const balances:any[]=(await Promise.all(lots.map(l=>ctx.db.query("lotLocationBalances").withIndex("by_lot",q=>q.eq("lotId",l._id)).collect()))).flat();
- const ids=new Set([...requests.map(r=>String(r._id)),...items.map(i=>String(i._id))]);
+ const movements=await ctx.db.query("stockMovements").withIndex("by_product",q=>q.eq("productId",product._id)).collect();
+ const allocations:any[]=(await Promise.all(movements.map(m=>ctx.db.query("stockMovementLotAllocations").withIndex("by_movement",q=>q.eq("movementId",m._id)).collect()))).flat();
+ const requestItemLots:any[]=(await Promise.all(items.map(i=>ctx.db.query("requestItemLots").withIndex("by_requestItem",q=>q.eq("requestItemId",i._id)).collect()))).flat();
+ const ids=new Set([...requests.map(r=>String(r._id)),...items.map(i=>String(i._id)),...movements.map(m=>String(m._id))]);
  const audit:any[]=(await ctx.db.query("auditLogs").collect()).filter(a=>a.entityId&&ids.has(a.entityId));
  for(const a of audit)await ctx.db.delete(a._id);
+ for(const a of allocations)await ctx.db.delete(a._id);
+ for(const a of requestItemLots)await ctx.db.delete(a._id);
+ for(const m of movements)await ctx.db.delete(m._id);
  for(const i of items)await ctx.db.delete(i._id);
  for(const r of requests)await ctx.db.delete(r._id);
  for(const b of balances)await ctx.db.delete(b._id);
@@ -60,7 +66,8 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  await ctx.db.delete(product._id);
  if(entry)await ctx.db.delete(entry._id);
  if(requester)await ctx.db.delete(requester._id);
- for(const credential of credentials)await ctx.db.delete(credential._id);\n if(approver)await ctx.db.delete(approver._id);
+ for(const credential of credentials)await ctx.db.delete(credential._id);
+ if(approver)await ctx.db.delete(approver._id);
  if(org)await ctx.db.delete(org._id);
  if(area)await ctx.db.delete(area._id);
  if(location)await ctx.db.delete(location._id);
