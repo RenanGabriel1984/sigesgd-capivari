@@ -82,17 +82,12 @@ function expectFailure(fn, label, pattern) {
 
 let failure;
 try {
-  const userQuery = `const users = await ctx.db.query("users").collect(); return users.filter((u) => u.active !== false && u.isAnonymous !== true && ["admin", "stock_manager"].includes(u.role)).map((u) => ({ userId: u._id, role: u.role }));`;
-  const operators = run(["--inline-query", userQuery], "localizar operador de teste");
-  assert(Array.isArray(operators) && operators.length > 0,
-    "Nenhum usuário ativo admin/stock_manager foi encontrado no DEV; nenhuma fixture foi criada.");
-  const operator = operators[0];
-  const identity = { subject: operator.userId, issuer: "https://sigesgd-capivari.dev" };
-
-  fixture = internal("stockDevTransactionTests:seed", { runId, operatorId: operator.userId });
+  fixture = internal("stockDevTransactionTests:seed", { runId });
   seeded = true;
-  assert(fixture.runId === runId && fixture.exitIds.length === 3, "Fixture criada com estrutura inesperada.");
-  results.push({ label: "fixture criada", operatorRole: operator.role, isolatedProduct: true });
+  assert(fixture.runId === runId && fixture.exitIds.length === 3 && fixture.operatorId,
+    "Fixture criada com estrutura inesperada.");
+  const identity = { subject: fixture.operatorId, issuer: "https://sigesgd-capivari.dev" };
+  results.push({ label: "fixture criada", operatorRole: fixture.operatorRole, isolatedProduct: true });
 
   let state = assertState(snapshot(), { global: 53, from: 33, to: 20 }, "baseline isolada");
 
