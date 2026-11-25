@@ -25,13 +25,22 @@ describe("etapa 4 — Gomaq, suprimentos, inventário e relatórios", () => {
     const create = section(gomaQ, "export const createExchange = mutation({", "export const createCollection = mutation({");
     expect(create).toContain("assertProductLedgerConsistent");
     expect(create).toContain("assertProductReservationConsistent");
-    expect(create).toContain('eq("name", "Impressoras")');
+    expect(create).toContain('area.name === "Impressoras" || area.name === "Impressoras/Gomaq"');
+    expect(create).toContain("areaId: printerAreaId");
+    expect(create).toContain("exatamente uma área ativa");
     expect(create).toContain("resolveWithdrawalLocation");
     expect(create).toContain("consumeLotLocationStock");
     expect(create).toContain("recordLotMovementAllocations");
     expect(create).toContain("locationId: sourceLocationId");
     expect(create).toContain("locationId: sourceLocationId");
     expect(create).toContain("gomaQExchanges");
+  });
+
+  it("coleta GomaQ rejeita IDs de carcaça duplicados antes de alterar registros", () => {
+    const collection = section(gomaQ, "export const createCollection = mutation({", "export const exportMonthlyOrder = mutation({");
+    expect(collection).toContain("new Set(args.cartridgeIds).size !== args.cartridgeIds.length");
+    expect(collection).toContain("A mesma carcaça não pode ser incluída mais de uma vez");
+    expect(collection.indexOf("new Set(args.cartridgeIds)")).toBeLessThan(collection.indexOf('ctx.db.patch(cartridgeId'));
   });
 
   it("retirada simples e por família de suprimentos registram lotes e armários", () => {
