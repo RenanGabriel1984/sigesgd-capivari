@@ -25,6 +25,7 @@ import type * as gomaQ from "../gomaQ.js";
 import type * as gomaQDevTests from "../gomaQDevTests.js";
 import type * as http from "../http.js";
 import type * as inventory from "../inventory.js";
+import type * as inventoryDevTests from "../inventoryDevTests.js";
 import type * as licenses from "../licenses.js";
 import type * as lots from "../lots.js";
 import type * as nfeProductAliases from "../nfeProductAliases.js";
@@ -87,6 +88,7 @@ const fullApi: ApiFromModules<{
   gomaQDevTests: typeof gomaQDevTests;
   http: typeof http;
   inventory: typeof inventory;
+  inventoryDevTests: typeof inventoryDevTests;
   licenses: typeof licenses;
   lots: typeof lots;
   nfeProductAliases: typeof nfeProductAliases;
