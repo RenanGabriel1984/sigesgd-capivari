@@ -443,6 +443,8 @@ const schema = defineSchema(
       supplierId: v.optional(v.id("suppliers")),
       requestId: v.optional(v.id("requests")),
       entryId: v.optional(v.id("entries")),
+      // Classificação efetiva do movimento; a localização física é independente.
+      areaId: v.optional(v.id("stockAreas")),
       lotId: v.optional(v.string()),
       locationId: v.optional(v.id("storageLocations")),
       documentNumber: v.optional(v.string()),
@@ -597,6 +599,8 @@ const schema = defineSchema(
       model: v.optional(v.string()),
       specification: v.optional(v.string()),
       lotId: v.optional(v.string()),
+      // Área do item sobrescreve a área padrão do cabeçalho quando informada.
+      areaId: v.optional(v.id("stockAreas")),
       locationId: v.optional(v.id("storageLocations")),
       photoStorageId: v.optional(v.string()),
       supplierLotNumber: v.optional(v.string()),
