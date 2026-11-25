@@ -257,9 +257,9 @@ export const cleanup = internalMutation({
     const [product, area, fromLocation, toLocation, entry] = await Promise.all([
       ctx.db.query("products").withIndex("by_name", (q) => q.eq("name", productName)).first(),
       ctx.db.query("stockAreas").withIndex("by_name", (q) => q.eq("name", fixtureName(args.runId, "AREA"))).first(),
-      ctx.db.query("storageLocations").withIndex("by_active", (q) => q.eq("active", true)).collect()
+      ctx.db.query("storageLocations").collect()
         .then((rows) => rows.find((row) => row.name === fixtureName(args.runId, "CABINET_A")) ?? null),
-      ctx.db.query("storageLocations").withIndex("by_active", (q) => q.eq("active", true)).collect()
+      ctx.db.query("storageLocations").collect()
         .then((rows) => rows.find((row) => row.name === fixtureName(args.runId, "CABINET_B")) ?? null),
       ctx.db.query("entries").withIndex("by_number", (q) => q.eq("entryNumber", fixtureName(args.runId, "ENTRY"))).first(),
     ]);
