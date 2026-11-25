@@ -1,6 +1,9 @@
 name: Validação transacional controlada — Convex DEV
 
 on:
+  push:
+    branches:
+      - codex/dev-transactional-validation
   pull_request:
     branches:
       - codex/returns-transfers-ledger-integration
@@ -14,7 +17,7 @@ concurrency:
 
 jobs:
   transactional-validation:
-    if: github.event_name == 'pull_request' && github.head_ref == 'codex/dev-transactional-validation'
+    if: (github.event_name == 'push' && github.ref_name == 'codex/dev-transactional-validation') || (github.event_name == 'pull_request' && github.head_ref == 'codex/dev-transactional-validation')
     name: Exercitar devoluções e transferências em fixture isolada
     runs-on: ubuntu-latest
     timeout-minutes: 35
