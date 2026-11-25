@@ -2,7 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { planTransfer } from "../lib/transfer-rules";
 import { planLotLocationTransfer } from "../lib/lot-location-rules";
-import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 import { assertProductLedgerConsistent, assertProductReservationConsistent } from "./lotLocationLedger";
 import { requirePermission } from "./rbac";
 
@@ -26,7 +26,9 @@ export const list = query({
       const fromLocation = await ctx.db.get(t.fromLocationId);
       const toLocation = await ctx.db.get(t.toLocationId);
       const responsible = await ctx.db.get(t.responsibleUserId);
-      return { ...t, product, lot, fromLocation, toLocation, responsible };
+      const area = lot?.areaId ? await ctx.db.get(lot.areaId) : null;
+      const movement = t.movementId ? await ctx.db.get(t.movementId) : null;
+      return { ...t, product, lot, area, movement, fromLocation, toLocation, responsible };
     }));
   },
 });
@@ -43,7 +45,10 @@ export const listByProduct = query({
     return Promise.all(transfers.map(async (t: any) => {
       const fromLocation = await ctx.db.get(t.fromLocationId);
       const toLocation = await ctx.db.get(t.toLocationId);
-      return { ...t, fromLocation, toLocation };
+      const lot = t.lotId ? await ctx.db.get(t.lotId) : null;
+      const area = lot?.areaId ? await ctx.db.get(lot.areaId) : null;
+      const movement = t.movementId ? await ctx.db.get(t.movementId) : null;
+      return { ...t, lot, area, movement, fromLocation, toLocation };
     }));
   },
 });
@@ -280,28 +285,26 @@ export const create = mutation({
       createdAt: now,
     });
 
-    // Create stock movement (transfer type — no global stock change)
-    const globalStockRows = await ctx.db
-      .query("stock")
-      .withIndex("by_product", (q) => q.eq("productId", args.productId))
-      .collect();
-    const globalStock = getOptionalSingleValidGlobalStock(globalStockRows, product.name);
-    if (globalStock) {
-      await ctx.db.insert("stockMovements", {
-        productId: args.productId,
-        type: "transfer",
-        quantity: args.quantity,
-        previousPhysical: globalStock.physicalQuantity,
-        newPhysical: globalStock.physicalQuantity,
-        previousReserved: globalStock.reservedQuantity,
-        newReserved: globalStock.reservedQuantity,
-        userId,
-        locationId: args.fromLocationId,
-        lotId: lotDoc?.lotNumber,
-        observation: `Transferência: ${fromLocation.name} → ${toLocation.name}`,
-        timestamp: now,
-      });
-    }
+    // O ledger global/reservas foi validado antes das alterações por armário.
+    // O movimento é obrigatório e vincula origem, destino, lote, área e transferência.
+    const movementId = await ctx.db.insert("stockMovements", {
+      productId: args.productId,
+      type: "transfer",
+      quantity: args.quantity,
+      previousPhysical: reservationStock.physicalQuantity,
+      newPhysical: reservationStock.physicalQuantity,
+      previousReserved: reservationStock.reservedQuantity,
+      newReserved: reservationStock.reservedQuantity,
+      userId,
+      transferId,
+      locationId: args.fromLocationId,
+      toLocationId: args.toLocationId,
+      areaId: lotDoc?.areaId,
+      lotId: lotDoc?.lotNumber,
+      observation: `Transferência: ${fromLocation.name} → ${toLocation.name}`,
+      timestamp: now,
+    });
+    await ctx.db.patch(transferId, { movementId });
 
     // Audit
     await ctx.db.insert("auditLogs", {
