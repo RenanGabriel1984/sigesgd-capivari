@@ -9,8 +9,7 @@ export const seed=internalMutation({args:{runId:v.string()},handler:async(ctx,{r
  const now=Date.now(),pass="Synthetic-Test-Password-938!",{hash,salt}=await hashPassword(pass);
  const userId=await ctx.db.insert("users",{name:PREFIX+runId,email:email(runId),role:"technician",active:true,createdAt:now,updatedAt:now});
  await ctx.db.insert("passwords",{userId,passwordHash:hash,salt,requiresReset:false});
- const duplicateUserId=await ctx.db.insert("users",{name:PREFIX+runId+"-DUP",email:email(runId),role:"technician",active:true,createdAt:now,updatedAt:now});
- return {email:email(runId),password:pass,userId,duplicateUserId};
+ return {email:email(runId),password:pass,userId};
 }});
 export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx,{runId})=>{
  if(!(process.env.CONVEX_CLOUD_URL??"").includes(HOST))throw new Error("Somente DEV first-herring-264.");
@@ -25,4 +24,10 @@ export const inspect=internalQuery({args:{runId:v.string(),password:v.string()},
  const matches=await ctx.db.query("users").collect().then(rs=>rs.filter(u=>u.email===email(runId)));
  const pw=matches.length===1?await ctx.db.query("passwords").withIndex("by_user",q=>q.eq("userId",matches[0]._id)).collect():[];
  return {users:matches.length,active:matches[0]?.active,role:matches[0]?.role,passwordRecords:pw.length,hashMatches:pw.length===1?await verifyPassword(password,pw[0].passwordHash,pw[0].salt):false};
+}});
+
+export const addDuplicate=internalMutation({args:{runId:v.string()},handler:async(ctx,{runId})=>{
+ if(!(process.env.CONVEX_CLOUD_URL??"").includes(HOST))throw new Error("Somente DEV first-herring-264.");
+ const now=Date.now();
+ return await ctx.db.insert("users",{name:PREFIX+runId+"-DUP",email:email(runId),role:"technician",active:true,createdAt:now,updatedAt:now});
 }});
