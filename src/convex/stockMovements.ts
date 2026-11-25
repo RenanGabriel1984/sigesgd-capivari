@@ -73,6 +73,7 @@ export const createExit = mutation({
     productId: v.id("products"), quantity: v.number(),
     locationId: v.optional(v.id("storageLocations")),
     areaId: v.optional(v.id("stockAreas")),
+    areaIsUnclassified: v.optional(v.boolean()),
     requestId: v.optional(v.id("requests")), observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -97,6 +98,7 @@ export const createExit = mutation({
       productId: args.productId,
       locationId: sourceLocationId,
       areaId: args.areaId,
+      areaIsUnclassified: args.areaIsUnclassified,
       quantity: args.quantity,
     });
     const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
