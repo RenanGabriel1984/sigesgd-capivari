@@ -3,7 +3,7 @@ name: Diagnóstico read-only do estoque — first-herring-264
 on:
   push:
     branches:
-      - codex/stock-readonly-diagnostic-first-herring
+      - codex/stock-readonly-diagnostic-pr39-dev-run
   pull_request:
     branches:
       - main
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   diagnose:
-    if: github.event_name != 'pull_request' || github.head_ref == 'codex/stock-readonly-diagnostic-first-herring'
+    if: github.event_name != 'pull_request' || github.head_ref == 'codex/stock-readonly-diagnostic-pr39-dev-run'
     name: Publicar código em DEV e consultar estoque sem escrita
     runs-on: ubuntu-latest
     timeout-minutes: 30
