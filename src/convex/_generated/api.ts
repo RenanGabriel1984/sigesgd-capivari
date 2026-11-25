@@ -22,6 +22,7 @@ import type * as diagnostics from "../diagnostics.js";
 import type * as email from "../email.js";
 import type * as entries from "../entries.js";
 import type * as gomaQ from "../gomaQ.js";
+import type * as gomaQDevTests from "../gomaQDevTests.js";
 import type * as http from "../http.js";
 import type * as inventory from "../inventory.js";
 import type * as licenses from "../licenses.js";
@@ -83,6 +84,7 @@ const fullApi: ApiFromModules<{
   email: typeof email;
   entries: typeof entries;
   gomaQ: typeof gomaQ;
+  gomaQDevTests: typeof gomaQDevTests;
   http: typeof http;
   inventory: typeof inventory;
   licenses: typeof licenses;

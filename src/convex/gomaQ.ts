@@ -323,22 +323,25 @@ export const createExchange = mutation({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
     const freshStock = requireSingleValidGlobalStock(freshStockRows, product.name);
-    const freshLedger = await assertProductLedgerConsistent(ctx, args.productId, product.name);
-    if (!freshLedger || freshLedger._id !== freshStock._id) {
-      throw new Error("Troca GomaQ bloqueada: livro-razão mudou durante a operação.");
-    }
+    // Depois do consumo de lote/local, o saldo físico local já diminuiu.
+    // Atualizar o global com a leitura fresca antes da conciliação final para
+    // não comparar dois snapshots de momentos diferentes na mesma mutation.
     await assertProductReservationConsistent(ctx, args.productId, product.name, freshStock);
     if (freshStock.physicalQuantity < args.quantityDelivered) {
-      throw new Error(`Estoque insuficiente (concorrência). Físico: ${freshStock.physicalQuantity}. Necessário: ${args.quantityDelivered}.`);
+      throw new Error("Estoque insuficiente (concorrência). Físico: " + freshStock.physicalQuantity + ". Necessário: " + args.quantityDelivered + ".");
     }
     if (freshStock.reservedQuantity > freshStock.physicalQuantity - args.quantityDelivered) {
-      throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}. Disponível: ${freshStock.physicalQuantity}.`);
+      throw new Error("Estoque reservado insuficiente (concorrência). Reservado: " + freshStock.reservedQuantity + ". Disponível: " + freshStock.physicalQuantity + ".");
     }
 
-    // Reduce global stock
     const newPhysical = freshStock.physicalQuantity - args.quantityDelivered;
     const newReserved = freshStock.reservedQuantity;
     await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical });
+    const finalLedger = await assertProductLedgerConsistent(ctx, args.productId, product.name);
+    if (!finalLedger || finalLedger._id !== freshStock._id) {
+      throw new Error("Troca GomaQ bloqueada: livro-razão não conciliou após a baixa.");
+    }
+    await assertProductReservationConsistent(ctx, args.productId, product.name, { ...freshStock, physicalQuantity: newPhysical });
 
     // Create stock movement
     const movementId = await ctx.db.insert("stockMovements", {
