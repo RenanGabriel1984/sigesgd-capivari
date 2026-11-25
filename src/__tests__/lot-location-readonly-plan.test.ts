@@ -256,6 +256,7 @@ describe("planner bloqueia saldo positivo sem lote histórico", () => {
   it("does not block a genuinely empty legacy product without any stock or lot", () => {
     const f = fixture();
     f.products[0].globalPhysical = 0;
+    f.products[0].globalReserved = 0;
     f.products[0].localPhysicalTotal = 0;
     f.products[0].lotsAvailableTotal = 0;
     f.products[0].candidateTotalsAlign = true;
