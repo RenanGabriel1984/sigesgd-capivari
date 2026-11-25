@@ -100,7 +100,7 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Água mineral", href: "/water", icon: Droplets, permission: "canManageStock" },
   ]},
   { title: "Patrimônio", items: [
-    { label: "Solicitações de baixa", href: "/patrimony", icon: ClipboardCheck, permission: "canManageAssets" },
+    { label: "Solicitações de baixa", href: "/patrimony", icon: ClipboardCheck, permission: "canManageAssets", permission2: "canViewPatrimony" },
   ]},
   // ── Equipamentos ──────────────────────────────────────────────────────────
   // Estrutura por CATEGORIA de equipamento. O fornecedor NUNCA faz parte do
