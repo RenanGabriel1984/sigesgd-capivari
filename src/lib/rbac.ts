@@ -294,6 +294,7 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
   "/stock-areas": "areas.view",
   "/inventory": "inventory.manage",
   "/requests": "requests.view",
+  "/water": "stock.mutate",
   "/returns": "returns.view",
   "/transfers": "transfers.view",
   "/gomaq": "gomaq.view",
