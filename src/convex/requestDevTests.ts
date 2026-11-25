@@ -7,9 +7,9 @@ function name(id:string,s:string){return PREFIX+id+"__"+s;}
 export const seed=internalMutation({args:{runId:v.string()},handler:async(ctx,{runId})=>{
  guard();valid(runId);
  const users=await ctx.db.query("users").collect();
- const requester=users.find(u=>u.role==="technician"&&u.active!==false&&u.isAnonymous!==true);
- const approver=users.find(u=>(u.role==="stock_manager"||u.role==="admin")&&u.active!==false&&u.isAnonymous!==true&&(!requester||u._id!==requester._id));
- if(!requester||!approver)throw new Error("DEV precisa de solicitante técnico e aprovador ativo.");
+ const now=Date.now();
+ const requesterId=await ctx.db.insert("users",{name:name(runId,"REQUESTER"),email:name(runId,"requester")+"@fixture.invalid",role:"technician",active:true,createdAt:now,updatedAt:now});
+ const approverId=await ctx.db.insert("users",{name:name(runId,"APPROVER"),email:name(runId,"approver")+"@fixture.invalid",role:"stock_manager",active:true,createdAt:now,updatedAt:now});
  const category=await ctx.db.query("categories").withIndex("by_active",q=>q.eq("active",true)).first();
  if(!category)throw new Error("Categoria ativa ausente.");
  const areaId=await ctx.db.insert("stockAreas",{name:name(runId,"AREA"),description:"Fixture request DEV",active:true});
@@ -17,12 +17,12 @@ export const seed=internalMutation({args:{runId:v.string()},handler:async(ctx,{r
  const secretariaId=await ctx.db.insert("organizations",{name:name(runId,"SECRETARIA"),type:"secretaria",active:true});
  const productId=await ctx.db.insert("products",{name:name(runId,"PRODUCT"),description:"Fixture request DEV",categoryId:category._id,unitOfMeasure:"un",active:true,maximumStock:100});
  const now=Date.now();
- const entryId=await ctx.db.insert("entries",{entryNumber:name(runId,"ENTRY"),receivedAt:now,originType:"other",responsibleUserId:approver._id,observation:"Fixture request DEV",status:"confirmed",materialType:"consumption",areaId,createdAt:now,updatedAt:now});
+ const entryId=await ctx.db.insert("entries",{entryNumber:name(runId,"ENTRY"),receivedAt:now,originType:"other",responsibleUserId:approverId,observation:"Fixture request DEV",status:"confirmed",materialType:"consumption",areaId,createdAt:now,updatedAt:now});
  const lotId=await ctx.db.insert("lots",{lotNumber:name(runId,"LOT"),productId,entryId,quantityReceived:10,quantityAvailable:10,receivedAt:now,active:true,materialType:"consumption",areaId});
  await ctx.db.insert("stock",{productId,physicalQuantity:10,reservedQuantity:0});
  await ctx.db.insert("stockByLocation",{productId,locationId,quantity:10});
  await ctx.db.insert("lotLocationBalances",{lotId,productId,locationId,quantityAvailable:10,updatedAt:now});
- return {runId,requesterId:requester._id,approverId:approver._id,secretariaId,productId,areaId,locationId,entryId,lotId,baseline:10};
+ return {runId,requesterId,approverId,secretariaId,productId,areaId,locationId,entryId,lotId,baseline:10};
 }});
 export const inspect=internalQuery({args:{runId:v.string()},handler:async(ctx,{runId})=>{
  guard();valid(runId);
@@ -42,7 +42,7 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  const entry=await ctx.db.query("entries").withIndex("by_number",q=>q.eq("entryNumber",name(runId,"ENTRY"))).first();
  const area=await ctx.db.query("stockAreas").withIndex("by_name",q=>q.eq("name",name(runId,"AREA"))).first();
  const location=await ctx.db.query("storageLocations").collect().then(rs=>rs.find(l=>l.name===name(runId,"LOCATION"))??null);
- if(!product){for(const i of items)await ctx.db.delete(i._id);for(const r of requests)await ctx.db.delete(r._id);if(org)await ctx.db.delete(org._id);if(entry)await ctx.db.delete(entry._id);if(area)await ctx.db.delete(area._id);if(location)await ctx.db.delete(location._id);return {fixtureRemaining:false};}
+ if(!product){for(const i of items)await ctx.db.delete(i._id);for(const r of requests)await ctx.db.delete(r._id);if(requester)await ctx.db.delete(requester._id);if(approver)await ctx.db.delete(approver._id);if(org)await ctx.db.delete(org._id);if(entry)await ctx.db.delete(entry._id);if(area)await ctx.db.delete(area._id);if(location)await ctx.db.delete(location._id);return {fixtureRemaining:false};}
  const [stocks,locations,lots]=await Promise.all([
  ctx.db.query("stock").withIndex("by_product",q=>q.eq("productId",product._id)).collect(),
  ctx.db.query("stockByLocation").withIndex("by_product",q=>q.eq("productId",product._id)).collect(),
@@ -64,5 +64,5 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  if(location)await ctx.db.delete(location._id);
  const remaining=await ctx.db.query("products").withIndex("by_name",q=>q.eq("name",name(runId,"PRODUCT"))).first();
  if(remaining)throw new Error("Fixture request ainda existe.");
- return {fixtureRemaining:false,deleted:{audit:audit.length,requests:requests.length,items:items.length}};
+ return {fixtureRemaining:false,deleted:{audit:audit.length,requests:requests.length,items:items.length,users:2}};
 }});
