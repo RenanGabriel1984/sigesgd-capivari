@@ -40,7 +40,7 @@ describe("validação transacional isolada no Convex DEV", () => {
   it("exige a chave dev:first-herring-264 e nunca seleciona produção", () => {
     const runner = source("../scripts/convex-dev-stock-transactions.mjs");
     expect(runner).toContain('const DEPLOYMENT = "first-herring-264"');
-    expect(runner).toContain(`dev:${DEPLOYMENT}`);
+    expect(runner).toContain("dev:first-herring-264");
     expect(runner).toContain("CONVEX_DEPLOYMENT");
     expect(runner).not.toContain("--prod");
   });
