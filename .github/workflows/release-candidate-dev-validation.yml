@@ -3,20 +3,17 @@ name: Release candidate — transactional validation in Convex DEV
 on:
   push:
     branches: [codex/replenishment-controlled-activation]
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-candidate-dev-first-herring
+  group: release-candidate-dev-first-herring-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   runtime:
-    if: github.ref == 'refs/heads/codex/replenishment-controlled-activation' || github.head_ref == 'codex/replenishment-controlled-activation'
+    if: github.ref == 'refs/heads/codex/replenishment-controlled-activation'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
