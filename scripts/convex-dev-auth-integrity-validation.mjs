@@ -16,7 +16,7 @@ try{
  const success=internal("passwords:recordSuccessfulLogin",{email:fixture.email});
  const after=internal("passwords:isLockedOut",{email:fixture.email});
  const duplicate=internal("passwords:verifyCredentials",{email:fixture.email,password:fixture.password});
- const checks={credentialHashMatches:inspect.hashMatches===true,normalizedEmailAccepted:goodLower.success===true,caseNormalizationAccepted:goodUpper.success===true,wrongPasswordGeneric:bad.success===false&&bad.error===good.error,lockAfterFive:locked.locked===true,successfulLoginClearsLock:success.cleared===true&&after.locked===false,duplicateIdentityFailsClosed:duplicate.success===false};
+ const checks={credentialHashMatches:inspect.hashMatches===true,normalizedEmailAccepted:goodLower.success===true,caseNormalizationAccepted:goodUpper.success===true,wrongPasswordGeneric:bad.success===false&&bad.error===goodLower.error,lockAfterFive:locked.locked===true,successfulLoginClearsLock:success.cleared===true&&after.locked===false,duplicateIdentityFailsClosed:duplicate.success===false};
  if(Object.values(checks).some(x=>!x))throw new Error("Cenários falharam: "+JSON.stringify({checks,inspect,goodLower,goodUpper,wrong}));
  console.log(JSON.stringify({passed:true,deployment,runId,checks},null,2));
 }finally{
