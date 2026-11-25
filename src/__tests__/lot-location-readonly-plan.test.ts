@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildReadonlyLotLocationPlan,
+  isClosedUnusedReturnAtSource,
   type LotLocationReadinessReport,
 } from "@/lib/lot-location-readonly-plan";
 
@@ -141,5 +142,100 @@ describe("planner read-only da migração lote × armário", () => {
     const plan = buildReadonlyLotLocationPlan(f);
     expect(plan.insertions).toHaveLength(2);
     expect(plan.totalLotsToTrace).toBe(2);
+  });
+});
+
+
+describe("evidência histórica de saída devolvida sem uso", () => {
+  const evidence = {
+    lotId: "lot-cooler",
+    sourceLocationId: "cabinet-01",
+    movements: [
+      {
+        id: "exit-1",
+        type: "exit",
+        lotId: "lot-cooler",
+        quantity: 1,
+        locationId: "cabinet-01",
+        canceled: false,
+      },
+      {
+        id: "return-movement-1",
+        type: "return",
+        lotId: "lot-cooler",
+        quantity: 1,
+        exitMovementId: "exit-1",
+        locationId: "cabinet-01",
+        canceled: false,
+      },
+    ],
+    returns: [{
+      lotId: "lot-cooler",
+      exitMovementId: "exit-1",
+      quantity: 1,
+      locationId: "cabinet-01",
+      condition: "unused",
+    }],
+  };
+
+  it("accepts only a full unused return linked to the same lot, exit and source cabinet", () => {
+    expect(isClosedUnusedReturnAtSource(evidence)).toBe(true);
+  });
+
+  it("rejects a partial return", () => {
+    expect(isClosedUnusedReturnAtSource({
+      ...evidence,
+      movements: evidence.movements.map((movement) =>
+        movement.type === "return" ? { ...movement, quantity: 0.5 } : movement
+      ),
+      returns: [{ ...evidence.returns[0], quantity: 0.5 }],
+    })).toBe(false);
+  });
+
+  it("rejects a used, quarantined or disposed return", () => {
+    for (const condition of ["used", "quarantine", "disposed", null]) {
+      expect(isClosedUnusedReturnAtSource({
+        ...evidence,
+        returns: [{ ...evidence.returns[0], condition }],
+      })).toBe(false);
+    }
+  });
+
+  it("rejects a return to another cabinet", () => {
+    expect(isClosedUnusedReturnAtSource({
+      ...evidence,
+      returns: [{ ...evidence.returns[0], locationId: "cabinet-02" }],
+    })).toBe(false);
+  });
+
+  it("rejects missing lot or exit linkage", () => {
+    expect(isClosedUnusedReturnAtSource({
+      ...evidence,
+      movements: evidence.movements.map((movement) =>
+        movement.type === "exit" ? { ...movement, lotId: null } : movement
+      ),
+    })).toBe(false);
+    expect(isClosedUnusedReturnAtSource({
+      ...evidence,
+      returns: [{ ...evidence.returns[0], exitMovementId: "other-exit" }],
+    })).toBe(false);
+  });
+
+  it("rejects any additional movement, transfer-like or canceled history", () => {
+    expect(isClosedUnusedReturnAtSource({
+      ...evidence,
+      movements: [...evidence.movements, {
+        id: "extra-adjustment",
+        type: "adjustment",
+        lotId: "lot-cooler",
+        quantity: 1,
+      }],
+    })).toBe(false);
+    expect(isClosedUnusedReturnAtSource({
+      ...evidence,
+      movements: evidence.movements.map((movement) =>
+        movement.type === "exit" ? { ...movement, canceled: true } : movement
+      ),
+    })).toBe(false);
   });
 });
