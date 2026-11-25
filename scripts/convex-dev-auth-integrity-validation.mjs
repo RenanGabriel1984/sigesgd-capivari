@@ -2,7 +2,7 @@ import {spawnSync} from "node:child_process";
 const deployment="first-herring-264",key=process.env.CONVEX_DEPLOY_KEY??"";
 if(key.split("|",1)[0]!==`dev:${deployment}`||process.env.CONVEX_DEPLOYMENT)throw new Error("Destino não é o DEV autorizado.");
 const runId=`gha-${process.env.GITHUB_RUN_ID??Date.now()}-${process.env.GITHUB_RUN_ATTEMPT??1}`;
-function call(name,args){const r=spawnSync("bunx",["convex","run",name,JSON.stringify(args)],{encoding:"utf8",env:process.env,maxBuffer:2e6});if(r.status!==0)throw new Error(name+": "+(r.stderr||r.stdout).slice(-1500));const s=r.stdout.trim();try{return JSON.parse(s)}catch{for(const line of s.split("\n").reverse()){try{return JSON.parse(line)}catch{}}throw new Error("Resposta inválida: "+name)}}
+function call(name,args){const r=spawnSync("bunx",["convex","run",name,JSON.stringify(args)],{encoding:"utf8",env:process.env,maxBuffer:2e6});if(r.status!==0)throw new Error(name+": "+(r.stderr||r.stdout).slice(-1500));const s=r.stdout.trim();if(!s||s==="undefined"||s==="null")return null;try{return JSON.parse(s)}catch{for(const line of s.split("\n").reverse()){try{return JSON.parse(line)}catch{}}throw new Error("Resposta inválida: "+name)}}
 const internal=(name,args={})=>call(name,args);
 let fixture;
 try{
@@ -19,6 +19,6 @@ try{
  console.log(JSON.stringify({passed:true,deployment,runId,checks},null,2));
 }finally{
  const cleanup=internal("authDevTests:cleanup",{runId});
- if(cleanup.remaining!==0)throw new Error("Fixture de autenticação não foi completamente limpa: "+JSON.stringify(cleanup));
+ if(cleanup.remaining!==0)throw new Error("Fixture não limpa: "+JSON.stringify(cleanup));
  console.log(JSON.stringify({cleanupVerified:cleanup},null,2));
 }
