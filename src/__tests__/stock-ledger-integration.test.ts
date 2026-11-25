@@ -95,3 +95,56 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(requests).toContain("areaId: di.areaId");
   });
 });
+
+describe("integração do livro-razão em devoluções e transferências", () => {
+  it("devolução disponível registra as parcelas no movimento reversor", () => {
+    const returns = source("convex/returns.ts");
+    const create = returns.slice(returns.indexOf("export const create = mutation({"), returns.indexOf("export const resolveQuarantine = mutation({"));
+    expect(create).toContain("assertProductLedgerConsistent");
+    expect(create).toContain("assertProductReservationConsistent");
+    expect(create).toContain("resolveConsistentMovementArea");
+    expect(create).toContain("areaId: effectiveAreaId");
+    expect(create).toContain('const returnMovementId = await ctx.db.insert("stockMovements"');
+    expect(create).toContain("recordLotMovementAllocations(ctx");
+    expect(create).toContain('allocationType: "reversal"');
+    expect(create.indexOf("assertProductLedgerConsistent")).toBeLessThan(create.indexOf('ctx.db.patch(stock._id'));
+  });
+
+  it("liberação de quarentena também cria alocação reversora estruturada", () => {
+    const returns = source("convex/returns.ts");
+    const resolve = returns.slice(returns.indexOf("export const resolveQuarantine = mutation({"));
+    expect(resolve).toContain("assertProductLedgerConsistent");
+    expect(resolve).toContain("resolveConsistentMovementArea");
+    expect(resolve).toContain("recordLotMovementAllocations(ctx");
+    expect(resolve).toContain('allocationType: "reversal"');
+    expect(resolve).toContain("areaId: effectiveAreaId");
+    expect(resolve).toContain("stockDisposition: args.disposition");
+  });
+
+  it("transferência mantém saldo global e vincula origem, destino e lote ao movimento", () => {
+    const transfers = source("convex/stockTransfers.ts");
+    const create = transfers.slice(transfers.indexOf("export const create = mutation({"));
+    expect(create).toContain("assertProductLedgerConsistent");
+    expect(create).toContain("assertProductReservationConsistent");
+    expect(create).toContain("planLotLocationTransfer");
+    expect(create).toContain('const movementId = await ctx.db.insert("stockMovements"');
+    expect(create).toContain("transferId");
+    expect(create).toContain("toLocationId: args.toLocationId");
+    expect(create).toContain("areaId: lotDoc?.areaId");
+    expect(create).toContain("await ctx.db.patch(transferId, { movementId })");
+    expect(create).toContain("newPhysical: reservationStock.physicalQuantity");
+    expect(create.indexOf("assertProductLedgerConsistent")).toBeLessThan(create.indexOf("await ctx.db.patch(sourceStock._id"));
+  });
+
+  it("schema usa vínculos opcionais compatíveis com os movimentos existentes", () => {
+    const schema = source("convex/schema.ts");
+    const movementSchema = schema.slice(schema.indexOf("stockMovements: defineTable({"), schema.indexOf("stockMovementLotAllocations: defineTable({"));
+    const transferSchema = schema.slice(schema.indexOf("stockTransfers: defineTable({"), schema.indexOf("gomaQExchanges: defineTable({"));
+    const returnSchema = schema.slice(schema.indexOf("returns: defineTable({"), schema.indexOf("returnLotAllocations: defineTable({"));
+    expect(movementSchema).toContain('transferId: v.optional(v.id("stockTransfers"))');
+    expect(movementSchema).toContain('toLocationId: v.optional(v.id("storageLocations"))');
+    expect(transferSchema).toContain('movementId: v.optional(v.id("stockMovements"))');
+    expect(returnSchema).toContain('areaId: v.optional(v.id("stockAreas"))');
+  });
+});
+
