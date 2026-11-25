@@ -25,7 +25,9 @@ describe("etapa 4 — Gomaq, suprimentos, inventário e relatórios", () => {
     const create = section(gomaQ, "export const createExchange = mutation({", "export const createCollection = mutation({");
     expect(create).toContain("assertProductLedgerConsistent");
     expect(create).toContain("assertProductReservationConsistent");
-    expect(create).toContain('eq("name", "Impressoras")');
+    expect(create).toContain('area.name === "Impressoras" || area.name === "Impressoras/Gomaq"');
+    expect(create).toContain("areaId: printerAreaId");
+    expect(create).toContain("exatamente uma área ativa");
     expect(create).toContain("resolveWithdrawalLocation");
     expect(create).toContain("consumeLotLocationStock");
     expect(create).toContain("recordLotMovementAllocations");
