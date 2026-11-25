@@ -15,6 +15,8 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain('ctx.db.insert("lotLocationBalances"');
     expect(part).toContain('ctx.db.insert("stockMovements"');
     expect(part).toContain("locationId: item.locationId");
+    expect(part).toContain("resolveEntryItemAreaId(item.areaId, entry.areaId)");
+    expect(part).toContain("areaId: effectiveAreaId as any");
   });
   it("estorna entradas com alocação estruturada por armário", () => {
     const entries = source("convex/entries.ts");
@@ -32,6 +34,7 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain("consumeLotLocationStock");
     expect(part).toContain("recordLotMovementAllocations");
     expect(part).toContain('areaId: v.optional(v.id("stockAreas"))');
+    expect(part).toContain("areaId: args.areaId");
   });
   it("saída alternativa também é ledger-backed", () => {
     const movements = source("convex/stockMovements.ts");
@@ -39,6 +42,7 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain("assertProductLedgerConsistent");
     expect(part).toContain("consumeLotLocationStock");
     expect(part).toContain("recordLotMovementAllocations");
+    expect(part).toContain("areaId: args.areaId");
   });
   it("entrega da requisição pré-valida e registra baixa FIFO por armário", () => {
     const requests = source("convex/requests.ts");
@@ -51,6 +55,7 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain("locationId: sourceLocationId");
     expect(part).toContain("reservedToRelease");
     expect(part).toContain("const finalReserved = newReserved - unusedReservation;");
+    expect(part).toContain("areaId: input.areaId");
   });
   it("interfaces exigem área e armário antes da saída", () => {
     const exit = source("pages/Exit.tsx");
