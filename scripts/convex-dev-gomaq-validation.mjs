@@ -11,6 +11,9 @@ let failure,fixture;
 try{
  fixture=internal("gomaQDevTests:seed",{runId});
  const identity={subject:fixture.operatorId,issuer:"https://sigesgd-capivari.dev"};
+ const baseline=internal("gomaQDevTests:inspect",{runId});
+ console.log(JSON.stringify({fixtureBaseline:baseline},null,2));
+ assert(baseline.exists&&baseline.global===10&&baseline.local===10&&baseline.lot===10&&baseline.lotLocal===10&&baseline.ledgerBalanced,"Fixture inicial não concilia global/local/lote/lote-local.");
  const marker="__SIGESGD_GOMAQ_DEV__"+runId+"__";
  const exchangeId=pub(identity,"gomaQ:createExchange",{productId:fixture.productId,printerId:fixture.printerId,locationId:fixture.locationId,quantityDelivered:2,quantityEmptyReceived:2,receivedByName:"Teste DEV GomaQ",observation:marker+"EXCHANGE"});
  let state=internal("gomaQDevTests:inspect",{runId});
