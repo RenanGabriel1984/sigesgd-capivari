@@ -186,7 +186,7 @@ export const inspect = internalQuery({
       .withIndex("by_name", (q) => q.eq("name", productName)).first();
     if (!product) return { exists: false, runId: args.runId };
 
-    const [stocks, locations, lots, transfers, returns, movements, lotBalances, movementAllocations, returnAllocations] = await Promise.all([
+    const [stocks, locations, lots, transfers, returns, movements, lotBalances, movementAllocations] = await Promise.all([
       ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
       ctx.db.query("stockByLocation").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
       ctx.db.query("lots").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
@@ -195,8 +195,10 @@ export const inspect = internalQuery({
       ctx.db.query("stockMovements").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
       ctx.db.query("lotLocationBalances").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
       ctx.db.query("stockMovementLotAllocations").withIndex("by_product_location", (q) => q.eq("productId", product._id)).collect(),
-      ctx.db.query("returnLotAllocations").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
     ]);
+    const returnAllocations = (await Promise.all(returns.map((row) =>
+      ctx.db.query("returnLotAllocations").withIndex("by_return", (q) => q.eq("returnId", row._id)).collect(),
+    ))).flat();
     const global = stocks.reduce((sum, row) => sum + row.physicalQuantity, 0);
     const local = locations.reduce((sum, row) => sum + row.quantity, 0);
     const lot = lots.reduce((sum, row) => sum + row.quantityAvailable, 0);
@@ -269,7 +271,7 @@ export const cleanup = internalMutation({
       return { runId: args.runId, cleaned: true, productFound: false };
     }
 
-    const [stocks, locations, lots, transfers, returns, movements, lotBalances, movementAllocations, returnAllocations] = await Promise.all([
+    const [stocks, locations, lots, transfers, returns, movements, lotBalances, movementAllocations] = await Promise.all([
       ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
       ctx.db.query("stockByLocation").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
       ctx.db.query("lots").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
@@ -278,8 +280,10 @@ export const cleanup = internalMutation({
       ctx.db.query("stockMovements").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
       ctx.db.query("lotLocationBalances").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
       ctx.db.query("stockMovementLotAllocations").withIndex("by_product_location", (q) => q.eq("productId", product._id)).collect(),
-      ctx.db.query("returnLotAllocations").withIndex("by_product", (q) => q.eq("productId", product._id)).collect(),
     ]);
+    const returnAllocations = (await Promise.all(returns.map((row) =>
+      ctx.db.query("returnLotAllocations").withIndex("by_return", (q) => q.eq("returnId", row._id)).collect(),
+    ))).flat();
     const entityIds = new Set<string>([
       String(product._id), String(entry?._id ?? ""),
       ...transfers.map((row) => String(row._id)),
