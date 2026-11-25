@@ -453,6 +453,9 @@ const schema = defineSchema(
       exitNumber: v.optional(v.string()),
       // ── Vínculo reverso: movimentação de DEVOLUÇÃO → saída original ──
       exitMovementId: v.optional(v.id("stockMovements")),
+      // Vínculo estruturado da movimentação de transferência.
+      transferId: v.optional(v.id("stockTransfers")),
+      toLocationId: v.optional(v.id("storageLocations")),
       timestamp: v.number(),
       canceled: v.optional(v.boolean()),
       canceledAt: v.optional(v.number()),
@@ -460,7 +463,8 @@ const schema = defineSchema(
       .index("by_type", ["type"])
       .index("by_user", ["userId"])
       .index("by_timestamp", ["timestamp"])
-      .index("by_request", ["requestId"]),
+      .index("by_request", ["requestId"])
+      .index("by_transfer", ["transferId"]),
 
     // Cada saída registra todas as parcelas FIFO consumidas por lote/local.
     // stockMovements.lotId permanece apenas por compatibilidade histórica.
@@ -727,6 +731,8 @@ const schema = defineSchema(
       inspectionReason: v.optional(v.string()),
       // Local físico de destino da devolução (opcional)
       locationId: v.optional(v.id("storageLocations")),
+      // Área efetiva herdada da saída e dos lotes devolvidos.
+      areaId: v.optional(v.id("stockAreas")),
       returnedByUserId: v.id("users"),
       receivedByUserId: v.optional(v.id("users")),
       observation: v.optional(v.string()),
@@ -813,6 +819,8 @@ const schema = defineSchema(
       quantity: v.number(),
       responsibleUserId: v.id("users"),
       observation: v.optional(v.string()),
+      // Vínculo com a movimentação correspondente no livro-razão.
+      movementId: v.optional(v.id("stockMovements")),
       createdAt: v.number(),
     }).index("by_product", ["productId"])
       .index("by_from", ["fromLocationId"])

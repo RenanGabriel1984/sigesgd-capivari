@@ -314,6 +314,7 @@ export default function ReturnsPage() {
                       <TableHead>Data</TableHead>
                       <TableHead>Saída</TableHead>
                       <TableHead>Produto</TableHead>
+                      <TableHead>Área</TableHead>
                       <TableHead className="text-center">Qtd</TableHead>
                       <TableHead>Lotes × armários</TableHead>
                       <TableHead>Condição</TableHead>
@@ -335,6 +336,9 @@ export default function ReturnsPage() {
                         </TableCell>
                         <TableCell className="text-sm font-medium">
                           {r.product?.name ?? "—"}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {r.area?.name ?? "Sem área registrada"}
                         </TableCell>
                         <TableCell className="text-center">
                           <Badge variant="outline">{r.quantity}</Badge>
