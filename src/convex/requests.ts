@@ -5,6 +5,7 @@ import { generateExitNumber } from "./stockHelpers";
 import { requirePermission, requireRequestAction } from "./rbac";
 import { roleHasPermission, type AppRole } from "../lib/rbac";
 import { assertTextLimits, assertShortTextLimits, MAX_OBSERVATION } from "../lib/text-limits";
+import { assertUniqueApprovalItemIds, assertCompleteDeliveryItemIds, getDeliveryStockAdjustment } from "../lib/request-approval-validation";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
 
@@ -235,6 +236,10 @@ export const approve = mutation({
     const stockNeeded: Record<string, { requestItemId: string; quantity: number; productName: string }> = {};
     let totalItemsToApprove = 0;
 
+    // A mesma linha não pode aparecer duas vezes: a fase de gravação reserva
+    // cada ocorrência, mas quantityApproved é armazenada em um único registro.
+    assertUniqueApprovalItemIds(args.items);
+
     for (const item of args.items) {
       const requestItem = await ctx.db.get(item.itemId);
       if (!requestItem) throw new Error(`Item da solicitação não encontrado: ${item.itemId}`);
@@ -370,11 +375,18 @@ export const deliver = mutation({
     await requirePermission(ctx, "requests.deliver", { entity: "requests", entityId: args.requestId });
 
     // Verify password for electronic signature
-    const passwordRecord = await ctx.db
+    const passwordRecords = await ctx.db
       .query("passwords")
       .withIndex("by_user", (q: any) => q.eq("userId", userId))
-      .first();
-    if (!passwordRecord) throw new Error("Senha não configurada. Contate o administrador.");
+      .collect();
+    if (passwordRecords.length !== 1) {
+      throw new Error(
+        passwordRecords.length === 0
+          ? "Senha não configurada. Contate o administrador."
+          : "Credenciais duplicadas. Contate o administrador para regularizar o acesso.",
+      );
+    }
+    const passwordRecord = passwordRecords[0];
     const passwordValid = await verifyPassword(args.confirmationPassword, passwordRecord.passwordHash, passwordRecord.salt);
     if (!passwordValid) throw new Error("Senha de confirmação incorreta");
 
@@ -383,6 +395,18 @@ export const deliver = mutation({
     if (request.status !== "approved") throw new Error("Solicitação deve estar aprovada");
     const inputItems = args.items ?? [];
     if (inputItems.length === 0) throw new Error("Informe ao menos um item para entrega");
+    // Uma linha duplicada poderia gerar duas saídas/lotes consumidos, mas
+    // gravar somente a última quantidade entregue no mesmo requestItem.
+    assertUniqueApprovalItemIds(inputItems);
+    const allRequestItems = await ctx.db
+      .query("requestItems")
+      .withIndex("by_request", (q: any) => q.eq("requestId", args.requestId))
+      .collect();
+    const approvedRequestItems = allRequestItems.filter((item: any) => item.quantityApproved > 0);
+    assertCompleteDeliveryItemIds(
+      approvedRequestItems.map((item: any) => ({ itemId: item._id as string })),
+      inputItems.map((item) => ({ itemId: item.itemId as string })),
+    );
 
     // Validate receiver
     if (args.receivedByUserId) {
@@ -425,8 +449,8 @@ export const deliver = mutation({
       if (stock.physicalQuantity < input.quantityDelivered) {
         throw new Error(`Estoque insuficiente. Disponível: ${stock.physicalQuantity}. Entrega: ${input.quantityDelivered}.`);
       }
-      if (stock.reservedQuantity < input.quantityDelivered) {
-        throw new Error(`Estoque reservado insuficiente. Reservado: ${stock.reservedQuantity}. Entrega: ${input.quantityDelivered}.`);
+      if (stock.reservedQuantity < requestItem.quantityApproved) {
+        throw new Error(`Estoque reservado insuficiente. Reservado: ${stock.reservedQuantity}. Reserva aprovada a liberar: ${requestItem.quantityApproved}.`);
       }
     }
 
@@ -439,9 +463,10 @@ export const deliver = mutation({
       const freshStock = await ctx.db.query("stock").withIndex("by_product", (q) => q.eq("productId", requestItem.productId)).first();
       if (!freshStock) throw new Error("Registro de estoque desapareceu durante a entrega");
       if (freshStock.physicalQuantity < input.quantityDelivered) throw new Error(`Estoque insuficiente (concorrência). Disponível: ${freshStock.physicalQuantity}.`);
-      if (freshStock.reservedQuantity < input.quantityDelivered) throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}.`);
-      const newPhysical = freshStock.physicalQuantity - input.quantityDelivered;
-      const newReserved = freshStock.reservedQuantity - input.quantityDelivered;
+      const adjustment = getDeliveryStockAdjustment(requestItem.quantityApproved, input.quantityDelivered);
+      if (freshStock.reservedQuantity < adjustment.reservedToRelease) throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}; necessário liberar: ${adjustment.reservedToRelease}.`);
+      const newPhysical = freshStock.physicalQuantity - adjustment.physicalToRemove;
+      const newReserved = freshStock.reservedQuantity - adjustment.reservedToRelease;
       await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical, reservedQuantity: newReserved });
       const exitNumber = await generateExitNumber(ctx);
       await ctx.db.insert("stockMovements", {
@@ -504,7 +529,11 @@ export const deliver = mutation({
       receivedByUserId: args.receivedByUserId ?? request.requesterId,
       reverseLogisticsConfirmed: args.reverseLogisticsConfirmed ?? undefined,
     });
-    await ctx.db.insert("auditLogs", { userId, action: "deliver", entity: "requests", entityId: args.requestId, details: `Solicitação entregue (${inputItems.length} item(ns))`, timestamp: now });
+    const unusedReservation = inputItems.reduce((total, input) => {
+      const approved = approvedRequestItems.find((item: any) => item._id === input.itemId)?.quantityApproved ?? 0;
+      return total + approved - input.quantityDelivered;
+    }, 0);
+    await ctx.db.insert("auditLogs", { userId, action: "deliver", entity: "requests", entityId: args.requestId, details: `Solicitação entregue (${inputItems.length} item(ns)). Reserva não utilizada liberada: ${unusedReservation}.`, timestamp: now });
     return args.requestId;
   },
 });

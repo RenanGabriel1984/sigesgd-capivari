@@ -853,7 +853,7 @@ export default function Requests() {
             {signatureStep === "items" ? (
               <>
                 <p className="text-sm text-muted-foreground">
-                  Informe a quantidade entregue e, quando aplicável, os números de patrimônio/série de cada unidade.
+                  Informe a quantidade efetivamente entregue. A parte aprovada que não for entregue será liberada da reserva automaticamente. Quando aplicável, informe os números de patrimônio/série de cada unidade.
                 </p>
                 {deliverItems.map((di, idx) => {
                   const reqItem = deliverDialog?.items?.find((i: any) => i._id === di.itemId);
