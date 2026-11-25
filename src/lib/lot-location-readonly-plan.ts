@@ -168,3 +168,59 @@ export function buildReadonlyLotLocationPlan(
     safeToApply: false,
   };
 }
+
+
+/**
+ * A historical exit may still support the original cabinet only when the
+ * complete movement chain proves an unused, full return to that same cabinet.
+ * Any extra movement, partial return, transfer, cancellation, lot mismatch,
+ * or location mismatch keeps the lot out of automatic candidate classification.
+ */
+export function isClosedUnusedReturnAtSource(input: {
+  lotId: string;
+  sourceLocationId: string;
+  movements: Array<{
+    id: string;
+    type: string;
+    lotId?: string | null;
+    quantity: number;
+    exitMovementId?: string | null;
+    locationId?: string | null;
+    canceled?: boolean;
+  }>;
+  returns: Array<{
+    lotId?: string | null;
+    exitMovementId?: string | null;
+    quantity: number;
+    locationId?: string | null;
+    condition?: string | null;
+  }>;
+}): boolean {
+  if (!input.lotId || !input.sourceLocationId) return false;
+  if (input.movements.length !== 2 || input.returns.length !== 1) return false;
+
+  const exit = input.movements.find((movement) => movement.type === "exit");
+  const returnedMovement = input.movements.find((movement) => movement.type === "return");
+  const returnRecord = input.returns[0];
+  if (!exit || !returnedMovement || exit.id === returnedMovement.id) return false;
+  if (exit.canceled === true || returnedMovement.canceled === true) return false;
+
+  const validQuantity = Number.isFinite(exit.quantity) && exit.quantity > 0 &&
+    Number.isFinite(returnedMovement.quantity) &&
+    Number.isFinite(returnRecord.quantity) &&
+    Math.abs(returnedMovement.quantity - exit.quantity) <= EPSILON &&
+    Math.abs(returnRecord.quantity - exit.quantity) <= EPSILON;
+
+  return (
+    validQuantity &&
+    exit.lotId === input.lotId &&
+    returnedMovement.lotId === input.lotId &&
+    returnedMovement.exitMovementId === exit.id &&
+    returnRecord.exitMovementId === exit.id &&
+    (returnRecord.lotId == null || returnRecord.lotId === input.lotId) &&
+    returnRecord.condition === "unused" &&
+    returnRecord.locationId === input.sourceLocationId &&
+    (exit.locationId == null || exit.locationId === input.sourceLocationId) &&
+    (returnedMovement.locationId == null || returnedMovement.locationId === input.sourceLocationId)
+  );
+}

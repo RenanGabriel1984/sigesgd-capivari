@@ -1,5 +1,5 @@
 import { requirePermission } from "./rbac";
-import { buildReadonlyLotLocationPlan } from "../lib/lot-location-readonly-plan";
+import { buildReadonlyLotLocationPlan, isClosedUnusedReturnAtSource } from "../lib/lot-location-readonly-plan";
 import {
   resolveConsumedLotId,
   formatConsumedLots,
@@ -1287,6 +1287,29 @@ export const lotLocationMigrationReadiness = query({
         const laterReturns = (returns as any[]).filter((returned) =>
           String(returned.productId) === String(product._id) && returned.createdAt >= lot.receivedAt,
         );
+        const closedUnusedReturnAtSource = isClosedUnusedReturnAtSource({
+          lotId: String(lot._id),
+          sourceLocationId: candidateIds[0] ?? "",
+          movements: laterMovements.map((movement: any) => ({
+            id: String(movement._id),
+            type: movement.type,
+            lotId: movement.lotId ? String(movement.lotId) : null,
+            quantity: movement.quantity,
+            exitMovementId: movement.exitMovementId ? String(movement.exitMovementId) : null,
+            locationId: movement.locationId ? String(movement.locationId) : null,
+            canceled: movement.canceled === true,
+          })),
+          returns: laterReturns.map((returned: any) => ({
+            lotId: returned.lotId ? String(returned.lotId) : null,
+            exitMovementId: returned.exitMovementId ? String(returned.exitMovementId) : null,
+            quantity: returned.quantity,
+            locationId: returned.locationId ? String(returned.locationId) : null,
+            condition: returned.condition ?? null,
+          })),
+        });
+        const noPostReceiptMovements = laterMovements.length === 0 && laterReturns.length === 0;
+        const locationHistoryIsSafe = noPostReceiptMovements || closedUnusedReturnAtSource;
+
         let status: "mapped" | "candidate" | "divergent" | "ambiguous" | "unmapped";
         let candidateLocationId: string | null = null;
         if (balancesForLot.length > 0) {
@@ -1295,7 +1318,7 @@ export const lotLocationMigrationReadiness = query({
             mappedLocations.some((row) => !locationNames.has(row.locationId))
             ? "divergent"
             : "mapped";
-        } else if (candidateEvidence && laterMovements.length === 0 && laterTransfers.length === 0 && laterReturns.length === 0) {
+        } else if (candidateEvidence && locationHistoryIsSafe && laterTransfers.length === 0) {
           status = "candidate";
           candidateLocationId = candidateIds[0];
         } else if (candidateIds.length > 0 || laterMovements.length > 0 || laterTransfers.length > 0 || laterReturns.length > 0) {
