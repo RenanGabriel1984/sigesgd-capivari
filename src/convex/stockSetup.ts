@@ -467,6 +467,7 @@ export const quickExit = mutation({
     quantity: v.number(),
     locationId: v.optional(v.id("storageLocations")),
     areaId: v.optional(v.id("stockAreas")),
+    areaIsUnclassified: v.optional(v.boolean()),
     destination: v.string(),
     receiverName: v.string(),
     reason: v.optional(v.string()),
@@ -510,6 +511,7 @@ export const quickExit = mutation({
       productId: args.productId,
       locationId: sourceLocationId,
       areaId: args.areaId,
+      areaIsUnclassified: args.areaIsUnclassified,
       quantity: args.quantity,
     });
     const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
