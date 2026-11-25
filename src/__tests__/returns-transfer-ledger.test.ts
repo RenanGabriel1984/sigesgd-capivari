@@ -138,3 +138,48 @@ describe("integração das devoluções e transferências no livro-razão", () =
     expect(transferPage).toContain("toLocationId");
   });
 });
+
+
+describe("rastreabilidade de devoluções e transferências no ledger", () => {
+  const schema = readSource("convex/schema.ts");
+  const returns = readSource("convex/returns.ts");
+  const transfers = readSource("convex/stockTransfers.ts");
+
+  it("vincula a devolução disponível ao movimento reversor e preserva a área da saída", () => {
+    const block = returns.slice(
+      returns.indexOf("export const create = mutation"),
+      returns.indexOf("export const resolveQuarantine = mutation"),
+    );
+    expect(block).toContain("areaId: exit.areaId");
+    expect(block).toContain("returnId,");
+    expect(block).toContain("const stockMovementId = await ctx.db.insert(\"stockMovements\"");
+    expect(block).toContain("await ctx.db.patch(returnId, { stockMovementId })");
+    expect(schema).toContain('stockMovementId: v.optional(v.id("stockMovements"))');
+    expect(schema).toContain('returnId: v.optional(v.id("returns"))');
+  });
+
+  it("vincula a liberação da quarentena ao movimento e não cria movimento no descarte", () => {
+    const block = returns.slice(returns.indexOf("export const resolveQuarantine = mutation"));
+    expect(block).toContain("const stockMovementId = await ctx.db.insert(\"stockMovements\"");
+    expect(block).toContain("await ctx.db.patch(args.returnId, { stockMovementId })");
+    expect(block).toContain('args.disposition === "available"');
+  });
+
+  it("registra transferência com área, origem, destino e vínculo reversível ao movimento", () => {
+    expect(transfers).toContain("areaId: lotDoc?.areaId");
+    expect(transfers).toContain("transferId,");
+    expect(transfers).toContain("fromLocationId: args.fromLocationId");
+    expect(transfers).toContain("toLocationId: args.toLocationId");
+    expect(transfers).toContain("await ctx.db.patch(transferId, { stockMovementId })");
+    expect(schema).toContain('transferId: v.optional(v.id("stockTransfers"))');
+    expect(schema).toContain('fromLocationId: v.optional(v.id("storageLocations"))');
+    expect(schema).toContain('toLocationId: v.optional(v.id("storageLocations"))');
+  });
+
+  it("expõe a área nas consultas e nas telas de devolução e transferência", () => {
+    expect(returns).toContain("const area: any = m.areaId ? await ctx.db.get(m.areaId) : null");
+    expect(transfers).toContain("const area = t.areaId ? await ctx.db.get(t.areaId) : null");
+    expect(readSource("pages/Returns.tsx")).toContain("<TableHead>Área</TableHead>");
+    expect(readSource("pages/StockTransfers.tsx")).toContain("<TableHead>Área</TableHead>");
+  });
+});
