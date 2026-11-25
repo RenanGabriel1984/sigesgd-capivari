@@ -2,7 +2,7 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { planTransfer } from "../lib/transfer-rules";
 import { planLotLocationTransfer } from "../lib/lot-location-rules";
-import { getOptionalSingleValidGlobalStock, requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
+import { requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 import { assertProductLedgerConsistent, assertProductReservationConsistent } from "./lotLocationLedger";
 import { requirePermission } from "./rbac";
 
@@ -26,7 +26,9 @@ export const list = query({
       const fromLocation = await ctx.db.get(t.fromLocationId);
       const toLocation = await ctx.db.get(t.toLocationId);
       const responsible = await ctx.db.get(t.responsibleUserId);
-      return { ...t, product, lot, fromLocation, toLocation, responsible };
+      const area = t.areaId ? await ctx.db.get(t.areaId) : null;
+      const stockMovement = t.stockMovementId ? await ctx.db.get(t.stockMovementId) : null;
+      return { ...t, product, lot, fromLocation, toLocation, responsible, area, stockMovement };
     }));
   },
 });
@@ -43,7 +45,8 @@ export const listByProduct = query({
     return Promise.all(transfers.map(async (t: any) => {
       const fromLocation = await ctx.db.get(t.fromLocationId);
       const toLocation = await ctx.db.get(t.toLocationId);
-      return { ...t, fromLocation, toLocation };
+      const area = t.areaId ? await ctx.db.get(t.areaId) : null;
+      return { ...t, fromLocation, toLocation, area };
     }));
   },
 });
@@ -276,6 +279,7 @@ export const create = mutation({
       toLocationId: args.toLocationId,
       quantity: args.quantity,
       responsibleUserId: userId,
+      areaId: lotDoc?.areaId,
       observation: args.observation,
       createdAt: now,
     });
@@ -285,23 +289,26 @@ export const create = mutation({
       .query("stock")
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
-    const globalStock = getOptionalSingleValidGlobalStock(globalStockRows, product.name);
-    if (globalStock) {
-      await ctx.db.insert("stockMovements", {
-        productId: args.productId,
-        type: "transfer",
-        quantity: args.quantity,
-        previousPhysical: globalStock.physicalQuantity,
-        newPhysical: globalStock.physicalQuantity,
-        previousReserved: globalStock.reservedQuantity,
-        newReserved: globalStock.reservedQuantity,
-        userId,
-        locationId: args.fromLocationId,
-        lotId: lotDoc?.lotNumber,
-        observation: `Transferência: ${fromLocation.name} → ${toLocation.name}`,
-        timestamp: now,
-      });
-    }
+    const globalStock = requireSingleValidGlobalStock(globalStockRows, product.name);
+    const stockMovementId = await ctx.db.insert("stockMovements", {
+      productId: args.productId,
+      type: "transfer",
+      quantity: args.quantity,
+      previousPhysical: globalStock.physicalQuantity,
+      newPhysical: globalStock.physicalQuantity,
+      previousReserved: globalStock.reservedQuantity,
+      newReserved: globalStock.reservedQuantity,
+      userId,
+      areaId: lotDoc?.areaId,
+      locationId: args.fromLocationId,
+      fromLocationId: args.fromLocationId,
+      toLocationId: args.toLocationId,
+      lotId: lotDoc?.lotNumber,
+      transferId,
+      observation: `Transferência: ${fromLocation.name} → ${toLocation.name}`,
+      timestamp: now,
+    });
+    await ctx.db.patch(transferId, { stockMovementId });
 
     // Audit
     await ctx.db.insert("auditLogs", {
