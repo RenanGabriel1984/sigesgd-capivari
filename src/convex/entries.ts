@@ -1,4 +1,5 @@
 import { query, mutation } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { validateEntryUnits } from "../lib/material-types";
 import {
@@ -138,8 +139,11 @@ export const list = query({
       const itemsWithProduct = await Promise.all(items.map(async (item: any) => {
         const product = await ctx.db.get(item.productId);
         const location = item.locationId ? await ctx.db.get(item.locationId) : null;
-        const effectiveAreaId = resolveEntryItemAreaId(item.areaId, e.areaId);
-        const area = effectiveAreaId ? await ctx.db.get(effectiveAreaId) : null;
+        const effectiveAreaId = resolveEntryItemAreaId<Id<"stockAreas">>(
+          item.areaId as Id<"stockAreas"> | undefined,
+          e.areaId as Id<"stockAreas"> | undefined,
+        );
+        const area = effectiveAreaId ? await ctx.db.get(effectiveAreaId as Id<"stockAreas">) : null;
         const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
         return { ...item, product, location, area, effectiveAreaId, units };
       }));
@@ -161,8 +165,11 @@ export const get = query({
     const itemsWithProduct = await Promise.all(items.map(async (item: any) => {
       const product = await ctx.db.get(item.productId);
       const location = item.locationId ? await ctx.db.get(item.locationId) : null;
-      const effectiveAreaId = resolveEntryItemAreaId(item.areaId, entry.areaId);
-      const area = effectiveAreaId ? await ctx.db.get(effectiveAreaId) : null;
+      const effectiveAreaId = resolveEntryItemAreaId<Id<"stockAreas">>(
+        item.areaId as Id<"stockAreas"> | undefined,
+        entry.areaId,
+      );
+      const area = effectiveAreaId ? await ctx.db.get(effectiveAreaId as Id<"stockAreas">) : null;
       const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
       const unitsWithAssets = await Promise.all(units.map(async (unit: any) => {
         const asset: any = unit.assetId ? await ctx.db.get(unit.assetId) : null;
@@ -463,13 +470,13 @@ export const confirm = mutation({
       const entryLocation = await ctx.db.get(item.locationId);
       if (!entryLocation || entryLocation.active === false) throw new Error(`O armário selecionado para "${product.name}" não existe ou está inativo.`);
 
-      const effectiveAreaId = resolveEntryItemAreaId(item.areaId, entry.areaId);
+      const effectiveAreaId = resolveEntryItemAreaId<Id<"stockAreas">>(item.areaId, entry.areaId);
       if (!effectiveAreaId) {
         throw new Error(`Selecione uma área para "${product.name}" no item ou no cabeçalho antes de confirmar.`);
       }
       const effectiveArea = effectiveAreaId === entry.areaId && destinationArea
         ? destinationArea
-        : await ctx.db.get(effectiveAreaId);
+        : await ctx.db.get(effectiveAreaId as Id<"stockAreas">);
       if (!effectiveArea || effectiveArea.active === false) {
         throw new Error(`A área selecionada para "${product.name}" não existe ou está inativa.`);
       }
@@ -500,7 +507,7 @@ export const confirm = mutation({
         active: true,
         observation: item.observation,
         materialType: entry.materialType,
-        areaId: effectiveAreaId as any,
+        areaId: effectiveAreaId,
       });
 
       // Rastreabilidade Entrada → EntryItem → Lote → Movimentação.
@@ -509,7 +516,7 @@ export const confirm = mutation({
       // o item ao lote que ele gerou.
       await ctx.db.patch(item._id, {
         lotId: lotId as string,
-        areaId: effectiveAreaId as any,
+        areaId: effectiveAreaId,
       });
 
       // Saldo rastreável do lote no armário informado no recebimento.
@@ -575,7 +582,7 @@ export const confirm = mutation({
         newReserved: prevReserved,
         userId,
         entryId: args.entryId,
-        areaId: effectiveAreaId as any,
+        areaId: effectiveAreaId,
         lotId: lotNumber,
         locationId: item.locationId,
         documentNumber: entry.invoiceNumber,
