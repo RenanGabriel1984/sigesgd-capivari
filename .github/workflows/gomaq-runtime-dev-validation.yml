@@ -31,6 +31,7 @@ jobs:
           test "${CONVEX_DEPLOY_KEY%%|*}" = "dev:first-herring-264"
           test -z "${CONVEX_DEPLOYMENT:-}"
       - name: Deploy DEV functions
+        id: deploy
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
         run: bunx convex dev --once --tail-logs disable
@@ -39,7 +40,7 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
         run: node scripts/convex-dev-gomaq-validation.mjs
       - name: Final idempotent fixture cleanup
-        if: always()
+        if: always() && steps.deploy.outcome == 'success'
         env:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
           RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
