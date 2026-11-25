@@ -540,7 +540,7 @@ export const quickExit = mutation({
       newReserved: previousReserved,
       userId,
       exitNumber,
-      areaId: args.areaId,
+      areaId: lotConsumption.areaId ?? args.areaId,
       lotId: consumedLotId ?? undefined,
       locationId: sourceLocationId,
       observation: [
