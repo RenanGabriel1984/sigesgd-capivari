@@ -11,8 +11,7 @@ let failure,fixture;
 try{
  fixture=internal("entryExitDevTests:seed",{runId});
  const identity={subject:fixture.operatorId,issuer:"https://sigesgd-capivari.dev"};
- const entry=pub(identity,"entries:create",{receivedAt:Date.now(),originType:"other",materialType:"consumption",areaId:fixture.areaId,observation:"__SIGESGD_ENTRY_EXIT_DEV__"+runId+"__ENTRY",items:[]});
- const item=pub(identity,"entries:addItem",{entryId:entry.entryId,productId:fixture.productId,quantity:10,unitOfMeasure:"un",areaId:fixture.areaId,locationId:fixture.locationId,observation:"Fixture entrada"});
+ const entry=pub(identity,"entries:create",{receivedAt:Date.now(),originType:"other",materialType:"consumption",areaId:fixture.areaId,observation:"__SIGESGD_ENTRY_EXIT_DEV__"+runId+"__ENTRY",items:[{productId:fixture.productId,quantity:10,unitOfMeasure:"un",areaId:fixture.areaId,locationId:fixture.locationId,observation:"Fixture entrada"}]});
  pub(identity,"entries:confirm",{entryId:entry.entryId});
  let state=internal("entryExitDevTests:inspect",{runId});
  assert(state.exists&&state.global===10&&state.local===10&&state.lot===10&&state.lotLocal===10&&state.ledgerBalanced,"Entrada confirmada não conciliou global/armário/lote.");
