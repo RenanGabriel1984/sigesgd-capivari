@@ -453,6 +453,10 @@ const schema = defineSchema(
       exitNumber: v.optional(v.string()),
       // ── Vínculo reverso: movimentação de DEVOLUÇÃO → saída original ──
       exitMovementId: v.optional(v.id("stockMovements")),
+      returnId: v.optional(v.id("returns")),
+      transferId: v.optional(v.id("stockTransfers")),
+      fromLocationId: v.optional(v.id("storageLocations")),
+      toLocationId: v.optional(v.id("storageLocations")),
       timestamp: v.number(),
       canceled: v.optional(v.boolean()),
       canceledAt: v.optional(v.number()),
@@ -716,6 +720,8 @@ const schema = defineSchema(
       requestItemId: v.optional(v.id("requestItems")),
       productId: v.id("products"),
       lotId: v.optional(v.id("lots")),
+      areaId: v.optional(v.id("stockAreas")),
+      stockMovementId: v.optional(v.id("stockMovements")),
       quantity: v.number(),
       reason: v.string(),
       // Condição do material devolvido
@@ -812,6 +818,8 @@ const schema = defineSchema(
       toLocationId: v.id("storageLocations"),
       quantity: v.number(),
       responsibleUserId: v.id("users"),
+      areaId: v.optional(v.id("stockAreas")),
+      stockMovementId: v.optional(v.id("stockMovements")),
       observation: v.optional(v.string()),
       createdAt: v.number(),
     }).index("by_product", ["productId"])
