@@ -101,7 +101,7 @@ jobs:
           RUN_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          bunx convex run --deployment "${TARGET_DEPLOYMENT}" stockDevTransactionTests:cleanup "{\"runId\":\"${RUN_ID}\"}"
-          bunx convex run --deployment "${TARGET_DEPLOYMENT}" --inline-query \
+          bunx convex run stockDevTransactionTests:cleanup "{\"runId\":\"${RUN_ID}\"}"
+          bunx convex run --inline-query \
             'const name = "__SIGESGD_DEV_TXN__'"${RUN_ID}"'__PRODUCT"; const product = await ctx.db.query("products").withIndex("by_name", (q) => q.eq("name", name)).first(); if (product) throw new Error("Fixture de teste ainda existe após a limpeza."); return { fixtureRemaining: false };'
 
