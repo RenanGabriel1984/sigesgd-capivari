@@ -239,3 +239,31 @@ describe("evidência histórica de saída devolvida sem uso", () => {
     })).toBe(false);
   });
 });
+
+
+describe("planner bloqueia saldo positivo sem lote histórico", () => {
+  it("does not omit a product that has global or cabinet quantity but no lots", () => {
+    const f = fixture();
+    f.products[0].lots = [];
+    f.products[0].lotsAvailableTotal = 0;
+    f.products[0].candidateTotalsAlign = false;
+    const plan = buildReadonlyLotLocationPlan(f);
+    expect(plan.insertions).toEqual([]);
+    expect(plan.blockedProducts).toHaveLength(1);
+    expect(plan.blockedProducts[0].reasons).toContain("saldo global diverge dos lotes disponíveis");
+  });
+
+  it("does not block a genuinely empty legacy product without any stock or lot", () => {
+    const f = fixture();
+    f.products[0].globalPhysical = 0;
+    f.products[0].globalReserved = 0;
+    f.products[0].localPhysicalTotal = 0;
+    f.products[0].lotsAvailableTotal = 0;
+    f.products[0].candidateTotalsAlign = true;
+    f.products[0].localComparison = [];
+    f.products[0].lots = [];
+    const plan = buildReadonlyLotLocationPlan(f);
+    expect(plan.blockedProducts).toEqual([]);
+    expect(plan.totalLotsToTrace).toBe(0);
+  });
+});

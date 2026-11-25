@@ -1,11 +1,11 @@
 import { requirePermission } from "./rbac";
-import { buildReadonlyLotLocationPlan, isClosedUnusedReturnAtSource } from "../lib/lot-location-readonly-plan";
+import { buildReadonlyLotLocationPlan, isClosedUnusedReturnAtSource, type LotLocationReadinessReport } from "../lib/lot-location-readonly-plan";
 import {
   resolveConsumedLotId,
   formatConsumedLots,
   type LotConsumption,
 } from "../lib/stock-consumption";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 import {
@@ -1195,10 +1195,7 @@ export const productDimensionSummary = query({
  * Diagnóstico conservador de rastreabilidade histórica lote × armário.
  * Apenas consulta; candidatos são sugestões de evidência e nunca gravados.
  */
-export const lotLocationMigrationReadiness = query({
-  args: {},
-  handler: async (ctx) => {
-    await requireUser(ctx);
+async function readLotLocationMigrationReadiness(ctx: any) {
     const [
       products, lots, lotBalances, locations, stocks, locationRows,
       entryItems, entries, movements, transfers, returns,
@@ -1223,22 +1220,29 @@ export const lotLocationMigrationReadiness = query({
       entryItemsByLot.set(key, [...(entryItemsByLot.get(key) ?? []), item]);
     }
     const entryById = new Map(entries.map((entry: any) => [String(entry._id), entry]));
-    const readinessProducts: any[] = [];
+    const readinessProducts: LotLocationReadinessReport["products"] = [];
     for (const product of products as any[]) {
       const productLots = (lots as any[]).filter((lot) => String(lot.productId) === String(product._id));
-      // Produtos sem lote histórico permanecem no modelo legado; não se criam lotes artificiais.
-      if (productLots.length === 0) continue;
+      // Produtos sem lote histórico também entram no relatório: saldo positivo sem lote deve ser bloqueado.
       const productBalances = (lotBalances as any[]).filter((row) => String(row.productId) === String(product._id));
       const productLocalRows = (locationRows as any[]).filter((row) => String(row.productId) === String(product._id));
       const globalRows = (stocks as any[]).filter((row) => String(row.productId) === String(product._id));
       const global = globalRows.length === 1 ? globalRows[0] : null;
       let globalError: string | null = null;
-      if (globalRows.length !== 1) globalError = globalRows.length === 0
-        ? "Registro global ausente."
-        : `Há ${globalRows.length} registros globais duplicados.`;
-      else if (!Number.isFinite(global.physicalQuantity) || !Number.isFinite(global.reservedQuantity) ||
-        global.physicalQuantity < 0 || global.reservedQuantity < 0 || global.reservedQuantity > global.physicalQuantity) {
-        globalError = "Registro global com quantidades inválidas.";
+      if (globalRows.length > 1) {
+        globalError = `Há ${globalRows.length} registros globais duplicados.`;
+      } else if (globalRows.length === 0 && (
+        productLocalRows.some((row: any) => Number.isFinite(row.quantity) && row.quantity > 1e-9) ||
+        productLots.some((lot: any) => Number.isFinite(lot.quantityAvailable) && lot.quantityAvailable > 1e-9)
+      )) {
+        globalError = "Há saldo físico ou lote disponível sem registro global de estoque.";
+      } else if (globalRows.length === 1) {
+        const currentGlobal = globalRows[0];
+        if (!Number.isFinite(currentGlobal.physicalQuantity) || !Number.isFinite(currentGlobal.reservedQuantity) ||
+          currentGlobal.physicalQuantity < 0 || currentGlobal.reservedQuantity < 0 ||
+          currentGlobal.reservedQuantity > currentGlobal.physicalQuantity) {
+          globalError = "Registro global com quantidades inválidas.";
+        }
       }
       const balanceScopeKeys = productBalances.map((row: any) => `${String(row.lotId)}::${String(row.locationId)}`);
       const duplicateBalanceScopeCount = balanceScopeKeys.length - new Set(balanceScopeKeys).size;
@@ -1409,7 +1413,19 @@ export const lotLocationMigrationReadiness = query({
       plan,
       warning: "Candidatos são inferências documentais; não executam migração. Produtos divergentes, ambíguos ou sem evidência suficiente permanecem bloqueados.",
     };
+}
+
+export const lotLocationMigrationReadiness = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    return readLotLocationMigrationReadiness(ctx);
   },
+});
+
+export const lotLocationMigrationReadinessInternal = internalQuery({
+  args: {},
+  handler: async (ctx) => readLotLocationMigrationReadiness(ctx),
 });
 
 
