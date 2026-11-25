@@ -57,6 +57,21 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain("const finalReserved = newReserved - unusedReservation;");
     expect(part).toContain("areaId: input.areaId");
   });
+  it("histórico expõe a área e o armário de cada movimentação", () => {
+    const movements = source("convex/stockMovements.ts");
+    const list = movements.slice(
+      movements.indexOf("export const list = query({"),
+      movements.indexOf("export const byProduct = query({"),
+    );
+    const page = source("pages/Movements.tsx");
+    expect(list).toContain("const area = m.areaId ? await ctx.db.get(m.areaId) : null");
+    expect(list).toContain("const location = m.locationId ? await ctx.db.get(m.locationId) : null");
+    expect(list).toContain("area, location");
+    expect(page).toContain("m.area?.name ?? \"Sem área registrada\"");
+    expect(page).toContain("m.location?.name ?? \"Sem armário registrado\"");
+    expect(page).toContain("Área / Armário");
+  });
+
   it("interfaces exigem área e armário antes da saída", () => {
     const exit = source("pages/Exit.tsx");
     const requests = source("pages/Requests.tsx");
