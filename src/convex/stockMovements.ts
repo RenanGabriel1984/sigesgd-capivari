@@ -108,7 +108,7 @@ export const createExit = mutation({
       productId: args.productId, type: "exit", quantity: args.quantity,
       previousPhysical: prevPhysical, newPhysical, previousReserved: prevReserved, newReserved: prevReserved,
       userId, requestId: args.requestId,
-      areaId: args.areaId,
+      areaId: lotConsumption.areaId ?? args.areaId,
       lotId: lotConsumption.allocations[0]?.lotId as any,
       locationId: sourceLocationId,
       observation: `${args.observation ?? "Saída direta"} — armário ${sourceLocation?.name ?? sourceLocationId}; lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
