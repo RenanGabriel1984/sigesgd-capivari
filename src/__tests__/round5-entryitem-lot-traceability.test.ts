@@ -62,7 +62,7 @@ describe("entries.confirm: cadeia de rastreabilidade completa", () => {
   });
 
   it("a área da entrada continua propagada para o lote", () => {
-    expect(body).toMatch(/resolveEntryItemAreaId\(item\.areaId, entry\.areaId\)/);
+    expect(body).toMatch(/resolveEntryItemAreaId<Id<"stockAreas">>\(item\.areaId, entry\.areaId\)/);
     expect(body).toMatch(/areaId:\s*effectiveAreaId/);
   });
 
