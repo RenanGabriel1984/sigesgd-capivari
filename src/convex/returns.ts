@@ -53,7 +53,11 @@ export const list = query({
       const request = r.requestId ? await ctx.db.get(r.requestId) : null;
       const exit = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
       const location = r.locationId ? await ctx.db.get(r.locationId) : null;
-      const area = r.areaId ? await ctx.db.get(r.areaId) : null;
+      const area = r.areaId
+        ? await ctx.db.get(r.areaId)
+        : exit?.areaId
+          ? await ctx.db.get(exit.areaId)
+          : null;
       const allocations = await ctx.db.query("returnLotAllocations")
         .withIndex("by_return", (q: any) => q.eq("returnId", r._id))
         .collect();
