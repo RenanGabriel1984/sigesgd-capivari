@@ -49,6 +49,7 @@ export const inspect=internalQuery({args:{runId:v.string()},handler:async(ctx,{r
 export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx,{runId})=>{
  guard();valid(runId);
  const product=await ctx.db.query("products").withIndex("by_name",q=>q.eq("name",name(runId,"PRODUCT"))).first();
+ const entry=await ctx.db.query("entries").withIndex("by_number",q=>q.eq("entryNumber",name(runId,"ENTRY"))).first();
  const printer=await ctx.db.query("printers").collect().then(rs=>rs.find(p=>p.name===name(runId,"PRINTER"))??null);
  const location=await ctx.db.query("storageLocations").collect().then(rs=>rs.find(l=>l.name===name(runId,"LOCATION"))??null);
  const fixtureArea=await ctx.db.query("stockAreas").collect().then(rs=>rs.find(a=>a.name==="Impressoras/Gomaq"&&a.description==="Fixture DEV GomaQ")??null);
