@@ -8,7 +8,7 @@ export const seed=internalMutation({args:{runId:v.string()},handler:async(ctx,{r
  guard();valid(runId);
  const users=await ctx.db.query("users").collect();
  const requester=users.find(u=>u.role==="technician"&&u.active!==false&&u.isAnonymous!==true);
- const approver=users.find(u=>(u.role==="stock_manager"||u.role==="admin")&&u.active!==false&&u.isAnonymous!==true&&u._id!==requester?true:false);
+ const approver=users.find(u=>(u.role==="stock_manager"||u.role==="admin")&&u.active!==false&&u.isAnonymous!==true&&(!requester||u._id!==requester._id));
  if(!requester||!approver)throw new Error("DEV precisa de solicitante técnico e aprovador ativo.");
  const category=await ctx.db.query("categories").withIndex("by_active",q=>q.eq("active",true)).first();
  if(!category)throw new Error("Categoria ativa ausente.");
