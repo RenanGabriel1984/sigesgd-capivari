@@ -1,5 +1,7 @@
 name: Entradas e saídas reais — Convex DEV
 on:
+  push:
+    branches: [codex/entry-exit-dev-runtime-validation]
   pull_request:
     branches: [codex/water-mineral-integrated]
 permissions:
@@ -8,10 +10,9 @@ concurrency:
   group: entry-exit-dev-first-herring
   cancel-in-progress: false
 jobs:
-  validation:
-    if: github.event_name == 'pull_request' && github.head_ref == 'codex/entry-exit-dev-runtime-validation'
+  quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with: {persist-credentials: false}
@@ -20,6 +21,17 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Quality gates
         run: bun run test && bun run build
+  dev-transaction:
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/entry-exit-dev-runtime-validation'
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {persist-credentials: false}
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76
+        with: {bun-version: "1.3.14"}
+      - run: bun install --frozen-lockfile
       - name: Guard target DEV only
         env: {CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}}
         run: |
