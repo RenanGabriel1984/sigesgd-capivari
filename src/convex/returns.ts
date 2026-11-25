@@ -49,6 +49,8 @@ export const list = query({
       const lot = r.lotId ? await ctx.db.get(r.lotId) : null;
       const returnedBy = await ctx.db.get(r.returnedByUserId);
       const receivedBy = r.receivedByUserId ? await ctx.db.get(r.receivedByUserId) : null;
+      const area = r.areaId ? await ctx.db.get(r.areaId) : null;
+      const stockMovement = r.stockMovementId ? await ctx.db.get(r.stockMovementId) : null;
       const request = r.requestId ? await ctx.db.get(r.requestId) : null;
       const exit = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
       const location = r.locationId ? await ctx.db.get(r.locationId) : null;
@@ -70,7 +72,7 @@ export const list = query({
           quantity: allocation.quantity,
         };
       }));
-      return { ...r, product, lot, returnedBy, receivedBy, request, exit, location, lotAllocations };
+      return { ...r, product, lot, area, stockMovement, returnedBy, receivedBy, request, exit, location, lotAllocations };
     }));
   },
 });
@@ -95,6 +97,7 @@ export const returnable = query({
     const rows = await Promise.all(exits.map(async (m: any) => {
       const product: any = await ctx.db.get(m.productId);
       const user: any = await ctx.db.get(m.userId);
+      const area: any = m.areaId ? await ctx.db.get(m.areaId) : null;
       const request: any = m.requestId ? await ctx.db.get(m.requestId) : null;
       const requester: any = request?.requesterId ? await ctx.db.get(request.requesterId) : null;
       const returned = returnedQuantityForExit(allReturns, m);
@@ -189,6 +192,7 @@ export const returnable = query({
       return {
         ...m,
         product,
+        area,
         user,
         requesterName: requester?.name ?? user?.name ?? null,
         osNumber: request?.osNumber ?? null,
@@ -404,6 +408,7 @@ export const create = mutation({
       requestId: exit.requestId,
       productId: exit.productId,
       lotId: plannedLotAllocations.length === 1 ? plannedLotAllocations[0].lotId : undefined,
+      areaId: exit.areaId,
       quantity: args.quantity,
       reason,
       condition,
@@ -558,7 +563,7 @@ export const create = mutation({
     // 5) Movimentação de DEVOLUÇÃO vinculada à saída original
     //    (a baixa original NÃO é alterada)
     const exitLabel = exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
-    await ctx.db.insert("stockMovements", {
+    const stockMovementId = await ctx.db.insert("stockMovements", {
       productId: exit.productId,
       type: "return",
       quantity: args.quantity,
@@ -569,7 +574,10 @@ export const create = mutation({
       userId,
       requestId: exit.requestId,
       exitMovementId: exit._id,
+      returnId,
+      areaId: exit.areaId,
       locationId: args.locationId,
+      toLocationId: args.locationId,
       lotId: plannedLotAllocations.length === 1
         ? (await ctx.db.get(plannedLotAllocations[0].lotId) as any)?.lotNumber
         : undefined,
@@ -581,6 +589,7 @@ export const create = mutation({
         (args.observation ? ` | ${args.observation}` : ""),
       timestamp: now,
     });
+    await ctx.db.patch(returnId, { stockMovementId });
 
     // 6) Auditoria
     await ctx.db.insert("auditLogs", {
@@ -724,7 +733,7 @@ export const resolveQuarantine = mutation({
           quantity: returned.quantity,
         });
       }
-      await ctx.db.insert("stockMovements", {
+      const stockMovementId = await ctx.db.insert("stockMovements", {
         productId: returned.productId,
         type: "return",
         quantity: returned.quantity,
@@ -735,11 +744,15 @@ export const resolveQuarantine = mutation({
         userId,
         requestId: returned.requestId,
         exitMovementId: returned.exitMovementId,
+        returnId: args.returnId,
+        areaId: returned.areaId,
         locationId: returned.locationId,
+        toLocationId: returned.locationId,
         lotId: allocations.length === 1 ? (await ctx.db.get(allocations[0].lotId) as any)?.lotNumber : undefined,
         observation: "Liberação de quarentena após inspeção — " + reason,
         timestamp: now,
       });
+      await ctx.db.patch(args.returnId, { stockMovementId });
     }
 
     await ctx.db.patch(args.returnId, {
