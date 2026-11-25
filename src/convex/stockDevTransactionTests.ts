@@ -171,7 +171,8 @@ export const seed = internalMutation({
       toLocationId,
       lotId,
       entryId,
-      operatorId,\n      operatorRole: operator.role,
+      operatorId,
+      operatorRole: operator.role,
       exitIds,
       baseline: { global: 53, from: 33, to: 20, lot: 53 },
     };
