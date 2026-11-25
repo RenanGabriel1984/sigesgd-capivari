@@ -6,7 +6,6 @@ function valid(id:string){if(!/^[a-zA-Z0-9-]{8,80}$/.test(id))throw new Error("F
 function name(id:string,s:string){return PREFIX+id+"__"+s;}
 export const seed=internalMutation({args:{runId:v.string()},handler:async(ctx,{runId})=>{
  guard();valid(runId);
- const users=await ctx.db.query("users").collect();
  const now=Date.now();
  const requesterId=await ctx.db.insert("users",{name:name(runId,"REQUESTER"),email:name(runId,"requester")+"@fixture.invalid",role:"technician",active:true,createdAt:now,updatedAt:now});
  const approverId=await ctx.db.insert("users",{name:name(runId,"APPROVER"),email:name(runId,"approver")+"@fixture.invalid",role:"stock_manager",active:true,createdAt:now,updatedAt:now});
@@ -16,7 +15,6 @@ export const seed=internalMutation({args:{runId:v.string()},handler:async(ctx,{r
  const locationId=await ctx.db.insert("storageLocations",{name:name(runId,"LOCATION"),description:"Fixture request DEV",active:true});
  const secretariaId=await ctx.db.insert("organizations",{name:name(runId,"SECRETARIA"),type:"secretaria",active:true});
  const productId=await ctx.db.insert("products",{name:name(runId,"PRODUCT"),description:"Fixture request DEV",categoryId:category._id,unitOfMeasure:"un",active:true,maximumStock:100});
- const now=Date.now();
  const entryId=await ctx.db.insert("entries",{entryNumber:name(runId,"ENTRY"),receivedAt:now,originType:"other",responsibleUserId:approverId,observation:"Fixture request DEV",status:"confirmed",materialType:"consumption",areaId,createdAt:now,updatedAt:now});
  const lotId=await ctx.db.insert("lots",{lotNumber:name(runId,"LOT"),productId,entryId,quantityReceived:10,quantityAvailable:10,receivedAt:now,active:true,materialType:"consumption",areaId});
  await ctx.db.insert("stock",{productId,physicalQuantity:10,reservedQuantity:0});
@@ -38,7 +36,7 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  const product=await ctx.db.query("products").withIndex("by_name",q=>q.eq("name",name(runId,"PRODUCT"))).first();
  const requests=await ctx.db.query("requests").collect().then(rs=>rs.filter(r=>r.reason?.includes(name(runId,"REASON"))));
  const items:any[]=(await Promise.all(requests.map(r=>ctx.db.query("requestItems").withIndex("by_request",q=>q.eq("requestId",r._id)).collect()))).flat();
- const org=await ctx.db.query("organizations").collect().then(rs=>rs.find(o=>o.name===name(runId,"SECRETARIA"))??null);
+ const requester=await ctx.db.query("users").collect().then(rs=>rs.find(u=>u.email===name(runId,"requester")+"@fixture.invalid")??null);\n const approver=await ctx.db.query("users").collect().then(rs=>rs.find(u=>u.email===name(runId,"approver")+"@fixture.invalid")??null);\n const org=await ctx.db.query("organizations").collect().then(rs=>rs.find(o=>o.name===name(runId,"SECRETARIA"))??null);
  const entry=await ctx.db.query("entries").withIndex("by_number",q=>q.eq("entryNumber",name(runId,"ENTRY"))).first();
  const area=await ctx.db.query("stockAreas").withIndex("by_name",q=>q.eq("name",name(runId,"AREA"))).first();
  const location=await ctx.db.query("storageLocations").collect().then(rs=>rs.find(l=>l.name===name(runId,"LOCATION"))??null);
