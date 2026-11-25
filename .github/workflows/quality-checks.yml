@@ -5,6 +5,7 @@ on:
     branches:
       - codex/rbac-audit-hardening
       - codex/gomaq-ledger-area-integration
+      - codex/stock-dimension-report-integrity
   pull_request:
     branches:
       - main

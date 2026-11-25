@@ -1455,12 +1455,37 @@ export const stockDimensionOverview = query({
       const globalPhysical = global.length === 1 ? global[0].physicalQuantity : 0;
       const areasMap = new Map<string, { areaId: string | null; areaName: string; quantityAvailable: number; locations: Map<string, number> }>();
       const keys = new Set<string>();
-      let invalidBalanceCount = global.length !== 1 && (productLots.length > 0 || productLocations.length > 0) ? 1 : 0;
+      let invalidBalanceCount =
+        global.length > 1 || (global.length === 0 && (productLots.length > 0 || productLocations.length > 0))
+          ? 1
+          : 0;
+      if (global.length === 1) {
+        const row = global[0];
+        if (!Number.isFinite(row.physicalQuantity) || row.physicalQuantity < 0 ||
+            !Number.isFinite(row.reservedQuantity) || row.reservedQuantity < 0 ||
+            row.reservedQuantity > row.physicalQuantity) {
+          invalidBalanceCount++;
+        }
+      }
       const locationKeys = new Set<string>();
       for (const row of productLocations) {
         const key = String(row.locationId);
         if (locationKeys.has(key)) invalidBalanceCount++;
         locationKeys.add(key);
+        const location = locationById.get(key) as any;
+        if (!location || location.active === false ||
+            !Number.isFinite(row.quantity) || row.quantity < 0) {
+          invalidBalanceCount++;
+        }
+      }
+      for (const lot of productLots) {
+        if (!Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0) {
+          invalidBalanceCount++;
+        }
+        if (lot.areaId) {
+          const area = areaById.get(String(lot.areaId)) as any;
+          if (!area || area.active === false) invalidBalanceCount++;
+        }
       }
       for (const balance of productBalances) {
         const lot = productLots.find((candidate) => String(candidate._id) === String(balance.lotId));
@@ -1497,8 +1522,17 @@ export const stockDimensionOverview = query({
           quantityAvailable,
         })).sort((a, b) => a.locationName.localeCompare(b.locationName, "pt-BR")),
       })).sort((a, b) => a.areaName.localeCompare(b.areaName, "pt-BR"));
+      // Soma diferenças por lote; diferenças opostas entre lotes não podem se anular.
+      const unmappedLotQuantity = productLots.reduce((sum, lot) => {
+        const lotQuantity = Number.isFinite(lot.quantityAvailable) ? lot.quantityAvailable : 0;
+        const locatedQuantity = productBalances
+          .filter((balance) => String(balance.lotId) === String(lot._id))
+          .reduce((total, balance) => total + (Number.isFinite(balance.quantityAvailable) ? balance.quantityAvailable : 0), 0);
+        return sum + Math.abs(lotQuantity - locatedQuantity);
+      }, 0) + productBalances
+        .filter((balance) => !productLots.some((lot) => String(lot._id) === String(balance.lotId)))
+        .reduce((sum, balance) => sum + Math.abs(Number.isFinite(balance.quantityAvailable) ? balance.quantityAvailable : 0), 0);
       const lotTotal = productLots.reduce((sum, lot) => sum + (Number.isFinite(lot.quantityAvailable) ? lot.quantityAvailable : 0), 0);
-      const locatedLotTotal = productBalances.reduce((sum, balance) => sum + (Number.isFinite(balance.quantityAvailable) ? balance.quantityAvailable : 0), 0);
       const lotRows = productLots.map((lot: any) => ({
         lotId: String(lot._id),
         lotNumber: lot.lotNumber,
@@ -1519,7 +1553,7 @@ export const stockDimensionOverview = query({
         globalStockRowCount: global.length,
         globalVsLocationDifference: global.length === 1 ? globalPhysical - locationTotal : null,
         globalVsLotsDifference: productLots.length > 0 ? globalPhysical - lotTotal : null,
-        unmappedLotQuantity: Math.abs(lotTotal - locatedLotTotal),
+        unmappedLotQuantity,
         invalidBalanceCount,
         areas: areaRows,
         lots: lotRows,
@@ -1532,7 +1566,8 @@ export const stockDimensionOverview = query({
         locationPhysical: physical,
       };
     }).filter((row: any) =>
-      row.globalPhysical !== 0 || row.locationPhysical !== 0 || row.areas.length > 0 || row.unmappedLotQuantity > 0
+      row.globalPhysical !== 0 || row.locationPhysical !== 0 || row.areas.length > 0 ||
+      row.unmappedLotQuantity > 0 || row.invalidBalanceCount > 0 || row.untrackedLocations.length > 0
     ).sort((a: any, b: any) => a.productName.localeCompare(b.productName, "pt-BR"));
     return { generatedAt: Date.now(), readOnly: true, products: result };
   },

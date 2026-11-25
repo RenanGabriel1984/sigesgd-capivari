@@ -87,7 +87,7 @@ function exportStockPositionCSV(data: any[]) {
 }
 
 function exportLotLocationCSV(data: any[]) {
-  const header = "Produto;Lote;Área;Armário;Saldo no armário;Saldo total do lote;Diferença lote/armário";
+  const header = "Produto;Lote;Área;Armário;Saldo no armário;Saldo total do lote;Diferença lote/armário;Alertas de integridade";
   const rows = data.map((r) => [
     r.productName,
     r.lotNumber,
@@ -96,6 +96,7 @@ function exportLotLocationCSV(data: any[]) {
     r.quantityAvailable,
     r.lotTotal,
     r.unmappedQuantity,
+    r.diagnostic ? `${r.diagnosticCount} inconsistência(s)` : "",
   ].map((value) => String(value ?? "").replace(/[;\r\n]/g, " ")).join(";"));
   downloadCSV("rastreabilidade_area_armario_lote.csv", [header, ...rows].join("\n"));
 }
@@ -273,6 +274,21 @@ export default function Reports() {
           quantityAvailable: location.quantityAvailable,
           lotTotal: location.quantityAvailable,
           unmappedQuantity: 0,
+        });
+      }
+      if (product.invalidBalanceCount > 0) {
+        rows.push({
+          productName: product.productName,
+          lotId: `diagnostic:${product.productId}`,
+          lotNumber: "Inconsistência de saldo",
+          areaName: "Diagnóstico",
+          locationId: "",
+          locationName: "—",
+          quantityAvailable: null,
+          lotTotal: null,
+          unmappedQuantity: null,
+          diagnostic: true,
+          diagnosticCount: product.invalidBalanceCount,
         });
       }
     }
@@ -503,12 +519,14 @@ export default function Reports() {
                         <TableRow key={row.lotId ? row.lotId + ":" + row.locationId : row.productName + ":" + row.locationId + ":" + index}>
                           <TableCell className="min-w-48 text-sm font-medium">{row.productName}</TableCell>
                           <TableCell className="text-xs font-mono">{row.lotNumber}</TableCell>
-                          <TableCell className="text-xs">{row.areaName}</TableCell>
+                          <TableCell className={row.diagnostic ? "text-xs font-medium text-amber-600" : "text-xs"}>
+                            {row.diagnostic ? `Diagnóstico — ${row.diagnosticCount} inconsistência(s)` : row.areaName}
+                          </TableCell>
                           <TableCell className="text-xs">{row.locationName}</TableCell>
-                          <TableCell className="text-right font-mono">{row.quantityAvailable}</TableCell>
-                          <TableCell className="text-right font-mono">{row.lotTotal}</TableCell>
-                          <TableCell className={Math.abs(row.unmappedQuantity) > 1e-9 ? "text-right font-mono text-amber-600" : "text-right font-mono"}>
-                            {row.unmappedQuantity}
+                          <TableCell className="text-right font-mono">{row.diagnostic ? "—" : row.quantityAvailable}</TableCell>
+                          <TableCell className="text-right font-mono">{row.diagnostic ? "—" : row.lotTotal}</TableCell>
+                          <TableCell className={row.diagnostic || Math.abs(row.unmappedQuantity) > 1e-9 ? "text-right font-mono text-amber-600" : "text-right font-mono"}>
+                            {row.diagnostic ? "Verificar" : row.unmappedQuantity}
                           </TableCell>
                         </TableRow>
                       ))}

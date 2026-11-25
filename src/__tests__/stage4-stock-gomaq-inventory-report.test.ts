@@ -77,6 +77,7 @@ describe("etapa 4 — Gomaq, suprimentos, inventário e relatórios", () => {
     expect(close).toContain("physicalQuantity");
     expect(close).toContain("Justificativa");
     expect(close).toContain("close_inventory");
+    expect(close).toContain("areaId: change.areaId");
   });
 
   it("visão dimensional é somente leitura e não classifica saldos legados por suposição", () => {
@@ -88,6 +89,12 @@ describe("etapa 4 — Gomaq, suprimentos, inventário e relatórios", () => {
     expect(overview).toContain("globalVsLotsDifference");
     expect(overview).toContain("untrackedLocations");
     expect(overview).toContain("readOnly: true");
+    expect(overview).toContain("global.length > 1");
+    expect(overview).toContain("row.reservedQuantity > row.physicalQuantity");
+    expect(overview).toContain("!Number.isFinite(row.quantity) || row.quantity < 0");
+    expect(overview).toContain("row.invalidBalanceCount > 0 || row.untrackedLocations.length > 0");
+    expect(overview).toContain("Math.abs(lotQuantity - locatedQuantity)");
+    expect(overview).toContain("!productLots.some((lot) => String(lot._id) === String(balance.lotId))");
     expect(overview).not.toMatch(/ctx\.db\.(insert|patch|replace|delete)\s*\(/);
   });
 
@@ -95,6 +102,9 @@ describe("etapa 4 — Gomaq, suprimentos, inventário e relatórios", () => {
     expect(reports).toContain("api.stockSetup.stockDimensionOverview");
     expect(reports).toContain("api.requests.listForReport");
     expect(reports).toContain("exportLotLocationCSV");
+    expect(reports).toContain('lotNumber: "Inconsistência de saldo"');
+    expect(reports).toContain("diagnosticCount: product.invalidBalanceCount");
+    expect(reports).toContain("Alertas de integridade");
     expect(reports).toContain("dimensionAreaFilter");
     expect(reports).toContain("dimensionLocationFilter");
     expect(stockPage).toContain("api.stockSetup.stockDimensionOverview");
