@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { permissionForRoute } from "@/lib/rbac";
 import {
   calculateWaterBalances,
   remainingWaterShare,
@@ -6,6 +7,9 @@ import {
 } from "@/lib/water-management";
 
 describe("water mineral accounting", () => {
+  it("protects the water management route through the central RBAC matrix", () => {
+    expect(permissionForRoute("/water")).toBe("stock.mutate");
+  });
   it("calculates full and empty gallon balances from signed movements", () => {
     expect(calculateWaterBalances([
       { fullDelta: 12, emptyDelta: 4 },
