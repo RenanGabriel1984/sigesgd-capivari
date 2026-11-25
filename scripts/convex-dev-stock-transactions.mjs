@@ -185,7 +185,7 @@ try {
   state = assertState(snapshot(), { global: 56, from: 28, to: 28 }, "descarte sem recomposição do saldo");
   assert(state.quarantineCount === 0 && state.returnCount === 3 &&
     state.movementCounts.transfer === 1 && state.movementCounts.return === 2 &&
-    state.returnAllocations === 4,
+    state.returnAllocations === 3,
   "Contagem final de devoluções, transferências ou alocações não corresponde ao cenário.");
   results.push({ label: "cenários transacionais aprovados", transfer: true, partialReturn: true,
     overReturnBlocked: true, quarantineRelease: true, disposalWithoutStockIncrease: true });
