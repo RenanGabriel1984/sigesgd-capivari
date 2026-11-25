@@ -12,8 +12,13 @@ async function requireUser(ctx: any) {
 }
 
 async function requireManagerOrAdmin(ctx: any) {
-  // RBAC central: gerenciamento de equipamentos.
+  // RBAC central: gerenciamento de equipamentos pela equipe de TI.
   return requirePermission(ctx, "equipment.manage", { entity: "assets" });
+}
+
+async function requirePatrimonyManager(ctx: any) {
+  // Tombamento oficial e confirmação de baixa pertencem ao Departamento de Patrimônio.
+  return requirePermission(ctx, "patrimony.assign", { entity: "assets" });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -290,7 +295,7 @@ export const recordDisposalConfirmation = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireManagerOrAdmin(ctx);
+    const { userId } = await requirePatrimonyManager(ctx);
     const reference = args.confirmationReference.trim();
     if (!reference || reference.length > 120) {
       throw new Error("Informe o número do documento ou protocolo da baixa oficial (até 120 caracteres).");
@@ -344,7 +349,7 @@ export const markSentToWarehouse = mutation({
     observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { userId } = await requireManagerOrAdmin(ctx);
+    const { userId } = await requirePatrimonyManager(ctx);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(args.warehouseSentDate)) {
       throw new Error("Informe a data de encaminhamento ao barracão no formato AAAA-MM-DD.");
     }
@@ -568,6 +573,56 @@ export const createFromEntryUnit = mutation({
   },
 });
 
+/** Atribuição tardia do número patrimonial pelo Departamento de Patrimônio. */
+export const assignPatrimonyNumber = mutation({
+  args: {
+    assetId: v.id("assets"),
+    patrimonyNumber: v.string(),
+    observation: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requirePatrimonyManager(ctx);
+    const patrimonyNumber = args.patrimonyNumber.trim();
+    if (!patrimonyNumber || patrimonyNumber.length > 80) {
+      throw new Error("Informe um número patrimonial válido (até 80 caracteres).");
+    }
+    const asset: any = await ctx.db.get(args.assetId);
+    if (!asset) throw new Error("Equipamento não encontrado.");
+    const normalize = (value?: string) => (value ?? "").trim().toLocaleUpperCase("pt-BR");
+    const allAssets = await ctx.db.query("assets").collect();
+    const duplicate = allAssets.find((row: any) =>
+      row._id !== asset._id && normalize(row.patrimonyNumber) === normalize(patrimonyNumber),
+    );
+    if (duplicate) throw new Error("Este número patrimonial já está associado a outro equipamento.");
+    if (asset.patrimonyNumber?.trim() && normalize(asset.patrimonyNumber) !== normalize(patrimonyNumber)) {
+      throw new Error("O equipamento já possui número patrimonial. Solicite a regularização administrativa.");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(asset._id, { patrimonyNumber, updatedAt: now });
+    if (asset.entryItemUnitId) {
+      const unit = await ctx.db.get(asset.entryItemUnitId);
+      if (unit) await ctx.db.patch(unit._id, { patrimonyNumber });
+    }
+    await ctx.db.insert("assetHistory", {
+      assetId: asset._id,
+      eventType: "assigned",
+      userId,
+      observation: `Número patrimonial atribuído pelo Departamento de Patrimônio: ${patrimonyNumber}${args.observation?.trim() ? ` — ${args.observation.trim()}` : ""}`,
+      timestamp: now,
+    });
+    await ctx.db.insert("auditLogs", {
+      userId,
+      action: "asset_update",
+      entity: "assets",
+      entityId: asset._id,
+      details: `Número patrimonial atribuído: ${patrimonyNumber}`,
+      timestamp: now,
+    });
+    return asset._id;
+  },
+});
+
 export const create = mutation({
   args: {
     patrimonyNumber: v.optional(v.string()),
@@ -652,7 +707,10 @@ export const update = mutation({
     const now = Date.now();
     const updates: Record<string, any> = { updatedAt: now };
 
-    if (args.patrimonyNumber !== undefined) updates.patrimonyNumber = args.patrimonyNumber || undefined;
+    if (args.patrimonyNumber !== undefined) {
+      await requirePatrimonyManager(ctx);
+      updates.patrimonyNumber = args.patrimonyNumber || undefined;
+    }
     if (args.serialNumber !== undefined) updates.serialNumber = args.serialNumber || undefined;
     if (args.assetType !== undefined) updates.assetType = args.assetType;
     if (args.manufacturer !== undefined) updates.manufacturer = args.manufacturer || undefined;

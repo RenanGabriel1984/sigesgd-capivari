@@ -142,10 +142,15 @@ describe("RBAC-05A patrimony_manager — tombamento sem acesso ao estoque", () =
     expect(PERMS.patrimony_manager.canViewProducts).toBe(false);
   });
 
-  it("não recebe dashboard, estoque, equipamentos, usuários ou auditoria", () => {
+  it("recebe leitura de equipamentos para o fluxo patrimonial, sem gerenciar o módulo da TI", () => {
+    expect(roleHasPermission("patrimony_manager", "equipment.view")).toBe(true);
+    expect(roleHasPermission("patrimony_manager", "equipment.manage")).toBe(false);
+  });
+
+  it("não recebe dashboard, estoque, gestão de equipamentos, usuários ou auditoria", () => {
     for (const permission of [
       "dashboard.view", "stock.view", "stock.mutate", "entries.view",
-      "entries.create", "equipment.view", "equipment.manage",
+      "entries.create", "equipment.manage",
       "users.view", "users.manage", "roles.manage", "audit.view",
     ] as const) {
       expect(roleHasPermission("patrimony_manager", permission), permission).toBe(false);
@@ -383,7 +388,8 @@ describe("RBAC-20 — rotas protegidas por permissão", () => {
     expect(permissionForRoute("/organization")).toBe("organizations.view");
     expect(permissionForRoute("/audit")).toBe("audit.view");
     expect(permissionForRoute("/settings")).toBe("settings.view");
-    expect(permissionForRoute("/patrimony")).toBe("equipment.manage");
+    expect(permissionForRoute("/patrimony")).toBe("equipment.view");
+    expect(roleHasPermission("patrimony_manager", permissionForRoute("/patrimony")!)).toBe(true);
     expect(permissionForRoute("/entries")).toBe("entries.view");
     expect(permissionForRoute("/suppliers")).toBe("suppliers.view");
   });

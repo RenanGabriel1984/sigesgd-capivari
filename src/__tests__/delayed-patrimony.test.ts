@@ -76,7 +76,8 @@ describe("identificação de equipamentos e solicitação de baixa patrimonial",
     expect(setUnits).not.toContain("patrimonyAssignedByUserId");
     expect(setUnits).not.toContain('v.literal("disposed")');
     expect(editor).toContain("UNIT_OPERATIONAL_STATUSES");
-    expect(entries).not.toContain("export const assignPatrimony");
+    expect(assets).toContain("export const assignPatrimonyNumber = mutation");
+    expect(assets).toContain('requirePermission(ctx, "patrimony.assign"');
     expect(entries).not.toContain("export const listPendingPatrimony");
     expect(dialog).toContain("patrimonyNumber: unit.patrimonyNumber?.trim() || undefined");
     expect(editor).toContain("Patrimônio (se conhecido)");
@@ -101,6 +102,8 @@ describe("identificação de equipamentos e solicitação de baixa patrimonial",
 
   it("só registra baixa oficial quando há documento/protocolo e data recebidos do Patrimônio", () => {
     expect(assets).toContain("export const recordDisposalConfirmation = mutation");
+    const confirmation = assets.slice(assets.indexOf("export const recordDisposalConfirmation"), assets.indexOf("export const markSentToWarehouse"));
+    expect(confirmation).toContain("requirePatrimonyManager(ctx)");
     expect(assets).toContain('request.status !== "sent_to_patrimony"');
     expect(assets).toContain("confirmationReference: reference");
     expect(assets).toContain('status: "disposal_authorized"');
@@ -109,6 +112,8 @@ describe("identificação de equipamentos e solicitação de baixa patrimonial",
 
   it("só permite encaminhar ao barracão depois da confirmação oficial", () => {
     expect(assets).toContain("export const markSentToWarehouse = mutation");
+    const warehouse = assets.slice(assets.indexOf("export const markSentToWarehouse"), assets.indexOf("export const listUnlinkedEntryUnits"));
+    expect(warehouse).toContain("requirePatrimonyManager(ctx)");
     expect(assets).toContain('request.status !== "confirmed_by_patrimony"');
     expect(assets).toContain('status: "sent_to_warehouse"');
     expect(assets).toContain("após a confirmação da baixa oficial");
@@ -125,7 +130,9 @@ describe("identificação de equipamentos e solicitação de baixa patrimonial",
     expect(page).toContain("A TI identifica o equipamento e encaminha a solicitação");
     expect(page).toContain("Registrar confirmação do Patrimônio");
     expect(menu).toContain('label: "Solicitações de baixa"');
-    expect(route).toContain('"/patrimony": "equipment.manage"');
+    expect(route).toContain('"/patrimony": "equipment.view"');
+    expect(assets).toContain("export const assignPatrimonyNumber = mutation");
+    expect(page).toContain("Equipamentos aguardando tombamento");
   });
 
   it("não mistura a baixa patrimonial com movimentações de estoque", () => {
