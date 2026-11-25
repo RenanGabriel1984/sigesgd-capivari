@@ -22,19 +22,21 @@ function validateRunId(runId: string) {
 }
 
 export const seed = internalMutation({
-  args: {
-    runId: v.string(),
-    operatorId: v.id("users"),
-  },
+  args: { runId: v.string() },
   handler: async (ctx, args) => {
     assertDevDeployment();
     validateRunId(args.runId);
 
-    const operator = await ctx.db.get(args.operatorId);
-    if (!operator || operator.active === false || operator.isAnonymous === true ||
-        !["admin", "stock_manager"].includes(String(operator.role))) {
-      throw new Error("O operador de teste precisa ser um usuário ativo e autorizado (admin/stock_manager).");
+    const users = await ctx.db.query("users").collect();
+    const rolePriority = ["admin", "stock_manager", "secretary"];
+    const operator = rolePriority
+      .map((role) => users.find((user) => user.role === role &&
+        user.active !== false && user.isAnonymous !== true))
+      .find(Boolean);
+    if (!operator) {
+      throw new Error("Nenhum operador DEV ativo com permissão de estoque (admin/stock_manager/secretary) foi encontrado.");
     }
+    const operatorId = operator._id;
 
     const productName = fixtureName(args.runId, "PRODUCT");
     const existing = await ctx.db.query("products")
@@ -74,7 +76,7 @@ export const seed = internalMutation({
       entryNumber: fixtureName(args.runId, "ENTRY"),
       receivedAt: now,
       originType: "other",
-      responsibleUserId: args.operatorId,
+      responsibleUserId: operatorId,
       observation: "Fixture DEV exclusiva para validar devoluções e transferências.",
       status: "confirmed",
       materialType: "consumption",
@@ -141,7 +143,7 @@ export const seed = internalMutation({
         newPhysical: spec.next,
         previousReserved: 0,
         newReserved: 0,
-        userId: args.operatorId,
+        userId: operatorId,
         areaId,
         lotId: String(lotId),
         locationId: fromLocationId,
@@ -169,7 +171,7 @@ export const seed = internalMutation({
       toLocationId,
       lotId,
       entryId,
-      operatorId: args.operatorId,
+      operatorId,\n      operatorRole: operator.role,
       exitIds,
       baseline: { global: 53, from: 33, to: 20, lot: 53 },
     };
@@ -268,7 +270,7 @@ export const cleanup = internalMutation({
       if (toLocation) await ctx.db.delete(toLocation._id);
       if (area) await ctx.db.delete(area._id);
       if (entry) await ctx.db.delete(entry._id);
-      return { runId: args.runId, cleaned: true, productFound: false };
+      return { runId: args.runId, cleaned: true, productFound: false, fixtureRemaining: false };
     }
 
     const [stocks, locations, lots, transfers, returns, movements, lotBalances, movementAllocations] = await Promise.all([
@@ -308,10 +310,20 @@ export const cleanup = internalMutation({
     if (fromLocation) await ctx.db.delete(fromLocation._id);
     if (toLocation) await ctx.db.delete(toLocation._id);
     if (area) await ctx.db.delete(area._id);
+    const [remainingProduct, remainingArea, remainingEntry, remainingLocations] = await Promise.all([
+      ctx.db.query("products").withIndex("by_name", (q) => q.eq("name", productName)).first(),
+      ctx.db.query("stockAreas").withIndex("by_name", (q) => q.eq("name", fixtureName(args.runId, "AREA"))).first(),
+      ctx.db.query("entries").withIndex("by_number", (q) => q.eq("entryNumber", fixtureName(args.runId, "ENTRY"))).first(),
+      ctx.db.query("storageLocations").collect().then((rows) => rows.filter((row) =>
+        row.name === fixtureName(args.runId, "CABINET_A") || row.name === fixtureName(args.runId, "CABINET_B"))),
+    ]);
+    const fixtureRemaining = Boolean(remainingProduct || remainingArea || remainingEntry || remainingLocations.length);
+    if (fixtureRemaining) throw new Error("A limpeza não removeu todos os registros exclusivos da fixture DEV.");
 
     return {
       runId: args.runId,
       cleaned: true,
+      fixtureRemaining: false,
       deleted: {
         auditLogs: auditRows.filter((row) => row.entityId && entityIds.has(row.entityId)).length,
         returns: returns.length,
