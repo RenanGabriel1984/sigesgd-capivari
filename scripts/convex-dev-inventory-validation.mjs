@@ -2,7 +2,7 @@ import {spawnSync} from "node:child_process";
 const DEPLOYMENT="first-herring-264",key=process.env.CONVEX_DEPLOY_KEY??"";
 if(key.split("|",1)[0]!==`dev:${DEPLOYMENT}`||process.env.CONVEX_DEPLOYMENT)throw new Error("Destino DEV não validado.");
 const runId=`gha-${process.env.GITHUB_RUN_ID??"local"}-${process.env.GITHUB_RUN_ATTEMPT??"1"}`;
-function run(args,label){const r=spawnSync("bunx",["convex","run",...args],{encoding:"utf8",env:process.env,maxBuffer:5e6});if(r.status!==0)throw Error(label+": "+(r.stderr||r.stdout).slice(-1800));const out=r.stdout.trim();try{return JSON.parse(out)}catch{for(const l of out.split("\n").reverse()){try{return JSON.parse(l)}catch{}}throw Error("JSON inválido "+label)}}
+function run(args,label){const r=spawnSync("bunx",["convex","run",...args],{encoding:"utf8",env:process.env,maxBuffer:5e6});if(r.status!==0)throw Error(label+": "+(r.stderr||r.stdout).slice(-1800));const out=r.stdout.trim();if(!out)return null;try{return JSON.parse(out)}catch{for(const l of out.split("\n").reverse()){try{return JSON.parse(l)}catch{}}throw Error("JSON inválido "+label)}}
 const internal=(name,args={})=>run([name,JSON.stringify(args)],name),pub=(identity,name,args)=>run(["--identity",JSON.stringify(identity),name,JSON.stringify(args)],name);
 const assert=(x,m)=>{if(!x)throw Error(m)};
 let failure,fixture;
