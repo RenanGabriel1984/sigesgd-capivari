@@ -57,6 +57,8 @@ export type NfeReviewRow = {
   matchReason?: string;
   associationType: ProductAssociationType;
   locationId?: string;
+  /** Área específica; ausente significa herdar a área do cabeçalho. */
+  areaId?: string;
   supplierLot?: string;
   /** Valores reconhecidos no documento (comparação/destaque de alteração). */
   originalValues?: NfeItemOriginalValues;
@@ -66,6 +68,9 @@ export interface NfeReviewTableProps {
   items: NfeReviewRow[];
   products: NfeReviewProduct[];
   locations?: Array<{ _id: string; name: string }>;
+  areas?: Array<{ _id: string; name: string }>;
+  defaultAreaName?: string;
+  disableAreaSelection?: boolean;
   /** Atualiza UMA linha (associação manual, lote, local, quantidade, valores). */
   onUpdate: (index: number, patch: Partial<NfeReviewRow>) => void;
   /** Abre o cadastro de produto para a LINHA indicada (índice do item). */
@@ -105,6 +110,9 @@ export function NfeReviewTable({
   items,
   products,
   locations,
+  areas = [],
+  defaultAreaName,
+  disableAreaSelection = false,
   onUpdate,
   onNewProduct,
   sourceLabel,
@@ -362,7 +370,7 @@ export function NfeReviewTable({
                   </p>
                 )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {/* Local */}
                   <div className="min-w-0 max-w-full overflow-hidden">
                     <span className="block text-[10px] uppercase text-muted-foreground">
@@ -382,6 +390,36 @@ export function NfeReviewTable({
                         {(locations ?? []).map((location) => (
                           <SelectItem key={location._id} value={location._id}>
                             {location.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Área do subestoque — independente do armário físico */}
+                  <div className="min-w-0 max-w-full overflow-hidden">
+                    <span className="block text-[10px] uppercase text-muted-foreground">
+                      Área / subestoque
+                    </span>
+                    <Select
+                      value={review.areaId || "default"}
+                      disabled={disableAreaSelection}
+                      onValueChange={(value) =>
+                        onUpdate(index, { areaId: value === "default" ? "" : value })
+                      }
+                    >
+                      <SelectTrigger className="mt-1 h-8 w-full min-w-0">
+                        <SelectValue placeholder="Herdar área da entrada" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="default">
+                          {defaultAreaName
+                            ? `Padrão — ${defaultAreaName}`
+                            : "Padrão da entrada (definida na próxima etapa)"}
+                        </SelectItem>
+                        {(areas ?? []).map((area) => (
+                          <SelectItem key={area._id} value={area._id}>
+                            {area.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
