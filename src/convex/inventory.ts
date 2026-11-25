@@ -416,6 +416,7 @@ export const close = mutation({
         const lotChanges: Array<{
           lotId: any;
           lotNumber: string;
+          areaId: any;
           locationId: any;
           delta: number;
           previousQuantity: number;
@@ -481,6 +482,7 @@ export const close = mutation({
             lotChanges.push({
               lotId: lot._id,
               lotNumber: lot.lotNumber,
+              areaId: lot.areaId,
               locationId: count.locationId,
               delta,
               previousQuantity: currentAtLocation,
@@ -591,6 +593,7 @@ export const close = mutation({
             previousReserved: reserved,
             newReserved: reserved,
             userId,
+            areaId: change.areaId,
             locationId: change.locationId,
             lotId: String(change.lotId),
             observation: `Inventário ${inv.inventoryNumber}: lote ${change.lotNumber}, armário ${String(change.locationId)}; ${change.previousQuantity} → ${change.countedQuantity}. Justificativa: ${justification}`,
