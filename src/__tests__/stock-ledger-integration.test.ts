@@ -34,6 +34,8 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain("consumeLotLocationStock");
     expect(part).toContain("recordLotMovementAllocations");
     expect(part).toContain('areaId: v.optional(v.id("stockAreas"))');
+    expect(part).toContain("areaIsUnclassified: v.optional(v.boolean())");
+    expect(part).toContain("areaIsUnclassified: args.areaIsUnclassified");
     expect(part).toContain("areaId: lotConsumption.areaId ?? args.areaId");
   });
   it("saída alternativa também é ledger-backed", () => {
@@ -42,6 +44,8 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain("assertProductLedgerConsistent");
     expect(part).toContain("consumeLotLocationStock");
     expect(part).toContain("recordLotMovementAllocations");
+    expect(part).toContain("areaIsUnclassified: v.optional(v.boolean())");
+    expect(part).toContain("areaIsUnclassified: args.areaIsUnclassified");
     expect(part).toContain("areaId: lotConsumption.areaId ?? args.areaId");
   });
   it("entrega da requisição pré-valida e registra baixa FIFO por armário", () => {
@@ -55,6 +59,8 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain("locationId: sourceLocationId");
     expect(part).toContain("reservedToRelease");
     expect(part).toContain("const finalReserved = newReserved - unusedReservation;");
+    expect(part).toContain("areaIsUnclassified: v.optional(v.boolean())");
+    expect(part).toContain("areaIsUnclassified: input.areaIsUnclassified");
     expect(part).toContain("areaId: lotConsumption.areaId ?? input.areaId");
   });
   it("histórico expõe a área e o armário de cada movimentação", () => {
@@ -80,6 +86,10 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(exit).toContain("Selecione o armário de origem");
     expect(exit).toContain("productDimensionSummary");
     expect(exit).toContain("areaId: areaId");
+    expect(exit).toContain('value="unclassified"');
+    expect(exit).toContain("areaIsUnclassified: areaId === \"unclassified\"");
+    expect(requests).toContain('value="unclassified"');
+    expect(requests).toContain("areaIsUnclassified: di.areaId === \"unclassified\"");
     expect(requests).toContain("Selecione o armário de origem para cada item entregue");
     expect(requests).toContain("locationId: di.locationId");
     expect(requests).toContain("areaId: di.areaId");
