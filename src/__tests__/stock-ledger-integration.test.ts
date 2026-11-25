@@ -34,7 +34,7 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain("consumeLotLocationStock");
     expect(part).toContain("recordLotMovementAllocations");
     expect(part).toContain('areaId: v.optional(v.id("stockAreas"))');
-    expect(part).toContain("areaId: args.areaId");
+    expect(part).toContain("areaId: lotConsumption.areaId ?? args.areaId");
   });
   it("saída alternativa também é ledger-backed", () => {
     const movements = source("convex/stockMovements.ts");
@@ -42,7 +42,7 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain("assertProductLedgerConsistent");
     expect(part).toContain("consumeLotLocationStock");
     expect(part).toContain("recordLotMovementAllocations");
-    expect(part).toContain("areaId: args.areaId");
+    expect(part).toContain("areaId: lotConsumption.areaId ?? args.areaId");
   });
   it("entrega da requisição pré-valida e registra baixa FIFO por armário", () => {
     const requests = source("convex/requests.ts");
@@ -55,7 +55,7 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain("locationId: sourceLocationId");
     expect(part).toContain("reservedToRelease");
     expect(part).toContain("const finalReserved = newReserved - unusedReservation;");
-    expect(part).toContain("areaId: input.areaId");
+    expect(part).toContain("areaId: lotConsumption.areaId ?? input.areaId");
   });
   it("histórico expõe a área e o armário de cada movimentação", () => {
     const movements = source("convex/stockMovements.ts");
@@ -67,6 +67,8 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(list).toContain("const area = m.areaId ? await ctx.db.get(m.areaId) : null");
     expect(list).toContain("const location = m.locationId ? await ctx.db.get(m.locationId) : null");
     expect(list).toContain("area, location");
+    const ledger = source("convex/lotLocationLedger.ts");
+    expect(ledger).toContain("areaId: selectedAreaId ?? undefined");
     expect(page).toContain("m.area?.name ?? \"Sem área registrada\"");
     expect(page).toContain("m.location?.name ?? \"Sem armário registrado\"");
     expect(page).toContain("Área / Armário");
