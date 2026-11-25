@@ -38,10 +38,11 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  const product=await ctx.db.query("products").withIndex("by_name",q=>q.eq("name",name(runId,"PRODUCT"))).first();
  const requests=await ctx.db.query("requests").collect().then(rs=>rs.filter(r=>r.reason?.includes(name(runId,"REASON"))));
  const items:any[]=(await Promise.all(requests.map(r=>ctx.db.query("requestItems").withIndex("by_request",q=>q.eq("requestId",r._id)).collect()))).flat();
+ const org=await ctx.db.query("organizations").collect().then(rs=>rs.find(o=>o.name===name(runId,"SECRETARIA"))??null);
  const entry=await ctx.db.query("entries").withIndex("by_number",q=>q.eq("entryNumber",name(runId,"ENTRY"))).first();
  const area=await ctx.db.query("stockAreas").withIndex("by_name",q=>q.eq("name",name(runId,"AREA"))).first();
  const location=await ctx.db.query("storageLocations").collect().then(rs=>rs.find(l=>l.name===name(runId,"LOCATION"))??null);
- if(!product){for(const i of items)await ctx.db.delete(i._id);for(const r of requests)await ctx.db.delete(r._id);if(entry)await ctx.db.delete(entry._id);if(area)await ctx.db.delete(area._id);if(location)await ctx.db.delete(location._id);return {fixtureRemaining:false};}
+ if(!product){for(const i of items)await ctx.db.delete(i._id);for(const r of requests)await ctx.db.delete(r._id);if(org)await ctx.db.delete(org._id);if(entry)await ctx.db.delete(entry._id);if(area)await ctx.db.delete(area._id);if(location)await ctx.db.delete(location._id);return {fixtureRemaining:false};}
  const [stocks,locations,lots]=await Promise.all([
  ctx.db.query("stock").withIndex("by_product",q=>q.eq("productId",product._id)).collect(),
  ctx.db.query("stockByLocation").withIndex("by_product",q=>q.eq("productId",product._id)).collect(),
@@ -58,6 +59,7 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  for(const row of stocks)await ctx.db.delete(row._id);
  await ctx.db.delete(product._id);
  if(entry)await ctx.db.delete(entry._id);
+ if(org)await ctx.db.delete(org._id);
  if(area)await ctx.db.delete(area._id);
  if(location)await ctx.db.delete(location._id);
  const remaining=await ctx.db.query("products").withIndex("by_name",q=>q.eq("name",name(runId,"PRODUCT"))).first();
