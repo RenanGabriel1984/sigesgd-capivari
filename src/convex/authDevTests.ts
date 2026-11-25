@@ -1,29 +1,20 @@
 import {internalMutation} from "./_generated/server";
-import {internal} from "./_generated/api";
 import {v} from "convex/values";
 import {hashPassword} from "./auth/passwords";
-const HOST="first-herring-264.convex.cloud";
-const PREFIX="__SIGESGD_AUTH_DEV__";
+const HOST="first-herring-264.convex.cloud",PREFIX="__SIGESGD_AUTH_DEV__";
 const email=(run:string,suffix="user")=>`${PREFIX}${run}-${suffix}@fixture.invalid`;
-export const validate=internalMutation({args:{runId:v.string()},handler:async(ctx,{runId})=>{
- if(!(process.env.CONVEX_CLOUD_URL??"").includes(HOST))throw new Error("Execução bloqueada: somente DEV first-herring-264.");
+export const seed=internalMutation({args:{runId:v.string()},handler:async(ctx,{runId})=>{
+ if(!(process.env.CONVEX_CLOUD_URL??"").includes(HOST))throw new Error("Somente DEV first-herring-264.");
  if(!/^[a-zA-Z0-9-]{1,60}$/.test(runId))throw new Error("runId inválido.");
- const now=Date.now(),pass="Synthetic-Test-Password-938!";
- const {hash,salt}=await hashPassword(pass);
+ const now=Date.now(),pass="Synthetic-Test-Password-938!",{hash,salt}=await hashPassword(pass);
  const userId=await ctx.db.insert("users",{name:PREFIX+runId,email:email(runId),role:"technician",active:true,createdAt:now,updatedAt:now});
  await ctx.db.insert("passwords",{userId,passwordHash:hash,salt,requiresReset:false});
- const correct=await ctx.runQuery(internal.passwords.verifyCredentials,{email:email(runId).toUpperCase(),password:pass});
- const wrong=await ctx.runQuery(internal.passwords.verifyCredentials,{email:email(runId),password:"wrong-password"});
- for(let n=0;n<5;n++)await ctx.runMutation(internal.passwords.recordFailedLogin,{email:email(runId)});
- const locked=await ctx.runQuery(internal.passwords.isLockedOut,{email:email(runId)});
- const cleared=await ctx.runMutation(internal.passwords.recordSuccessfulLogin,{email:email(runId)});
- const unlocked=await ctx.runQuery(internal.passwords.isLockedOut,{email:email(runId)});
- const duplicateId=await ctx.db.insert("users",{name:PREFIX+runId+"-DUP",email:email(runId),role:"technician",active:true,createdAt:now,updatedAt:now});
- const duplicateDenied=await ctx.runQuery(internal.passwords.verifyCredentials,{email:email(runId),password:pass});
- const attempts=await ctx.db.query("failedLoginAttempts").withIndex("by_email",q=>q.eq("email",email(runId))).first();
- if(attempts)await ctx.db.delete(attempts._id);
- const passwords=await ctx.db.query("passwords").withIndex("by_user",q=>q.eq("userId",userId)).collect();
- for(const p of passwords)await ctx.db.delete(p._id);
- await ctx.db.delete(userId);await ctx.db.delete(duplicateId);
- return {passed:correct.success===true&&wrong.success===false&&wrong.error===correct.error&&locked.locked===true&&cleared.cleared===true&&unlocked.locked===false&&duplicateDenied.success===false,checks:{normalizedEmailAccepted:correct.success===true,wrongPasswordGeneric:wrong.success===false&&wrong.error===correct.error,bruteforceLockAfter5:locked.locked===true,successfulLoginClearsLock:cleared.cleared===true&&unlocked.locked===false,duplicateEmailFailsClosed:duplicateDenied.success===false},cleaned:{users:2,passwords:passwords.length,failedLoginAttempts:attempts?1:0}};
+ return {email:email(runId),password:pass,userId};
+}});
+export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx,{runId})=>{
+ if(!(process.env.CONVEX_CLOUD_URL??"").includes(HOST))throw new Error("Somente DEV first-herring-264.");
+ const targets=await ctx.db.query("users").collect().then(rs=>rs.filter(u=>typeof u.email==="string"&&u.email.startsWith(PREFIX+runId+"-")));
+ let deletedPasswords=0,deletedAttempts=0;
+ for(const u of targets){const ps=await ctx.db.query("passwords").withIndex("by_user",q=>q.eq("userId",u._id)).collect();for(const p of ps){await ctx.db.delete(p._id);deletedPasswords++;}const fr=await ctx.db.query("failedLoginAttempts").withIndex("by_email",q=>q.eq("email",u.email!)).first();if(fr){await ctx.db.delete(fr._id);deletedAttempts++;}await ctx.db.delete(u._id);}
+ return {users:targets.length,passwords:deletedPasswords,failedAttempts:deletedAttempts,remaining:await ctx.db.query("users").collect().then(rs=>rs.filter(u=>typeof u.email==="string"&&u.email.startsWith(PREFIX+runId+"-")).length)};
 }});
