@@ -151,6 +151,7 @@ export async function consumeLotLocationStock(
   input: { productId: any; locationId: any; quantity: number; areaId?: any },
 ): Promise<{
   locationId: any;
+  areaId?: any;
   availableAtLocation: number;
   allocations: Array<{
     lotId: any;
@@ -293,6 +294,7 @@ export async function consumeLotLocationStock(
 
   return {
     locationId: input.locationId,
+    areaId: selectedAreaId ?? undefined,
     availableAtLocation: plan.availableAtLocation,
     allocations: plan.allocations.map((allocation) => ({
       lotId: lotsById.get(allocation.lotId)._id,
