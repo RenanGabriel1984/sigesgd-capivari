@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { planTransfer } from "../lib/transfer-rules";
 import { planLotLocationTransfer } from "../lib/lot-location-rules";
 import { requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
-import { assertProductLedgerConsistent, assertProductReservationConsistent } from "./lotLocationLedger";
+import { assertProductLedgerConsistent, assertProductReservationConsistent, recordLotMovementAllocations } from "./lotLocationLedger";
 import { requirePermission } from "./rbac";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician";
@@ -305,6 +305,19 @@ export const create = mutation({
       timestamp: now,
     });
     await ctx.db.patch(transferId, { movementId });
+    if (args.lotId) {
+      await recordLotMovementAllocations(ctx, {
+        movementId,
+        productId: args.productId,
+        locationId: args.fromLocationId,
+        allocations: [{
+          lotId: args.lotId,
+          locationId: args.fromLocationId,
+          quantity: args.quantity,
+        }],
+        allocationType: "reclassification",
+      });
+    }
 
     // Audit
     await ctx.db.insert("auditLogs", {
