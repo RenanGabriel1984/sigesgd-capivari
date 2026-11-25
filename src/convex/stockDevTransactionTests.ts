@@ -292,7 +292,11 @@ export const cleanup = internalMutation({
       ...returns.map((row) => String(row._id)),
       ...movements.map((row) => String(row._id)),
     ]);
-    const auditRows = await ctx.db.query("auditLogs").collect();
+    const [transferAuditRows, returnAuditRows] = await Promise.all([
+      ctx.db.query("auditLogs").withIndex("by_entity", (q) => q.eq("entity", "stockTransfers")).collect(),
+      ctx.db.query("auditLogs").withIndex("by_entity", (q) => q.eq("entity", "returns")).collect(),
+    ]);
+    const auditRows = [...transferAuditRows, ...returnAuditRows];
     for (const audit of auditRows) {
       if (audit.entityId && entityIds.has(audit.entityId)) await ctx.db.delete(audit._id);
     }
