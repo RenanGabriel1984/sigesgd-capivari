@@ -18,7 +18,7 @@ A inspeção só pode ser concluída uma vez: o registro deixa de estar em `quar
 
 A transferência muda a distribuição física, não o total global nem a reserva. O backend confirma o ledger e as reservas, valida a distribuição de cada lote por armário, a igualdade entre lote e soma de armários e a igualdade entre o global e a soma dos armários.
 
-O registro `stockTransfers` mantém produto/lote, origem, destino, quantidade, responsável e observação. Cada nova transferência recebe um movimento `transfer` vinculado nos dois sentidos; o movimento identifica a origem em `locationId`, o destino em `toLocationId`, o lote e sua área. Os vínculos novos são opcionais no schema para preservar a leitura dos registros anteriores.
+O registro `stockTransfers` mantém produto/lote, origem, destino, quantidade, responsável e observação. Cada nova transferência recebe um movimento `transfer` vinculado nos dois sentidos; o movimento identifica a origem em `locationId`, o destino em `toLocationId`, o lote e sua área. Quando há lote, o movimento também recebe uma alocação `reclassification` na trilha comum `stockMovementLotAllocations`, identificando a parcela e o armário de origem; o destino permanece no movimento de transferência. Os vínculos novos são opcionais no schema para preservar a leitura dos registros anteriores.
 
 ## Limites operacionais
 
