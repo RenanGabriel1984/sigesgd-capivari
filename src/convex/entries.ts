@@ -11,6 +11,7 @@ import {
 import { requirePermission } from "./rbac";
 import { getOptionalSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
 import { assertProductLedgerConsistent, assertProductReservationConsistent, recordLotMovementAllocations } from "./lotLocationLedger";
+import { resolveEntryItemAreaId } from "../lib/entry-area-classification";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -137,8 +138,10 @@ export const list = query({
       const itemsWithProduct = await Promise.all(items.map(async (item: any) => {
         const product = await ctx.db.get(item.productId);
         const location = item.locationId ? await ctx.db.get(item.locationId) : null;
+        const effectiveAreaId = resolveEntryItemAreaId(item.areaId, e.areaId);
+        const area = effectiveAreaId ? await ctx.db.get(effectiveAreaId) : null;
         const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
-        return { ...item, product, location, units };
+        return { ...item, product, location, area, effectiveAreaId, units };
       }));
       const area = e.areaId ? await ctx.db.get(e.areaId) : null;
       return { ...e, responsible, supplier, area, items: itemsWithProduct };
@@ -158,6 +161,8 @@ export const get = query({
     const itemsWithProduct = await Promise.all(items.map(async (item: any) => {
       const product = await ctx.db.get(item.productId);
       const location = item.locationId ? await ctx.db.get(item.locationId) : null;
+      const effectiveAreaId = resolveEntryItemAreaId(item.areaId, entry.areaId);
+      const area = effectiveAreaId ? await ctx.db.get(effectiveAreaId) : null;
       const units = await ctx.db.query("entryItemUnits").withIndex("by_entryItem", (q: any) => q.eq("entryItemId", item._id)).collect();
       const unitsWithAssets = await Promise.all(units.map(async (unit: any) => {
         const asset: any = unit.assetId ? await ctx.db.get(unit.assetId) : null;
@@ -173,7 +178,7 @@ export const get = query({
           } : null,
         };
       }));
-      return { ...item, product, location, units: unitsWithAssets };
+      return { ...item, product, location, area, effectiveAreaId, units: unitsWithAssets };
     }));
     const lots = await ctx.db.query("lots").withIndex("by_entry", (q: any) => q.eq("entryId", entry._id)).collect();
     const area = entry.areaId ? await ctx.db.get(entry.areaId) : null;
@@ -236,6 +241,7 @@ export const create = mutation({
       brand: v.optional(v.string()),
       model: v.optional(v.string()),
       specification: v.optional(v.string()),
+      areaId: v.optional(v.id("stockAreas")),
       locationId: v.optional(v.id("storageLocations")),
       photoStorageId: v.optional(v.string()),
       supplierLotNumber: v.optional(v.string()),
@@ -283,6 +289,12 @@ export const create = mutation({
       const product = await ctx.db.get(item.productId);
       if (!product) throw new Error(`Produto não encontrado: ${item.productId}`);
       if (!product.active) throw new Error(`O produto "${product.name}" está inativo`);
+      if (item.areaId) {
+        const itemArea = await ctx.db.get(item.areaId);
+        if (!itemArea || itemArea.active === false) {
+          throw new Error(`A área selecionada para "${product.name}" não existe ou está inativa.`);
+        }
+      }
     }
 
     const now = Date.now();
@@ -343,6 +355,7 @@ export const create = mutation({
         brand: item.brand,
         model: item.model,
         specification: item.specification,
+        areaId: item.areaId,
         locationId: item.locationId,
         photoStorageId: item.photoStorageId,
         supplierLotNumber: item.supplierLotNumber || undefined,
@@ -381,12 +394,10 @@ export const confirm = mutation({
     const entry = await ctx.db.get(args.entryId);
     if (!entry) throw new Error("Entrada não encontrada");
     if (entry.status !== "draft") throw new Error("Apenas entradas em rascunho podem ser confirmadas");
-    if (!entry.areaId) {
-      throw new Error("Selecione a área/subestoque da entrada antes de confirmar. Nenhum saldo pode ser criado sem classificação.");
-    }
-    const destinationArea = await ctx.db.get(entry.areaId);
-    if (!destinationArea || destinationArea.active === false) {
-      throw new Error("A área/subestoque selecionada não existe ou está inativa. Escolha uma área ativa antes de confirmar.");
+    // O cabeçalho é a área padrão; todos os itens podem sobrescrevê-la.
+    const destinationArea = entry.areaId ? await ctx.db.get(entry.areaId) : null;
+    if (entry.areaId && (!destinationArea || destinationArea.active === false)) {
+      throw new Error("A área/subestoque padrão não existe ou está inativa. Escolha uma área ativa.");
     }
 
     const items = await ctx.db.query("entryItems").withIndex("by_entry", (q: any) => q.eq("entryId", args.entryId)).collect();
@@ -452,6 +463,17 @@ export const confirm = mutation({
       const entryLocation = await ctx.db.get(item.locationId);
       if (!entryLocation || entryLocation.active === false) throw new Error(`O armário selecionado para "${product.name}" não existe ou está inativo.`);
 
+      const effectiveAreaId = resolveEntryItemAreaId(item.areaId, entry.areaId);
+      if (!effectiveAreaId) {
+        throw new Error(`Selecione uma área para "${product.name}" no item ou no cabeçalho antes de confirmar.`);
+      }
+      const effectiveArea = effectiveAreaId === entry.areaId && destinationArea
+        ? destinationArea
+        : await ctx.db.get(effectiveAreaId);
+      if (!effectiveArea || effectiveArea.active === false) {
+        throw new Error(`A área selecionada para "${product.name}" não existe ou está inativa.`);
+      }
+
       // A entrada só pode aumentar um livro-razão que já esteja conciliado.
       // Isso impede que uma diferença antiga seja perpetuada por novas compras.
       const stockBefore = await assertProductLedgerConsistent(ctx, item.productId, product.name);
@@ -478,14 +500,17 @@ export const confirm = mutation({
         active: true,
         observation: item.observation,
         materialType: entry.materialType,
-        areaId: entry.areaId,
+        areaId: effectiveAreaId as any,
       });
 
       // Rastreabilidade Entrada → EntryItem → Lote → Movimentação.
       // Sem este back-patch, `entryItems.lotId` ficava ausente (foi o caso dos
       // 8 itens da ENT-2026-000002) e o detalhe da entrada não conseguia ligar
       // o item ao lote que ele gerou.
-      await ctx.db.patch(item._id, { lotId: lotId as string });
+      await ctx.db.patch(item._id, {
+        lotId: lotId as string,
+        areaId: effectiveAreaId as any,
+      });
 
       // Saldo rastreável do lote no armário informado no recebimento.
       // Entradas legadas sem local continuam preservadas, mas não recebem
@@ -550,6 +575,7 @@ export const confirm = mutation({
         newReserved: prevReserved,
         userId,
         entryId: args.entryId,
+        areaId: effectiveAreaId as any,
         lotId: lotNumber,
         locationId: item.locationId,
         documentNumber: entry.invoiceNumber,
@@ -588,6 +614,7 @@ export const addItem = mutation({
     brand: v.optional(v.string()),
     model: v.optional(v.string()),
     specification: v.optional(v.string()),
+    areaId: v.optional(v.id("stockAreas")),
     locationId: v.optional(v.id("storageLocations")),
     photoStorageId: v.optional(v.string()),
     supplierLotNumber: v.optional(v.string()),
@@ -611,6 +638,10 @@ export const addItem = mutation({
     const product = await ctx.db.get(args.productId);
     if (!product) throw new Error("Produto não encontrado");
     if (!product.active) throw new Error(`O produto "${product.name}" está inativo`);
+    if (args.areaId) {
+      const itemArea = await ctx.db.get(args.areaId);
+      if (!itemArea || itemArea.active === false) throw new Error("Área/Subestoque do item não encontrada ou inativa.");
+    }
 
     const itemId = await ctx.db.insert("entryItems", {
       entryId: args.entryId,
@@ -622,6 +653,7 @@ export const addItem = mutation({
       brand: args.brand,
       model: args.model,
       specification: args.specification,
+      areaId: args.areaId,
       locationId: args.locationId,
       photoStorageId: args.photoStorageId,
       supplierLotNumber: args.supplierLotNumber || undefined,
@@ -657,6 +689,7 @@ export const updateItem = mutation({
     brand: v.optional(v.string()),
     model: v.optional(v.string()),
     specification: v.optional(v.string()),
+    areaId: v.optional(v.id("stockAreas")),
     locationId: v.optional(v.id("storageLocations")),
     photoStorageId: v.optional(v.string()),
     supplierLotNumber: v.optional(v.string()),
@@ -684,6 +717,10 @@ export const updateItem = mutation({
       if (!product) throw new Error("Produto não encontrado");
       if (!product.active) throw new Error(`O produto "${product.name}" está inativo`);
     }
+    if (args.areaId) {
+      const itemArea = await ctx.db.get(args.areaId);
+      if (!itemArea || itemArea.active === false) throw new Error("Área/Subestoque do item não encontrada ou inativa.");
+    }
 
     const updates: Record<string, any> = {};
     if (args.productId !== undefined) updates.productId = args.productId;
@@ -694,6 +731,7 @@ export const updateItem = mutation({
     if (args.brand !== undefined) updates.brand = args.brand;
     if (args.model !== undefined) updates.model = args.model;
     if (args.specification !== undefined) updates.specification = args.specification;
+    if (args.areaId !== undefined) updates.areaId = args.areaId;
     if (args.locationId !== undefined) updates.locationId = args.locationId;
     if (args.photoStorageId !== undefined) updates.photoStorageId = args.photoStorageId;
     if (args.supplierLotNumber !== undefined) updates.supplierLotNumber = args.supplierLotNumber;
