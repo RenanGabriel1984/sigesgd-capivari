@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { resolveEntryItemAreaId } from "./entry-area-classification";
+import { buildEntryDraftFromNfe } from "./nfe";
+import { buildNfeEntrySummary } from "./nfe-summary";
 
 const root = resolve(__dirname, "..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
@@ -20,6 +22,60 @@ describe("classificação de área por item na entrada", () => {
   it("não inventa uma área quando nenhuma foi selecionada", () => {
     expect(resolveEntryItemAreaId(undefined, undefined)).toBeUndefined();
     expect(resolveEntryItemAreaId(null, null)).toBeUndefined();
+  });
+
+  it("leva a área revisada por item até o payload da NF-e", () => {
+    const draft = buildEntryDraftFromNfe(
+      {
+        accessKey: "",
+        number: "123",
+        series: "1",
+        emissionDate: "2026-11-25",
+        items: [{
+          lineNumber: 1,
+          code: "TONER",
+          description: "Toner preto",
+          unit: "UN",
+          quantity: 2,
+        }],
+      },
+      [{ productId: "products:toner", areaId: "stockAreas:impressoras" }],
+    );
+
+    expect(draft.items[0].areaId).toBe("stockAreas:impressoras");
+  });
+
+  it("mostra a área específica do item e a área padrão no resumo da NF-e", () => {
+    const summary = buildNfeEntrySummary({
+      nfe: { number: "123", series: "1", emissionDate: "2026-11-25" },
+      rows: [
+        {
+          item: { lineNumber: 1, code: "A", description: "Toner", unit: "UN", quantity: 2 },
+          productId: "products:toner",
+          matchStatus: "found",
+          areaId: "stockAreas:impressoras",
+        },
+        {
+          item: { lineNumber: 2, code: "B", description: "Mouse", unit: "UN", quantity: 1 },
+          productId: "products:mouse",
+          matchStatus: "found",
+        },
+      ],
+      products: [
+        { _id: "products:toner", name: "Toner" },
+        { _id: "products:mouse", name: "Mouse" },
+      ],
+      areas: [
+        { _id: "stockAreas:impressoras", name: "Impressoras / Gomaq" },
+        { _id: "stockAreas:ti", name: "TI Geral" },
+      ],
+      defaultAreaId: "stockAreas:ti",
+    });
+
+    expect(summary.items.map((item) => item.areaName)).toEqual([
+      "Impressoras / Gomaq",
+      "TI Geral",
+    ]);
   });
 });
 
