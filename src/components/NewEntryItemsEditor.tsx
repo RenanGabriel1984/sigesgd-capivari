@@ -11,6 +11,9 @@ interface ItemEditorProps {
   items: any[];
   products: any[];
   locations: any[];
+  areas?: Array<{ _id: string; name: string }>;
+  defaultAreaName?: string;
+  disableAreaSelection?: boolean;
   onUpdateItem: (index: number, field: any, value: string) => void;
   onAddItem: () => void;
   onRemoveItem: (index: number) => void;
@@ -21,6 +24,9 @@ export function NewEntryItemsEditor({
   items,
   products,
   locations,
+  areas = [],
+  defaultAreaName,
+  disableAreaSelection = false,
   onUpdateItem,
   onAddItem,
   onRemoveItem,
@@ -143,6 +149,31 @@ export function NewEntryItemsEditor({
                   className="mt-1 h-8"
                 />
               </div>
+            </div>
+
+            <div>
+              <Label className="text-xs">Área / subestoque</Label>
+              <Select
+                value={item.areaId || "default"}
+                disabled={disableAreaSelection}
+                onValueChange={(value) =>
+                  onUpdateItem(index, "areaId", value === "default" ? "" : String(value))
+                }
+              >
+                <SelectTrigger className="mt-1 h-8">
+                  <SelectValue placeholder="Área padrão da entrada" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">
+                    {defaultAreaName ? `Padrão — ${defaultAreaName}` : "Padrão da entrada"}
+                  </SelectItem>
+                  {areas.map((area) => (
+                    <SelectItem key={area._id} value={area._id}>
+                      {area.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="grid grid-cols-2 gap-3">

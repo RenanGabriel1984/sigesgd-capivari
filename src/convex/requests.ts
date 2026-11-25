@@ -399,6 +399,7 @@ export const deliver = mutation({
       serialNumbers: v.optional(v.array(v.string())),
       locationId: v.optional(v.id("storageLocations")),
       areaId: v.optional(v.id("stockAreas")),
+      areaIsUnclassified: v.optional(v.boolean()),
     }))),
     receivedByUserId: v.optional(v.id("users")),
     confirmationPassword: v.string(),
@@ -517,6 +518,7 @@ export const deliver = mutation({
         productId: requestItem.productId,
         locationId: sourceLocationId,
         areaId: input.areaId,
+        areaIsUnclassified: input.areaIsUnclassified,
         quantity: input.quantityDelivered,
       });
       const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
@@ -533,6 +535,7 @@ export const deliver = mutation({
         previousPhysical: freshStock.physicalQuantity, newPhysical,
         previousReserved: freshStock.reservedQuantity, newReserved: finalReserved,
         userId, requestId: args.requestId, exitNumber,
+        areaId: lotConsumption.areaId ?? input.areaId,
         lotId: lotConsumption.allocations[0]?.lotId as any,
         locationId: sourceLocationId,
         observation: `Entrega da solicitação — armário ${sourceLocation?.name ?? sourceLocationId}. Lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,

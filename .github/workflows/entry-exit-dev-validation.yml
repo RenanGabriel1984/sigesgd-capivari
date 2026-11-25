@@ -1,0 +1,53 @@
+name: Entry exit DEV validation
+on:
+  push:
+    branches: [codex/entry-exit-dev-runtime-validation]
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: entry-exit-dev-first-herring-${{ github.event_name }}
+  cancel-in-progress: false
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76
+        with:
+          bun-version: "1.3.14"
+      - run: bun install --frozen-lockfile
+      - name: Tests and production build
+        run: bun run test && bun run build
+  dev-transaction:
+    if: github.head_ref == 'codex/entry-exit-dev-runtime-validation'
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76
+        with:
+          bun-version: "1.3.14"
+      - run: bun install --frozen-lockfile
+      - name: Guard DEV deployment key
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
+        run: |
+          set -euo pipefail
+          test "${CONVEX_DEPLOY_KEY%%|*}" = "dev:first-herring-264"
+          test -z "${CONVEX_DEPLOYMENT:-}"
+      - name: Deploy DEV functions
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
+        run: bunx convex dev --once --tail-logs disable
+      - name: Execute mutations and cleanup fixtures
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_FIRST_HERRING }}
+        run: node scripts/convex-dev-entry-exit-validation.mjs

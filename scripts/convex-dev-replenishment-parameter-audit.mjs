@@ -1,0 +1,22 @@
+import {spawnSync} from "node:child_process";
+const deployment="first-herring-264",key=process.env.CONVEX_DEPLOY_KEY??"";
+if(key.split("|",1)[0]!==`dev:${deployment}`||process.env.CONVEX_DEPLOYMENT)throw new Error("Somente DEV autorizado.");
+function run(args,label){const r=spawnSync("bunx",["convex","run",...args],{encoding:"utf8",env:process.env,maxBuffer:4e6});if(r.status!==0)throw Error(label+": "+(r.stderr||r.stdout).slice(-1500));const s=r.stdout.trim();if(!s||s==="undefined"||s==="null")return null;try{return JSON.parse(s)}catch{for(const line of s.split("\n").reverse()){try{return JSON.parse(line)}catch{}}throw Error("JSON inválido: "+label)}}
+const internal=(name,args={})=>run([name,JSON.stringify(args)],name),pub=(identity,name,args={})=>run(["--identity",JSON.stringify(identity),name,JSON.stringify(args)],name);
+const before=internal("stockSetup:lotLocationMigrationReadinessInternal");
+if(before.readOnly!==true||before.migrationApplied===true)throw Error("Diagnostic baseline não está read-only.");
+const identity={subject:internal("stockIntelligenceDevTests:identity").userId,issuer:"https://sigesgd-capivari.dev"};
+const report=pub(identity,"stockParameters:list");
+if(!Array.isArray(report.rows)||!report.counters)throw Error("Query de parametrização retornou formato inesperado.");
+const rows=report.rows;
+const notConfigured=rows.filter(r=>!r.parametrized);
+const minimumMissing=rows.filter(r=>r.parameters.minimumStock===null);
+const idealMissing=rows.filter(r=>r.parameters.idealStock===null);
+const enabled=rows.filter(r=>r.parameters.replenishmentEnabled);
+const belowMinimum=rows.filter(r=>r.status==="replenish_required");
+const withSuggestions=rows.filter(r=>r.suggestedQuantity>0);
+const after=internal("stockSetup:lotLocationMigrationReadinessInternal");
+const sum=(diag)=>({global:diag.report.products.reduce((s,p)=>s+(p.globalPhysical??0),0),location:diag.report.products.reduce((s,p)=>s+(p.localPhysicalTotal??0),0),lots:diag.report.products.reduce((s,p)=>s+(p.lotsAvailableTotal??0),0)});
+if(JSON.stringify(sum(before))!==JSON.stringify(sum(after)))throw Error("Saldos mudaram durante relatório read-only.");
+const summary={total:rows.length,parametrized:report.counters.parametrized,notParametrized:report.counters.notParametrized,minimumMissing:minimumMissing.length,idealMissing:idealMissing.length,replenishmentEnabled:enabled.length,belowMinimum:belowMinimum.length,withSuggestedQuantity:withSuggestions.length};
+console.log(JSON.stringify({passed:true,readOnly:true,deployment,summary,productsNeedingSetup:notConfigured.map(r=>({name:r.productName,category:r.categoryName,area:r.areaName,physical:r.physicalStock,reserved:r.reservedStock,available:r.availableStock,minimum:r.parameters.minimumStock,ideal:r.parameters.idealStock,enabled:r.parameters.replenishmentEnabled,status:r.status})),productsBelowMinimum:belowMinimum.map(r=>({name:r.productName,available:r.availableStock,minimum:r.parameters.minimumStock,ideal:r.parameters.idealStock,suggested:r.suggestedQuantity})),ledgerBefore:sum(before),ledgerAfter:sum(after)},null,2));

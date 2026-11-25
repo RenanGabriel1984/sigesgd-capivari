@@ -198,6 +198,7 @@ export default function AssetsPage() {
 
   const { user } = useAuth();
   const canManageEquipment = roleHasPermission(user?.role as AppRole | undefined, "equipment.manage");
+  const canAssignPatrimony = roleHasPermission(user?.role as AppRole | undefined, "patrimony.assign");
   const pendingEntryUnits = useQuery(api.assets.listUnlinkedEntryUnits, {}) as any[] | undefined;
   const createFromEntryUnit = useMutation(api.assets.createFromEntryUnit);
   const [linkingUnitId, setLinkingUnitId] = useState<string | null>(null);
@@ -557,10 +558,10 @@ export default function AssetsPage() {
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div>
+                {canAssignPatrimony && <div>
                   <Label>Nº Patrimônio</Label>
                   <Input value={form.patrimonyNumber} onChange={(e) => setForm({ ...form, patrimonyNumber: e.target.value })} />
-                </div>
+                </div>}
                 <div>
                   <Label>Nº Série</Label>
                   <Input value={form.serialNumber} onChange={(e) => setForm({ ...form, serialNumber: e.target.value })} />

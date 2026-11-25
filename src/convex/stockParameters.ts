@@ -16,6 +16,7 @@ import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import {
   readReplenishmentParameters,
+  validateReplenishmentActivation,
   buildStockParameterRow,
   computeParameterCounters,
   type StockParameterRow,
@@ -147,6 +148,18 @@ export const updateMany = mutation({
       if (!product) {
         skipped++;
         continue;
+      }
+
+      // Habilitação é uma alteração operacional: exige limites positivos e
+      // coerentes. Parâmetros históricos são preservados; nada é inventado.
+      if (update.replenishmentEnabled) {
+        const activationError = validateReplenishmentActivation({
+          minimumStock: update.minimumStock,
+          idealStock: update.idealStock,
+        });
+        if (activationError) {
+          throw new Error(`Não foi possível habilitar reposição para "${product.name}": ${activationError}`);
+        }
       }
 
       // Compara com o valor ATUAL e só grava o que realmente mudou — evita

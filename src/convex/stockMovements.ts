@@ -26,7 +26,9 @@ export const list = query({
       const product = await ctx.db.get(m.productId);
       const user = await ctx.db.get(m.userId);
       const supplier = m.supplierId ? await ctx.db.get(m.supplierId) : null;
-      return { ...m, product, user, supplier };
+      const area = m.areaId ? await ctx.db.get(m.areaId) : null;
+      const location = m.locationId ? await ctx.db.get(m.locationId) : null;
+      return { ...m, product, user, supplier, area, location };
     }));
   },
 });
@@ -39,7 +41,9 @@ export const byProduct = query({
     return Promise.all(movements.map(async (m) => {
       const user = await ctx.db.get(m.userId);
       const supplier = m.supplierId ? await ctx.db.get(m.supplierId) : null;
-      return { ...m, user, supplier };
+      const area = m.areaId ? await ctx.db.get(m.areaId) : null;
+      const location = m.locationId ? await ctx.db.get(m.locationId) : null;
+      return { ...m, user, supplier, area, location };
     }));
   },
 });
@@ -69,6 +73,7 @@ export const createExit = mutation({
     productId: v.id("products"), quantity: v.number(),
     locationId: v.optional(v.id("storageLocations")),
     areaId: v.optional(v.id("stockAreas")),
+    areaIsUnclassified: v.optional(v.boolean()),
     requestId: v.optional(v.id("requests")), observation: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -93,6 +98,7 @@ export const createExit = mutation({
       productId: args.productId,
       locationId: sourceLocationId,
       areaId: args.areaId,
+      areaIsUnclassified: args.areaIsUnclassified,
       quantity: args.quantity,
     });
     const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
@@ -104,6 +110,7 @@ export const createExit = mutation({
       productId: args.productId, type: "exit", quantity: args.quantity,
       previousPhysical: prevPhysical, newPhysical, previousReserved: prevReserved, newReserved: prevReserved,
       userId, requestId: args.requestId,
+      areaId: lotConsumption.areaId ?? args.areaId,
       lotId: lotConsumption.allocations[0]?.lotId as any,
       locationId: sourceLocationId,
       observation: `${args.observation ?? "Saída direta"} — armário ${sourceLocation?.name ?? sourceLocationId}; lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,

@@ -443,6 +443,8 @@ const schema = defineSchema(
       supplierId: v.optional(v.id("suppliers")),
       requestId: v.optional(v.id("requests")),
       entryId: v.optional(v.id("entries")),
+      // Classificação efetiva do movimento; a localização física é independente.
+      areaId: v.optional(v.id("stockAreas")),
       lotId: v.optional(v.string()),
       locationId: v.optional(v.id("storageLocations")),
       documentNumber: v.optional(v.string()),
@@ -451,6 +453,9 @@ const schema = defineSchema(
       exitNumber: v.optional(v.string()),
       // ── Vínculo reverso: movimentação de DEVOLUÇÃO → saída original ──
       exitMovementId: v.optional(v.id("stockMovements")),
+      // Vínculo estruturado da movimentação de transferência.
+      transferId: v.optional(v.id("stockTransfers")),
+      toLocationId: v.optional(v.id("storageLocations")),
       timestamp: v.number(),
       canceled: v.optional(v.boolean()),
       canceledAt: v.optional(v.number()),
@@ -458,7 +463,8 @@ const schema = defineSchema(
       .index("by_type", ["type"])
       .index("by_user", ["userId"])
       .index("by_timestamp", ["timestamp"])
-      .index("by_request", ["requestId"]),
+      .index("by_request", ["requestId"])
+      .index("by_transfer", ["transferId"]),
 
     // Cada saída registra todas as parcelas FIFO consumidas por lote/local.
     // stockMovements.lotId permanece apenas por compatibilidade histórica.
@@ -597,6 +603,8 @@ const schema = defineSchema(
       model: v.optional(v.string()),
       specification: v.optional(v.string()),
       lotId: v.optional(v.string()),
+      // Área do item sobrescreve a área padrão do cabeçalho quando informada.
+      areaId: v.optional(v.id("stockAreas")),
       locationId: v.optional(v.id("storageLocations")),
       photoStorageId: v.optional(v.string()),
       supplierLotNumber: v.optional(v.string()),
@@ -723,6 +731,8 @@ const schema = defineSchema(
       inspectionReason: v.optional(v.string()),
       // Local físico de destino da devolução (opcional)
       locationId: v.optional(v.id("storageLocations")),
+      // Área efetiva herdada da saída e dos lotes devolvidos.
+      areaId: v.optional(v.id("stockAreas")),
       returnedByUserId: v.id("users"),
       receivedByUserId: v.optional(v.id("users")),
       observation: v.optional(v.string()),
@@ -809,6 +819,8 @@ const schema = defineSchema(
       quantity: v.number(),
       responsibleUserId: v.id("users"),
       observation: v.optional(v.string()),
+      // Vínculo com a movimentação correspondente no livro-razão.
+      movementId: v.optional(v.id("stockMovements")),
       createdAt: v.number(),
     }).index("by_product", ["productId"])
       .index("by_from", ["fromLocationId"])
@@ -1036,6 +1048,70 @@ const schema = defineSchema(
       lastAttemptAt: v.number(),
       lockedUntil: v.optional(v.number()),
     }).index("by_email", ["email"]),
+
+    waterParticipants: defineTable({
+      name: v.string(),
+      department: v.optional(v.string()),
+      active: v.boolean(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_active", ["active"])
+      .index("by_name", ["name"]),
+
+    waterMovements: defineTable({
+      movementType: v.union(
+        v.literal("opening_balance"),
+        v.literal("supplier_delivery"),
+        v.literal("consumption"),
+        v.literal("supplier_exchange"),
+        v.literal("adjustment")
+      ),
+      fullDelta: v.number(),
+      emptyDelta: v.number(),
+      supplierName: v.optional(v.string()),
+      costAmount: v.optional(v.number()),
+      observation: v.optional(v.string()),
+      userId: v.id("users"),
+      createdAt: v.number(),
+    }).index("by_created", ["createdAt"])
+      .index("by_type", ["movementType"]),
+
+    waterPeriods: defineTable({
+      label: v.string(),
+      startDate: v.string(),
+      endDate: v.string(),
+      gallonsConsumed: v.number(),
+      totalCost: v.number(),
+      observation: v.optional(v.string()),
+      createdByUserId: v.id("users"),
+      createdAt: v.number(),
+    }).index("by_start", ["startDate"])
+      .index("by_label", ["label"]),
+
+    waterPeriodCharges: defineTable({
+      periodId: v.id("waterPeriods"),
+      participantId: v.id("waterParticipants"),
+      participantNameSnapshot: v.string(),
+      shareAmount: v.number(),
+      createdAt: v.number(),
+    }).index("by_period", ["periodId"])
+      .index("by_participant", ["participantId"]),
+
+    waterPayments: defineTable({
+      periodId: v.id("waterPeriods"),
+      participantId: v.id("waterParticipants"),
+      amount: v.number(),
+      paidAt: v.number(),
+      method: v.optional(v.string()),
+      observation: v.optional(v.string()),
+      receivedByUserId: v.id("users"),
+      reversedAt: v.optional(v.number()),
+      reversedByUserId: v.optional(v.id("users")),
+      reversalReason: v.optional(v.string()),
+      createdAt: v.number(),
+    }).index("by_period", ["periodId"])
+      .index("by_participant", ["participantId"])
+      .index("by_paid_at", ["paidAt"]),
 
     // ── Audit Log ──
     auditLogs: defineTable({

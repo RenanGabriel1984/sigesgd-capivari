@@ -2,7 +2,8 @@ import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { requirePermission } from "./rbac";
 import { requireSingleValidGlobalStock, validateUniqueScopedStockRows } from "../lib/stock-read-integrity";
-import { assertProductLedgerConsistent, assertProductReservationConsistent } from "./lotLocationLedger";
+import { assertProductLedgerConsistent, assertProductReservationConsistent, recordLotMovementAllocations } from "./lotLocationLedger";
+import { resolveConsistentMovementArea } from "../lib/stock-movement-area";
 import { planLotReturnAllocations } from "../lib/return-lot-allocation";
 import {
   validateReturnQuantity,
@@ -50,8 +51,13 @@ export const list = query({
       const returnedBy = await ctx.db.get(r.returnedByUserId);
       const receivedBy = r.receivedByUserId ? await ctx.db.get(r.receivedByUserId) : null;
       const request = r.requestId ? await ctx.db.get(r.requestId) : null;
-      const exit = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
+      const exit: any = r.exitMovementId ? await ctx.db.get(r.exitMovementId) : null;
       const location = r.locationId ? await ctx.db.get(r.locationId) : null;
+      const area = r.areaId
+        ? await ctx.db.get(r.areaId)
+        : exit?.areaId
+          ? await ctx.db.get(exit.areaId)
+          : null;
       const allocations = await ctx.db.query("returnLotAllocations")
         .withIndex("by_return", (q: any) => q.eq("returnId", r._id))
         .collect();
@@ -70,7 +76,7 @@ export const list = query({
           quantity: allocation.quantity,
         };
       }));
-      return { ...r, product, lot, returnedBy, receivedBy, request, exit, location, lotAllocations };
+      return { ...r, product, lot, area, returnedBy, receivedBy, request, exit, location, lotAllocations };
     }));
   },
 });
@@ -390,6 +396,14 @@ export const create = mutation({
       }
     }
 
+    const allocationLots = await Promise.all(
+      plannedLotAllocations.map((allocation) => ctx.db.get(allocation.lotId) as Promise<any>),
+    );
+    const effectiveAreaId = resolveConsistentMovementArea([
+      ...(exit.areaId ? [String(exit.areaId)] : []),
+      ...allocationLots.map((lot) => lot?.areaId ? String(lot.areaId) : null),
+    ]);
+
     if (args.receivedByUserId) {
       const receiver = await ctx.db.get(args.receivedByUserId);
       if (!receiver) throw new Error("Usuário recebedor não encontrado");
@@ -409,6 +423,7 @@ export const create = mutation({
       condition,
       stockDisposition: returnConditionReturnsToAvailableStock(condition) ? "available" : "quarantine",
       locationId: args.locationId,
+      areaId: effectiveAreaId as any,
       returnedByUserId: userId,
       receivedByUserId: args.receivedByUserId,
       observation: args.observation,
@@ -558,7 +573,7 @@ export const create = mutation({
     // 5) Movimentação de DEVOLUÇÃO vinculada à saída original
     //    (a baixa original NÃO é alterada)
     const exitLabel = exit.exitNumber ?? new Date(exit.timestamp).toLocaleString("pt-BR");
-    await ctx.db.insert("stockMovements", {
+    const returnMovementId = await ctx.db.insert("stockMovements", {
       productId: exit.productId,
       type: "return",
       quantity: args.quantity,
@@ -570,8 +585,9 @@ export const create = mutation({
       requestId: exit.requestId,
       exitMovementId: exit._id,
       locationId: args.locationId,
+      areaId: effectiveAreaId as any,
       lotId: plannedLotAllocations.length === 1
-        ? (await ctx.db.get(plannedLotAllocations[0].lotId) as any)?.lotNumber
+        ? allocationLots[0]?.lotNumber
         : undefined,
       observation:
         `Devolução da saída ${exitLabel} — ${reason}` +
@@ -581,6 +597,19 @@ export const create = mutation({
         (args.observation ? ` | ${args.observation}` : ""),
       timestamp: now,
     });
+    if (plannedLotAllocations.length > 0) {
+      await recordLotMovementAllocations(ctx, {
+        movementId: returnMovementId,
+        productId: exit.productId,
+        locationId: args.locationId,
+        allocations: plannedLotAllocations.map((allocation) => ({
+          lotId: allocation.lotId,
+          locationId: args.locationId,
+          quantity: allocation.quantity,
+        })),
+        allocationType: "reversal",
+      });
+    }
 
     // 6) Auditoria
     await ctx.db.insert("auditLogs", {
@@ -643,6 +672,18 @@ export const resolveQuarantine = mutation({
       const locationBalance = locationRows.find((row: any) => row.locationId === returned.locationId);
       const allocations = await ctx.db.query("returnLotAllocations")
         .withIndex("by_return", (q: any) => q.eq("returnId", args.returnId)).collect();
+      const allocationLots = await Promise.all(
+        allocations.map((allocation: any) => ctx.db.get(allocation.lotId) as Promise<any>),
+      );
+      if (allocationLots.some((lot) =>
+        !lot || lot.active === false || lot.productId !== returned.productId,
+      )) {
+        throw new Error("Lote da quarentena inexistente, inativo ou incompatível com o produto.");
+      }
+      const effectiveAreaId = resolveConsistentMovementArea([
+        ...(returned.areaId ? [String(returned.areaId)] : []),
+        ...allocationLots.map((lot) => lot?.areaId ? String(lot.areaId) : null),
+      ]);
       const activeLots = await ctx.db.query("lots")
         .withIndex("by_product", (q: any) => q.eq("productId", returned.productId)).collect();
       const allLotBalances = await ctx.db.query("lotLocationBalances")
@@ -724,7 +765,7 @@ export const resolveQuarantine = mutation({
           quantity: returned.quantity,
         });
       }
-      await ctx.db.insert("stockMovements", {
+      const returnMovementId = await ctx.db.insert("stockMovements", {
         productId: returned.productId,
         type: "return",
         quantity: returned.quantity,
@@ -736,10 +777,24 @@ export const resolveQuarantine = mutation({
         requestId: returned.requestId,
         exitMovementId: returned.exitMovementId,
         locationId: returned.locationId,
-        lotId: allocations.length === 1 ? (await ctx.db.get(allocations[0].lotId) as any)?.lotNumber : undefined,
+        areaId: effectiveAreaId as any,
+        lotId: allocations.length === 1 ? allocationLots[0]?.lotNumber : undefined,
         observation: "Liberação de quarentena após inspeção — " + reason,
         timestamp: now,
       });
+      if (allocations.length > 0) {
+        await recordLotMovementAllocations(ctx, {
+          movementId: returnMovementId,
+          productId: returned.productId,
+          locationId: returned.locationId,
+          allocations: allocations.map((allocation: any) => ({
+            lotId: allocation.lotId,
+            locationId: returned.locationId,
+            quantity: allocation.quantity,
+          })),
+          allocationType: "reversal",
+        });
+      }
     }
 
     await ctx.db.patch(args.returnId, {

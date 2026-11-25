@@ -139,6 +139,7 @@ type ManualEntryItem = {
   brand: string;
   model: string;
   specification: string;
+  areaId: string;
   locationId: string;
   photoStorageId: string;
   supplierLotNumber: string;
@@ -152,6 +153,7 @@ const emptyEntryItem = (): ManualEntryItem => ({
   brand: "",
   model: "",
   specification: "",
+  areaId: "",
   locationId: "",
   photoStorageId: "",
   supplierLotNumber: "",
@@ -434,6 +436,8 @@ function EntriesPage() {
     rows: nfeItems,
     products: productOptions,
     locations: locationList,
+    areas: (areas ?? []).map((area) => ({ _id: area._id, name: area.name })),
+    defaultAreaId: nfeDestination.areaId ?? undefined,
     supplier: nfeSupplier,
     afNumber: nfeAfNumber,
     processNumber: nfeProcessNumber,
@@ -808,6 +812,7 @@ function EntriesPage() {
         nfeItems.map((row) => ({
           productId: row.productId,
           locationId: row.locationId,
+          areaId: row.areaId,
           supplierLotNumber: row.supplierLot,
           matchSource: row.matchSource,
           matchScore: row.matchScore,
@@ -994,6 +999,7 @@ function EntriesPage() {
             brand: item.brand || undefined,
             model: item.model || undefined,
             specification: item.specification || undefined,
+            areaId: (item.areaId || undefined) as any,
             locationId: (item.locationId || undefined) as any,
             photoStorageId: item.photoStorageId || undefined,
             supplierLotNumber: item.supplierLotNumber || undefined,
@@ -1346,6 +1352,9 @@ function EntriesPage() {
               items={items}
               products={productOptions}
               locations={locationList}
+              areas={(areas ?? []).map((area) => ({ _id: area._id, name: area.name }))}
+              defaultAreaName={(areas ?? []).find((area) => area._id === areaId)?.name}
+              disableAreaSelection={Boolean(manualDraft)}
               onUpdateItem={handleManualItemUpdate}
               onAddItem={() => setItems((current) => [...current, emptyEntryItem()])}
               onRemoveItem={(index) =>
@@ -1708,6 +1717,9 @@ function EntriesPage() {
                   items={nfeItems}
                   products={productOptions}
                   locations={locationList}
+                  areas={(areas ?? []).map((area) => ({ _id: area._id, name: area.name }))}
+                  defaultAreaName={(areas ?? []).find((area) => area._id === nfeDestination.areaId)?.name}
+                  disableAreaSelection={Boolean(nfeDraft)}
                   documentTotal={nfe.totalValue}
                   onUpdate={(index, patch) =>
                     setNfeItems((current) =>

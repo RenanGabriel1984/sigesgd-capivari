@@ -46,12 +46,18 @@ export default function Movements() {
 
         {/* Desktop Table */}
         <Card className="border-border/50 hidden sm:block"><CardContent className="p-0"><div className="overflow-x-auto"><Table>
-          <TableHeader><TableRow><TableHead>Data/Hora</TableHead><TableHead>Produto</TableHead><TableHead>Tipo</TableHead><TableHead className="text-center">Qtd</TableHead><TableHead className="text-center">Est. Anterior</TableHead><TableHead className="text-center">Est. Novo</TableHead><TableHead>Usuário</TableHead><TableHead>Observação</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Data/Hora</TableHead><TableHead>Produto</TableHead><TableHead>Tipo</TableHead><TableHead>Área / Armário</TableHead><TableHead className="text-center">Qtd</TableHead><TableHead className="text-center">Est. Anterior</TableHead><TableHead className="text-center">Est. Novo</TableHead><TableHead>Usuário</TableHead><TableHead>Observação</TableHead></TableRow></TableHeader>
           <TableBody>
             {movements.map((m) => (<TableRow key={m._id} className={m.canceled ? "opacity-50" : ""}>
               <TableCell className="text-xs whitespace-nowrap">{new Date(m.timestamp).toLocaleString("pt-BR")}</TableCell>
               <TableCell className="font-medium text-sm">{m.product?.name ?? "—"}</TableCell>
               <TableCell><Badge variant="secondary" className={`text-[10px] ${MOVEMENT_TYPE_COLORS[m.type as MovementType]}`}>{MOVEMENT_TYPE_LABELS[m.type as MovementType]}</Badge></TableCell>
+              <TableCell>
+                <div className="text-xs">
+                  <p className="font-medium">{m.area?.name ?? "Sem área registrada"}</p>
+                  <p className="text-muted-foreground">{m.location?.name ?? "Sem armário registrado"}</p>
+                </div>
+              </TableCell>
               <TableCell className="text-center font-mono font-semibold">{m.type === "entry" || m.type === "return" ? "+" : m.type === "exit" ? "-" : ""}{m.quantity}</TableCell>
               <TableCell className="text-center font-mono text-xs text-muted-foreground">{m.previousPhysical}</TableCell>
               <TableCell className="text-center font-mono text-xs">{m.newPhysical}</TableCell>
@@ -67,7 +73,7 @@ export default function Movements() {
                 </div>
               </TableCell>
             </TableRow>))}
-            {movements.length === 0 && (<TableRow><TableCell colSpan={8}><div className="empty-state py-12"><ArrowLeftRight className="empty-state-icon" /><p className="empty-state-title">Nenhuma movimentação registrada</p><p className="empty-state-desc">As movimentações aparecerão aqui após entradas, saídas e transferências</p></div></TableCell></TableRow>)}
+            {movements.length === 0 && (<TableRow><TableCell colSpan={9}><div className="empty-state py-12"><ArrowLeftRight className="empty-state-icon" /><p className="empty-state-title">Nenhuma movimentação registrada</p><p className="empty-state-desc">As movimentações aparecerão aqui após entradas, saídas e transferências</p></div></TableCell></TableRow>)}
           </TableBody>
         </Table></div></CardContent></Card>
 
@@ -81,6 +87,10 @@ export default function Movements() {
                   <Badge variant="secondary" className={`text-[10px] ${MOVEMENT_TYPE_COLORS[m.type as MovementType]}`}>
                     {MOVEMENT_TYPE_LABELS[m.type as MovementType]}
                   </Badge>
+                </div>
+                <div className="mb-2 rounded-md bg-muted/40 px-2 py-1.5 text-xs">
+                  <p className="font-medium">{m.area?.name ?? "Sem área registrada"}</p>
+                  <p className="text-muted-foreground">{m.location?.name ?? "Sem armário registrado"}</p>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center text-xs">
                   <div>

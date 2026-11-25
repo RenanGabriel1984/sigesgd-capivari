@@ -14,6 +14,7 @@ import { resolve } from "node:path";
 
 import {
   readReplenishmentParameters,
+  validateReplenishmentActivation,
   isParametrized,
   replenishmentStatus,
   suggestedReplenishmentQuantity,
@@ -453,5 +454,27 @@ describe("PARAM — Tela e dados reais", () => {
     // Consumo mensal virou campo legado: não é exigido e nunca é validado como
     // "parâmetro de reposição" (o consumo real vem das saídas registradas).
     expect(validateParameters(params({ monthlyConsumptionTarget: 0 }))).toBeNull();
+  });
+});
+
+
+describe("PARAM — Habilitação operacional segura da reposição", () => {
+  it("exige mínimo e ideal positivos antes de ativar", () => {
+    expect(validateReplenishmentActivation({ minimumStock: null, idealStock: 5 })).toContain("mínimo maior que zero");
+    expect(validateReplenishmentActivation({ minimumStock: 0, idealStock: 5 })).toContain("mínimo maior que zero");
+    expect(validateReplenishmentActivation({ minimumStock: 2, idealStock: null })).toContain("ideal maior que zero");
+    expect(validateReplenishmentActivation({ minimumStock: 2, idealStock: 0 })).toContain("ideal maior que zero");
+  });
+
+  it("recusa ideal inferior ao mínimo e aceita limites coerentes", () => {
+    expect(validateReplenishmentActivation({ minimumStock: 5, idealStock: 4 })).toContain("menor que o estoque mínimo");
+    expect(validateReplenishmentActivation({ minimumStock: 2, idealStock: 2 })).toBeNull();
+    expect(validateReplenishmentActivation({ minimumStock: 2, idealStock: 10 })).toBeNull();
+  });
+
+  it("backend valida os valores enviados antes de gravar a ativação", () => {
+    expect(backend).toContain("validateReplenishmentActivation");
+    expect(backend).toContain("if (update.replenishmentEnabled)");
+    expect(backend).toContain("if (activationError)");
   });
 });

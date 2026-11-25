@@ -206,6 +206,7 @@ const DIRECTOR_ACCESS: readonly AppPermission[] = [
 ];
 
 const PATRIMONY_MANAGER_ACCESS: readonly AppPermission[] = [
+  "equipment.view",
   "patrimony.view",
   "patrimony.assign",
   // Permite apenas acesso às configurações pessoais, como troca de senha.
@@ -294,11 +295,12 @@ export const ROUTE_PERMISSIONS: Record<string, AppPermission> = {
   "/stock-areas": "areas.view",
   "/inventory": "inventory.manage",
   "/requests": "requests.view",
+  "/water": "stock.mutate",
   "/returns": "returns.view",
   "/transfers": "transfers.view",
   "/gomaq": "gomaq.view",
   "/assets": "equipment.view",
-  "/patrimony": "equipment.manage",
+  "/patrimony": "equipment.view",
   "/licenses": "licenses.view",
   "/movements": "movements.view",
   "/organization": "organizations.view",

@@ -13,6 +13,7 @@ import type * as assetParts from "../assetParts.js";
 import type * as assets from "../assets.js";
 import type * as auditLogs from "../auditLogs.js";
 import type * as auth from "../auth.js";
+import type * as authDevTests from "../authDevTests.js";
 import type * as auth_credentials from "../auth/credentials.js";
 import type * as auth_passwords from "../auth/passwords.js";
 import type * as categories from "../categories.js";
@@ -22,8 +23,10 @@ import type * as diagnostics from "../diagnostics.js";
 import type * as email from "../email.js";
 import type * as entries from "../entries.js";
 import type * as gomaQ from "../gomaQ.js";
+import type * as gomaQDevTests from "../gomaQDevTests.js";
 import type * as http from "../http.js";
 import type * as inventory from "../inventory.js";
+import type * as inventoryDevTests from "../inventoryDevTests.js";
 import type * as licenses from "../licenses.js";
 import type * as lots from "../lots.js";
 import type * as nfeProductAliases from "../nfeProductAliases.js";
@@ -39,6 +42,7 @@ import type * as products from "../products.js";
 import type * as pwResetHelpers from "../pwResetHelpers.js";
 import type * as rbac from "../rbac.js";
 import type * as requests from "../requests.js";
+import type * as requestDevTests from "../requestDevTests.js";
 import type * as returns from "../returns.js";
 import type * as securityAudit from "../securityAudit.js";
 import type * as seed from "../seed.js";
@@ -46,16 +50,21 @@ import type * as seeds from "../seeds.js";
 import type * as stockAreas from "../stockAreas.js";
 import type * as stockHelpers from "../stockHelpers.js";
 import type * as stockIntelligence from "../stockIntelligence.js";
+import type * as stockIntelligenceDevTests from "../stockIntelligenceDevTests.js";
 import type * as stockLocations from "../stockLocations.js";
 import type * as stockMovements from "../stockMovements.js";
 import type * as stockParameters from "../stockParameters.js";
 import type * as stockSetup from "../stockSetup.js";
 import type * as stockTransfers from "../stockTransfers.js";
+import type * as stockDevTransactionTests from "../stockDevTransactionTests.js";
 import type * as storage from "../storage.js";
 import type * as storageLocations from "../storageLocations.js";
 import type * as suppliers from "../suppliers.js";
 import type * as supplyRequests from "../supplyRequests.js";
 import type * as users from "../users.js";
+import type * as water from "../water.js";
+import type * as waterDevTransactionTests from "../waterDevTransactionTests.js";
+import type * as entryExitDevTests from "../entryExitDevTests.js";
 
 import type {
   ApiFromModules,
@@ -70,6 +79,7 @@ const fullApi: ApiFromModules<{
   assets: typeof assets;
   auditLogs: typeof auditLogs;
   auth: typeof auth;
+  authDevTests: typeof authDevTests;
   "auth/credentials": typeof auth_credentials;
   "auth/passwords": typeof auth_passwords;
   categories: typeof categories;
@@ -79,8 +89,10 @@ const fullApi: ApiFromModules<{
   email: typeof email;
   entries: typeof entries;
   gomaQ: typeof gomaQ;
+  gomaQDevTests: typeof gomaQDevTests;
   http: typeof http;
   inventory: typeof inventory;
+  inventoryDevTests: typeof inventoryDevTests;
   licenses: typeof licenses;
   lots: typeof lots;
   nfeProductAliases: typeof nfeProductAliases;
@@ -96,6 +108,7 @@ const fullApi: ApiFromModules<{
   pwResetHelpers: typeof pwResetHelpers;
   rbac: typeof rbac;
   requests: typeof requests;
+  requestDevTests: typeof requestDevTests;
   returns: typeof returns;
   securityAudit: typeof securityAudit;
   seed: typeof seed;
@@ -103,16 +116,21 @@ const fullApi: ApiFromModules<{
   stockAreas: typeof stockAreas;
   stockHelpers: typeof stockHelpers;
   stockIntelligence: typeof stockIntelligence;
+  stockIntelligenceDevTests: typeof stockIntelligenceDevTests;
   stockLocations: typeof stockLocations;
   stockMovements: typeof stockMovements;
   stockParameters: typeof stockParameters;
   stockSetup: typeof stockSetup;
   stockTransfers: typeof stockTransfers;
+  stockDevTransactionTests: typeof stockDevTransactionTests;
   storage: typeof storage;
   storageLocations: typeof storageLocations;
   suppliers: typeof suppliers;
   supplyRequests: typeof supplyRequests;
   users: typeof users;
+  water: typeof water;
+  waterDevTransactionTests: typeof waterDevTransactionTests;
+  entryExitDevTests: typeof entryExitDevTests;
 }> = anyApi as any;
 
 /**

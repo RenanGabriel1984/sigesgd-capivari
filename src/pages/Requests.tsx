@@ -352,7 +352,8 @@ export default function Requests() {
           quantityDelivered: di.quantity,
           serialNumbers: di.serialNumbers.length > 0 ? di.serialNumbers : undefined,
           locationId: di.locationId as any,
-          areaId: di.areaId as any,
+          areaId: di.areaId !== "unclassified" ? (di.areaId as any) : undefined,
+          areaIsUnclassified: di.areaId === "unclassified" ? true : undefined,
         })),
         receivedByUserId: (receivedByUserId || undefined) as any,
         confirmationPassword: confirmationPassword,
@@ -901,6 +902,7 @@ export default function Requests() {
                           {(stockAreas ?? []).map((area: any) => (
                             <option key={area._id} value={area._id}>{area.name}</option>
                           ))}
+                          <option value="unclassified">Sem área classificada (estoque legado)</option>
                         </select>
                       </div>
                       <div>

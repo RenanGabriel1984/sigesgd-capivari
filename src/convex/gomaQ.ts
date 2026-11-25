@@ -297,15 +297,22 @@ export const createExchange = mutation({
     // A troca baixa somente no armário de origem selecionado e preserva
     // a relação de cada lote consumido. O fallback só aceita um armário único.
     const sourceLocationId = await resolveWithdrawalLocation(ctx, args.productId, args.locationId);
+    // Compatibilidade com o nome histórico "Impressoras" e o nome funcional
+    // "Impressoras/Gomaq". Nunca escolhe silenciosamente se ambos coexistirem.
+    const printerAreaCandidates = await ctx.db.query("stockAreas").collect();
+    const printerAreas = printerAreaCandidates.filter((area) =>
+      area.active !== false && (area.name === "Impressoras" || area.name === "Impressoras/Gomaq"),
+    );
+    if (printerAreas.length !== 1) {
+      throw new Error("Deve existir exatamente uma área ativa Impressoras ou Impressoras/Gomaq antes da troca GomaQ.");
+    }
+    const printerAreaId = printerAreas[0]._id;
+
     const lotConsumption = await consumeLotLocationStock(ctx, {
       productId: args.productId,
       locationId: sourceLocationId,
       quantity: args.quantityDelivered,
-      areaId: await (async () => {
-        const printerAreas = await ctx.db.query("stockAreas").withIndex("by_name", (q: any) => q.eq("name", "Impressoras")).collect();
-        if (printerAreas.length !== 1) throw new Error("A área Impressoras precisa existir uma única vez antes da troca GomaQ.");
-        return printerAreas[0]._id;
-      })(),
+      areaId: printerAreaId,
     });
     const consumedLotId = lotConsumption.allocations[0]?.lotId;
     const sourceLocation = await ctx.db.get(sourceLocationId as Id<"storageLocations">);
@@ -316,22 +323,25 @@ export const createExchange = mutation({
       .withIndex("by_product", (q) => q.eq("productId", args.productId))
       .collect();
     const freshStock = requireSingleValidGlobalStock(freshStockRows, product.name);
-    const freshLedger = await assertProductLedgerConsistent(ctx, args.productId, product.name);
-    if (!freshLedger || freshLedger._id !== freshStock._id) {
-      throw new Error("Troca GomaQ bloqueada: livro-razão mudou durante a operação.");
-    }
+    // Depois do consumo de lote/local, o saldo físico local já diminuiu.
+    // Atualizar o global com a leitura fresca antes da conciliação final para
+    // não comparar dois snapshots de momentos diferentes na mesma mutation.
     await assertProductReservationConsistent(ctx, args.productId, product.name, freshStock);
     if (freshStock.physicalQuantity < args.quantityDelivered) {
-      throw new Error(`Estoque insuficiente (concorrência). Físico: ${freshStock.physicalQuantity}. Necessário: ${args.quantityDelivered}.`);
+      throw new Error("Estoque insuficiente (concorrência). Físico: " + freshStock.physicalQuantity + ". Necessário: " + args.quantityDelivered + ".");
     }
     if (freshStock.reservedQuantity > freshStock.physicalQuantity - args.quantityDelivered) {
-      throw new Error(`Estoque reservado insuficiente (concorrência). Reservado: ${freshStock.reservedQuantity}. Disponível: ${freshStock.physicalQuantity}.`);
+      throw new Error("Estoque reservado insuficiente (concorrência). Reservado: " + freshStock.reservedQuantity + ". Disponível: " + freshStock.physicalQuantity + ".");
     }
 
-    // Reduce global stock
     const newPhysical = freshStock.physicalQuantity - args.quantityDelivered;
     const newReserved = freshStock.reservedQuantity;
     await ctx.db.patch(freshStock._id, { physicalQuantity: newPhysical });
+    const finalLedger = await assertProductLedgerConsistent(ctx, args.productId, product.name);
+    if (!finalLedger || finalLedger._id !== freshStock._id) {
+      throw new Error("Troca GomaQ bloqueada: livro-razão não conciliou após a baixa.");
+    }
+    await assertProductReservationConsistent(ctx, args.productId, product.name, { ...freshStock, physicalQuantity: newPhysical });
 
     // Create stock movement
     const movementId = await ctx.db.insert("stockMovements", {
@@ -343,6 +353,7 @@ export const createExchange = mutation({
       previousReserved: freshStock.reservedQuantity,
       newReserved,
       userId,
+      areaId: printerAreaId,
       lotId: consumedLotId as any,
       locationId: sourceLocationId,
       observation: `Troca Gomaq — ${printer.name} (${printer.model}) — armário ${sourceLocation?.name ?? sourceLocationId}; lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
@@ -409,6 +420,9 @@ export const createCollection = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
 
     if (args.cartridgeIds.length === 0) throw new Error("Selecione ao menos uma carcaça para coleta");
+    if (new Set(args.cartridgeIds).size !== args.cartridgeIds.length) {
+      throw new Error("A mesma carcaça não pode ser incluída mais de uma vez na coleta.");
+    }
 
     const now = Date.now();
     let totalCartridges = 0;

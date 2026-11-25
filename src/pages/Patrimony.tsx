@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { ClipboardList, Search, Send, Warehouse, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import { roleHasPermission } from "@/lib/rbac";
 
 type DisposalStatus = "sent_to_patrimony" | "confirmed_by_patrimony" | "sent_to_warehouse";
 
@@ -43,11 +44,13 @@ function equipmentLabel(asset: any): string {
 }
 
 export default function PatrimonyPage() {
+  const currentUser = useQuery(api.users.currentUser);
   const assets = useQuery(api.assets.list, {}) as any[] | undefined;
   const requests = useQuery(api.assets.listDisposalRequests, {}) as any[] | undefined;
   const requestDisposal = useMutation(api.assets.requestDisposal);
   const recordConfirmation = useMutation(api.assets.recordDisposalConfirmation);
   const markSentToWarehouse = useMutation(api.assets.markSentToWarehouse);
+  const assignPatrimonyNumber = useMutation(api.assets.assignPatrimonyNumber);
 
   const [search, setSearch] = useState("");
   const [selectedAsset, setSelectedAsset] = useState<any | null>(null);
@@ -58,6 +61,12 @@ export default function PatrimonyPage() {
   const [confirmationDate, setConfirmationDate] = useState("");
   const [warehouseDate, setWarehouseDate] = useState("");
   const [busy, setBusy] = useState(false);
+  const [selectedAssetForPatrimony, setSelectedAssetForPatrimony] = useState<any | null>(null);
+  const [newPatrimonyNumber, setNewPatrimonyNumber] = useState("");
+  const [patrimonyObservation, setPatrimonyObservation] = useState("");
+  const canRequestDisposal = roleHasPermission(currentUser?.role, "equipment.manage");
+  const canAssignPatrimony = roleHasPermission(currentUser?.role, "patrimony.assign");
+  const pendingPatrimonyAssets = (assets ?? []).filter((asset) => asset.active !== false && !asset.patrimonyNumber?.trim());
 
   const availableAssets = useMemo(() => {
     const q = search.trim().toLocaleLowerCase("pt-BR");
@@ -70,6 +79,30 @@ export default function PatrimonyPage() {
       ].some((value) => value.toLocaleLowerCase("pt-BR").includes(q));
     });
   }, [assets, search]);
+
+  const submitPatrimonyAssignment = async () => {
+    if (!selectedAssetForPatrimony) return;
+    if (!newPatrimonyNumber.trim()) {
+      toast.error("Informe o número patrimonial.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await assignPatrimonyNumber({
+        assetId: selectedAssetForPatrimony._id,
+        patrimonyNumber: newPatrimonyNumber.trim(),
+        observation: patrimonyObservation.trim() || undefined,
+      });
+      toast.success("Número patrimonial associado ao equipamento.");
+      setSelectedAssetForPatrimony(null);
+      setNewPatrimonyNumber("");
+      setPatrimonyObservation("");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível associar o número patrimonial.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submitRequest = async () => {
     if (!selectedAsset) return;
@@ -152,6 +185,37 @@ export default function PatrimonyPage() {
           </div>
         </div>
 
+        {canAssignPatrimony && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Equipamentos aguardando tombamento</CardTitle>
+              <p className="text-sm text-muted-foreground">Equipamentos recebidos pela TI sem número patrimonial. O Departamento de Patrimônio pode associar o número posteriormente, sem alterar a entrada ou o estoque.</p>
+            </CardHeader>
+            <CardContent>
+              {assets === undefined ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">Carregando equipamentos...</p>
+              ) : pendingPatrimonyAssets.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">Não há equipamentos pendentes de tombamento.</p>
+              ) : (
+                <Table>
+                  <TableHeader><TableRow><TableHead>Equipamento</TableHead><TableHead>Série</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ação</TableHead></TableRow></TableHeader>
+                  <TableBody>
+                    {pendingPatrimonyAssets.map((asset) => (
+                      <TableRow key={asset._id}>
+                        <TableCell className="font-medium">{equipmentLabel(asset)}</TableCell>
+                        <TableCell>{asset.serialNumber ?? "—"}</TableCell>
+                        <TableCell><Badge variant="outline">{asset.status}</Badge></TableCell>
+                        <TableCell className="text-right"><Button size="sm" onClick={() => setSelectedAssetForPatrimony(asset)}>Associar patrimônio</Button></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {canRequestDisposal && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Registrar solicitação de baixa</CardTitle>
@@ -179,9 +243,9 @@ export default function PatrimonyPage() {
                         <TableCell className="font-medium">{equipmentLabel(asset)}</TableCell>
                         <TableCell><Badge variant="outline">{asset.status}</Badge></TableCell>
                         <TableCell className="text-right">
-                          <Button size="sm" variant="outline" onClick={() => setSelectedAsset(asset)}>
+                          {canRequestDisposal ? <Button size="sm" variant="outline" onClick={() => setSelectedAsset(asset)}>
                             <Send className="mr-2 h-3.5 w-3.5" /> Solicitar baixa
-                          </Button>
+                          </Button> : <span className="text-xs text-muted-foreground">Ação da equipe de TI</span>}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -191,6 +255,7 @@ export default function PatrimonyPage() {
             )}
           </CardContent>
         </Card>
+        )}
 
         <Card>
           <CardHeader><CardTitle className="text-base">Acompanhamento das solicitações</CardTitle></CardHeader>
@@ -228,11 +293,11 @@ export default function PatrimonyPage() {
                         </TableCell>
                         <TableCell className="text-right">
                           {request.status === "sent_to_patrimony" ? (
-                            <Button size="sm" onClick={() => setSelectedRequest(request)}>Registrar confirmação</Button>
+                            canAssignPatrimony ? <Button size="sm" onClick={() => setSelectedRequest(request)}>Registrar confirmação</Button> : <span className="text-xs text-muted-foreground">Aguardando Patrimônio</span>
                           ) : request.status === "confirmed_by_patrimony" ? (
-                            <Button size="sm" onClick={() => setSelectedRequest(request)}>
+                            canAssignPatrimony ? <Button size="sm" onClick={() => setSelectedRequest(request)}>
                               <Warehouse className="mr-2 h-3.5 w-3.5" /> Registrar envio
-                            </Button>
+                            </Button> : <span className="text-xs text-muted-foreground">Baixa confirmada</span>
                           ) : (
                             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><CheckCircle2 className="h-4 w-4" /> Concluído</span>
                           )}
@@ -246,6 +311,23 @@ export default function PatrimonyPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={!!selectedAssetForPatrimony} onOpenChange={(open) => { if (!open && !busy) setSelectedAssetForPatrimony(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Associar número patrimonial</DialogTitle>
+            <DialogDescription>{selectedAssetForPatrimony ? equipmentLabel(selectedAssetForPatrimony) : ""}. Esta ação registra o tombamento informado pelo Departamento de Patrimônio e preserva a entrada original.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div><Label>Número patrimonial</Label><Input value={newPatrimonyNumber} onChange={(event) => setNewPatrimonyNumber(event.target.value)} maxLength={80} /></div>
+            <div><Label>Observação (opcional)</Label><Textarea value={patrimonyObservation} onChange={(event) => setPatrimonyObservation(event.target.value)} rows={2} /></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSelectedAssetForPatrimony(null)} disabled={busy}>Cancelar</Button>
+            <Button onClick={() => void submitPatrimonyAssignment()} disabled={busy || !newPatrimonyNumber.trim()}>{busy ? "Salvando..." : "Associar número"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!selectedAsset} onOpenChange={(open) => { if (!open && !busy) setSelectedAsset(null); }}>
         <DialogContent>

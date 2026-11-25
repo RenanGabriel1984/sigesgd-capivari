@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/stock-readonly-diagnostic-first-herring
+      - codex/stock-dimension-report-integrity
   pull_request:
     branches:
       - main

@@ -91,6 +91,34 @@ describe("lot location FIFO rules", () => {
     expect(plan.allocations[0].lotId).toBe("area-a");
   });
 
+  it("selects unclassified legacy lots explicitly without mixing classified areas", () => {
+    const legacyAndClassifiedLots = [
+      { lotId: "legacy", lotNumber: "LEGACY", receivedAt: 1, quantityAvailable: 3, active: true, areaId: null },
+      { lotId: "classified", lotNumber: "CLASSIFIED", receivedAt: 2, quantityAvailable: 5, active: true, areaId: "area-1" },
+    ];
+    const legacyAndClassifiedBalances = [
+      { balanceId: "legacy-01", lotId: "legacy", locationId: "cabinet-01", quantityAvailable: 3 },
+      { balanceId: "classified-01", lotId: "classified", locationId: "cabinet-01", quantityAvailable: 5 },
+    ];
+
+    const plan = planFifoLotLocationConsumption({
+      lots: legacyAndClassifiedLots,
+      balances: legacyAndClassifiedBalances,
+      locationId: "cabinet-01",
+      quantity: 2,
+      areaId: null,
+    });
+
+    expect(plan.availableAtLocation).toBe(3);
+    expect(plan.allocations).toHaveLength(1);
+    expect(plan.allocations[0]).toMatchObject({
+      lotId: "legacy",
+      quantity: 2,
+      lotQuantityAfter: 1,
+      locationQuantityAfter: 1,
+    });
+  });
+
   it("does not use another area's quantity to cover a shortage", () => {
     expect(() => planFifoLotLocationConsumption({
       lots: [
