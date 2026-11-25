@@ -4,17 +4,21 @@ on:
   push:
     branches:
       - codex/stock-readonly-diagnostic-first-herring
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
   statuses: write
 
 concurrency:
-  group: stock-readonly-diagnostic-first-herring
+  group: stock-readonly-diagnostic-${{ github.event_name }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   diagnose:
+    if: github.event_name != 'pull_request' || github.head_ref == 'codex/stock-readonly-diagnostic-first-herring'
     name: Publicar código em DEV e consultar estoque sem escrita
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -71,8 +75,16 @@ jobs:
           set -euo pipefail
           log="${RUNNER_TEMP}/convex-publish.log"
           bunx convex dev --once --tail-logs disable 2>&1 | tee "${log}"
+          if grep -Eqi "You do not have permission|Unable to pull deployment config|Error:" "${log}"; then
+            echo "::error::Convex recusou a publicação ou informou erro; o diagnóstico não pode prosseguir."
+            exit 1
+          fi
           grep -qF "https://${TARGET_HOST}" "${log}" || {
             echo "::error::A publicação não confirmou o host first-herring-264."
+            exit 1
+          }
+          grep -qF "Preparing Convex functions" "${log}" || {
+            echo "::error::O CLI não confirmou a preparação das funções."
             exit 1
           }
           for host in ${FORBIDDEN_HOSTS}; do
@@ -160,27 +172,6 @@ jobs:
           console.log(JSON.stringify(summary, null, 2));
           NODE
 
-      - name: Publicar status verificável do diagnóstico no commit
-        if: always()
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          if [ "${JOB_STATUS}" = "success" ]; then
-            state="success"
-            description="Diagnóstico read-only concluído em first-herring-264"
-          else
-            state="failure"
-            description="Diagnóstico read-only falhou; consulte a execução"
-          fi
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
-            -f state="${state}" \
-            -f context="stock-readonly-diagnostic/first-herring-264" \
-            -f description="${description}" \
-            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-
       - name: Registrar resumo sem dados identificadores
         shell: bash
         run: |
@@ -216,3 +207,24 @@ jobs:
             appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n")
           );
           NODE
+
+      - name: Publicar status verificável do diagnóstico no commit
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [ "${JOB_STATUS}" = "success" ]; then
+            state="success"
+            description="Diagnóstico read-only concluído em first-herring-264"
+          else
+            state="failure"
+            description="Diagnóstico read-only falhou; consulte a execução"
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -f state="${state}" \
+            -f context="stock-readonly-diagnostic/first-herring-264" \
+            -f description="${description}" \
+            -f target_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
