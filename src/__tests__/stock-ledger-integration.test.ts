@@ -132,6 +132,8 @@ describe("integração do livro-razão em devoluções e transferências", () =>
     expect(create).toContain("toLocationId: args.toLocationId");
     expect(create).toContain("areaId: lotDoc?.areaId");
     expect(create).toContain("await ctx.db.patch(transferId, { movementId })");
+    expect(create).toContain("recordLotMovementAllocations(ctx");
+    expect(create).toContain('allocationType: "reclassification"');
     expect(create).toContain("newPhysical: reservationStock.physicalQuantity");
     expect(create.indexOf("assertProductLedgerConsistent")).toBeLessThan(create.indexOf("await ctx.db.patch(sourceStock._id"));
   });
