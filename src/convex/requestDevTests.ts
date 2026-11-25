@@ -36,7 +36,9 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  const product=await ctx.db.query("products").withIndex("by_name",q=>q.eq("name",name(runId,"PRODUCT"))).first();
  const requests=await ctx.db.query("requests").collect().then(rs=>rs.filter(r=>r.reason?.includes(name(runId,"REASON"))));
  const items:any[]=(await Promise.all(requests.map(r=>ctx.db.query("requestItems").withIndex("by_request",q=>q.eq("requestId",r._id)).collect()))).flat();
- const requester=await ctx.db.query("users").collect().then(rs=>rs.find(u=>u.email===name(runId,"requester")+"@fixture.invalid")??null);\n const approver=await ctx.db.query("users").collect().then(rs=>rs.find(u=>u.email===name(runId,"approver")+"@fixture.invalid")??null);\n const org=await ctx.db.query("organizations").collect().then(rs=>rs.find(o=>o.name===name(runId,"SECRETARIA"))??null);
+ const requester=await ctx.db.query("users").collect().then(rs=>rs.find(u=>u.email===name(runId,"requester")+"@fixture.invalid")??null);
+ const approver=await ctx.db.query("users").collect().then(rs=>rs.find(u=>u.email===name(runId,"approver")+"@fixture.invalid")??null);
+ const org=await ctx.db.query("organizations").collect().then(rs=>rs.find(o=>o.name===name(runId,"SECRETARIA"))??null);
  const entry=await ctx.db.query("entries").withIndex("by_number",q=>q.eq("entryNumber",name(runId,"ENTRY"))).first();
  const area=await ctx.db.query("stockAreas").withIndex("by_name",q=>q.eq("name",name(runId,"AREA"))).first();
  const location=await ctx.db.query("storageLocations").collect().then(rs=>rs.find(l=>l.name===name(runId,"LOCATION"))??null);
