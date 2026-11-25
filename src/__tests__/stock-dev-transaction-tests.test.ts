@@ -21,7 +21,7 @@ describe("validação transacional isolada no Convex DEV", () => {
     expect(fixture).toContain("fixtureName(args.runId, \"CABINET_A\")");
     expect(fixture).toContain("fixtureName(args.runId, \"CABINET_B\")");
     expect(fixture).toContain("fixtureName(args.runId, \"ENTRY\")");
-    expect(fixture).toContain("operator.isAnonymous === true");
+    expect(fixture).toContain("user.isAnonymous === true");
   });
 
   it("remove movimentos, alocações, devoluções, transferências e saldos da fixture", () => {
