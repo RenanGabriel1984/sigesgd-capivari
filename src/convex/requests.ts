@@ -533,7 +533,7 @@ export const deliver = mutation({
         previousPhysical: freshStock.physicalQuantity, newPhysical,
         previousReserved: freshStock.reservedQuantity, newReserved: finalReserved,
         userId, requestId: args.requestId, exitNumber,
-        areaId: input.areaId,
+        areaId: lotConsumption.areaId ?? input.areaId,
         lotId: lotConsumption.allocations[0]?.lotId as any,
         locationId: sourceLocationId,
         observation: `Entrega da solicitação — armário ${sourceLocation?.name ?? sourceLocationId}. Lotes: ${lotConsumption.allocations.map((a) => `${a.lotNumber}(${a.quantity})`).join(", ")}`,
