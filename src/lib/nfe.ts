@@ -125,6 +125,7 @@ export interface NfeDraftItem {
   totalCost?: number;
   specification?: string;
   locationId?: string;
+  areaId?: string;
   supplierLotNumber?: string;
   supplierCode?: string;
   ncm?: string;
@@ -799,6 +800,7 @@ export function buildEntryDraftFromNfe(
   mapped: {
     productId: string;
     locationId?: string;
+    areaId?: string;
     supplierLotNumber?: string;
     matchSource?: ProductMatchSource;
     matchScore?: number;
@@ -837,6 +839,7 @@ export function buildEntryDraftFromNfe(
       totalCost: item.totalValue,
       specification: specs.length > 0 ? specs.join(" · ") : undefined,
       locationId: m.locationId,
+      areaId: m.areaId || undefined,
       supplierLotNumber: m.supplierLotNumber || undefined,
       supplierCode: item.code || undefined,
       ncm: item.ncm,
