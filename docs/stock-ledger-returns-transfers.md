@@ -26,3 +26,22 @@ O registro `stockTransfers` mantém produto/lote, origem, destino, quantidade, r
 - Nenhuma migração ou alteração de saldo é executada por estes artefatos.
 - Transferências sem lote continuam permitidas somente para produtos sem histórico de lotes/saldos lote-local.
 - Divergências, áreas incompatíveis, lotes inativos positivos, saldos duplicados ou saldos não rastreáveis bloqueiam a operação para regularização.
+
+## Consolidação operacional — 25/11/2026
+
+A cadeia de estoque foi consolidada na branch candidata `codex/replenishment-controlled-activation`, apresentada na PR #58 contra `main`.
+
+Validações transacionais realizadas exclusivamente no Convex DEV `first-herring-264`:
+- entradas e saídas;
+- devoluções, transferências, quarentena e descarte;
+- trocas e coletas GomaQ;
+- inventário e ajustes justificados;
+- requisições, aprovações e reservas;
+- relatórios e conciliação somente leitura;
+- água mineral;
+- autenticação e integridade das credenciais;
+- parâmetros e regras de ativação da reposição.
+
+A conciliação de referência confirmou 3.338 unidades globais, por armário e por lote, sem divergência no diagnóstico read-only. Os testes transacionais utilizaram fixtures descartáveis e verificaram a limpeza.
+
+Esta consolidação não autoriza migração, alteração de dados reais ou publicação automática. A liberação depende da validação de qualidade no HEAD consolidado, da verificação de sessão/JWT e da aprovação do procedimento de publicação.
