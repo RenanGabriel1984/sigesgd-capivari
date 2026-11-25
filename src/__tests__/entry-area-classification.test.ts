@@ -97,8 +97,8 @@ describe("integração de área efetiva com o fluxo de entradas", () => {
   });
 
   it("usa a área do item ou herda o cabeçalho ao criar lote e confirmar item", () => {
-    expect(confirmation).toContain("resolveEntryItemAreaId(item.areaId, entry.areaId)");
-    expect(confirmation).toContain("areaId: effectiveAreaId as any");
+    expect(confirmation).toContain('resolveEntryItemAreaId<Id<"stockAreas">>(item.areaId, entry.areaId)');
+    expect(confirmation).toContain("areaId: effectiveAreaId");
   });
 
   it("valida a área efetiva antes de gerar o lote", () => {
