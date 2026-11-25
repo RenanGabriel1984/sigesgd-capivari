@@ -77,6 +77,7 @@ describe("etapa 4 — Gomaq, suprimentos, inventário e relatórios", () => {
     expect(close).toContain("physicalQuantity");
     expect(close).toContain("Justificativa");
     expect(close).toContain("close_inventory");
+    expect(close).toContain("areaId: change.areaId");
   });
 
   it("visão dimensional é somente leitura e não classifica saldos legados por suposição", () => {
