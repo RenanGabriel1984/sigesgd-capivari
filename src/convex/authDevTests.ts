@@ -19,4 +19,10 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  for(const u of targets){const ps=await ctx.db.query("passwords").withIndex("by_user",q=>q.eq("userId",u._id)).collect();for(const p of ps){await ctx.db.delete(p._id);deletedPasswords++;}const fr=await ctx.db.query("failedLoginAttempts").withIndex("by_email",q=>q.eq("email",u.email!)).first();if(fr){await ctx.db.delete(fr._id);deletedAttempts++;}await ctx.db.delete(u._id);}
  return {users:targets.length,passwords:deletedPasswords,failedAttempts:deletedAttempts,remaining:await ctx.db.query("users").collect().then(rs=>rs.filter(u=>typeof u.email==="string"&&u.email.startsWith(PREFIX+runId+"-")).length)};
 }});
-\nexport const inspect=internalQuery({args:{runId:v.string(),password:v.string()},handler:async(ctx,{runId,password})=>{\n if(!(process.env.CONVEX_CLOUD_URL??"").includes(HOST))throw new Error("Somente DEV.");\n const matches=await ctx.db.query("users").collect().then(rs=>rs.filter(u=>u.email===email(runId)));\n const pw=matches.length===1?await ctx.db.query("passwords").withIndex("by_user",q=>q.eq("userId",matches[0]._id)).collect():[];\n return {users:matches.length,active:matches[0]?.active,role:matches[0]?.role,passwordRecords:pw.length,hashMatches:pw.length===1?await verifyPassword(password,pw[0].passwordHash,pw[0].salt):false};\n}});\n
+
+export const inspect=internalQuery({args:{runId:v.string(),password:v.string()},handler:async(ctx,{runId,password})=>{
+ if(!(process.env.CONVEX_CLOUD_URL??"").includes(HOST))throw new Error("Somente DEV.");
+ const matches=await ctx.db.query("users").collect().then(rs=>rs.filter(u=>u.email===email(runId)));
+ const pw=matches.length===1?await ctx.db.query("passwords").withIndex("by_user",q=>q.eq("userId",matches[0]._id)).collect():[];
+ return {users:matches.length,active:matches[0]?.active,role:matches[0]?.role,passwordRecords:pw.length,hashMatches:pw.length===1?await verifyPassword(password,pw[0].passwordHash,pw[0].salt):false};
+}});
