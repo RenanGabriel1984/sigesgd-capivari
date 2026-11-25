@@ -17,7 +17,7 @@ let seeded = false;
 let fixture;
 
 function run(args, label) {
-  const result = spawnSync("bunx", ["convex", "run", "--deployment", DEPLOYMENT, ...args], {
+  const result = spawnSync("bunx", ["convex", "run", ...args], {
     encoding: "utf8",
     env: process.env,
     maxBuffer: 10 * 1024 * 1024,
