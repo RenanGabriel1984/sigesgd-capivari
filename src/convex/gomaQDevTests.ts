@@ -20,15 +20,17 @@ export const seed=internalMutation({args:{runId:v.string()},handler:async(ctx,{r
  const productId=await ctx.db.insert("products",{name:name(runId,"PRODUCT"),description:"Fixture DEV GomaQ",categoryId:category._id,unitOfMeasure:"un",active:true,maximumStock:100,brand:"Fixture",model:"TEST"});
  const printerId=await ctx.db.insert("printers",{name:name(runId,"PRINTER"),brand:"Fixture",model:"TEST-PRINTER",active:true,observation:"Fixture DEV descartável"});
  const compatibilityId=await ctx.db.insert("printerCompatibility",{productId,printerModel:"TEST-PRINTER",estimatedYield:1000});
- const lotId=await ctx.db.insert("lots",{lotNumber:name(runId,"LOT"),productId,entryId:undefined as any,quantityReceived:10,quantityAvailable:10,receivedAt:Date.now(),active:true,materialType:"consumption",areaId});
+ const now=Date.now(); const entryId=await ctx.db.insert("entries",{entryNumber:name(runId,"ENTRY"),receivedAt:now,originType:"other",responsibleUserId:operator._id,observation:"Fixture GomaQ DEV",status:"confirmed",materialType:"consumption",areaId,createdAt:now,updatedAt:now});
+ const lotId=await ctx.db.insert("lots",{lotNumber:name(runId,"LOT"),productId,entryId,quantityReceived:10,quantityAvailable:10,receivedAt:now,active:true,materialType:"consumption",areaId});
  await ctx.db.insert("stock",{productId,physicalQuantity:10,reservedQuantity:0});
  await ctx.db.insert("stockByLocation",{productId,locationId,quantity:10});
  await ctx.db.insert("lotLocationBalances",{lotId,productId,locationId,quantityAvailable:10,updatedAt:Date.now()});
- return {runId,operatorId:operator._id,role:operator.role,productId,printerId,compatibilityId,areaId,areaCreated,locationId,lotId,baseline:10};
+ return {runId,operatorId:operator._id,role:operator.role,productId,printerId,compatibilityId,areaId,areaCreated,locationId,lotId,entryId,baseline:10};
 }});
 export const inspect=internalQuery({args:{runId:v.string()},handler:async(ctx,{runId})=>{
  guard();valid(runId);
  const product=await ctx.db.query("products").withIndex("by_name",q=>q.eq("name",name(runId,"PRODUCT"))).first();
+ const entry=await ctx.db.query("entries").withIndex("by_number",q=>q.eq("entryNumber",name(runId,"ENTRY"))).first();
  if(!product)return {exists:false};
  const [stock,locations,lots,movements,exchanges,cartridges,collections,compatibility]=await Promise.all([
  ctx.db.query("stock").withIndex("by_product",q=>q.eq("productId",product._id)).collect(),
@@ -50,7 +52,7 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  const printer=await ctx.db.query("printers").collect().then(rs=>rs.find(p=>p.name===name(runId,"PRINTER"))??null);
  const location=await ctx.db.query("storageLocations").collect().then(rs=>rs.find(l=>l.name===name(runId,"LOCATION"))??null);
  const fixtureArea=await ctx.db.query("stockAreas").collect().then(rs=>rs.find(a=>a.name==="Impressoras/Gomaq"&&a.description==="Fixture DEV GomaQ")??null);
- if(!product){if(printer)await ctx.db.delete(printer._id);if(location)await ctx.db.delete(location._id);if(fixtureArea)await ctx.db.delete(fixtureArea._id);return {fixtureRemaining:false};}
+ if(!product){if(entry)await ctx.db.delete(entry._id);if(printer)await ctx.db.delete(printer._id);if(location)await ctx.db.delete(location._id);if(fixtureArea)await ctx.db.delete(fixtureArea._id);return {fixtureRemaining:false};}
  const [stocks,locations,lots,movements,exchanges,cartridges,compatibilities]=await Promise.all([
  ctx.db.query("stock").withIndex("by_product",q=>q.eq("productId",product._id)).collect(),
  ctx.db.query("stockByLocation").withIndex("by_product",q=>q.eq("productId",product._id)).collect(),
@@ -76,6 +78,7 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  for(const s of stocks)await ctx.db.delete(s._id);
  for(const c of compatibilities)await ctx.db.delete(c._id);
  await ctx.db.delete(product._id);
+ if(entry)await ctx.db.delete(entry._id);
  if(printer)await ctx.db.delete(printer._id);
  if(location)await ctx.db.delete(location._id);
  if(fixtureArea)await ctx.db.delete(fixtureArea._id);
