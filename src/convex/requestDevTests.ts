@@ -1,5 +1,5 @@
 import {internalMutation,internalQuery} from "./_generated/server";
-import {v} from "convex/values";\nimport {hashPassword} from "./auth/passwords";
+import {v} from "convex/values";
 const HOST="first-herring-264.convex.cloud",PREFIX="__SIGESGD_REQUEST_DEV__";
 function guard(){if(!(process.env.CONVEX_CLOUD_URL??"").includes(HOST))throw new Error("Somente Convex DEV autorizado.");}
 function valid(id:string){if(!/^[a-zA-Z0-9-]{8,80}$/.test(id))throw new Error("Fixture inválida.");}
@@ -8,7 +8,7 @@ export const seed=internalMutation({args:{runId:v.string()},handler:async(ctx,{r
  guard();valid(runId);
  const now=Date.now();
  const requesterId=await ctx.db.insert("users",{name:name(runId,"REQUESTER"),email:name(runId,"requester")+"@fixture.invalid",role:"technician",active:true,createdAt:now,updatedAt:now});
- const approverId=await ctx.db.insert("users",{name:name(runId,"APPROVER"),email:name(runId,"approver")+"@fixture.invalid",role:"stock_manager",active:true,createdAt:now,updatedAt:now});\n const credential=await hashPassword(confirmationPassword);\n await ctx.db.insert("passwords",{userId:approverId,passwordHash:credential.hash,salt:credential.salt,requiresReset:false});
+ const approverId=await ctx.db.insert("users",{name:name(runId,"APPROVER"),email:name(runId,"approver")+"@fixture.invalid",role:"stock_manager",active:true,createdAt:now,updatedAt:now});
  const category=await ctx.db.query("categories").withIndex("by_active",q=>q.eq("active",true)).first();
  if(!category)throw new Error("Categoria ativa ausente.");
  const areaId=await ctx.db.insert("stockAreas",{name:name(runId,"AREA"),description:"Fixture request DEV",active:true});
@@ -20,7 +20,7 @@ export const seed=internalMutation({args:{runId:v.string()},handler:async(ctx,{r
  await ctx.db.insert("stock",{productId,physicalQuantity:10,reservedQuantity:0});
  await ctx.db.insert("stockByLocation",{productId,locationId,quantity:10});
  await ctx.db.insert("lotLocationBalances",{lotId,productId,locationId,quantityAvailable:10,updatedAt:now});
- return {runId,requesterId,approverId,secretariaId,productId,areaId,locationId,entryId,lotId,baseline:10,confirmationPassword};
+ return {runId,requesterId,approverId,secretariaId,productId,areaId,locationId,entryId,lotId,baseline:10};
 }});
 export const inspect=internalQuery({args:{runId:v.string()},handler:async(ctx,{runId})=>{
  guard();valid(runId);
@@ -43,7 +43,7 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  const area=await ctx.db.query("stockAreas").withIndex("by_name",q=>q.eq("name",name(runId,"AREA"))).first();
  const location=await ctx.db.query("storageLocations").collect().then(rs=>rs.find(l=>l.name===name(runId,"LOCATION"))??null);
  if(!product){for(const i of items)await ctx.db.delete(i._id);for(const r of requests)await ctx.db.delete(r._id);if(requester)await ctx.db.delete(requester._id);if(approver)await ctx.db.delete(approver._id);if(org)await ctx.db.delete(org._id);if(entry)await ctx.db.delete(entry._id);if(area)await ctx.db.delete(area._id);if(location)await ctx.db.delete(location._id);return {fixtureRemaining:false};}
- const passwords=approver?await ctx.db.query("passwords").withIndex("by_user",q=>q.eq("userId",approver._id)).collect():[];\n const [stocks,locations,lots]=await Promise.all([
+ const [stocks,locations,lots]=await Promise.all([
  ctx.db.query("stock").withIndex("by_product",q=>q.eq("productId",product._id)).collect(),
  ctx.db.query("stockByLocation").withIndex("by_product",q=>q.eq("productId",product._id)).collect(),
  ctx.db.query("lots").withIndex("by_product",q=>q.eq("productId",product._id)).collect()]);
@@ -66,5 +66,5 @@ export const cleanup=internalMutation({args:{runId:v.string()},handler:async(ctx
  if(location)await ctx.db.delete(location._id);
  const remaining=await ctx.db.query("products").withIndex("by_name",q=>q.eq("name",name(runId,"PRODUCT"))).first();
  if(remaining)throw new Error("Fixture request ainda existe.");
- return {fixtureRemaining:false,deleted:{audit:audit.length,requests:requests.length,items:items.length,movements:movements.length,allocations:allocations.length,requestItemLots:requestItemLots.length,passwords:passwords.length,users:2}};
+ return {fixtureRemaining:false,deleted:{audit:audit.length,requests:requests.length,items:items.length,users:2}};
 }});
