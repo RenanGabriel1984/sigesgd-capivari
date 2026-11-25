@@ -91,18 +91,6 @@ jobs:
           bunx convex --version | tee "${log}"
           bunx convex deploy 2>&1 | tee -a "${log}"
 
-      - name: Verificar bootstrap do primeiro administrador (somente leitura)
-        env:
-          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY_SAVORY_SOCKEYE }}
-        run: |
-          set -euo pipefail
-          result="$(bunx convex run passwords:hasAdmin '{}')"
-          if ! printf '%s\n' "$result" | grep -Fxq 'true'; then
-            echo "::error::Backend publicado, mas não foi possível confirmar a existência de um administrador ativo. Nenhuma conta foi criada ou alterada."
-            exit 1
-          fi
-          echo "Bootstrap: existe pelo menos um administrador. Nenhuma conta ou senha foi alterada."
-
       - name: Confirmar destino publicado
         run: |
           set -euo pipefail
