@@ -136,6 +136,7 @@ export default function Exit() {
         quantity: qty,
         locationId: locationId as any,
         areaId: areaId && areaId !== "unclassified" ? (areaId as any) : undefined,
+        areaIsUnclassified: areaId === "unclassified" ? true : undefined,
         destination: destination || "Não informado",
         receiverName: receiverName.trim() || (activeUsers.find((u: any) => u._id === receiverId)?.name ?? user?.name ?? "Não informado"),
         reason,
@@ -297,6 +298,11 @@ export default function Exit() {
                               {(productDimensions?.areas ?? []).filter((area: any) => area.areaId).map((area: any) => (
                                 <SelectItem key={area.areaId} value={String(area.areaId)}>{area.areaName} ({area.quantityAvailable})</SelectItem>
                               ))}
+                              {(productDimensions?.areas ?? []).some((area: any) => !area.areaId) && (
+                                <SelectItem value="unclassified">
+                                  Sem área classificada ({productDimensions?.areas.find((area: any) => !area.areaId)?.quantityAvailable ?? 0})
+                                </SelectItem>
+                              )}
                             </SelectContent>
                           </Select>
                           {(productDimensions?.areas ?? []).some((area: any) => !area.areaId) && (
