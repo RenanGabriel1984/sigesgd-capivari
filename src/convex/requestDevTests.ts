@@ -1,5 +1,5 @@
 import {internalMutation,internalQuery} from "./_generated/server";
-import {v} from "convex/values";
+import {v} from "convex/values";\nimport {hashPassword} from "./auth/passwords";
 const HOST="first-herring-264.convex.cloud",PREFIX="__SIGESGD_REQUEST_DEV__";
 function guard(){if(!(process.env.CONVEX_CLOUD_URL??"").includes(HOST))throw new Error("Somente Convex DEV autorizado.");}
 function valid(id:string){if(!/^[a-zA-Z0-9-]{8,80}$/.test(id))throw new Error("Fixture inválida.");}
