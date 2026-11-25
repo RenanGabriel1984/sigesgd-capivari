@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - codex/rbac-audit-hardening
+      - codex/gomaq-ledger-area-integration
   pull_request:
     branches:
       - main
