@@ -1,4 +1,5 @@
 import { requirePermission } from "./rbac";
+import { buildReadonlyLotLocationPlan } from "../lib/lot-location-readonly-plan";
 import {
   resolveConsumedLotId,
   formatConsumedLots,
@@ -1188,6 +1189,206 @@ export const productDimensionSummary = query({
     };
   },
 });
+
+
+/**
+ * Diagnóstico conservador de rastreabilidade histórica lote × armário.
+ * Apenas consulta; candidatos são sugestões de evidência e nunca gravados.
+ */
+export const lotLocationMigrationReadiness = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const [
+      products, lots, lotBalances, locations, stocks, locationRows,
+      entryItems, entries, movements, transfers, returns,
+    ] = await Promise.all([
+      ctx.db.query("products").collect(),
+      ctx.db.query("lots").collect(),
+      ctx.db.query("lotLocationBalances").collect(),
+      ctx.db.query("storageLocations").collect(),
+      ctx.db.query("stock").collect(),
+      ctx.db.query("stockByLocation").collect(),
+      ctx.db.query("entryItems").collect(),
+      ctx.db.query("entries").collect(),
+      ctx.db.query("stockMovements").collect(),
+      ctx.db.query("stockTransfers").collect(),
+      ctx.db.query("returns").collect(),
+    ]);
+    const locationNames = new Map(locations.map((location: any) => [String(location._id), location.name]));
+    const entryItemsByLot = new Map<string, any[]>();
+    for (const item of entryItems as any[]) {
+      if (!item.lotId) continue;
+      const key = String(item.lotId);
+      entryItemsByLot.set(key, [...(entryItemsByLot.get(key) ?? []), item]);
+    }
+    const entryById = new Map(entries.map((entry: any) => [String(entry._id), entry]));
+    const readinessProducts: any[] = [];
+    for (const product of products as any[]) {
+      const productLots = (lots as any[]).filter((lot) => String(lot.productId) === String(product._id));
+      // Produtos sem lote histórico permanecem no modelo legado; não se criam lotes artificiais.
+      if (productLots.length === 0) continue;
+      const productBalances = (lotBalances as any[]).filter((row) => String(row.productId) === String(product._id));
+      const productLocalRows = (locationRows as any[]).filter((row) => String(row.productId) === String(product._id));
+      const globalRows = (stocks as any[]).filter((row) => String(row.productId) === String(product._id));
+      const global = globalRows.length === 1 ? globalRows[0] : null;
+      let globalError: string | null = null;
+      if (globalRows.length !== 1) globalError = globalRows.length === 0
+        ? "Registro global ausente."
+        : `Há ${globalRows.length} registros globais duplicados.`;
+      else if (!Number.isFinite(global.physicalQuantity) || !Number.isFinite(global.reservedQuantity) ||
+        global.physicalQuantity < 0 || global.reservedQuantity < 0 || global.reservedQuantity > global.physicalQuantity) {
+        globalError = "Registro global com quantidades inválidas.";
+      }
+      const balanceScopeKeys = productBalances.map((row: any) => `${String(row.lotId)}::${String(row.locationId)}`);
+      const duplicateBalanceScopeCount = balanceScopeKeys.length - new Set(balanceScopeKeys).size;
+      const invalidBalanceCount = productBalances.filter((row: any) =>
+        !Number.isFinite(row.quantityAvailable) || row.quantityAvailable < 0,
+      ).length;
+      const orphanBalanceCount = productBalances.filter((row: any) =>
+        !productLots.some((lot: any) => String(lot._id) === String(row.lotId)),
+      ).length;
+      const invalidLotCount = productLots.filter((lot: any) =>
+        !Number.isFinite(lot.quantityAvailable) || lot.quantityAvailable < 0 ||
+        !Number.isFinite(lot.quantityReceived) || lot.quantityReceived < 0 ||
+        (lot.active === false && lot.quantityAvailable > 1e-9) ||
+        lot.quantityAvailable > lot.quantityReceived + 1e-9,
+      ).length;
+      const lotDetails = productLots.map((lot: any) => {
+        const balancesForLot = productBalances.filter((row: any) => String(row.lotId) === String(lot._id));
+        const mappedQuantity = balancesForLot.reduce((sum: number, row: any) =>
+          sum + (Number.isFinite(row.quantityAvailable) ? row.quantityAvailable : 0), 0);
+        const mappedLocations = balancesForLot.map((row: any) => ({
+          locationId: String(row.locationId),
+          quantity: row.quantityAvailable,
+        }));
+        const duplicateLocations = balancesForLot.length !== new Set(balancesForLot.map((row: any) => String(row.locationId))).size;
+        const entryItemsForLot = entryItemsByLot.get(String(lot._id)) ?? [];
+        const candidateIds = [...new Set(entryItemsForLot.map((item: any) => item.locationId ? String(item.locationId) : "").filter(Boolean))];
+        const originalEntryId = String(lot.entryId ?? "");
+        const originalEntry = entryById.get(originalEntryId);
+        const candidateEvidence = entryItemsForLot.length === 1 &&
+          entryItemsForLot[0].productId === lot.productId &&
+          String(entryItemsForLot[0].entryId) === originalEntryId &&
+          Number.isFinite(entryItemsForLot[0].quantity) &&
+          Math.abs(entryItemsForLot[0].quantity - lot.quantityReceived) <= 1e-9 &&
+          candidateIds.length === 1 &&
+          Math.abs(lot.quantityAvailable - lot.quantityReceived) <= 1e-9 &&
+          Boolean(originalEntry) &&
+          candidateIds[0] !== "";
+        const laterMovements = (movements as any[]).filter((movement) =>
+          String(movement.productId) === String(product._id) &&
+          movement.timestamp >= lot.receivedAt &&
+          String(movement.entryId ?? "") !== originalEntryId,
+        );
+        const laterTransfers = (transfers as any[]).filter((transfer) =>
+          String(transfer.productId) === String(product._id) && transfer.createdAt >= lot.receivedAt,
+        );
+        const laterReturns = (returns as any[]).filter((returned) =>
+          String(returned.productId) === String(product._id) && returned.createdAt >= lot.receivedAt,
+        );
+        let status: "mapped" | "candidate" | "divergent" | "ambiguous" | "unmapped";
+        let candidateLocationId: string | null = null;
+        if (balancesForLot.length > 0) {
+          status = duplicateLocations || invalidBalanceCount > 0 ||
+            Math.abs(mappedQuantity - lot.quantityAvailable) > 1e-9 ||
+            mappedLocations.some((row) => !locationNames.has(row.locationId))
+            ? "divergent"
+            : "mapped";
+        } else if (candidateEvidence && laterMovements.length === 0 && laterTransfers.length === 0 && laterReturns.length === 0) {
+          status = "candidate";
+          candidateLocationId = candidateIds[0];
+        } else if (candidateIds.length > 0 || laterMovements.length > 0 || laterTransfers.length > 0 || laterReturns.length > 0) {
+          status = "ambiguous";
+        } else {
+          status = "unmapped";
+        }
+        return {
+          lotId: String(lot._id),
+          lotNumber: lot.lotNumber,
+          quantityAvailable: lot.quantityAvailable,
+          status,
+          candidateLocationId,
+          mappedLocations,
+        };
+      });
+      const localByLocation = new Map<string, number>();
+      const localDuplicateCounts = new Map<string, number>();
+      for (const row of productLocalRows) {
+        const key = String(row.locationId);
+        localByLocation.set(key, (localByLocation.get(key) ?? 0) + row.quantity);
+        localDuplicateCounts.set(key, (localDuplicateCounts.get(key) ?? 0) + 1);
+      }
+      const mappedByLocation = new Map<string, number>();
+      for (const row of productBalances) {
+        const key = String(row.locationId);
+        mappedByLocation.set(key, (mappedByLocation.get(key) ?? 0) + row.quantityAvailable);
+      }
+      const candidateByLocation = new Map<string, number>();
+      for (const lot of lotDetails) {
+        if (lot.status === "candidate" && lot.candidateLocationId) {
+          const key = lot.candidateLocationId;
+          candidateByLocation.set(key, (candidateByLocation.get(key) ?? 0) + lot.quantityAvailable);
+        }
+      }
+      const localComparison = [...new Set([
+        ...localByLocation.keys(), ...mappedByLocation.keys(), ...candidateByLocation.keys(),
+      ])].map((locationId) => ({
+        locationId,
+        physicalQuantity: localByLocation.get(locationId) ?? 0,
+        mappedLotQuantity: mappedByLocation.get(locationId) ?? 0,
+        candidateLotQuantity: candidateByLocation.get(locationId) ?? 0,
+        duplicatePhysicalRows: Math.max(0, (localDuplicateCounts.get(locationId) ?? 0) - 1),
+      }));
+      const globalPhysical = global?.physicalQuantity ?? 0;
+      const localPhysicalTotal = productLocalRows.reduce((sum: number, row: any) => sum + row.quantity, 0);
+      const lotsAvailableTotal = productLots.reduce((sum: number, lot: any) =>
+        sum + (Number.isFinite(lot.quantityAvailable) ? lot.quantityAvailable : 0), 0);
+      const mappedLotTotal = productBalances.reduce((sum: number, row: any) =>
+        sum + (Number.isFinite(row.quantityAvailable) ? row.quantityAvailable : 0), 0);
+      const candidateLotTotal = lotDetails.filter((lot) => lot.status === "candidate")
+        .reduce((sum: number, lot) => sum + lot.quantityAvailable, 0);
+      readinessProducts.push({
+        productId: String(product._id),
+        productName: product.name,
+        globalPhysical,
+        globalReserved: global?.reservedQuantity ?? 0,
+        globalError,
+        localPhysicalTotal,
+        lotsAvailableTotal,
+        candidateTotalsAlign: localComparison.every((row) =>
+          Math.abs(row.physicalQuantity - row.mappedLotQuantity - row.candidateLotQuantity) <= 1e-9,
+        ) && Math.abs(globalPhysical - mappedLotTotal - candidateLotTotal) <= 1e-9,
+        invalidLotCount,
+        invalidBalanceCount,
+        duplicateBalanceScopeCount,
+        orphanBalanceCount,
+        localComparison,
+        lots: lotDetails,
+      });
+    }
+    const report = {
+      readOnly: true as const,
+      migrationApplied: false as const,
+      locations: locations.map((location: any) => ({
+        locationId: String(location._id),
+        name: location.name,
+        active: location.active !== false,
+      })),
+      products: readinessProducts,
+    };
+    const plan = buildReadonlyLotLocationPlan(report);
+    return {
+      generatedAt: Date.now(),
+      readOnly: true,
+      migrationApplied: false,
+      report,
+      plan,
+      warning: "Candidatos são inferências documentais; não executam migração. Produtos divergentes, ambíguos ou sem evidência suficiente permanecem bloqueados.",
+    };
+  },
+});
+
 
 export const stockDimensionOverview = query({
   args: {},

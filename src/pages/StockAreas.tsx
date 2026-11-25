@@ -10,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Layers, Edit2, ToggleLeft, ToggleRight, ArrowRightLeft, Info } from "lucide-react";
+import { Plus, Layers, Edit2, ToggleLeft, ToggleRight, ArrowRightLeft, Info, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router";
 import { BASELINE_STOCK_AREAS, NO_AREA_LABEL } from "@/lib/stock-areas";
@@ -45,6 +45,7 @@ function StockAreasSkeleton() {
 export default function StockAreas() {
   const areas = useQuery(api.stockAreas.list);
   const summary = useQuery(api.stockAreas.summary);
+  const lotLocationReadiness = useQuery(api.stockSetup.lotLocationMigrationReadiness);
   const createArea = useMutation(api.stockAreas.create);
   const updateArea = useMutation(api.stockAreas.update);
   const createMissingBaselineAreas = useMutation(api.stockAreas.createMissingBaselineAreas);
@@ -177,6 +178,103 @@ export default function StockAreas() {
             </CardContent>
           </Card>
         )}
+
+        <Card className="border-border/50">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <Info className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <h2 className="font-semibold text-sm">Conciliação histórica lote × armário</h2>
+                <p className="text-xs text-muted-foreground">
+                  Diagnóstico somente leitura. Nenhum lote, saldo, área ou localização é alterado nesta tela.
+                </p>
+              </div>
+            </div>
+            {lotLocationReadiness === undefined ? (
+              <Skeleton className="h-24 w-full" />
+            ) : (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Lotes sugeridos</p>
+                    <p className="text-lg font-semibold tabular-nums">{lotLocationReadiness.plan.insertions.length}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Quantidade sugerida</p>
+                    <p className="text-lg font-semibold tabular-nums">{lotLocationReadiness.plan.totalQuantityToTrace}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Já conciliados</p>
+                    <p className="text-lg font-semibold tabular-nums">{lotLocationReadiness.plan.alreadyMapped}</p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-muted-foreground">Produtos bloqueados</p>
+                    <p className="text-lg font-semibold tabular-nums">{lotLocationReadiness.plan.blockedProducts.length}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  O sistema só sugere armário quando a entrada está ligada inequivocamente ao lote,
+                  o saldo atual não mudou desde o recebimento e não há movimentação posterior.
+                  A proposta ainda exige conferência antes de qualquer regularização.
+                </p>
+                <details className="rounded-md border p-3">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Ver {lotLocationReadiness.plan.insertions.length} associação(ões) candidata(s)
+                  </summary>
+                  <div className="mt-3 space-y-2 max-h-80 overflow-auto">
+                    {lotLocationReadiness.plan.insertions.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Nenhuma associação candidata liberada.</p>
+                    ) : lotLocationReadiness.plan.insertions.map((row) => {
+                      const product = lotLocationReadiness.report.products.find((item) => item.productId === row.productId);
+                      const location = lotLocationReadiness.report.locations.find((item) => item.locationId === row.locationId);
+                      return (
+                        <div key={row.lotId} className="text-xs border-b last:border-0 pb-2">
+                          <p className="font-medium">{product?.productName ?? row.productId}</p>
+                          <p className="text-muted-foreground">
+                            {row.lotNumber} · {row.quantityAvailable} · {location?.name ?? "Local desconhecido"}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </details>
+                <details className="rounded-md border p-3">
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Ver {lotLocationReadiness.plan.blockedProducts.length} produto(s) que exigem conferência
+                  </summary>
+                  <div className="mt-3 space-y-3 max-h-80 overflow-auto">
+                    {lotLocationReadiness.plan.blockedProducts.length === 0 ? (
+                      <div className="flex items-center gap-2 text-xs text-emerald-700">
+                        <CheckCircle2 className="h-4 w-4" /> Nenhum produto bloqueado pelo diagnóstico.
+                      </div>
+                    ) : lotLocationReadiness.plan.blockedProducts.map((product) => (
+                      <div key={product.productId} className="text-xs border-b last:border-0 pb-2">
+                        <p className="font-medium flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3 text-amber-600" />
+                          {product.productName}
+                        </p>
+                        <ul className="list-disc pl-5 text-muted-foreground mt-1">
+                          {product.reasons.map((reason, index) => <li key={index}>{reason}</li>)}
+                        </ul>
+                        {lotLocationReadiness.report.products.find((item) => item.productId === product.productId)?.lots
+                          .filter((lot: { status: string; quantityAvailable: number }) => lot.status !== "mapped" && lot.quantityAvailable > 0)
+                          .map((lot: { lotId: string; lotNumber: string; status: string; quantityAvailable: number }) => (
+                            <p key={lot.lotId} className="mt-1 pl-1 text-muted-foreground">
+                              Lote {lot.lotNumber}: {lot.status} · {lot.quantityAvailable}
+                            </p>
+                          ))}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+                <div className="rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">
+                  <strong>Modo seguro:</strong> consulta e planejamento apenas. O botão de migração não existe;
+                  nenhuma gravação é executada.
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
 
         {areas.length === 0 ? (
           <Card className="border-border/50">
