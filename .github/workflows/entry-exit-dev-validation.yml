@@ -1,5 +1,7 @@
 name: Entry exit DEV validation
 on:
+  push:
+    branches: [codex/entry-exit-dev-runtime-validation]
   pull_request:
     types: [opened, synchronize, reopened]
 permissions:
