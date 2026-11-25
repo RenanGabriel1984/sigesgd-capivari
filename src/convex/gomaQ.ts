@@ -417,6 +417,9 @@ export const createCollection = mutation({
     const { userId } = await requireManagerOrAdmin(ctx);
 
     if (args.cartridgeIds.length === 0) throw new Error("Selecione ao menos uma carcaça para coleta");
+    if (new Set(args.cartridgeIds).size !== args.cartridgeIds.length) {
+      throw new Error("A mesma carcaça não pode ser incluída mais de uma vez na coleta.");
+    }
 
     const now = Date.now();
     let totalCartridges = 0;
