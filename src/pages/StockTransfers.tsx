@@ -152,6 +152,7 @@ export default function StockTransfersPage() {
                       <TableHead>Data</TableHead>
                       <TableHead>Produto</TableHead>
                       <TableHead>Lote</TableHead>
+                      <TableHead>Área</TableHead>
                       <TableHead>Qtd</TableHead>
                       <TableHead>Origem</TableHead>
                       <TableHead>Destino</TableHead>
@@ -169,6 +170,9 @@ export default function StockTransfersPage() {
                         </TableCell>
                         <TableCell className="text-sm">
                           {t.lot?.lotNumber ?? "\u2014"}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {t.area?.name ?? "Sem área classificada"}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline">{t.quantity}</Badge>
