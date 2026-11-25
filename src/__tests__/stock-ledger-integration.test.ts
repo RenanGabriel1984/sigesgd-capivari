@@ -15,8 +15,8 @@ describe("integração do livro-razão em entradas e saídas", () => {
     expect(part).toContain('ctx.db.insert("lotLocationBalances"');
     expect(part).toContain('ctx.db.insert("stockMovements"');
     expect(part).toContain("locationId: item.locationId");
-    expect(part).toContain("resolveEntryItemAreaId(item.areaId, entry.areaId)");
-    expect(part).toContain("areaId: effectiveAreaId as any");
+    expect(part).toContain('resolveEntryItemAreaId<Id<"stockAreas">>(item.areaId, entry.areaId)');
+    expect(part).toContain("areaId: effectiveAreaId");
   });
   it("estorna entradas com alocação estruturada por armário", () => {
     const entries = source("convex/entries.ts");
