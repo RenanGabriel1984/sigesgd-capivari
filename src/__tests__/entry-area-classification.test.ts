@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { resolveEntryItemAreaId } from "./entry-area-classification";
-import { buildEntryDraftFromNfe } from "./nfe";
-import { buildNfeEntrySummary } from "./nfe-summary";
+import { resolveEntryItemAreaId } from "../lib/entry-area-classification";
+import { buildEntryDraftFromNfe } from "../lib/nfe";
+import { buildNfeEntrySummary } from "../lib/nfe-summary";
 
 const root = resolve(__dirname, "..");
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
