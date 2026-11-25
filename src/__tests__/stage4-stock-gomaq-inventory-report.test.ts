@@ -88,6 +88,10 @@ describe("etapa 4 — Gomaq, suprimentos, inventário e relatórios", () => {
     expect(overview).toContain("globalVsLotsDifference");
     expect(overview).toContain("untrackedLocations");
     expect(overview).toContain("readOnly: true");
+    expect(overview).toContain("global.length > 1");
+    expect(overview).toContain("row.reservedQuantity > row.physicalQuantity");
+    expect(overview).toContain("!Number.isFinite(row.quantity) || row.quantity < 0");
+    expect(overview).toContain("row.invalidBalanceCount > 0 || row.untrackedLocations.length > 0");
     expect(overview).not.toMatch(/ctx\.db\.(insert|patch|replace|delete)\s*\(/);
   });
 
