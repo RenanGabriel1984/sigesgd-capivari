@@ -49,6 +49,7 @@ import type * as seeds from "../seeds.js";
 import type * as stockAreas from "../stockAreas.js";
 import type * as stockHelpers from "../stockHelpers.js";
 import type * as stockIntelligence from "../stockIntelligence.js";
+import type * as stockIntelligenceDevTests from "../stockIntelligenceDevTests.js";
 import type * as stockLocations from "../stockLocations.js";
 import type * as stockMovements from "../stockMovements.js";
 import type * as stockParameters from "../stockParameters.js";
@@ -113,6 +114,7 @@ const fullApi: ApiFromModules<{
   stockAreas: typeof stockAreas;
   stockHelpers: typeof stockHelpers;
   stockIntelligence: typeof stockIntelligence;
+  stockIntelligenceDevTests: typeof stockIntelligenceDevTests;
   stockLocations: typeof stockLocations;
   stockMovements: typeof stockMovements;
   stockParameters: typeof stockParameters;
