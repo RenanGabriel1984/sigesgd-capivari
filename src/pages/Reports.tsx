@@ -39,6 +39,7 @@ import {
 import { UNIT_LABELS } from "@/types/constants";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { ConsumptionManagement } from "@/components/reports/ConsumptionManagement";
 
 function LoadingSkeleton() {
   return (
@@ -322,8 +323,11 @@ export default function Reports() {
           </div>
         </div>
 
-        <Tabs defaultValue="stock">
+        <Tabs defaultValue="management">
           <TabsList>
+            <TabsTrigger value="management" className="gap-1">
+              <FileBarChart className="h-3.5 w-3.5" /> Gestão de Consumo
+            </TabsTrigger>
             <TabsTrigger value="stock" className="gap-1">
               <Package className="h-3.5 w-3.5" /> Posição de Estoque
             </TabsTrigger>
@@ -331,7 +335,7 @@ export default function Reports() {
               <ArrowLeftRight className="h-3.5 w-3.5" /> Movimentações
             </TabsTrigger>
             <TabsTrigger value="consumption" className="gap-1">
-              <Building2 className="h-3.5 w-3.5" /> Consumo por Secretaria
+              <Building2 className="h-3.5 w-3.5" /> Entregas por Secretaria
             </TabsTrigger>
             <TabsTrigger value="toners" className="gap-1">
               <Printer className="h-3.5 w-3.5" /> Métricas de Toners
@@ -674,6 +678,11 @@ export default function Reports() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* ═══ VISÃO EXECUTIVA: GESTÃO DE CONSUMO ═══ */}
+          <TabsContent value="management" className="space-y-4 mt-4">
+            <ConsumptionManagement />
           </TabsContent>
 
           {/* ═══ RELATÓRIO 3: CONSUMO POR SECRETARIA ═══ */}
