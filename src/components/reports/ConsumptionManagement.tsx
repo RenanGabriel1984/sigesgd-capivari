@@ -289,8 +289,8 @@ export function ConsumptionManagement() {
     ]);
     const workbook = XLSX.utils.book_new();
     const comparisonSheet = XLSX.utils.aoa_to_sheet([
-      ["Grupo", "Quantidade atual", "Quantidade anterior", "Variação da quantidade", "Custo atual", "Custo anterior", "Variação do custo"],
-      ...comparisonRows.map((row) => [row.label, row.quantity, row.previousQuantity, row.change, row.currentCost ?? "Custo não informado", row.previousCost ?? "Custo não informado", row.costChange]),
+      ["Grupo", dimension === "produto" ? "Quantidade atual" : "Saídas atuais", dimension === "produto" ? "Quantidade anterior" : "Saídas anteriores", dimension === "produto" ? "Variação da quantidade" : "Variação das saídas", "Custo atual", "Custo anterior", "Variação do custo"],
+      ...comparisonRows.map((row) => [row.label, dimension === "produto" ? row.quantity : row.exits, dimension === "produto" ? row.previousQuantity : row.previousExits, row.change, row.currentCost ?? "Custo não informado", row.previousCost ?? "Custo não informado", row.costChange]),
     ]);
     XLSX.utils.book_append_sheet(workbook, summarySheet, "Resumo executivo");
     XLSX.utils.book_append_sheet(workbook, comparisonSheet, "Comparativo");
@@ -505,7 +505,7 @@ export function ConsumptionManagement() {
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <p className="text-xs text-muted-foreground">
-                      {chartUsesQuantity ? "Quantidade por produto/categoria (unidades de medida podem variar entre produtos)." : "Frequência de saídas por grupo, sem somar unidades de medida diferentes."}
+                      {chartUsesQuantity ? "Quantidade do produto selecionado (unidade de medida identificada)." : "Frequência de saídas por grupo, sem somar unidades de medida diferentes."}
                     </p>
                     {currentGroups.slice(0, 7).map((group) => {
                       const value = chartUsesQuantity ? group.quantity : group.exits;
