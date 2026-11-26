@@ -320,8 +320,9 @@ export function ConsumptionManagement() {
       `Saídas registradas: ${number(currentSummary.exits)}`,
       `Custo identificado no período atual: ${currency(currentSummary.cost)}`,
       `Custo identificado no período anterior: ${currency(previousSummary.cost)}`,
-      `Comparação de quantidade com período anterior: ${percentChange(currentSummary.quantity, previousSummary.quantity)}`,
-      "As quantidades são somadas nas unidades cadastradas para cada produto; não compare diretamente materiais com unidades diferentes. Os custos só aparecem quando há informação confiável para todas as movimentações do agrupamento.",
+      `Produtos distintos com saída: ${number(currentSummary.products)} (período anterior: ${number(previousSummary.products)})`,
+      `Variação na frequência de saídas: ${percentChange(currentSummary.exits, previousSummary.exits)}`,
+      "A frequência de saídas permite comparar órgãos sem misturar unidades de medida. Quantidades devem ser analisadas por produto/categoria. Os custos só aparecem quando há informação confiável para todas as movimentações do agrupamento.",
     ].join("\n");
     try {
       if (navigator.share) {
