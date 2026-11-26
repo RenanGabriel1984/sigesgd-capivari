@@ -224,6 +224,8 @@ export function ConsumptionManagement() {
         cost: current?.cost ?? null,
         previousQuantity: previous?.quantity ?? 0,
         change: percentChange(current?.quantity ?? 0, previous?.quantity ?? 0),
+        currentCost: current?.cost ?? null,
+        previousCost: previous?.cost ?? null,
       };
     }).sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label, "pt-BR"));
   }, [currentGroups, previousGroups]);
@@ -272,7 +274,12 @@ export function ConsumptionManagement() {
       ...exportRows(),
     ]);
     const workbook = XLSX.utils.book_new();
+    const comparisonSheet = XLSX.utils.aoa_to_sheet([
+      ["Grupo", "Quantidade atual", "Quantidade anterior", "Variação", "Custo atual", "Custo anterior"],
+      ...comparisonRows.map((row) => [row.label, row.quantity, row.previousQuantity, row.change, row.currentCost ?? "Custo não informado", row.previousCost ?? "Custo não informado"]),
+    ]);
     XLSX.utils.book_append_sheet(workbook, summarySheet, "Resumo executivo");
+    XLSX.utils.book_append_sheet(workbook, comparisonSheet, "Comparativo");
     XLSX.utils.book_append_sheet(workbook, detailSheet, "Detalhamento");
     XLSX.writeFile(workbook, "relatorio-gerencial-consumo-sigesgd.xlsx");
     toast.success("Planilha Excel exportada.");
@@ -297,7 +304,8 @@ export function ConsumptionManagement() {
       `Gerado em: ${generatedAt}`,
       `Quantidade registrada: ${number(currentSummary.quantity)}`,
       `Saídas registradas: ${number(currentSummary.exits)}`,
-      `Custo identificado: ${currency(currentSummary.cost)}`,
+      `Custo identificado no período atual: ${currency(currentSummary.cost)}`,
+      `Custo identificado no período anterior: ${currency(previousSummary.cost)}`,
       `Comparação de quantidade com período anterior: ${percentChange(currentSummary.quantity, previousSummary.quantity)}`,
       "As quantidades são somadas nas unidades cadastradas para cada produto; não compare diretamente materiais com unidades diferentes. Os custos só aparecem quando há informação confiável para todas as movimentações do agrupamento.",
     ].join("\n");
@@ -438,7 +446,7 @@ export function ConsumptionManagement() {
               <CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-muted-foreground">Custo identificado</CardTitle></CardHeader>
               <CardContent>
                 <p className="text-lg font-semibold tabular-nums">{currency(currentSummary.cost)}</p>
-                <p className="text-xs text-muted-foreground mt-1">{currentSummary.unknownCosts} combinação(ões) sem custo confiável</p>
+                <p className="text-xs text-muted-foreground mt-1">Anterior: {currency(previousSummary.cost)} · {currentSummary.unknownCosts} combinação(ões) sem custo confiável</p>
               </CardContent>
             </Card>
             <Card className="border-border/50">
@@ -505,6 +513,8 @@ export function ConsumptionManagement() {
                           <TableHead className="text-right">Atual</TableHead>
                           <TableHead className="text-right">Anterior</TableHead>
                           <TableHead className="text-right">Variação</TableHead>
+                          <TableHead className="text-right">Custo atual</TableHead>
+                          <TableHead className="text-right">Custo anterior</TableHead>
                         </TableRow></TableHeader>
                         <TableBody>
                           {comparisonRows.slice(0, 8).map((row) => (
@@ -517,9 +527,11 @@ export function ConsumptionManagement() {
                                   {row.change}
                                 </span>
                               </TableCell>
+                              <TableCell className="text-right text-xs whitespace-nowrap">{currency(row.currentCost)}</TableCell>
+                              <TableCell className="text-right text-xs whitespace-nowrap">{currency(row.previousCost)}</TableCell>
                             </TableRow>
                           ))}
-                          {comparisonRows.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-sm text-muted-foreground">Sem dados comparáveis.</TableCell></TableRow>}
+                          {comparisonRows.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground">Sem dados comparáveis.</TableCell></TableRow>}
                         </TableBody>
                       </Table>
                     </div>
