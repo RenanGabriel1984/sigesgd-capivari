@@ -37,6 +37,8 @@ import {
   Phone,
   SlidersHorizontal,
   Droplets,
+  Utensils,
+  SprayCan,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -97,7 +99,9 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Dar saída", href: "/exit", icon: PackageMinus, permission: "canCreateEntries" },
     { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests", permission2: "canApproveRequests" },
     { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
-    { label: "Água mineral", href: "/water", icon: Droplets, permission: "canManageStock" },
+    { label: "Água mineral / Garrafões", href: "/water", icon: Droplets, permission: "canManageStock" },
+    { label: "Copa e Cozinha", href: "/stock?area=Copa%20e%20Cozinha", icon: Utensils, permission: "canViewStock" },
+    { label: "Materiais de Limpeza", href: "/stock?area=Limpeza", icon: SprayCan, permission: "canViewStock" },
   ]},
   { title: "Patrimônio", items: [
     { label: "Solicitações de baixa", href: "/patrimony", icon: ClipboardCheck, permission: "canManageAssets", permission2: "canViewPatrimony" },
