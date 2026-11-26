@@ -39,6 +39,9 @@ export interface OrganizationalMovement extends ConsumableMovement {
   secretariaId?: string | null;
   departamentoId?: string | null;
   unidadeId?: string | null;
+  /** Motivo declarado na solicitação ou observação registrada na saída. */
+  reason?: string | null;
+  unitOfMeasure?: string | null;
   /** Custo unitário do LOTE de origem, quando conhecido. */
   unitCost?: number | null;
 }
@@ -194,6 +197,8 @@ export interface ConsumptionHierarchyAggregate {
   productId: string;
   productName: string;
   categoryName: string;
+  unitOfMeasure: string;
+  reason: string;
   quantity: number;
   exitCount: number;
   cost: number | null;
@@ -223,11 +228,14 @@ export function aggregateConsumptionHierarchy(
     const unidadeName = movement.unidadeName || "Sem unidade vinculada";
     const productName = movement.productName || "Produto não identificado";
     const categoryName = movement.categoryName || "Categoria não identificada";
+    const unitOfMeasure = movement.unitOfMeasure || "Unidade não informada";
+    const reason = movement.reason?.trim() || "Sem justificativa registrada";
     const identity = [
       movement.secretariaId ?? `name:${secretariaName}`,
       movement.departamentoId ?? `name:${departamentoName}`,
       movement.unidadeId ?? `name:${unidadeName}`,
       movement.productId,
+      reason,
     ].join("|");
     const bucket = groups.get(identity) ?? {
       row: {
@@ -240,6 +248,8 @@ export function aggregateConsumptionHierarchy(
         productId: movement.productId,
         productName,
         categoryName,
+        unitOfMeasure,
+        reason,
       },
       quantity: 0,
       exitCount: 0,
