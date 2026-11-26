@@ -35,6 +35,10 @@ export interface OrganizationalMovement extends ConsumableMovement {
   secretariaName?: string | null;
   departamentoName?: string | null;
   unidadeName?: string | null;
+  /** IDs preservam a identidade do órgão mesmo quando nomes se repetem. */
+  secretariaId?: string | null;
+  departamentoId?: string | null;
+  unidadeId?: string | null;
   /** Custo unitário do LOTE de origem, quando conhecido. */
   unitCost?: number | null;
 }
@@ -176,6 +180,99 @@ export function aggregateConsumptionByOrganizationAndProduct(
     }
   }
   return rows.sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label, "pt-BR"));
+}
+
+
+/** Linha de cruzamento organizacional × produto para filtros e drill-down gerencial. */
+export interface ConsumptionHierarchyAggregate {
+  secretariaId: string | null;
+  secretariaName: string;
+  departamentoId: string | null;
+  departamentoName: string;
+  unidadeId: string | null;
+  unidadeName: string;
+  productId: string;
+  productName: string;
+  categoryName: string;
+  quantity: number;
+  exitCount: number;
+  cost: number | null;
+  costLabel: string;
+}
+
+/**
+ * Agrega uma saída uma única vez na combinação Secretaria × Departamento ×
+ * Unidade × Produto. A composição do custo só é liberada quando todas as
+ * saídas da combinação possuem custo unitário confiável.
+ */
+export function aggregateConsumptionHierarchy(
+  movements: OrganizationalMovement[],
+): ConsumptionHierarchyAggregate[] {
+  const groups = new Map<string, {
+    row: Omit<ConsumptionHierarchyAggregate, "quantity" | "exitCount" | "cost" | "costLabel">;
+    quantity: number;
+    exitCount: number;
+    costSum: number;
+    costKnown: boolean;
+  }>();
+
+  for (const movement of movements) {
+    if (!isConsumptionMovement(movement)) continue;
+    const secretariaName = movement.secretariaName || NO_ORGANIZATION_LABEL;
+    const departamentoName = movement.departamentoName || "Sem departamento vinculado";
+    const unidadeName = movement.unidadeName || "Sem unidade vinculada";
+    const productName = movement.productName || "Produto não identificado";
+    const categoryName = movement.categoryName || "Categoria não identificada";
+    const identity = [
+      movement.secretariaId ?? `name:${secretariaName}`,
+      movement.departamentoId ?? `name:${departamentoName}`,
+      movement.unidadeId ?? `name:${unidadeName}`,
+      movement.productId,
+    ].join("|");
+    const bucket = groups.get(identity) ?? {
+      row: {
+        secretariaId: movement.secretariaId ?? null,
+        secretariaName,
+        departamentoId: movement.departamentoId ?? null,
+        departamentoName,
+        unidadeId: movement.unidadeId ?? null,
+        unidadeName,
+        productId: movement.productId,
+        productName,
+        categoryName,
+      },
+      quantity: 0,
+      exitCount: 0,
+      costSum: 0,
+      costKnown: true,
+    };
+    const quantity = Math.max(movement.quantity, 0);
+    bucket.quantity += quantity;
+    bucket.exitCount += 1;
+    const unitCost = resolveConsumptionUnitCost(movement);
+    if (unitCost === null) bucket.costKnown = false;
+    else bucket.costSum += quantity * unitCost;
+    groups.set(identity, bucket);
+  }
+
+  return [...groups.values()]
+    .map((bucket) => {
+      const cost = bucket.costKnown ? Math.round(bucket.costSum * 100) / 100 : null;
+      return {
+        ...bucket.row,
+        quantity: bucket.quantity,
+        exitCount: bucket.exitCount,
+        cost,
+        costLabel: cost === null
+          ? COST_UNAVAILABLE_LABEL
+          : new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(cost),
+      };
+    })
+    .sort((a, b) =>
+      b.quantity - a.quantity ||
+      a.secretariaName.localeCompare(b.secretariaName, "pt-BR") ||
+      a.productName.localeCompare(b.productName, "pt-BR")
+    );
 }
 
 /** Série do período para contexto do relatório (só meses com saída real). */
