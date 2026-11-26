@@ -226,6 +226,9 @@ export function ConsumptionManagement() {
         change: percentChange(current?.quantity ?? 0, previous?.quantity ?? 0),
         currentCost: current?.cost ?? null,
         previousCost: previous?.cost ?? null,
+        costChange: current?.cost == null || previous?.cost == null
+          ? "Não comparável"
+          : percentChange(current.cost, previous.cost),
       };
     }).sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label, "pt-BR"));
   }, [currentGroups, previousGroups]);
@@ -272,13 +275,13 @@ export function ConsumptionManagement() {
       ["Nota", data.current.note],
     ]);
     const detailSheet = XLSX.utils.aoa_to_sheet([
-      ["Secretaria", "Departamento", "Unidade", "Produto", "Categoria", "Unidade de medida", "Justificativa registrada", "Quantidade", "Saídas", "Custo"],
+      ["Secretaria", "Departamento", "Unidade", "Produto", "Categoria", "Unidade de medida", "Motivo/observação registrada", "Quantidade", "Saídas", "Custo"],
       ...exportRows(),
     ]);
     const workbook = XLSX.utils.book_new();
     const comparisonSheet = XLSX.utils.aoa_to_sheet([
-      ["Grupo", "Quantidade atual", "Quantidade anterior", "Variação", "Custo atual", "Custo anterior"],
-      ...comparisonRows.map((row) => [row.label, row.quantity, row.previousQuantity, row.change, row.currentCost ?? "Custo não informado", row.previousCost ?? "Custo não informado"]),
+      ["Grupo", "Quantidade atual", "Quantidade anterior", "Variação da quantidade", "Custo atual", "Custo anterior", "Variação do custo"],
+      ...comparisonRows.map((row) => [row.label, row.quantity, row.previousQuantity, row.change, row.currentCost ?? "Custo não informado", row.previousCost ?? "Custo não informado", row.costChange]),
     ]);
     XLSX.utils.book_append_sheet(workbook, summarySheet, "Resumo executivo");
     XLSX.utils.book_append_sheet(workbook, comparisonSheet, "Comparativo");
@@ -517,6 +520,7 @@ export function ConsumptionManagement() {
                           <TableHead className="text-right">Variação</TableHead>
                           <TableHead className="text-right">Custo atual</TableHead>
                           <TableHead className="text-right">Custo anterior</TableHead>
+                          <TableHead className="text-right">Var. custo</TableHead>
                         </TableRow></TableHeader>
                         <TableBody>
                           {comparisonRows.slice(0, 8).map((row) => (
@@ -531,9 +535,10 @@ export function ConsumptionManagement() {
                               </TableCell>
                               <TableCell className="text-right text-xs whitespace-nowrap">{currency(row.currentCost)}</TableCell>
                               <TableCell className="text-right text-xs whitespace-nowrap">{currency(row.previousCost)}</TableCell>
+                              <TableCell className="text-right text-xs whitespace-nowrap">{row.costChange}</TableCell>
                             </TableRow>
                           ))}
-                          {comparisonRows.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-sm text-muted-foreground">Sem dados comparáveis.</TableCell></TableRow>}
+                          {comparisonRows.length === 0 && <TableRow><TableCell colSpan={7} className="text-center text-sm text-muted-foreground">Sem dados comparáveis.</TableCell></TableRow>}
                         </TableBody>
                       </Table>
                     </div>
@@ -584,7 +589,7 @@ export function ConsumptionManagement() {
           )}
 
           <div className="flex flex-wrap items-start justify-between gap-3 text-xs text-muted-foreground">
-            <p>{data.current.note} Custos não identificados não são tratados como zero nem substituídos por estimativas.</p>
+            <p>{data.current.note} Motivos e observações refletem o que foi registrado na solicitação/saída; o sistema não presume a causa de uma variação. Custos não identificados não são tratados como zero nem substituídos por estimativas.</p>
             <p>O relatório contém somente movimentações do tipo saída, não canceladas e não vinculadas a devoluções.</p>
           </div>
         </>
