@@ -47,12 +47,14 @@ import {
 } from "../lib/consumption-history";
 import {
   buildPeriodConsumptionReport,
+  aggregateConsumptionHierarchy,
   COST_UNAVAILABLE_LABEL,
   type ConsumptionAggregate,
   type OrganizationalMovement,
 } from "../lib/consumption-organization";
 
 const periodArg = v.union(
+  v.literal("15d"),
   v.literal("30d"),
   v.literal("60d"),
   v.literal("90d"),
@@ -217,76 +219,173 @@ export const consumptionByOrganization = query({
     await requirePermission(ctx, "stock_parameters.view", { entity: "products" });
     const now = Date.now();
     const period = getConsumptionPeriod((args.period ?? "12m") as ConsumptionPeriodKey);
-    const startMs = consumptionPeriodStart(period, now);
+    const currentStartMs = consumptionPeriodStart(period, now);
+    const previousStartMs = currentStartMs - period.days * 24 * 60 * 60 * 1000;
 
-    const [movements, products, categories, lots, requests] = await Promise.all([
-      ctx.db.query("stockMovements").collect(),
+    // Leitura limitada à janela atual + janela imediatamente anterior.
+    const [movements, products, categories, allocations] = await Promise.all([
+      ctx.db.query("stockMovements")
+        .withIndex("by_timestamp", (q) => q.gte("timestamp", previousStartMs))
+        .collect(),
       ctx.db.query("products").collect(),
       ctx.db.query("categories").collect(),
-      ctx.db.query("lots").collect(),
-      ctx.db.query("requests").collect(),
+      ctx.db.query("stockMovementLotAllocations")
+        .withIndex("by_created_at", (q) => q.gte("createdAt", previousStartMs))
+        .collect(),
     ]);
 
-    const productById = new Map(products.map((p) => [p._id, p]));
-    const categoryNameById = new Map(categories.map((c) => [c._id, c.name]));
-    const requestById = new Map(requests.map((r) => [r._id, r]));
+    const relevantMovements = movements.filter((movement) =>
+      isConsumptionMovement(movement) &&
+      movement.timestamp >= previousStartMs &&
+      movement.timestamp <= now
+    );
+    const movementIds = new Set(relevantMovements.map((movement) => String(movement._id)));
+    const withdrawalsByMovement = new Map<string, typeof allocations>();
+    for (const allocation of allocations) {
+      const movementId = String(allocation.movementId);
+      if (allocation.allocationType !== "withdrawal" || !movementIds.has(movementId)) continue;
+      const rows = withdrawalsByMovement.get(movementId) ?? [];
+      rows.push(allocation);
+      withdrawalsByMovement.set(movementId, rows);
+    }
 
-    // Custo unitário CONFIAVEL: apenas o `unitCost` do lote de origem já
-    // cadastrado. Nenhum preço médio é estimado.
-    const unitCostByLot = new Map<string, number>();
-    for (const lot of lots) {
-      if (typeof lot.unitCost === "number" && lot.unitCost > 0) {
-        unitCostByLot.set(lot.lotNumber, lot.unitCost);
+    const requestIds = [...new Set(
+      relevantMovements.flatMap((movement) => movement.requestId ? [String(movement.requestId)] : [])
+    )];
+    const requestDocs = await Promise.all(
+      requestIds.map((id) => ctx.db.get(id as Id<"requests">))
+    );
+    const requestById = new Map<string, NonNullable<(typeof requestDocs)[number]>>();
+    for (const request of requestDocs) {
+      if (request) requestById.set(String(request._id), request);
+    }
+
+    const organizationIds = new Set<Id<"organizations">>();
+    for (const request of requestById.values()) {
+      organizationIds.add(request.secretariaId);
+      if (request.departamentoId) organizationIds.add(request.departamentoId);
+      if (request.unidadeId) organizationIds.add(request.unidadeId);
+    }
+    const organizationDocs = await Promise.all(
+      [...organizationIds].map((id) => ctx.db.get(id))
+    );
+    const organizationNameById = new Map<string, string>();
+    for (const organization of organizationDocs) {
+      if (organization) organizationNameById.set(String(organization._id), organization.name);
+    }
+
+    // Uma saída pode consumir vários lotes FIFO. O custo só é considerado
+    // completo quando todas as parcelas da saída têm custo e fecham a quantidade.
+    const lotIds = new Set<string>();
+    for (const [movementId, rows] of withdrawalsByMovement) {
+      if (!movementIds.has(movementId)) continue;
+      for (const allocation of rows) lotIds.add(String(allocation.lotId));
+    }
+    for (const movement of relevantMovements) {
+      if (!withdrawalsByMovement.has(String(movement._id)) && movement.lotId) {
+        lotIds.add(String(movement.lotId));
       }
     }
-
-    const orgNames = async (orgId: Id<"organizations"> | undefined): Promise<string | null> => {
-      if (!orgId) return null;
-      const org = await ctx.db.get(orgId);
-      return org?.name ?? null;
-    };
-
-    const enriched: OrganizationalMovement[] = [];
-    for (const m of movements) {
-      if (!isConsumptionMovement(m)) continue;
-      const product = productById.get(m.productId);
-      const request = m.requestId ? requestById.get(m.requestId) : null;
-      const [secretariaName, departamentoName, unidadeName] = await Promise.all([
-        orgNames(request?.secretariaId),
-        orgNames(request?.departamentoId),
-        orgNames(request?.unidadeId),
-      ]);
-      const productDoc = product as
-        | (typeof products)[number]
-        | undefined;
-      enriched.push({
-        _id: m._id,
-        productId: m.productId,
-        type: m.type,
-        quantity: m.quantity,
-        timestamp: m.timestamp,
-        canceled: m.canceled,
-        exitMovementId: m.exitMovementId,
-        requestId: m.requestId,
-        productName: productDoc?.name ?? "Produto não identificado",
-        categoryName: productDoc ? categoryNameById.get(productDoc.categoryId) : undefined,
-        secretariaName,
-        departamentoName,
-        unidadeName,
-        unitCost: m.lotId ? unitCostByLot.get(m.lotId) ?? null : null,
-      });
+    const lotDocs = await Promise.all(
+      [...lotIds].map((id) => ctx.db.get(id as Id<"lots">))
+    );
+    const unitCostByLotId = new Map<string, number | null>();
+    for (const lot of lotDocs) {
+      if (!lot) continue;
+      unitCostByLotId.set(
+        String(lot._id),
+        typeof lot.unitCost === "number" && Number.isFinite(lot.unitCost) && lot.unitCost > 0
+          ? lot.unitCost
+          : null
+      );
     }
 
-    const report = buildPeriodConsumptionReport(enriched, period, startMs);
+    const productById = new Map(products.map((product) => [String(product._id), product]));
+    const categoryNameById = new Map(categories.map((category) => [String(category._id), category.name]));
+
+    const enriched: OrganizationalMovement[] = relevantMovements.map((movement) => {
+      const request = movement.requestId
+        ? requestById.get(String(movement.requestId))
+        : undefined;
+      const product = productById.get(String(movement.productId));
+      const allocationsForMovement = withdrawalsByMovement.get(String(movement._id)) ?? [];
+      let unitCost: number | null = null;
+
+      if (allocationsForMovement.length > 0) {
+        let allocatedQuantity = 0;
+        let allocatedCost = 0;
+        let allCostsKnown = true;
+        for (const allocation of allocationsForMovement) {
+          const quantity = Math.max(allocation.quantity, 0);
+          allocatedQuantity += quantity;
+          const lotUnitCost = unitCostByLotId.get(String(allocation.lotId));
+          if (lotUnitCost == null) allCostsKnown = false;
+          else allocatedCost += quantity * lotUnitCost;
+        }
+        if (
+          allCostsKnown &&
+          allocatedQuantity > 0 &&
+          Math.abs(allocatedQuantity - movement.quantity) <= 0.000001
+        ) {
+          unitCost = allocatedCost / allocatedQuantity;
+        }
+      } else if (movement.lotId) {
+        unitCost = unitCostByLotId.get(String(movement.lotId)) ?? null;
+      }
+
+      return {
+        _id: String(movement._id),
+        productId: String(movement.productId),
+        type: movement.type,
+        quantity: movement.quantity,
+        timestamp: movement.timestamp,
+        canceled: movement.canceled,
+        exitMovementId: movement.exitMovementId ? String(movement.exitMovementId) : undefined,
+        requestId: movement.requestId ? String(movement.requestId) : undefined,
+        productName: product?.name ?? "Produto não identificado",
+        categoryName: product ? categoryNameById.get(String(product.categoryId)) : undefined,
+        secretariaId: request?.secretariaId ? String(request.secretariaId) : null,
+        departamentoId: request?.departamentoId ? String(request.departamentoId) : null,
+        unidadeId: request?.unidadeId ? String(request.unidadeId) : null,
+        secretariaName: request?.secretariaId
+          ? organizationNameById.get(String(request.secretariaId)) ?? null
+          : null,
+        departamentoName: request?.departamentoId
+          ? organizationNameById.get(String(request.departamentoId)) ?? null
+          : null,
+        unidadeName: request?.unidadeId
+          ? organizationNameById.get(String(request.unidadeId)) ?? null
+          : null,
+        unitCost,
+      };
+    });
+
+    const buildWindow = (startMs: number, endMs: number) => {
+      const windowMovements = enriched.filter(
+        (movement) => movement.timestamp >= startMs && movement.timestamp <= endMs
+      );
+      const report = buildPeriodConsumptionReport(windowMovements, period, startMs);
+      return {
+        bySecretaria: report.bySecretaria,
+        byDepartment: report.byDepartment,
+        byUnit: report.byUnit,
+        byProduct: report.byProduct,
+        byCategory: report.byCategory,
+        hierarchy: aggregateConsumptionHierarchy(windowMovements),
+        totalQuantity: report.totalQuantity,
+        totalExitCount: report.totalExitCount,
+        withoutHistory: report.withoutHistory,
+        note: report.note,
+      };
+    };
+
     return {
-      bySecretaria: report.bySecretaria as ConsumptionAggregate[],
-      byDepartment: report.byDepartment,
-      byUnit: report.byUnit,
-      byProduct: report.byProduct,
-      byCategory: report.byCategory,
+      period: period.key,
+      periodLabel: period.label,
+      generatedAt: now,
+      current: buildWindow(currentStartMs, now),
+      previous: buildWindow(previousStartMs, currentStartMs - 1),
       costLabel: COST_UNAVAILABLE_LABEL,
-      withoutHistory: report.withoutHistory,
-      note: report.note,
     };
   },
 });
