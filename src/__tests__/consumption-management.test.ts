@@ -105,6 +105,14 @@ describe("Consumo gerencial — cruzamento organizacional", () => {
     });
   });
 
+  it("não soma unidades de medida diferentes em indicadores gerenciais globais", () => {
+    const component = readFileSync(resolve(__dirname, "../components/reports/ConsumptionManagement.tsx"), "utf8");
+    expect(component).toContain("Produtos distintos consumidos");
+    expect(component).toContain("Frequência de saídas por grupo");
+    expect(component).not.toContain("currentSummary.quantity");
+    expect(component).not.toContain("previousSummary.quantity");
+  });
+
   it("consulta saídas por data e usa as alocações FIFO para apurar custo", () => {
     const source = readFileSync(resolve(__dirname, "../convex/stockIntelligence.ts"), "utf8");
     const schema = readFileSync(resolve(__dirname, "../convex/schema.ts"), "utf8");
