@@ -241,6 +241,8 @@ export function ConsumptionManagement() {
       row.unidadeName,
       row.productName,
       row.categoryName,
+      row.unitOfMeasure,
+      row.reason,
       row.quantity,
       row.exitCount,
       row.cost ?? "Custo não informado",
@@ -270,7 +272,7 @@ export function ConsumptionManagement() {
       ["Nota", data.current.note],
     ]);
     const detailSheet = XLSX.utils.aoa_to_sheet([
-      ["Secretaria", "Departamento", "Unidade", "Produto", "Categoria", "Quantidade", "Saídas", "Custo"],
+      ["Secretaria", "Departamento", "Unidade", "Produto", "Categoria", "Unidade de medida", "Justificativa registrada", "Quantidade", "Saídas", "Custo"],
       ...exportRows(),
     ]);
     const workbook = XLSX.utils.book_new();
@@ -291,7 +293,7 @@ export function ConsumptionManagement() {
       return;
     }
     downloadCSV("detalhamento-gerencial-consumo.csv", [
-      ["Secretaria", "Departamento", "Unidade", "Produto", "Categoria", "Quantidade", "Saídas", "Custo"],
+      ["Secretaria", "Departamento", "Unidade", "Produto", "Categoria", "Unidade de medida", "Justificativa registrada", "Quantidade", "Saídas", "Custo"],
       ...exportRows(),
     ]);
     toast.success("CSV exportado.");
@@ -552,6 +554,8 @@ export function ConsumptionManagement() {
                         <TableHead>Departamento</TableHead>
                         <TableHead>Unidade</TableHead>
                         <TableHead>Produto</TableHead>
+                        <TableHead>Unidade</TableHead>
+                        <TableHead>Justificativa registrada</TableHead>
                         <TableHead className="text-right">Qtd.</TableHead>
                         <TableHead className="text-right">Saídas</TableHead>
                         <TableHead className="text-right">Custo</TableHead>
@@ -563,6 +567,8 @@ export function ConsumptionManagement() {
                             <TableCell className="text-xs">{row.departamentoName}</TableCell>
                             <TableCell className="text-xs">{row.unidadeName}</TableCell>
                             <TableCell className="text-xs font-medium">{row.productName}<span className="block text-[10px] text-muted-foreground">{row.categoryName}</span></TableCell>
+                            <TableCell className="text-xs">{row.unitOfMeasure}</TableCell>
+                            <TableCell className="text-xs min-w-[180px]">{row.reason}</TableCell>
                             <TableCell className="text-right text-xs tabular-nums">{number(row.quantity)}</TableCell>
                             <TableCell className="text-right text-xs tabular-nums">{number(row.exitCount)}</TableCell>
                             <TableCell className="text-right text-xs whitespace-nowrap">{currency(row.cost)}</TableCell>
