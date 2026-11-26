@@ -74,7 +74,7 @@ export function consumptionExclusionReason(movement: ConsumableMovement): string
 
 /* ─── Períodos ──────────────────────────────────────────────────────────────── */
 
-export type ConsumptionPeriodKey = "30d" | "60d" | "90d" | "6m" | "12m";
+export type ConsumptionPeriodKey = "15d" | "30d" | "60d" | "90d" | "6m" | "12m";
 
 export interface ConsumptionPeriod {
   key: ConsumptionPeriodKey;
@@ -86,6 +86,7 @@ export interface ConsumptionPeriod {
 }
 
 export const CONSUMPTION_PERIODS: ConsumptionPeriod[] = [
+  { key: "15d", label: "Últimos 15 dias", months: 0.5, days: 15 },
   { key: "30d", label: "Últimos 30 dias", months: 1, days: 30 },
   { key: "60d", label: "Últimos 60 dias", months: 2, days: 60 },
   { key: "90d", label: "Últimos 90 dias", months: 3, days: 90 },

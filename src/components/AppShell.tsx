@@ -102,6 +102,7 @@ const NAV_SECTIONS: NavSection[] = [
   ]},
   // Produtos e serviços de uso diário da Secretaria, agrupados na navegação.
   { title: "Consumo Interno", items: [
+    { label: "Gestão de Consumo e Planejamento", href: "/reports", icon: BarChart3, permission: "canViewStockParameters" },
     { label: "Água mineral / Garrafões", href: "/water", icon: Droplets, permission: "canManageStock" },
     { label: "Copa e Cozinha", href: "/stock?area=Copa%20e%20Cozinha", icon: Utensils, permission: "canViewStock" },
     { label: "Materiais de Limpeza", href: "/stock?area=Limpeza", icon: SprayCan, permission: "canViewStock" },

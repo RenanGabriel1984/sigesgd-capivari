@@ -421,13 +421,13 @@ describe("INTEL-05 — O que conta como consumo", () => {
   });
 });
 
-/* ─── §5 · Períodos de 30/60/90 dias e 6/12 meses ─────────────────────────── */
+/* ─── §5 · Períodos quinzenal, mensal, trimestral, semestral e anual ───────── */
 
 describe("INTEL-06 — Períodos de consumo", () => {
-  it("existem exatamente os cinco períodos com as durações esperadas", () => {
-    expect(CONSUMPTION_PERIODS.map((p) => p.key)).toEqual(["30d", "60d", "90d", "6m", "12m"]);
-    expect(CONSUMPTION_PERIODS.map((p) => p.days)).toEqual([30, 60, 90, 183, 365]);
-    expect(CONSUMPTION_PERIODS.map((p) => p.months)).toEqual([1, 2, 3, 6, 12]);
+  it("existem os seis períodos de consumo com as durações esperadas", () => {
+    expect(CONSUMPTION_PERIODS.map((p) => p.key)).toEqual(["15d", "30d", "60d", "90d", "6m", "12m"]);
+    expect(CONSUMPTION_PERIODS.map((p) => p.days)).toEqual([15, 30, 60, 90, 183, 365]);
+    expect(CONSUMPTION_PERIODS.map((p) => p.months)).toEqual([0.5, 1, 2, 3, 6, 12]);
   });
 
   it("30 dias: a saída de 31 dias atrás fica fora", () => {

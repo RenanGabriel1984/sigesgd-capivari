@@ -478,6 +478,7 @@ const schema = defineSchema(
       createdAt: v.number(),
     }).index("by_movement", ["movementId"])
       .index("by_lot", ["lotId"])
+      .index("by_created_at", ["createdAt"])
       .index("by_product_location", ["productId", "locationId"]),
 
     // ── Requests (Solicitações) ──
