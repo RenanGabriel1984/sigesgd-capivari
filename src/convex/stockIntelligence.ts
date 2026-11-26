@@ -344,6 +344,8 @@ export const consumptionByOrganization = query({
         requestId: movement.requestId ? String(movement.requestId) : undefined,
         productName: product?.name ?? "Produto não identificado",
         categoryName: product ? categoryNameById.get(String(product.categoryId)) : undefined,
+        unitOfMeasure: product?.unitOfMeasure ?? null,
+        reason: request?.reason?.trim() || movement.observation || null,
         secretariaId: request?.secretariaId ? String(request.secretariaId) : null,
         departamentoId: request?.departamentoId ? String(request.departamentoId) : null,
         unidadeId: request?.unidadeId ? String(request.unidadeId) : null,
