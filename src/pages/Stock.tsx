@@ -292,9 +292,9 @@ export default function Stock() {
                         </TableCell>
                         <TableCell className="text-center font-mono font-semibold">{physical}</TableCell>
                         <TableCell className="text-center font-mono text-amber-600">
-                          {reserved > 0 ? reserved : "—"}
+                          {areaLabel ? "—" : (reserved > 0 ? reserved : "—")}
                         </TableCell>
-                        <TableCell className="text-center font-mono">{available}</TableCell>
+                        <TableCell className="text-center font-mono">{areaLabel ? "—" : available}</TableCell>
                         <TableCell className="text-center font-mono text-muted-foreground">{p.minimumStock ?? "—"}</TableCell>
                         <TableCell className="text-center font-mono text-muted-foreground">{p.idealStock ?? "—"}</TableCell>
                         <TableCell>
