@@ -22,6 +22,8 @@ function movement(overrides: Partial<OrganizationalMovement> = {}): Organization
     departamentoName: "Compras",
     unidadeId: "unidade-1",
     unidadeName: "Paço Municipal",
+    reason: "Reposição para atendimento das equipes",
+    unitOfMeasure: "resma",
     unitCost: 2.5,
     ...overrides,
   };
@@ -79,6 +81,19 @@ describe("Consumo gerencial — cruzamento organizacional", () => {
     expect(rows[0].quantity).toBe(5);
     expect(rows[0].cost).toBeNull();
     expect(rows[0].costLabel).toBe("Custo não informado");
+  });
+
+  it("separa as justificativas registradas para explicar o perfil das retiradas", () => {
+    const rows = aggregateConsumptionHierarchy([
+      movement({ _id: "m1", reason: "Reposição de rotina" }),
+      movement({ _id: "m2", reason: "Atendimento de demanda extraordinária" }),
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.reason).sort()).toEqual([
+      "Atendimento de demanda extraordinária",
+      "Reposição de rotina",
+    ]);
+    expect(rows.every((row) => row.unitOfMeasure === "resma")).toBe(true);
   });
 
   it("oferece a janela quinzenal para os relatórios de reunião", () => {
