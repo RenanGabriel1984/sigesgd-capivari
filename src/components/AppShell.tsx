@@ -100,10 +100,12 @@ const NAV_SECTIONS: NavSection[] = [
     { label: "Solicitações", href: "/requests", icon: ClipboardList, permission: "canCreateRequests", permission2: "canApproveRequests" },
     { label: "Inventário", href: "/inventory", icon: ClipboardCheck, permission: "canManageInventory" },
   ]},
-  { title: "Consumo Interno", items: [\n    { label: "Água mineral / Garrafões", href: "/water", icon: Droplets, permission: "canManageStock" },
+  { title: "Consumo Interno", items: [
+    { label: "Água mineral / Garrafões", href: "/water", icon: Droplets, permission: "canManageStock" },
     { label: "Copa e Cozinha", href: "/stock?area=Copa%20e%20Cozinha", icon: Utensils, permission: "canViewStock" },
     { label: "Materiais de Limpeza", href: "/stock?area=Limpeza", icon: SprayCan, permission: "canViewStock" },
-  ]},\n  { title: "Patrimônio", items: [
+  ]},
+  { title: "Patrimônio", items: [
     { label: "Solicitações de baixa", href: "/patrimony", icon: ClipboardCheck, permission: "canManageAssets", permission2: "canViewPatrimony" },
   ]},
   // ── Equipamentos ──────────────────────────────────────────────────────────
