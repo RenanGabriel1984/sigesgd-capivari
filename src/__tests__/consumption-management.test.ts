@@ -109,6 +109,8 @@ describe("Consumo gerencial — cruzamento organizacional", () => {
     const component = readFileSync(resolve(__dirname, "../components/reports/ConsumptionManagement.tsx"), "utf8");
     expect(component).toContain("Produtos distintos consumidos");
     expect(component).toContain("Frequência de saídas por grupo");
+    expect(component).toContain('const chartUsesQuantity = dimension === "produto"');
+    expect(component).toContain('dimension === "produto" ? row.quantity : row.exits');
     expect(component).not.toContain("currentSummary.quantity");
     expect(component).not.toContain("previousSummary.quantity");
   });
