@@ -36,10 +36,10 @@ describe("stock intelligence read-only DEV runner", () => {
       "byProduct",
       "byCategory",
       "hierarchy",
-      "totalQuantity",
-      "totalExitCount",
     ]) {
       expect(runner).toContain(`"${field}"`);
     }
+    expect(runner).toContain("window.totalQuantity");
+    expect(runner).toContain("window.totalExitCount");
   });
 });
