@@ -150,7 +150,7 @@ function matchesFilters(
 
 function summarize(rows: HierarchyRow[]) {
   return {
-    quantity: rows.reduce((sum, row) => sum + row.quantity, 0),
+    products: new Set(rows.map((row) => row.productId)).size,
     exits: rows.reduce((sum, row) => sum + row.exitCount, 0),
     cost: rows.length > 0 && rows.every((row) => row.cost !== null)
       ? rows.reduce((sum, row) => sum + (row.cost ?? 0), 0)
@@ -223,7 +223,15 @@ export function ConsumptionManagement() {
         exits: current?.exits ?? 0,
         cost: current?.cost ?? null,
         previousQuantity: previous?.quantity ?? 0,
-        change: percentChange(current?.quantity ?? 0, previous?.quantity ?? 0),
+        previousExits: previous?.exits ?? 0,
+        change: percentChange(
+          dimension === "produto" || dimension === "categoria"
+            ? current?.quantity ?? 0
+            : current?.exits ?? 0,
+          dimension === "produto" || dimension === "categoria"
+            ? previous?.quantity ?? 0
+            : previous?.exits ?? 0,
+        ),
         currentCost: current?.cost ?? null,
         previousCost: previous?.cost ?? null,
         costChange: current?.cost == null || previous?.cost == null
@@ -233,7 +241,8 @@ export function ConsumptionManagement() {
     }).sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label, "pt-BR"));
   }, [currentGroups, previousGroups]);
 
-  const maxChartQuantity = Math.max(1, ...currentGroups.slice(0, 7).map((row) => row.quantity));
+  const chartUsesQuantity = dimension === "produto" || dimension === "categoria";
+  const maxChartQuantity = Math.max(1, ...currentGroups.slice(0, 7).map((row) => chartUsesQuantity ? row.quantity : row.exits));
   const periodLabel = data?.periodLabel ?? "Período selecionado";
   const generatedAt = data?.generatedAt ? new Date(data.generatedAt).toLocaleString("pt-BR") : "";
 
@@ -267,7 +276,7 @@ export function ConsumptionManagement() {
       ["Produto", productOptions.find((item) => item.value === produto)?.label ?? "Todos"],
       [],
       ["Indicador", "Período atual", "Período anterior"],
-      ["Quantidade registrada", currentSummary.quantity, previousSummary.quantity],
+      ["Produtos distintos com saída", currentSummary.products, previousSummary.products],
       ["Saídas registradas", currentSummary.exits, previousSummary.exits],
       ["Custo identificado", currentSummary.cost ?? "Custo não informado", previousSummary.cost ?? "Custo não informado"],
       ["Combinações sem custo", currentSummary.unknownCosts, previousSummary.unknownCosts],
@@ -307,7 +316,7 @@ export function ConsumptionManagement() {
       "RELATÓRIO GERENCIAL DE CONSUMO — SIGESGD CAPIVARI",
       `Período: ${periodLabel}`,
       `Gerado em: ${generatedAt}`,
-      `Quantidade registrada: ${number(currentSummary.quantity)}`,
+      `Produtos distintos com saída: ${number(currentSummary.products)}`,
       `Saídas registradas: ${number(currentSummary.exits)}`,
       `Custo identificado no período atual: ${currency(currentSummary.cost)}`,
       `Custo identificado no período anterior: ${currency(previousSummary.cost)}`,
@@ -434,10 +443,10 @@ export function ConsumptionManagement() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <Card className="border-border/50">
-              <CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-muted-foreground">Quantidade registrada*</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-muted-foreground">Produtos distintos consumidos</CardTitle></CardHeader>
               <CardContent>
-                <p className="text-2xl font-semibold tabular-nums">{number(currentSummary.quantity)}</p>
-                <p className="text-xs text-muted-foreground mt-1">Somatória nas unidades de cadastro · anterior: {number(previousSummary.quantity)}</p>
+                <p className="text-2xl font-semibold tabular-nums">{number(currentSummary.products)}</p>
+                <p className="text-xs text-muted-foreground mt-1">Anterior: {number(previousSummary.products)}</p>
               </CardContent>
             </Card>
             <Card className="border-border/50">
@@ -455,17 +464,17 @@ export function ConsumptionManagement() {
               </CardContent>
             </Card>
             <Card className="border-border/50">
-              <CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-muted-foreground">Variação da quantidade</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-muted-foreground">Variação no número de saídas</CardTitle></CardHeader>
               <CardContent>
                 <div className="flex items-center gap-2">
-                  {currentSummary.quantity > previousSummary.quantity
+                  {currentSummary.exits > previousSummary.exits
                     ? <TrendingUp className="h-5 w-5 text-amber-600" />
-                    : currentSummary.quantity < previousSummary.quantity
+                    : currentSummary.exits < previousSummary.exits
                     ? <TrendingDown className="h-5 w-5 text-emerald-600" />
                     : <ArrowUpRight className="h-5 w-5 text-muted-foreground" />}
-                  <p className="text-xl font-semibold tabular-nums">{percentChange(currentSummary.quantity, previousSummary.quantity)}</p>
+                  <p className="text-xl font-semibold tabular-nums">{percentChange(currentSummary.exits, previousSummary.exits)}</p>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Comparação da somatória de quantidades; não representa aumento de preço e não deve comparar produtos com unidades diferentes.</p>
+                <p className="text-xs text-muted-foreground mt-1">Frequência de retiradas em relação à janela anterior; não mistura unidades de medida.</p>
               </CardContent>
             </Card>
           </div>
@@ -494,17 +503,23 @@ export function ConsumptionManagement() {
                     </Select>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {currentGroups.slice(0, 7).map((group) => (
-                      <div key={group.key} className="space-y-1">
-                        <div className="flex items-center justify-between gap-3 text-xs">
-                          <span className="font-medium truncate">{group.label}</span>
-                          <span className="tabular-nums text-muted-foreground">{number(group.quantity)}</span>
+                    <p className="text-xs text-muted-foreground">
+                      {chartUsesQuantity ? "Quantidade por produto/categoria (unidades de medida podem variar entre produtos)." : "Frequência de saídas por grupo, sem somar unidades de medida diferentes."}
+                    </p>
+                    {currentGroups.slice(0, 7).map((group) => {
+                      const value = chartUsesQuantity ? group.quantity : group.exits;
+                      return (
+                        <div key={group.key} className="space-y-1">
+                          <div className="flex items-center justify-between gap-3 text-xs">
+                            <span className="font-medium truncate">{group.label}</span>
+                            <span className="tabular-nums text-muted-foreground">{number(value)}</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-muted overflow-hidden">
+                            <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(2, value / maxChartQuantity * 100)}%` }} />
+                          </div>
                         </div>
-                        <div className="h-2 rounded-full bg-muted overflow-hidden">
-                          <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(2, group.quantity / maxChartQuantity * 100)}%` }} />
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </CardContent>
                 </Card>
 
@@ -515,8 +530,8 @@ export function ConsumptionManagement() {
                       <Table>
                         <TableHeader><TableRow>
                           <TableHead>Grupo</TableHead>
-                          <TableHead className="text-right">Atual</TableHead>
-                          <TableHead className="text-right">Anterior</TableHead>
+                          <TableHead className="text-right">{dimension === "produto" || dimension === "categoria" ? "Qtd. atual" : "Saídas atuais"}</TableHead>
+                          <TableHead className="text-right">{dimension === "produto" || dimension === "categoria" ? "Qtd. anterior" : "Saídas anteriores"}</TableHead>
                           <TableHead className="text-right">Variação</TableHead>
                           <TableHead className="text-right">Custo atual</TableHead>
                           <TableHead className="text-right">Custo anterior</TableHead>
@@ -526,8 +541,8 @@ export function ConsumptionManagement() {
                           {comparisonRows.slice(0, 8).map((row) => (
                             <TableRow key={row.key}>
                               <TableCell className="text-xs font-medium max-w-[160px] truncate">{row.label}</TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">{number(row.quantity)}</TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">{number(row.previousQuantity)}</TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">{number(dimension === "produto" || dimension === "categoria" ? row.quantity : row.exits)}</TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">{number(dimension === "produto" || dimension === "categoria" ? row.previousQuantity : row.previousExits)}</TableCell>
                               <TableCell className="text-right text-xs">
                                 <span className={row.quantity > row.previousQuantity ? "text-amber-700" : row.quantity < row.previousQuantity ? "text-emerald-700" : "text-muted-foreground"}>
                                   {row.change}
