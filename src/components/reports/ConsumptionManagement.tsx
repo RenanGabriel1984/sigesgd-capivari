@@ -117,7 +117,7 @@ function groupDetails(rows: HierarchyRow[], dimension: Dimension) {
   }
   return [...groups.values()]
     .map((group) => ({ ...group, cost: group.costKnown ? group.cost : null }))
-    .sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label, "pt-BR"));
+    .sort((a, b) => (dimension === "produto" ? b.quantity - a.quantity : b.exits - a.exits) || a.label.localeCompare(b.label, "pt-BR"));
 }
 
 function optionsFor(rows: HierarchyRow[], field: "secretaria" | "departamento" | "unidade" | "produto") {
@@ -225,10 +225,10 @@ export function ConsumptionManagement() {
         previousQuantity: previous?.quantity ?? 0,
         previousExits: previous?.exits ?? 0,
         change: percentChange(
-          dimension === "produto" || dimension === "categoria"
+          dimension === "produto"
             ? current?.quantity ?? 0
             : current?.exits ?? 0,
-          dimension === "produto" || dimension === "categoria"
+          dimension === "produto"
             ? previous?.quantity ?? 0
             : previous?.exits ?? 0,
         ),
@@ -238,10 +238,10 @@ export function ConsumptionManagement() {
           ? "Não comparável"
           : percentChange(current.cost, previous.cost),
       };
-    }).sort((a, b) => b.quantity - a.quantity || a.label.localeCompare(b.label, "pt-BR"));
+    }).sort((a, b) => (dimension === "produto" ? b.quantity - a.quantity : b.exits - a.exits) || a.label.localeCompare(b.label, "pt-BR"));
   }, [currentGroups, previousGroups]);
 
-  const chartUsesQuantity = dimension === "produto" || dimension === "categoria";
+  const chartUsesQuantity = dimension === "produto";
   const maxChartQuantity = Math.max(1, ...currentGroups.slice(0, 7).map((row) => chartUsesQuantity ? row.quantity : row.exits));
   const periodLabel = data?.periodLabel ?? "Período selecionado";
   const generatedAt = data?.generatedAt ? new Date(data.generatedAt).toLocaleString("pt-BR") : "";
@@ -531,8 +531,8 @@ export function ConsumptionManagement() {
                       <Table>
                         <TableHeader><TableRow>
                           <TableHead>Grupo</TableHead>
-                          <TableHead className="text-right">{dimension === "produto" || dimension === "categoria" ? "Qtd. atual" : "Saídas atuais"}</TableHead>
-                          <TableHead className="text-right">{dimension === "produto" || dimension === "categoria" ? "Qtd. anterior" : "Saídas anteriores"}</TableHead>
+                          <TableHead className="text-right">{dimension === "produto" ? "Qtd. atual" : "Saídas atuais"}</TableHead>
+                          <TableHead className="text-right">{dimension === "produto" ? "Qtd. anterior" : "Saídas anteriores"}</TableHead>
                           <TableHead className="text-right">Variação</TableHead>
                           <TableHead className="text-right">Custo atual</TableHead>
                           <TableHead className="text-right">Custo anterior</TableHead>
@@ -542,10 +542,10 @@ export function ConsumptionManagement() {
                           {comparisonRows.slice(0, 8).map((row) => (
                             <TableRow key={row.key}>
                               <TableCell className="text-xs font-medium max-w-[160px] truncate">{row.label}</TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">{number(dimension === "produto" || dimension === "categoria" ? row.quantity : row.exits)}</TableCell>
-                              <TableCell className="text-right text-xs tabular-nums">{number(dimension === "produto" || dimension === "categoria" ? row.previousQuantity : row.previousExits)}</TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">{number(dimension === "produto" ? row.quantity : row.exits)}</TableCell>
+                              <TableCell className="text-right text-xs tabular-nums">{number(dimension === "produto" ? row.previousQuantity : row.previousExits)}</TableCell>
                               <TableCell className="text-right text-xs">
-                                <span className={row.quantity > row.previousQuantity ? "text-amber-700" : row.quantity < row.previousQuantity ? "text-emerald-700" : "text-muted-foreground"}>
+                                <span className={(dimension === "produto" ? row.quantity > row.previousQuantity : row.exits > row.previousExits) ? "text-amber-700" : (dimension === "produto" ? row.quantity < row.previousQuantity : row.exits < row.previousExits) ? "text-emerald-700" : "text-muted-foreground"}>
                                   {row.change}
                                 </span>
                               </TableCell>
