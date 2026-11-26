@@ -9,12 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Warehouse, ClipboardList } from "lucide-react";
+import { Warehouse, ClipboardList, Layers } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UNIT_LABELS } from "@/types/constants";
 import { getStockSituation, STOCK_SITUATION_LABELS, STOCK_SITUATION_BADGE_CLASSES } from "@/lib/stock-status";
 import { matchesStockSearch } from "@/convex/stockHelpers";
 import type { ProductView } from "@/lib/product-types";
+import { AREA_COPA_COZINHA, AREA_LIMPEZA } from "@/lib/stock-areas";
 import {
   EQUIPMENT_STOCK_PARAM,
   findEquipmentCategory,
@@ -70,6 +71,13 @@ export default function Stock() {
   // aponta para cá e o MESMO filtro puro é aplicado sobre os produtos.
   // Nenhum produto é duplicado — continua sendo a lista real de `products`.
   const equipmentCategory = findEquipmentCategory(searchParams.get(EQUIPMENT_STOCK_PARAM));
+  const areaFilter = searchParams.get("area");
+  const areaLabel = areaFilter === AREA_COPA_COZINHA || areaFilter === AREA_LIMPEZA ? areaFilter : null;
+  const areaQuantityOf = (p: ProductView) => {
+    const dimension: any = dimensionByProduct.get(String(p._id));
+    return (dimension?.lots ?? []).filter((lot: any) => lot.areaName === areaLabel)
+      .reduce((sum: number, lot: any) => sum + (lot.quantityAvailable ?? 0), 0);
+  };
 
   if (products === undefined) return <StockSkeleton />;
   const dimensionByProduct = new Map((dimensionOverview?.products ?? []).map((row: any) => [row.productId, row]));
@@ -80,6 +88,7 @@ export default function Stock() {
   const filtered = products?.filter(
     (p) => {
       if (equipmentCategory && !matchesEquipmentStockProduct(p, equipmentCategory)) return false;
+      if (areaLabel && areaQuantityOf(p) <= 0) return false;
       const matchesSearch = matchesStockSearch(p, search);
       if (!matchesSearch) return false;
       const physical = p.stock?.physicalQuantity ?? 0;
@@ -111,9 +120,9 @@ export default function Stock() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Estoque</h1>
+            <h1 className="text-2xl font-bold tracking-tight">{areaLabel ? `Estoque — ${areaLabel}` : "Estoque"}</h1>
             <p className="text-sm text-muted-foreground">
-              Saldo atual por produto — calculado pelas movimentações
+              {areaLabel ? "Saldo físico da área, calculado pelos lotes vinculados; reservas são controladas no nível do produto." : "Saldo atual por produto — calculado pelas movimentações"}
               {criticalCount > 0 && (
                 <Badge variant="destructive" className="ml-2 text-xs">
                   {criticalCount} crítico{criticalCount !== 1 ? "s" : ""}
@@ -374,11 +383,11 @@ export default function Stock() {
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Físico</p>
                     </div>
                     <div>
-                      <p className="text-lg font-bold font-mono text-amber-600">{reserved || "—"}</p>
+                      <p className="text-lg font-bold font-mono text-amber-600">{areaLabel ? "—" : (reserved || "—")}</p>
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Reservado</p>
                     </div>
                     <div>
-                      <p className="text-lg font-bold font-mono">{available}</p>
+                      <p className="text-lg font-bold font-mono">{areaLabel ? "—" : available}</p>
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Disponível</p>
                     </div>
                   </div>
