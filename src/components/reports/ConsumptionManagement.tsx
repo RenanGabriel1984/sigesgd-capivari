@@ -21,7 +21,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  ArrowDownRight,
   ArrowUpRight,
   Building2,
   Download,
@@ -197,13 +196,12 @@ export function ConsumptionManagement() {
   );
   const productOptions = useMemo(() => optionsFor(productSource, "produto"), [productSource]);
 
-  const filters = { secretaria, departamento, unidade, produto };
   const currentRows = useMemo(
-    () => (data?.current.hierarchy ?? []).filter((row) => matchesFilters(row, filters)),
+    () => (data?.current.hierarchy ?? []).filter((row) => matchesFilters(row, { secretaria, departamento, unidade, produto })),
     [data, secretaria, departamento, unidade, produto],
   );
   const previousRows = useMemo(
-    () => (data?.previous.hierarchy ?? []).filter((row) => matchesFilters(row, filters)),
+    () => (data?.previous.hierarchy ?? []).filter((row) => matchesFilters(row, { secretaria, departamento, unidade, produto })),
     [data, secretaria, departamento, unidade, produto],
   );
   const currentSummary = useMemo(() => summarize(currentRows), [currentRows]);
@@ -301,7 +299,7 @@ export function ConsumptionManagement() {
       `Saídas registradas: ${number(currentSummary.exits)}`,
       `Custo identificado: ${currency(currentSummary.cost)}`,
       `Comparação de quantidade com período anterior: ${percentChange(currentSummary.quantity, previousSummary.quantity)}`,
-      "Os custos são exibidos somente quando há informação confiável para todas as movimentações do agrupamento.",
+      "As quantidades são somadas nas unidades cadastradas para cada produto; não compare diretamente materiais com unidades diferentes. Os custos só aparecem quando há informação confiável para todas as movimentações do agrupamento.",
     ].join("\n");
     try {
       if (navigator.share) {
@@ -423,10 +421,10 @@ export function ConsumptionManagement() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <Card className="border-border/50">
-              <CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-muted-foreground">Quantidade registrada</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-muted-foreground">Quantidade registrada*</CardTitle></CardHeader>
               <CardContent>
                 <p className="text-2xl font-semibold tabular-nums">{number(currentSummary.quantity)}</p>
-                <p className="text-xs text-muted-foreground mt-1">Anterior: {number(previousSummary.quantity)} · {percentChange(currentSummary.quantity, previousSummary.quantity)}</p>
+                <p className="text-xs text-muted-foreground mt-1">Somatória nas unidades de cadastro · anterior: {number(previousSummary.quantity)}</p>
               </CardContent>
             </Card>
             <Card className="border-border/50">
@@ -454,7 +452,7 @@ export function ConsumptionManagement() {
                     : <ArrowUpRight className="h-5 w-5 text-muted-foreground" />}
                   <p className="text-xl font-semibold tabular-nums">{percentChange(currentSummary.quantity, previousSummary.quantity)}</p>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">Comparação de quantidade; não representa, isoladamente, aumento de preço.</p>
+                <p className="text-xs text-muted-foreground mt-1">Comparação da somatória de quantidades; não representa aumento de preço e não deve comparar produtos com unidades diferentes.</p>
               </CardContent>
             </Card>
           </div>
