@@ -3,6 +3,7 @@ import {
   clearLoginFailureState,
   LOGIN_LOCK_WINDOW_MS,
   recordLoginFailure,
+  type LoginFailureState,
 } from "@/lib/login-lockout";
 
 describe("proteção contra tentativas inválidas de login", () => {
@@ -48,7 +49,7 @@ describe("proteção contra tentativas inválidas de login", () => {
   });
 
   it("bloqueia somente ao atingir cinco falhas dentro dos mesmos 15 minutos", () => {
-    let state = {};
+    let state: LoginFailureState = {};
     for (let index = 0; index < 4; index += 1) {
       state = recordLoginFailure(state, start + index * minute);
     }
@@ -61,7 +62,7 @@ describe("proteção contra tentativas inválidas de login", () => {
   });
 
   it("após o bloqueio expirar, inicia uma nova contagem", () => {
-    let state = {};
+    let state: LoginFailureState = {};
     for (let index = 0; index < 5; index += 1) {
       state = recordLoginFailure(state, start + index * minute);
     }
