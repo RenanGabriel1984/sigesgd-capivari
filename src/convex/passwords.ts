@@ -7,7 +7,7 @@ import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
 import { findUsersByNormalizedEmail, resolveUniqueRecord } from "../lib/credential-integrity";
-import { recordLoginFailure, clearLoginFailureState } from "../lib/login-lockout";
+import { getLoginLockStatus, recordLoginFailure, clearLoginFailureState } from "../lib/login-lockout";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
@@ -877,13 +877,7 @@ export const isLockedOut = internalQuery({
 
     if (!record) return { locked: false };
 
-    const now = Date.now();
-    if (record.lockedUntil && record.lockedUntil > now) {
-      const remainingSeconds = Math.ceil((record.lockedUntil - now) / 1000);
-      return { locked: true, remainingSeconds };
-    }
-
-    return { locked: false };
+    return getLoginLockStatus(record, Date.now());
   },
 });
 
