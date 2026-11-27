@@ -7,15 +7,12 @@ import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { APP_ROLES } from "../lib/rbac";
 import { findUsersByNormalizedEmail, resolveUniqueRecord } from "../lib/credential-integrity";
+import { getLoginLockStatus, recordLoginFailure, clearLoginFailureState } from "../lib/login-lockout";
 
 type UserRole = "admin" | "stock_manager" | "director" | "secretary" | "technician" | "patrimony_manager";
 
 /** Política de senha (§12). Todas as cinco ACTIONS de definição exigem este mínimo. */
 export const MIN_PASSWORD_LENGTH = 8;
-
-/** Janela de bloqueio por tentativas de login (§9/§10). */
-const LOGIN_MAX_ATTEMPTS = 5;
-const LOGIN_LOCK_MINUTES = 15;
 
 /** Tentativas máximas do código de recuperação (§8). */
 const RESET_MAX_ATTEMPTS = 5;
@@ -205,6 +202,16 @@ export const adminResetPassword = mutation({
 
     // Set requiresPasswordReset flag on user
     await ctx.db.patch(args.userId, { requiresPasswordReset: true });
+    const normalizedTargetEmail = user.email?.trim().toLowerCase();
+    if (normalizedTargetEmail) {
+      const previousFailures = await ctx.db
+        .query("failedLoginAttempts")
+        .withIndex("by_email", (q) => q.eq("email", normalizedTargetEmail))
+        .first();
+      if (previousFailures) {
+        await ctx.db.patch(previousFailures._id, clearLoginFailureState());
+      }
+    }
 
     await ctx.db.insert("auditLogs", {
       userId: adminId,
@@ -520,7 +527,7 @@ export const bootstrapSetPassword = internalMutation({
       .withIndex("by_email", (q) => q.eq("email", email))
       .first();
     if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined });
+      await ctx.db.patch(failedAttempts._id, clearLoginFailureState());
     }
 
     // Audit
@@ -768,10 +775,7 @@ export const confirmPasswordReset = mutation({
       .withIndex("by_email", (q) => q.eq("email", email))
       .first();
     if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, {
-        attempts: 0,
-        lockedUntil: undefined,
-      });
+      await ctx.db.patch(failedAttempts._id, clearLoginFailureState());
     }
 
     // Clear requiresPasswordReset flag
@@ -812,32 +816,19 @@ export const recordFailedLogin = internalMutation({
       .withIndex("by_email", (q) => q.eq("email", email))
       .first();
 
+    // Usa os horários individuais das falhas, não apenas a última tentativa.
+    // Registros legados sem attemptTimestamps são reiniciados com a falha atual:
+    // o contador antigo não informa quando cada falha ocorreu e não pode ser
+    // usado para bloquear indevidamente a conta após a atualização.
+    const nextState = recordLoginFailure(existing ?? {}, now);
+
     if (existing) {
-      const newAttempts = (existing.attempts ?? 0) + 1;
-      const lockExpired =
-        existing.lockedUntil !== undefined && existing.lockedUntil <= now;
-      const updates: any = {
-        attempts: newAttempts,
-        lastAttemptAt: now,
-      };
-      // Bloqueia após LOGIN_MAX_ATTEMPTS falhas por LOGIN_LOCK_MINUTES.
-      // O bloqueio é REAVALIADO quando a janela anterior expirou — sem isso a
-      // condição `!existing.lockedUntil` nunca voltava a ser verdadeira e a
-      // proteção de força brute deixava de valer depois do 1º bloqueio (§10).
-      if (newAttempts >= LOGIN_MAX_ATTEMPTS && (!existing.lockedUntil || lockExpired)) {
-        updates.lockedUntil = now + LOGIN_LOCK_MINUTES * 60 * 1000;
-      }
-      await ctx.db.patch(existing._id, updates);
+      await ctx.db.patch(existing._id, nextState);
     } else {
-      await ctx.db.insert("failedLoginAttempts", {
-        email,
-        attempts: 1,
-        lastAttemptAt: now,
-      });
+      await ctx.db.insert("failedLoginAttempts", { email, ...nextState });
     }
   },
 });
-
 /**
  * Check if an email is currently locked out due to brute force.
  */
@@ -862,11 +853,11 @@ export const recordSuccessfulLogin = internalMutation({
       .first();
 
     if (!existing) return { cleared: false };
-    if ((existing.attempts ?? 0) === 0 && existing.lockedUntil === undefined) {
+    if ((existing.attempts ?? 0) === 0 && existing.lockedUntil === undefined && (existing.attemptTimestamps?.length ?? 0) === 0) {
       return { cleared: false };
     }
 
-    await ctx.db.patch(existing._id, { attempts: 0, lockedUntil: undefined });
+    await ctx.db.patch(existing._id, clearLoginFailureState());
     return { cleared: true };
   },
 });
@@ -886,13 +877,7 @@ export const isLockedOut = internalQuery({
 
     if (!record) return { locked: false };
 
-    const now = Date.now();
-    if (record.lockedUntil && record.lockedUntil > now) {
-      const remainingSeconds = Math.ceil((record.lockedUntil - now) / 1000);
-      return { locked: true, remainingSeconds };
-    }
-
-    return { locked: false };
+    return getLoginLockStatus(record, Date.now());
   },
 });
 
@@ -969,7 +954,7 @@ export const bootstrapResetPassword = internalMutation({
       .withIndex("by_email", (q) => q.eq("email", email))
       .first();
     if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined });
+      await ctx.db.patch(failedAttempts._id, clearLoginFailureState());
     }
 
     await ctx.db.insert("auditLogs", {

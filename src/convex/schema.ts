@@ -1047,6 +1047,9 @@ const schema = defineSchema(
       email: v.string(),
       attempts: v.number(),
       lastAttemptAt: v.number(),
+      // Até cinco horários individuais permitem calcular uma janela móvel exata.
+      // Opcional para leitura compatível dos registros anteriores à correção.
+      attemptTimestamps: v.optional(v.array(v.number())),
       lockedUntil: v.optional(v.number()),
     }).index("by_email", ["email"]),
 
