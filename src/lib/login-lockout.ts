@@ -30,11 +30,6 @@ function recentFailures(state: LoginFailureState, now: number): number[] {
   );
 }
 
-/**
- * Registra uma falha considerando somente falhas ocorridas nos últimos
- * 15 minutos. Campos legados sem horários individuais são descartados, pois
- * não é possível determinar com segurança a idade de cada tentativa.
- */
 export function recordLoginFailure(
   state: LoginFailureState,
   now: number,
@@ -60,10 +55,6 @@ export function recordLoginFailure(
   };
 }
 
-/**
- * Só reconhece bloqueios sustentados por cinco timestamps ainda dentro
- * da janela atual. Isso descarta bloqueios legados sem histórico verificável.
- */
 export function getLoginLockStatus(
   state: LoginFailureState,
   now: number,
@@ -83,7 +74,6 @@ export function getLoginLockStatus(
   };
 }
 
-/** Estado canônico após login válido ou redefinição administrativa da senha. */
 export function clearLoginFailureState() {
   return {
     attempts: 0,
