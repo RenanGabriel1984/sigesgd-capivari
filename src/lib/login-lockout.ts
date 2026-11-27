@@ -34,7 +34,10 @@ export function recordLoginFailure(
   state: LoginFailureState,
   now: number,
 ): NextLoginFailureState {
-  const timestamps = recentFailures(state, now);
+  // Ao terminar um bloqueio, a próxima falha sempre inicia uma contagem nova.
+  const lockExpired =
+    typeof state.lockedUntil === "number" && state.lockedUntil <= now;
+  const timestamps = lockExpired ? [] : recentFailures(state, now);
   timestamps.push(now);
   const attemptTimestamps = timestamps.slice(-LOGIN_MAX_ATTEMPTS);
   const alreadyLockedWithValidHistory =
@@ -59,9 +62,14 @@ export function getLoginLockStatus(
   state: LoginFailureState,
   now: number,
 ): { locked: false } | { locked: true; remainingSeconds: number } {
-  const timestamps = recentFailures(state, now);
+  // Uma vez atingido o limite, mantém o bloqueio até lockedUntil. Não
+  // recalcula a janela durante o bloqueio; senão as primeiras falhas
+  // expirariam e liberariam a conta antes dos 15 minutos.
+  const storedTimestamps = Array.isArray(state.attemptTimestamps)
+    ? state.attemptTimestamps
+    : [];
   if (
-    timestamps.length < LOGIN_MAX_ATTEMPTS ||
+    storedTimestamps.filter(Number.isFinite).length < LOGIN_MAX_ATTEMPTS ||
     typeof state.lockedUntil !== "number" ||
     state.lockedUntil <= now
   ) {
