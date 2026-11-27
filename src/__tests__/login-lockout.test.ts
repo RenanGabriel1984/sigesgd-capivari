@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clearLoginFailureState,
+  getLoginLockStatus,
   LOGIN_LOCK_WINDOW_MS,
   recordLoginFailure,
   type LoginFailureState,
@@ -46,6 +47,7 @@ describe("proteção contra tentativas inválidas de login", () => {
 
     expect(next.attempts).toBe(1);
     expect(next.lockedUntil).toBeUndefined();
+    expect(getLoginLockStatus({ lockedUntil: start + 10 * minute }, start)).toEqual({ locked: false });
   });
 
   it("bloqueia somente ao atingir cinco falhas dentro dos mesmos 15 minutos", () => {
