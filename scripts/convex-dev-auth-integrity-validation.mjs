@@ -42,11 +42,20 @@ try{
   typeof tokens?.refreshToken==="string"&&tokens.refreshToken.length>20;
 
  let authenticated=false,currentUserMatches=false,signedOut=false;
+ let replenishmentReadable=false,consumptionReadable=false,organizationReportReadable=false;
  if(tokenBundleValid){
   client.setAuth(accessToken);
   authenticated=await client.query(anyApi.auth.isAuthenticated,{})===true;
   const currentUser=await client.query(anyApi.users.currentUser,{});
   currentUserMatches=currentUser?._id===fixture.userId&&currentUser?.email===fixture.email;
+  const replenishment=await client.query(anyApi.stockIntelligence.replenishment,{});
+  replenishmentReadable=Array.isArray(replenishment?.rows)&&typeof replenishment?.counters==="object";
+  const consumption=await client.query(anyApi.stockIntelligence.consumption,{period:"30d"});
+  consumptionReadable=consumption?.period==="30d"&&Array.isArray(consumption?.summaries)&&Array.isArray(consumption?.series);
+  const organizationReport=await client.query(anyApi.stockIntelligence.consumptionByOrganization,{period:"30d"});
+  organizationReportReadable=organizationReport?.period==="30d"&&
+   typeof organizationReport?.current?.totalQuantity==="number"&&
+   typeof organizationReport?.previous?.totalQuantity==="number";
   await client.action(anyApi.auth.signOut,{});
   client.clearAuth();
   const refreshAfterSignOut=await client.action(anyApi.auth.signIn,{
@@ -84,6 +93,9 @@ try{
   actualSignInIssuesTokenBundle:tokenBundleValid,
   tokenAuthenticatesConvexSession:authenticated,
   authenticatedUserMatchesFixture:currentUserMatches,
+  replenishmentReportReadable:replenishmentReadable,
+  consumptionReportReadable:consumptionReadable,
+  organizationConsumptionReportReadable:organizationReportReadable,
   actualSignOutRevokesSession:signedOut,
   lockAfterFive:locked.locked===true,
   successfulLoginClearsLock:success.cleared===true&&after.locked===false,
