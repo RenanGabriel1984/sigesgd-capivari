@@ -507,7 +507,7 @@ describe("SEC — contabilidade de falhas de login (§9/§10) e enumeração (§
   it("SEC-BF-03: login bem-sucedido zera o contador de tentativas", () => {
     expect(pwSrc).toMatch(/export const recordSuccessfulLogin = internalMutation\(/);
     expect(pwSrc).toMatch(/await ctx\.db\.patch\(existing\._id, clearLoginFailureState\(\)\)/);
-    expect(lockoutSrc).toMatch(/attempts:\s*0,[\s\S]*attemptTimestamps:\s*\[\],[\s\S]*lockedUntil:\s*undefined/);
+    expect(lockoutSrc).toMatch(/attempts:\s*0,[\s\S]*attemptTimestamps:\s*\[\](?:\s+as number\[\])?,[\s\S]*lockedUntil:\s*undefined/);
     expect(credSrc).toMatch(/internal\.passwords\.recordSuccessfulLogin/);
   });
 
