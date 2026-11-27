@@ -40,8 +40,9 @@ describe("proteção contra tentativas inválidas de login", () => {
     const legacyState = {
       attempts: 4,
       lastAttemptAt: start - minute,
+      lockedUntil: start + 10 * minute,
       // Campo inexistente nos registros anteriores à implementação.
-    } as { attempts: number; lastAttemptAt: number; attemptTimestamps?: number[] };
+    } as { attempts: number; lastAttemptAt: number; lockedUntil: number; attemptTimestamps?: number[] };
 
     const next = recordLoginFailure(legacyState, start);
 
@@ -61,6 +62,17 @@ describe("proteção contra tentativas inválidas de login", () => {
 
     expect(next.attempts).toBe(5);
     expect(next.lockedUntil).toBe(fifthFailureAt + LOGIN_LOCK_WINDOW_MS);
+  });
+
+  it("reconhece o bloqueio legítimo enquanto as cinco falhas seguem na janela", () => {
+    const timestamps = [0, 1, 2, 3, 4].map((offset) => start + offset * minute);
+    expect(getLoginLockStatus({
+      attemptTimestamps: timestamps,
+      lockedUntil: start + 19 * minute,
+    }, start + 5 * minute)).toEqual({
+      locked: true,
+      remainingSeconds: 14 * 60,
+    });
   });
 
   it("após o bloqueio expirar, inicia uma nova contagem", () => {
