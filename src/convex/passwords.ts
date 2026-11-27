@@ -961,7 +961,7 @@ export const bootstrapResetPassword = internalMutation({
       .withIndex("by_email", (q) => q.eq("email", email))
       .first();
     if (failedAttempts) {
-      await ctx.db.patch(failedAttempts._id, { attempts: 0, lockedUntil: undefined });
+      await ctx.db.patch(failedAttempts._id, clearLoginFailureState());
     }
 
     await ctx.db.insert("auditLogs", {
