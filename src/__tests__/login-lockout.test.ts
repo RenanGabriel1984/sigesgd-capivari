@@ -75,6 +75,17 @@ describe("proteção contra tentativas inválidas de login", () => {
     });
   });
 
+  it("mantém o bloqueio pelos 15 minutos completos após as primeiras falhas saírem da janela", () => {
+    const timestamps = [0, 1, 2, 3, 4].map((offset) => start + offset * minute);
+    expect(getLoginLockStatus({
+      attemptTimestamps: timestamps,
+      lockedUntil: start + 19 * minute,
+    }, start + 16 * minute)).toEqual({
+      locked: true,
+      remainingSeconds: 3 * 60,
+    });
+  });
+
   it("após o bloqueio expirar, inicia uma nova contagem", () => {
     let state: LoginFailureState = {};
     for (let index = 0; index < 5; index += 1) {
