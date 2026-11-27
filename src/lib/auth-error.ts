@@ -11,25 +11,72 @@ const CREDENTIAL_ERROR_MARKERS = [
   "credentialssignin",
 ];
 
+type ErrorRecord = {
+  message?: unknown;
+  data?: unknown;
+  errorData?: unknown;
+  cause?: unknown;
+};
+
+function collectErrorMessages(error: unknown): string[] {
+  const messages: string[] = [];
+  const visited = new Set<object>();
+
+  function visit(value: unknown, depth: number): void {
+    if (depth > 3 || value == null) return;
+
+    if (typeof value === "string") {
+      if (value.trim()) messages.push(value);
+      return;
+    }
+
+    if (typeof value !== "object" || visited.has(value)) return;
+    visited.add(value);
+
+    const record = value as ErrorRecord;
+    if (typeof record.message === "string" && record.message.trim()) {
+      messages.push(record.message);
+    }
+
+    // Convex forwards ConvexError.data to the client even when the
+    // production errorMessage is redacted to the generic "Server Error".
+    visit(record.data, depth + 1);
+
+    // Also accept the HTTP response envelope shape for callers/tests that
+    // pass the raw action response instead of the thrown ConvexError.
+    visit(record.errorData, depth + 1);
+    visit(record.cause, depth + 1);
+  }
+
+  visit(error, 0);
+  return messages;
+}
+
 export function getLoginErrorMessage(
   error: unknown,
   appEnvironment?: string,
 ): string {
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : "";
-  const normalized = message.toLocaleLowerCase("pt-BR");
+  const messages = collectErrorMessages(error);
+  const normalizedMessages = messages.map((message) =>
+    message.toLocaleLowerCase("pt-BR"),
+  );
 
-  if (normalized.includes("bloqueado")) {
-    return message || "Acesso temporariamente bloqueado. Tente novamente mais tarde.";
+  // Prefer the explicit lockout reason carried in ConvexError.data when the
+  // top-level message has been redacted by the production deployment.
+  const lockoutMessage = messages.find((message, index) =>
+    normalizedMessages[index].includes("bloqueado"),
+  );
+  if (lockoutMessage) {
+    return lockoutMessage;
   }
 
-  // Mensagens de credenciais incorretas permanecem genéricas para não revelar
-  // se o e-mail existe, se a conta está ativa ou se há uma senha cadastrada.
-  if (CREDENTIAL_ERROR_MARKERS.some((marker) => normalized.includes(marker))) {
+  // Keep all credential failures indistinguishable to avoid revealing
+  // whether an e-mail exists, the account is active, or a password is set.
+  if (
+    normalizedMessages.some((message) =>
+      CREDENTIAL_ERROR_MARKERS.some((marker) => message.includes(marker)),
+    )
+  ) {
     return INVALID_LOGIN_MESSAGE;
   }
 
@@ -40,7 +87,7 @@ export function getLoginErrorMessage(
     );
   }
 
-  // Erros desconhecidos (ex.: Server Error, rede ou handshake JWT) nunca devem
-  // ser apresentados como senha incorreta: isso induz a redefinições inúteis.
+  // Unknown errors (for example network or JWT handshake failures) remain
+  // technical and are never mislabeled as an invalid password.
   return LOGIN_TECHNICAL_ERROR_MESSAGE;
 }
