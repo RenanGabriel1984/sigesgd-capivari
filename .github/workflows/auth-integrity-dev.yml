@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   validation:
-    if: github.head_ref == 'codex/authentication-dev-integrity-validation'
+    if: github.head_ref == 'codex/authentication-dev-integrity-validation' || github.head_ref == 'codex/auth-error-data-mapping'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
