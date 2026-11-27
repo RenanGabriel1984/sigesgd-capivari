@@ -48,9 +48,22 @@ try{
   const currentUser=await client.query(anyApi.users.currentUser,{});
   currentUserMatches=currentUser?._id===fixture.userId&&currentUser?.email===fixture.email;
   await client.action(anyApi.auth.signOut,{});
-  sessionNeedsRevocation=false;
-  signedOut=await client.query(anyApi.auth.isAuthenticated,{})===false;
   client.clearAuth();
+  const refreshAfterSignOut=await client.action(anyApi.auth.signIn,{
+   refreshToken:tokens.refreshToken,
+   calledBy:"dev-credential-integrity-signout-check"
+  });
+  signedOut=refreshAfterSignOut?.tokens==null;
+  if(signedOut){
+   sessionNeedsRevocation=false;
+  }else{
+   const rotatedTokens=refreshAfterSignOut?.tokens;
+   const rotatedAccessToken=rotatedTokens?.accessToken??rotatedTokens?.token??rotatedTokens?.jwt;
+   if(typeof rotatedAccessToken==="string"){
+    accessToken=rotatedAccessToken;
+    sessionNeedsRevocation=true;
+   }
+  }
  }
 
  // Exercise brute-force lockout and successful-login counter reset.
@@ -79,14 +92,20 @@ try{
  if(Object.values(checks).some(x=>!x)){const tokenShape=Object.fromEntries(Object.entries(tokens??{}).map(([k,v])=>[k,typeof v==="string"?`string(${v.length})`:v===null?"null":typeof v]));throw new Error("Cenários falharam: "+JSON.stringify({checks,signInResultKeys:Object.keys(signInResult??{}),tokenShape}));}
  console.log(JSON.stringify({passed:true,deployment,runId,checks},null,2));
 }finally{
+ let sessionCleanupError;
  if(sessionNeedsRevocation&&accessToken){
-  client.setAuth(accessToken);
-  await client.action(anyApi.auth.signOut,{});
-  client.clearAuth();
+  try{
+   client.setAuth(accessToken);
+   await client.action(anyApi.auth.signOut,{});
+   client.clearAuth();
+  }catch(error){
+   sessionCleanupError=error instanceof Error?error.message:String(error);
+  }
  }
  if(fixture){
   const cleanup=internal("authDevTests:cleanup",{runId});
   if(cleanup.remaining!==0)throw new Error("Fixture não limpa: "+JSON.stringify(cleanup));
   console.log(JSON.stringify({cleanupVerified:cleanup},null,2));
  }
+ if(sessionCleanupError)throw new Error("Não foi possível revogar a sessão sintética após o cenário: "+sessionCleanupError);
 }
