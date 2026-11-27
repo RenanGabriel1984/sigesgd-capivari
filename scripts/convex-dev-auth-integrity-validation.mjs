@@ -10,6 +10,7 @@ function call(name,args){const r=spawnSync("bunx",["convex","run",name,JSON.stri
 const internal=(name,args={})=>call(name,args);
 let fixture;
 let tokens;
+let accessToken;
 let sessionNeedsRevocation=false;
 try{
  fixture=internal("authDevTests:seed",{runId});
@@ -35,14 +36,14 @@ try{
   calledBy:"dev-credential-integrity"
  });
  tokens=signInResult?.tokens;
- sessionNeedsRevocation=Boolean(tokens?.accessToken);
- const tokenBundleValid=typeof tokens?.accessToken==="string"&&tokens.accessToken.length>40&&
-  typeof tokens?.refreshToken==="string"&&tokens.refreshToken.length>20&&
-  tokens.userId===fixture.userId;
+ accessToken=tokens?.accessToken??tokens?.token??tokens?.jwt;
+ sessionNeedsRevocation=typeof accessToken==="string";
+ const tokenBundleValid=typeof accessToken==="string"&&accessToken.length>40&&
+  typeof tokens?.refreshToken==="string"&&tokens.refreshToken.length>20;
 
  let authenticated=false,currentUserMatches=false,signedOut=false;
  if(tokenBundleValid){
-  client.setAuth(tokens.accessToken);
+  client.setAuth(accessToken);
   authenticated=await client.query(anyApi.auth.isAuthenticated,{})===true;
   const currentUser=await client.query(anyApi.users.currentUser,{});
   currentUserMatches=currentUser?._id===fixture.userId&&currentUser?.email===fixture.email;
@@ -75,11 +76,11 @@ try{
   successfulLoginClearsLock:success.cleared===true&&after.locked===false,
   duplicateIdentityFailsClosed:duplicate.success===false
  };
- if(Object.values(checks).some(x=>!x))throw new Error("Cenários falharam: "+JSON.stringify(checks));
+ if(Object.values(checks).some(x=>!x)){const tokenShape=Object.fromEntries(Object.entries(tokens??{}).map(([k,v])=>[k,typeof v==="string"?`string(${v.length})`:v===null?"null":typeof v]));throw new Error("Cenários falharam: "+JSON.stringify({checks,signInResultKeys:Object.keys(signInResult??{}),tokenShape}));}
  console.log(JSON.stringify({passed:true,deployment,runId,checks},null,2));
 }finally{
- if(sessionNeedsRevocation&&tokens?.accessToken){
-  client.setAuth(tokens.accessToken);
+ if(sessionNeedsRevocation&&accessToken){
+  client.setAuth(accessToken);
   await client.action(anyApi.auth.signOut,{});
   client.clearAuth();
  }
