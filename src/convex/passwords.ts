@@ -85,8 +85,7 @@ export const createPassword = mutation({
     // Set requiresPasswordReset flag on user
     if (args.requiresReset) {
       await ctx.db.patch(args.userId, { requiresPasswordReset: true });
-
-
+    }
 
     await ctx.db.insert("auditLogs", {
       userId: adminId,
