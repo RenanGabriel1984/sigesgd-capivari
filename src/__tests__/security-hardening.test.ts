@@ -499,7 +499,7 @@ describe("SEC — contabilidade de falhas de login (§9/§10) e enumeração (§
 
   it("SEC-BF-02: o bloqueio é reavaliado pela janela móvel e expira corretamente", () => {
     expect(pwSrc).toMatch(/getLoginLockStatus\(record, Date\.now\(\)\)/);
-    expect(lockoutSrc).toMatch(/timestamps\.length < LOGIN_MAX_ATTEMPTS/);
+    expect(lockoutSrc).toMatch(/storedTimestamps\.filter\(Number\.isFinite\)\.length < LOGIN_MAX_ATTEMPTS/);
     expect(lockoutSrc).toMatch(/lockedUntil <= now/);
     expect(lockoutSrc).toMatch(/now \+ LOGIN_LOCK_WINDOW_MS/);
   });
