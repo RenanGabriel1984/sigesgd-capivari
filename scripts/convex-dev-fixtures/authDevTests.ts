@@ -7,7 +7,7 @@ export const seed=internalMutation({args:{runId:v.string()},handler:async(ctx,{r
  if(!(process.env.CONVEX_CLOUD_URL??"").includes(HOST))throw new Error("Somente DEV first-herring-264.");
  if(!/^[a-zA-Z0-9-]{1,60}$/.test(runId))throw new Error("runId inválido.");
  const now=Date.now(),pass="Synthetic-Test-Password-938!",{hash,salt}=await hashPassword(pass);
- const userId=await ctx.db.insert("users",{name:PREFIX+runId,email:email(runId),role:"technician",active:true,createdAt:now,updatedAt:now});
+ const userId=await ctx.db.insert("users",{name:PREFIX+runId,email:email(runId),role:"admin",active:true,createdAt:now,updatedAt:now});
  await ctx.db.insert("passwords",{userId,passwordHash:hash,salt,requiresReset:false});
  return {email:email(runId),password:pass,userId};
 }});

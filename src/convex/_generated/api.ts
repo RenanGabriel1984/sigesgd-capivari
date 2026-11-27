@@ -13,7 +13,6 @@ import type * as assetParts from "../assetParts.js";
 import type * as assets from "../assets.js";
 import type * as auditLogs from "../auditLogs.js";
 import type * as auth from "../auth.js";
-import type * as authDevTests from "../authDevTests.js";
 import type * as auth_credentials from "../auth/credentials.js";
 import type * as auth_passwords from "../auth/passwords.js";
 import type * as categories from "../categories.js";
@@ -79,7 +78,6 @@ const fullApi: ApiFromModules<{
   assets: typeof assets;
   auditLogs: typeof auditLogs;
   auth: typeof auth;
-  authDevTests: typeof authDevTests;
   "auth/credentials": typeof auth_credentials;
   "auth/passwords": typeof auth_passwords;
   categories: typeof categories;
