@@ -490,20 +490,24 @@ describe("SEC — superfície de autenticação (B-01/B-02/B-04)", () => {
 describe("SEC — contabilidade de falhas de login (§9/§10) e enumeração (§11)", () => {
   const pwSrc = stripComments(read("src/convex/passwords.ts"));
   const credSrc = stripComments(read("src/convex/auth/credentials.ts"));
+  const lockoutSrc = stripComments(read("src/lib/login-lockout.ts"));
 
   it("SEC-BF-01: recordFailedLogin é interno (não há endpoint público de bloqueio)", () => {
     expect(pwSrc).toMatch(/export const recordFailedLogin = internalMutation\(/);
     expect(pwSrc).not.toMatch(/export const recordFailedLogin = mutation\(/);
   });
 
-  it("SEC-BF-02: o bloqueio é reavaliado quando a janela expira", () => {
-    expect(pwSrc).toMatch(/lockExpired/);
-    expect(pwSrc).toMatch(/!existing\.lockedUntil\s*\|\|\s*lockExpired/);
+  it("SEC-BF-02: o bloqueio é reavaliado pela janela móvel e expira corretamente", () => {
+    expect(pwSrc).toMatch(/getLoginLockStatus\(record, Date\.now\(\)\)/);
+    expect(lockoutSrc).toMatch(/timestamps\.length < LOGIN_MAX_ATTEMPTS/);
+    expect(lockoutSrc).toMatch(/lockedUntil <= now/);
+    expect(lockoutSrc).toMatch(/now \+ LOGIN_LOCK_WINDOW_MS/);
   });
 
   it("SEC-BF-03: login bem-sucedido zera o contador de tentativas", () => {
     expect(pwSrc).toMatch(/export const recordSuccessfulLogin = internalMutation\(/);
-    expect(pwSrc).toMatch(/attempts:\s*0,\s*lockedUntil:\s*undefined/);
+    expect(pwSrc).toMatch(/await ctx\.db\.patch\(existing\._id, clearLoginFailureState\(\)\)/);
+    expect(lockoutSrc).toMatch(/attempts:\s*0,[\s\S]*attemptTimestamps:\s*\[\],[\s\S]*lockedUntil:\s*undefined/);
     expect(credSrc).toMatch(/internal\.passwords\.recordSuccessfulLogin/);
   });
 
