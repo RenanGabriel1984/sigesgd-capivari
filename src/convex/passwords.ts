@@ -813,19 +813,27 @@ export const recordFailedLogin = internalMutation({
       .first();
 
     if (existing) {
-      const newAttempts = (existing.attempts ?? 0) + 1;
+      // A contagem é uma janela móvel: falhas mais antigas que 15 minutos
+      // não podem contribuir para um bloqueio novo.
+      const windowStart = now - LOGIN_LOCK_MINUTES * 60 * 1000;
+      const withinWindow =
+        typeof existing.lastAttemptAt === "number" &&
+        existing.lastAttemptAt > windowStart;
+      const newAttempts = withinWindow ? (existing.attempts ?? 0) + 1 : 1;
       const lockExpired =
         existing.lockedUntil !== undefined && existing.lockedUntil <= now;
       const updates: any = {
         attempts: newAttempts,
         lastAttemptAt: now,
       };
-      // Bloqueia após LOGIN_MAX_ATTEMPTS falhas por LOGIN_LOCK_MINUTES.
-      // O bloqueio é REAVALIADO quando a janela anterior expirou — sem isso a
-      // condição `!existing.lockedUntil` nunca voltava a ser verdadeira e a
-      // proteção de força brute deixava de valer depois do 1º bloqueio (§10).
+
+      // Bloqueia após cinco falhas dentro da janela móvel de quinze minutos.
+      // Se a janela anterior expirou, a falha atual inicia uma nova contagem.
       if (newAttempts >= LOGIN_MAX_ATTEMPTS && (!existing.lockedUntil || lockExpired)) {
         updates.lockedUntil = now + LOGIN_LOCK_MINUTES * 60 * 1000;
+      } else if (!withinWindow) {
+        // Também remove qualquer bloqueio já expirado ao iniciar nova janela.
+        updates.lockedUntil = undefined;
       }
       await ctx.db.patch(existing._id, updates);
     } else {
