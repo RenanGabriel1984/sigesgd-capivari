@@ -86,17 +86,7 @@ export const createPassword = mutation({
     if (args.requiresReset) {
       await ctx.db.patch(args.userId, { requiresPasswordReset: true });
 
-    const emailForLockReset = user.email?.trim().toLowerCase();
-    if (emailForLockReset) {
-      const failedAttempts = await ctx.db
-        .query("failedLoginAttempts")
-        .withIndex("by_email", (q) => q.eq("email", emailForLockReset))
-        .first();
-      if (failedAttempts) {
-        await ctx.db.patch(failedAttempts._id, clearLoginFailureState());
-      }
-    }
-    }
+
 
     await ctx.db.insert("auditLogs", {
       userId: adminId,
